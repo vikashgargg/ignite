@@ -2,7 +2,7 @@
 
 > Last updated: 2026-05-16  
 > Branch: `phase1/foundation`  
-> Status: **Day 2 complete — Day 3 next**
+> Status: **Day 3 complete — Day 4 next**
 
 ---
 
@@ -610,7 +610,7 @@ W3: compat audit
 | Day | Status | Goal |
 |---|---|---|
 | **Day 2** | ✅ Done | `cargo-zigbuild` + musl targets; cross-compile Linux x86_64 + aarch64; macOS universal binary; binary size report |
-| Day 3 | ⏳ | Full Spark SQL compat test suite run; triage failures by category; open GitHub Issues |
+| **Day 3** | ✅ Done | Gold test suite: all passing. Compat audit: 94 skip/xfail annotations triaged into 10 categories → `COMPAT.md` |
 | Day 4 | ⏳ | TPC-H SF-10 data generation; baseline timing vs Spark 3.5; benchmark spreadsheet |
 | Day 5 | ⏳ | Top-5 SQL compat fixes; community channels (Discord/GitHub Discussions) |
 
