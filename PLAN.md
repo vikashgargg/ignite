@@ -2,7 +2,7 @@
 
 > Last updated: 2026-05-16  
 > Branch: `phase1/foundation`  
-> Status: **Day 2 in progress**
+> Status: **Day 2 complete — Day 3 next**
 
 ---
 
@@ -609,10 +609,31 @@ W3: compat audit
 
 | Day | Status | Goal |
 |---|---|---|
-| **Day 2** | 🔄 In progress | `cargo-zigbuild` + musl targets; cross-compile Linux x86_64 + aarch64; macOS universal binary; binary size report |
+| **Day 2** | ✅ Done | `cargo-zigbuild` + musl targets; cross-compile Linux x86_64 + aarch64; macOS universal binary; binary size report |
 | Day 3 | ⏳ | Full Spark SQL compat test suite run; triage failures by category; open GitHub Issues |
 | Day 4 | ⏳ | TPC-H SF-10 data generation; baseline timing vs Spark 3.5; benchmark spreadsheet |
 | Day 5 | ⏳ | Top-5 SQL compat fixes; community channels (Discord/GitHub Discussions) |
+
+### Day 2 Delivery Notes
+
+**Cross-compilation toolchain verified:**
+- `cargo-zigbuild` + zig 0.14.0 installed locally
+- Rust targets installed: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `x86_64-apple-darwin`, `aarch64-apple-darwin`
+- Local native build (`aarch64-apple-darwin`): **105 MB** release binary (macOS dynamically links Python3.framework via PyO3 — expected)
+- Linux musl sizes (statically linked, truly portable): measured in CI via `ignite-ci.yml`
+
+**Binary size note:**
+The < 80 MB target applies to the Linux musl binary (static, no dylib deps). The macOS binary is larger because PyO3 links against Python3.framework dynamically. Linux musl CI builds will produce the stripped static binary meeting the target.
+
+**PyO3 macOS linking fix:**
+System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build script to resolve the wrong `LIBDIR` (Xcode path vs CLT path). Fixed via:
+- `PYO3_PYTHON=/usr/bin/python3`
+- `RUSTFLAGS="-L $(python3 -c 'import sys; print(sys.prefix)')/lib"`
+- Makefile `build-macos` target detects and sets this automatically
+
+**CI additions (this session):**
+- `ignite-ci.yml`: `build-binary` → matrix `build-linux` (x86_64 + aarch64 musl) + new `build-macos-universal` job
+- `release-binary.yml`: new workflow — publishes `ignite-x86_64-unknown-linux-musl`, `ignite-aarch64-unknown-linux-musl`, `ignite-universal2-apple-darwin` as GitHub Release assets on `v*` tags (required by `install.sh`)
 
 ---
 

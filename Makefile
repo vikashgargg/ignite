@@ -64,19 +64,31 @@ build-linux:
 	@file target/x86_64-unknown-linux-musl/release/ignite
 	@file target/aarch64-unknown-linux-musl/release/ignite
 
+# Detect Python for PyO3 native link on macOS. Prefer a Python with python3-config
+# (Homebrew/pyenv 3.11+) over the CommandLineTools Python (which lacks it).
+PYTHON_BIN := $(shell command -v python3.11 2>/dev/null || \
+                       command -v python3.12 2>/dev/null || \
+                       command -v python3.13 2>/dev/null || \
+                       command -v python3 2>/dev/null || \
+                       echo python3)
+PYTHON_LIB := $(shell $(PYTHON_BIN) -c \
+  "import sys; print(sys.prefix + '/lib')" 2>/dev/null)
+
 build-macos:
 	@echo "Building macOS x86_64..."
 	$(CARGO) zigbuild --release -p sail-cli --target x86_64-apple-darwin
 	@echo "Building macOS aarch64 (native)..."
+	PYO3_PYTHON=$(PYTHON_BIN) \
+	RUSTFLAGS="$(if $(PYTHON_LIB),-L $(PYTHON_LIB))" \
 	$(CARGO) build --release -p sail-cli --target aarch64-apple-darwin
 	@echo "Creating universal binary..."
-	lipo -create -output target/ignite-universal-apple-darwin \
+	lipo -create -output target/ignite-universal2-apple-darwin \
 		target/x86_64-apple-darwin/release/ignite \
 		target/aarch64-apple-darwin/release/ignite
 	@echo ""
 	@echo "Universal binary:"
-	@ls -lh target/ignite-universal-apple-darwin
-	@file target/ignite-universal-apple-darwin
+	@ls -lh target/ignite-universal2-apple-darwin
+	@file target/ignite-universal2-apple-darwin
 
 build-all: build-linux build-macos
 
@@ -91,7 +103,7 @@ size-report:
 		target/aarch64-unknown-linux-musl/release/ignite \
 		target/x86_64-apple-darwin/release/ignite \
 		target/aarch64-apple-darwin/release/ignite \
-		target/ignite-universal-apple-darwin; do \
+		target/ignite-universal2-apple-darwin; do \
 		[ -f "$$f" ] && printf "%-60s %s\n" "$$f" "$$(ls -lh $$f | awk '{print $$5}')"; \
 	done
 
