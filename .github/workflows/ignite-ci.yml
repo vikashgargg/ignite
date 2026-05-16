@@ -9,6 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Required by PyO3 when cross-compiling to a different OS/arch.
+  PYO3_CROSS_PYTHON_VERSION: "3.11"
 
 jobs:
   fmt:
@@ -80,12 +82,18 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-musl-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
-        run: sudo apt-get install -y protobuf-compiler musl-tools
+        run: |
+          sudo apt-get install -y protobuf-compiler musl-tools
+          pip install cargo-zigbuild 2>/dev/null || cargo install cargo-zigbuild
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Build static binary
-        run: cargo build --release -p sail-cli --target x86_64-unknown-linux-musl
+      - name: Install zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.14.0"
+      - name: Build static binary (musl via zigbuild)
+        run: cargo zigbuild --release -p sail-cli --target x86_64-unknown-linux-musl
       - name: Show binary size
         run: |
           ls -lh target/x86_64-unknown-linux-musl/release/ignite

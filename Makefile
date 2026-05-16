@@ -7,6 +7,10 @@ CARGO := $(shell which cargo)
 BINARY := target/debug/ignite
 RELEASE_DIR := target/release
 
+# PyO3 requires the target Python version when cross-compiling to a different OS/arch.
+# Set to match the Python version used in CI (3.11).
+PYO3_CROSS_PYTHON_VERSION ?= 3.11
+
 help:
 	@echo "Ignite build targets:"
 	@echo "  make dev          Build debug binary (fast, for local testing)"
@@ -48,9 +52,11 @@ release:
 
 build-linux:
 	@echo "Building Linux x86_64 musl..."
-	$(CARGO) zigbuild --release -p sail-cli --target x86_64-unknown-linux-musl
+	PYO3_CROSS_PYTHON_VERSION=$(PYO3_CROSS_PYTHON_VERSION) \
+		$(CARGO) zigbuild --release -p sail-cli --target x86_64-unknown-linux-musl
 	@echo "Building Linux aarch64 musl..."
-	$(CARGO) zigbuild --release -p sail-cli --target aarch64-unknown-linux-musl
+	PYO3_CROSS_PYTHON_VERSION=$(PYO3_CROSS_PYTHON_VERSION) \
+		$(CARGO) zigbuild --release -p sail-cli --target aarch64-unknown-linux-musl
 	@echo ""
 	@echo "Binaries:"
 	@ls -lh target/x86_64-unknown-linux-musl/release/ignite
