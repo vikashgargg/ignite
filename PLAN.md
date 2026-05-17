@@ -1,8 +1,8 @@
 # Ignite — Master Build Plan
 
-> Last updated: 2026-05-16  
+> Last updated: 2026-05-17  
 > Branch: `phase1/foundation`  
-> Status: **Day 3 complete — Day 4 next**
+> Status: **Day 4 in progress — Spark compat fixes landing**
 
 ---
 
@@ -611,8 +611,8 @@ W3: compat audit
 |---|---|---|
 | **Day 2** | ✅ Done | `cargo-zigbuild` + musl targets; cross-compile Linux x86_64 + aarch64; macOS universal binary; binary size report |
 | **Day 3** | ✅ Done | Gold test suite: all passing. Compat audit: 94 skip/xfail annotations triaged into 10 categories → `COMPAT.md` |
-| Day 4 | ⏳ | TPC-H SF-10 data generation; baseline timing vs Spark 3.5; benchmark spreadsheet |
-| Day 5 | ⏳ | Top-5 SQL compat fixes; community channels (Discord/GitHub Discussions) |
+| **Day 4** | ✅ Done | Spark compat fixes: DELETE without WHERE (C1), monotonically_increasing_id in aggregates (C2/C10), UPDATE SET CoW (C1), FILTER in aggregates (C4 — stale skip removed); workspace clean |
+| Day 5 | ⏳ | TPC-H SF-10 baseline timing; C8 managed tables default; community channels |
 
 ### Day 2 Delivery Notes
 
@@ -634,6 +634,28 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 **CI additions (this session):**
 - `ignite-ci.yml`: `build-binary` → matrix `build-linux` (x86_64 + aarch64 musl) + new `build-macos-universal` job
 - `release-binary.yml`: new workflow — publishes `ignite-x86_64-unknown-linux-musl`, `ignite-aarch64-unknown-linux-musl`, `ignite-universal2-apple-darwin` as GitHub Release assets on `v*` tags (required by `install.sh`)
+
+### Day 4 Delivery Notes
+
+**Fix C1a — DELETE without WHERE clause** (`crates/sail-delta-lake/src/table_format.rs`):
+- Both MoR and CoW DELETE branches no longer error when `condition = None`
+- Use `lit(true)` as the predicate — negated to `NOT true = false` by delta-rs, retaining no rows
+
+**Fix C2/C10 — `monotonically_increasing_id()` in aggregate context** (`crates/sail-plan/src/resolver/query/aggregate.rs`):
+- Exclude `SparkMonotonicallyIncreasingId` from the volatile-in-aggregate check (it has special pre-projection handling)
+- Pre-project `monotonically_increasing_id()` calls out of aggregate function arguments into deterministic column refs before DataFusion builds the Aggregate node
+- Removed 3 skips from `test_monotonic_id.py` (2 explode-in-aggregate skips intentionally kept — separate issue)
+
+**Fix C1b — UPDATE SET as Copy-on-Write** (`crates/sail-plan/src/resolver/command/update.rs` + `mod.rs`):
+- New file: `update.rs` implements `resolve_command_update` as: scan table → project each column through `CASE WHEN condition THEN new_val ELSE original_col END` → overwrite with `WriteMode::Truncate`
+- Wired into command dispatcher in `mod.rs`
+- Removed 6 UPDATE skips and 2 DELETE skips from `test_dml.py`; removed module-level Ignite skip (cleanup fixed via `try/finally` on `meow` table)
+
+**Fix C4 — FILTER in aggregate functions** (`test_group_by.py`):
+- Confirmed `filter` is already lowered in `sail-plan/src/resolver/expression/function.rs:147`
+- Removed stale `@pytest.mark.skip` from `test_aggregation_filter`
+
+**Workspace status:** `cargo check --workspace` passes clean.
 
 ---
 

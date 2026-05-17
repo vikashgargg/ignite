@@ -82,7 +82,6 @@ def test_count_distinct(spark):
     assert_frame_equal(sort(actual), sort(expected))
 
 
-@pytest.mark.skip(reason="not implemented")
 def test_aggregation_filter(spark):
     actual = spark.sql("""
         SELECT id, sum(quantity) FILTER (

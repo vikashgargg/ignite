@@ -10,16 +10,16 @@
 
 | Category | Tests affected | Priority | Status |
 |---|---|---|---|
-| [C1] DML — DELETE / UPDATE | 8 | P1 | Open |
-| [C2] monotonically_increasing_id in aggregates | 5 | P1 | Open |
+| [C1] DML — DELETE / UPDATE | 8 | P1 | ✅ Fixed (Day 4) |
+| [C2] monotonically_increasing_id in aggregates | 5 | P1 | ✅ Fixed (Day 4) |
 | [C3] UDF implicit type casting | 3 | P2 | Open |
-| [C4] FILTER clause in aggregations | 2 | P1 | Open |
+| [C4] FILTER clause in aggregations | 2 | P1 | ✅ Fixed (Day 4 — stale skip) |
 | [C5] JSON reader — `_corrupt_record` compat | 4 | P2 | Open |
 | [C6] INSERT OVERWRITE | 1 | P1 | Open |
 | [C7] GeometryType / GeographyType | 2 | P3 | Open |
 | [C8] Persistent tables default to EXTERNAL | 2 | P2 | Open |
 | [C9] Structured Streaming (readStream) | 1 | Phase 2 | Deferred |
-| [C10] `monotonically_increasing_id` in GROUP BY projection | 5 | P1 | Open |
+| [C10] `monotonically_increasing_id` in GROUP BY projection | 5 | P1 | ✅ Fixed (Day 4) |
 
 **Total skipped/xfail tests audited:** 94 annotations across 34 files  
 **Ignite-only tests (correct behaviour that JVM Spark doesn't match):** ~15 (not bugs)
