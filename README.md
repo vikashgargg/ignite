@@ -95,6 +95,42 @@ ignite mcp-server                      Spark MCP server
 
 ---
 
+## Spark Compatibility Status
+
+Phase 1 compat work tracked in [COMPAT.md](COMPAT.md).
+
+| Feature | Status |
+|---|---|
+| `SELECT`, `JOIN`, `GROUP BY`, `ORDER BY`, window functions | ✅ |
+| `DELETE FROM` / `UPDATE SET` (Delta Lake) | ✅ |
+| `INSERT INTO` / `INSERT OVERWRITE` | ✅ |
+| `CREATE TABLE` / `DROP TABLE` / `ALTER TABLE` | ✅ |
+| Persistent tables — MANAGED vs EXTERNAL | ✅ |
+| `monotonically_increasing_id()` in aggregates | ✅ |
+| `FILTER (WHERE ...)` in aggregate functions | ✅ |
+| Python UDFs (Arrow + non-Arrow) | ✅ |
+| Pandas UDFs / Arrow batch UDFs | ✅ |
+| Delta Lake DML (merge, vacuum, history) | ✅ |
+| JSON `_corrupt_record` (PERMISSIVE mode) | 🔄 Phase 1 |
+| Structured Streaming (`readStream`) | 📅 Phase 2 |
+
+---
+
+## Memory Target
+
+Ignite is designed to run a full PySpark workload in **≤ 1 GB RAM**:
+
+| Component | Configuration |
+|---|---|
+| DataFusion sort spill threshold | 256 MB |
+| Arrow batch size | 8 192 rows |
+| Execution partition count | `2 × CPU cores` |
+| JVM overhead | **0** (no JVM) |
+
+Set `IGNITE_MEMORY_LIMIT=1g` to enforce the limit at the process level.
+
+---
+
 ## Storage Support
 
 - AWS S3 (instance profile + explicit credentials)
