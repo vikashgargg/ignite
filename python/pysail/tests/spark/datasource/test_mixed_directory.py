@@ -187,13 +187,11 @@ def test_json_no_schema_collect(spark, mixed_files_dir):
     assert actual_items == expected_items
 
 
-@pytest.mark.skip(reason="Sail's JSON reader errors on non-JSON lines; Spark uses _corrupt_record.")
 def test_json_schema_show(spark, mixed_files_dir):
     df = spark.read.format("json").schema("k STRING, v INT").load(str(mixed_files_dir))
     df.show()  # smoke test
 
 
-@pytest.mark.skip(reason="Sail's JSON reader errors on non-JSON lines; Spark uses _corrupt_record.")
 def test_json_schema_collect(spark, mixed_files_dir):
     # With an explicit schema whose field names don't appear in any
     # document, every line yields all-NULL — but every line of every

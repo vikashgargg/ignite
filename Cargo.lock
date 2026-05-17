@@ -7215,6 +7215,7 @@ dependencies = [
  "sail-common-datafusion",
  "sail-sql-analyzer",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

@@ -14,6 +14,7 @@ use crate::options::gen::{JsonReadOptions, JsonWriteOptions};
 use crate::options::ResolveOptions;
 
 mod options;
+mod permissive;
 
 pub type JsonTableFormat = ListingTableFormat<JsonFormatFactory>;
 
@@ -62,7 +63,7 @@ impl ReadFormat for JsonReadFormat {
         if let Some(compression) = compression {
             options.compression = compression;
         }
-        Ok(Arc::new(JsonFormat::default().with_options(options)))
+        Ok(Arc::new(permissive::PermissiveJsonFormat::new(options)))
     }
 
     fn schema_inferrer(&self) -> Arc<dyn SchemaInfer> {
