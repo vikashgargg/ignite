@@ -1,7 +1,7 @@
 # Ignite build targets
 # Usage: make <target>
 
-.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench
+.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10
 
 CARGO := $(shell which cargo)
 BINARY := target/debug/ignite
@@ -23,7 +23,9 @@ help:
 	@echo "  make build-macos  Build macOS universal binary (x86_64 + aarch64)"
 	@echo "  make build-all    All cross-compilation targets"
 	@echo "  make release      Release build for native target"
-	@echo "  make bench        Run TPC-H SF-1 benchmark"
+	@echo "  make bench        Run TPC-H SF-1 benchmark (in-memory, requires duckdb)"
+	@echo "  make bench-sf1    Same as bench"
+	@echo "  make bench-sf10   Run TPC-H SF-10 benchmark (larger, ~60s)"
 	@echo "  make clean        cargo clean"
 
 dev:
@@ -92,9 +94,19 @@ build-macos:
 
 build-all: build-linux build-macos
 
-bench:
-	$(CARGO) build --release -p sail-cli 2>/dev/null
+bench: bench-sf1
+
+bench-sf1:
+	@echo "Building Ignite release binary..."
+	$(CARGO) build --release -p sail-cli
+	@echo ""
 	$(RELEASE_DIR)/ignite bench --scale-factor 1
+
+bench-sf10:
+	@echo "Building Ignite release binary..."
+	$(CARGO) build --release -p sail-cli
+	@echo ""
+	$(RELEASE_DIR)/ignite bench --scale-factor 10
 
 size-report:
 	@echo "=== Binary Size Report ==="

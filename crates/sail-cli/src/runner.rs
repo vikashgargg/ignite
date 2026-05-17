@@ -214,9 +214,110 @@ spark.sql({query:?}).show(truncate=False)
 }
 
 fn run_bench(scale_factor: u32, data_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("Ignite TPC-H Benchmark — Scale Factor {scale_factor}");
-    eprintln!("Data path: {data_path}");
-    eprintln!("Benchmark harness (Phase 1, Week 10) — coming soon.");
-    eprintln!("Track progress: https://github.com/vikashgargg/ignite/issues");
-    Ok(())
+    use std::io::Write;
+    let script = format_bench_script(scale_factor, data_path);
+    let mut tmp = tempfile::NamedTempFile::new()?;
+    writeln!(tmp, "{script}")?;
+    let path = tmp.into_temp_path().keep()?;
+    run_pyspark_script(path.to_string_lossy().to_string())
+}
+
+fn format_bench_script(scale_factor: u32, data_path: &str) -> String {
+    // spark is injected into scope by spark_run.py — no SparkSession.builder needed.
+    format!(
+        r#"
+import sys, time
+
+SF = {sf}
+DATA = {data_path:?}
+
+LINE = "=" * 62
+print(f"\n{{LINE}}")
+print(f"  Ignite TPC-H Benchmark  —  Scale Factor {{SF}}")
+print(f"{{LINE}}\n")
+
+# ── 1. Generate / load data ──────────────────────────────────
+try:
+    import duckdb
+except ImportError:
+    print("ERROR: duckdb is required for ignite bench.")
+    print("       pip install 'duckdb>=1.0'")
+    sys.exit(1)
+
+conn = duckdb.connect()
+try:
+    conn.sql("INSTALL tpch; LOAD tpch;")
+except Exception:
+    pass  # already installed in some bundles
+
+if DATA == "local":
+    print(f"Generating TPC-H SF={{SF}} with DuckDB (in-memory)...")
+    conn.sql(f"CALL dbgen(sf={{SF}})")
+    tables = [r[0] for r in conn.sql("SHOW TABLES").fetchall()]
+    q_rows  = conn.sql("SELECT query_nr, query FROM tpch_queries()").fetchall()
+    queries = dict(q_rows)
+    print(f"Generated {{len(tables)}} tables.\n")
+
+    print("Loading into Ignite via Arrow...")
+    t_load = time.time()
+    for tbl in tables:
+        arrow = conn.sql(f"FROM {{tbl}}").fetch_arrow_table()
+        spark.createDataFrame(arrow.to_pandas()).createOrReplaceTempView(tbl)
+    print(f"Load time: {{time.time()-t_load:.2f}}s\n")
+else:
+    import os
+    TABLES = ["customer","lineitem","nation","orders","part","partsupp","region","supplier"]
+    queries = dict(conn.sql("SELECT query_nr, query FROM tpch_queries()").fetchall())
+    print(f"Loading Parquet files from {{DATA}}...")
+    t_load = time.time()
+    for tbl in TABLES:
+        p = os.path.join(DATA, f"{{tbl}}.parquet")
+        if os.path.isfile(p):
+            spark.read.parquet(p).createOrReplaceTempView(tbl)
+        else:
+            # try directory of part files
+            spark.read.parquet(os.path.join(DATA, tbl)).createOrReplaceTempView(tbl)
+    print(f"Load time: {{time.time()-t_load:.2f}}s\n")
+
+# ── 2. Run all 22 TPC-H queries ──────────────────────────────
+print(f"  {{' Q':>4}}  {{' Time':>8}}  {{' Rows':>10}}  Status")
+print(f"  {{'-'*4}}  {{'-'*8}}  {{'-'*10}}  ------")
+results = []
+for q_num in range(1, 23):
+    sql = queries.get(q_num, "")
+    if not sql:
+        print(f"  Q{{q_num:02d}}  {{'(no query)':>8}}")
+        results.append((q_num, None, 0, "SKIP"))
+        continue
+    last_df = None
+    try:
+        t0 = time.time()
+        for stmt in (s.strip() for s in sql.split(";") if s.strip()):
+            stmt = stmt.replace("CREATE VIEW", "CREATE TEMP VIEW")
+            last_df = spark.sql(stmt)
+        count = last_df.count() if last_df is not None else 0
+        elapsed = time.time() - t0
+        print(f"  Q{{q_num:02d}}  {{elapsed:>7.3f}}s  {{count:>10}}  OK")
+        results.append((q_num, elapsed, count, "OK"))
+    except Exception as exc:
+        print(f"  Q{{q_num:02d}}  {{' FAILED':>8}}  {{' ':>10}}  {{str(exc)[:55]}}")
+        results.append((q_num, None, 0, "FAIL"))
+
+# ── 3. Summary ───────────────────────────────────────────────
+ok     = [r for r in results if r[3] == "OK"]
+failed = [r[0] for r in results if r[3] == "FAIL"]
+total  = sum(r[1] for r in ok)
+times  = sorted(r[1] for r in ok)
+median = times[len(times)//2] if times else 0
+
+print(f"\n{{LINE}}")
+print(f"  Passed : {{len(ok):>2}}/22    Failed : {{len(failed):>2}}/22")
+print(f"  Total  : {{total:>8.3f}}s   Median : {{median:>7.3f}}s")
+if failed:
+    print(f"  Failed queries: {{failed}}")
+print(f"{{LINE}}\n")
+"#,
+        sf = scale_factor,
+        data_path = data_path,
+    )
 }

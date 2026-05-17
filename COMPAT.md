@@ -15,7 +15,7 @@
 | [C3] UDF implicit type casting | 3 | P2 | Open |
 | [C4] FILTER clause in aggregations | 2 | P1 | ✅ Fixed (Day 4 — stale skip) |
 | [C5] JSON reader — `_corrupt_record` compat | 4 | P2 | Open |
-| [C6] INSERT OVERWRITE | 1 | P1 | Open |
+| [C6] INSERT OVERWRITE | 1 | P1 | ✅ Fixed (Day 5 — stale skip) |
 | [C7] GeometryType / GeographyType | 2 | P3 | Open |
 | [C8] Persistent tables default to EXTERNAL | 2 | P2 | Open |
 | [C9] Structured Streaming (readStream) | 1 | Phase 2 | Deferred |

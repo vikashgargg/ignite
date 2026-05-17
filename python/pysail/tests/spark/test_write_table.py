@@ -64,7 +64,6 @@ def test_insert_into_with_invalid_options(spark):
         df.write.partitionBy("id").insertInto("t1")
 
 
-@pytest.mark.skipif(not is_jvm_spark(), reason="`INSERT OVERWRITE` is not supported in Sail yet")
 def test_insert_overwrite(spark):
     spark.sql("INSERT INTO t1 VALUES (401, 'Alice', 22)")
     spark.sql("INSERT OVERWRITE t1 VALUES (402, 'Bob', 32)")
