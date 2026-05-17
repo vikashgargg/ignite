@@ -2,7 +2,7 @@
 
 > Last updated: 2026-05-17  
 > Branch: `phase1/foundation`  
-> Status: **Day 5 in progress — bench command implemented, INSERT OVERWRITE stale skip removed**
+> Status: **Day 6 in progress — C8 managed tables fixed; next: C5 JSON _corrupt_record**
 
 ---
 
@@ -613,6 +613,7 @@ W3: compat audit
 | **Day 3** | ✅ Done | Gold test suite: all passing. Compat audit: 94 skip/xfail annotations triaged into 10 categories → `COMPAT.md` |
 | **Day 4** | ✅ Done | Spark compat fixes: DELETE without WHERE (C1), monotonically_increasing_id in aggregates (C2/C10), UPDATE SET CoW (C1), FILTER in aggregates (C4 — stale skip removed); workspace clean |
 | **Day 5** | ✅ Done | `ignite bench` implemented (DuckDB-driven, all 22 queries, timing table); C6 INSERT OVERWRITE stale skip removed; Makefile bench targets; end-goal memory + perf targets set |
+| **Day 6** | 🔄 In progress | C8 managed tables fixed (`is_external` tracked in `CreateTableOptions`); next: C5 JSON `_corrupt_record`, C3 UDF coercion, README quick-start |
 
 ### Day 2 Delivery Notes
 

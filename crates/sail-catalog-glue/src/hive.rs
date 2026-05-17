@@ -95,6 +95,7 @@ fn validate_hive_options(options: CreateTableOptions) -> CatalogResult<Validated
         comment,
         constraints,
         location,
+        is_external: _,
         format,
         partition_by,
         sort_by,

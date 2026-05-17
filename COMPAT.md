@@ -17,7 +17,7 @@
 | [C5] JSON reader — `_corrupt_record` compat | 4 | P2 | Open |
 | [C6] INSERT OVERWRITE | 1 | P1 | ✅ Fixed (Day 5 — stale skip) |
 | [C7] GeometryType / GeographyType | 2 | P3 | Open |
-| [C8] Persistent tables default to EXTERNAL | 2 | P2 | Open |
+| [C8] Persistent tables default to EXTERNAL | 2 | P2 | ✅ Fixed (Day 6) |
 | [C9] Structured Streaming (readStream) | 1 | Phase 2 | Deferred |
 | [C10] `monotonically_increasing_id` in GROUP BY projection | 5 | P1 | ✅ Fixed (Day 4) |
 
@@ -176,23 +176,17 @@ These are Databricks-specific spatial types not in open-source Spark. Low priori
 
 ---
 
-## C8 — Persistent tables default to EXTERNAL
+## C8 — Persistent tables default to EXTERNAL ✅ Fixed (Day 6)
 
 **Priority:** P2  
 **Files:** `test_write_table.py`, `test_catalog.py`  
 **Count:** 2 tests
 
-### Behaviour difference
-- **Spark:** `CREATE TABLE` / `df.write.saveAsTable()` creates MANAGED tables (data under warehouse dir)
-- **Ignite:** Creates EXTERNAL tables (data at user-specified or default external path)
-
-### Root cause
-The default `TableType` in `sail-catalog-memory` / `sail-catalog-system` is set to `External` rather than `Managed`.
-
-### Fix path
-1. Check `CreateTableStatement.table_type` defaulting in `sail-plan`
-2. When no `LOCATION` is specified and `USING` is a managed format, default to `TableType::Managed`
-3. Map managed table path to `spark.sql.warehouse.dir` config value
+### Fix
+Added `is_external: bool` to `CreateTableOptions`. The resolver in `sail-plan` now sets
+`is_external = true` only when `LOCATION` is explicitly specified by the user; otherwise
+`is_external = false` (MANAGED). All catalog provider `create_table` implementations
+updated to use `options.is_external`. Tests updated to assert `MANAGED` for no-location tables.
 
 ---
 

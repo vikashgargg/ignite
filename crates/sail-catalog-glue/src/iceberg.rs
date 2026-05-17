@@ -122,6 +122,7 @@ fn validate_iceberg_options(options: CreateTableOptions) -> CatalogResult<Valida
         comment,
         constraints,
         location,
+        is_external: _,
         format: _,
         partition_by,
         sort_by,

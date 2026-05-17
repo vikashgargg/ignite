@@ -351,19 +351,23 @@ impl PlanResolver<'_> {
                                 self.config.default_table_file_format.clone();
                         }
                     }
-                    if let Some(location) = info.as_ref().and_then(|x| x.location.as_ref()) {
-                        file_write_options.options.push(OptionLayer::OptionList {
-                            items: vec![("path".to_string(), location.clone())],
-                        });
-                    } else {
-                        let default_location = self.resolve_default_table_location(&table).await?;
-                        file_write_options.options.insert(
-                            0,
-                            OptionLayer::OptionList {
-                                items: vec![("path".to_string(), default_location)],
-                            },
-                        );
-                    };
+                    let is_external =
+                        if let Some(location) = info.as_ref().and_then(|x| x.location.as_ref()) {
+                            file_write_options.options.push(OptionLayer::OptionList {
+                                items: vec![("path".to_string(), location.clone())],
+                            });
+                            info.as_ref().map_or(true, |i| i.is_external)
+                        } else {
+                            let default_location =
+                                self.resolve_default_table_location(&table).await?;
+                            file_write_options.options.insert(
+                                0,
+                                OptionLayer::OptionList {
+                                    items: vec![("path".to_string(), default_location)],
+                                },
+                            );
+                            false
+                        };
                     if file_write_options
                         .partition_by
                         .iter()
@@ -428,6 +432,7 @@ impl PlanResolver<'_> {
                             comment: None,
                             constraints: vec![],
                             location: table_location,
+                            is_external,
                             format: file_write_options.format.clone(),
                             partition_by,
                             sort_by,
@@ -526,7 +531,7 @@ impl PlanResolver<'_> {
                 sort_by,
                 bucket_by,
                 properties,
-                is_external: _,
+                is_external,
             } => {
                 // When a table is created without column definitions
                 // (e.g. `CREATE TABLE t USING fmt`), the catalog stores an empty column list.
@@ -589,6 +594,7 @@ impl PlanResolver<'_> {
                 Ok(Some(TableInfo {
                     columns,
                     location,
+                    is_external,
                     format,
                     partition_by,
                     sort_by,
@@ -668,6 +674,7 @@ impl PlanResolver<'_> {
         let info = TableInfo {
             columns,
             location: Some(path),
+            is_external: true,
             format: options.format.clone(),
             partition_by: vec![],
             sort_by: vec![],
@@ -1263,6 +1270,7 @@ fn extract_partition_int_arg(
 struct TableInfo {
     columns: Vec<TableColumnStatus>,
     location: Option<String>,
+    is_external: bool,
     format: String,
     partition_by: Vec<CatalogPartitionField>,
     sort_by: Vec<CatalogTableSort>,

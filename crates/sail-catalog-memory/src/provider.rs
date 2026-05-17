@@ -160,6 +160,7 @@ impl CatalogProvider for MemoryCatalogProvider {
             comment,
             constraints,
             location,
+            is_external,
             format,
             partition_by,
             sort_by,
@@ -234,7 +235,7 @@ impl CatalogProvider for MemoryCatalogProvider {
                 sort_by,
                 bucket_by,
                 properties,
-                is_external: true,
+                is_external,
             },
         };
         db.tables.insert(table.to_string(), status.clone());
