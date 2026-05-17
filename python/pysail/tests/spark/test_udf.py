@@ -16,7 +16,6 @@ def arrow(spark, request):
 
 
 @pytest.mark.usefixtures("arrow")
-@pytest.mark.skip(reason="not working")
 def test_implicit_string_casting(spark):
     # The default UDF return type is "string".
     df = spark.sql("SELECT 1 as a").select(udf(lambda x: x)("a").alias("b"))
@@ -27,7 +26,6 @@ def test_implicit_string_casting(spark):
 
 
 @pytest.mark.usefixtures("arrow")
-@pytest.mark.skip(reason="not working")
 def test_implicit_binary_casting_invalid_type(spark):
     df = spark.sql("SELECT 1 as a").select(udf(lambda x: x, returnType="binary")("a").alias("b"))
     assert df.collect() == [Row(b=None)]
@@ -37,7 +35,6 @@ def test_implicit_binary_casting_invalid_type(spark):
 
 
 @pytest.mark.usefixtures("arrow")
-@pytest.mark.skip(reason="not working")
 def test_implicit_binary_casting_string_type(spark):
     df = spark.sql("SELECT '1' as a").select(udf(lambda x: x, returnType="binary")("a").alias("b"))
     assert df.collect() == [Row(b=bytearray(b"1"))]
