@@ -1,7 +1,7 @@
 # Ignite build targets
 # Usage: make <target>
 
-.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10
+.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10 container-build
 
 CARGO := $(shell which cargo)
 BINARY := target/debug/ignite
@@ -121,3 +121,24 @@ size-report:
 
 clean:
 	$(CARGO) clean
+
+# ── Apple Container build ─────────────────────────────────────────────────────
+# Workarounds for Apple Container bugs:
+#   #425 — only root-level files reach the builder VM (subdirs silently dropped)
+#   #656 — builder VM may have stale DNS after system restart
+#
+# Prerequisites: `container builder start --cpus 4 --memory 5g`
+container-build:
+	@echo "=== Fixing buildkit DNS (Apple Container issue #656) ==="
+	container exec buildkit /bin/sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf' 2>/dev/null || true
+	@echo "=== Creating clean build context in /tmp/ignite-apple-ctx ==="
+	rm -rf /tmp/ignite-apple-ctx
+	mkdir -p /tmp/ignite-apple-ctx
+	cp Cargo.toml Cargo.lock /tmp/ignite-apple-ctx/
+	cp docker/apple/Dockerfile /tmp/ignite-apple-ctx/Dockerfile
+	tar -czf /tmp/ignite-apple-ctx/crates.tar.gz crates/
+	@echo "=== Build context size ==="
+	du -sh /tmp/ignite-apple-ctx/
+	@echo "=== Running container build (~25-35 min) ==="
+	container build --no-cache --platform linux/arm64 -t ignite:latest /tmp/ignite-apple-ctx
+	@echo "=== Done. Run with: container run --name ignite -p 50051:50051 ignite:latest ==="
