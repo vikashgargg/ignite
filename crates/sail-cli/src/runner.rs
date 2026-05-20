@@ -4,7 +4,8 @@ use sail_common::error::CommonError;
 use crate::flight::run_flight_server;
 use crate::spark::run::run_pyspark_script;
 use crate::spark::{
-    run_pyspark_shell, run_spark_connect_server, run_spark_mcp_server, McpSettings, McpTransport,
+    run_pyspark_shell, run_spark_connect_server, run_spark_connect_server_local_cluster,
+    run_spark_mcp_server, McpSettings, McpTransport,
 };
 use crate::worker::run_worker;
 
@@ -31,6 +32,17 @@ enum Command {
         port: u16,
         #[arg(short = 'C', long, help = "Directory to change to before starting")]
         directory: Option<String>,
+        #[arg(
+            long,
+            help = "Execution mode: local | local-cluster | kubernetes-cluster (overrides SAIL_MODE)"
+        )]
+        mode: Option<String>,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Number of local workers for local-cluster mode (0 = config default)"
+        )]
+        workers: usize,
     },
 
     /// Execute a SQL query and print results, then exit
@@ -71,11 +83,16 @@ enum Command {
         role: ClusterRole,
         #[arg(long, default_value = "0.0.0.0", help = "IP address to bind to")]
         ip: String,
-        #[arg(long, default_value_t = 7070, help = "Scheduler port")]
+        #[arg(long, default_value_t = 50051, help = "Spark Connect port (scheduler role)")]
         port: u16,
-        /// Scheduler address (required for worker role)
         #[arg(long, help = "Scheduler address (host:port), required for worker role")]
         scheduler: Option<String>,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Number of local workers to launch (0 = config default, scheduler role only)"
+        )]
+        workers: usize,
     },
 
     /// Arrow Flight SQL interface
@@ -134,11 +151,24 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Worker => run_worker(),
 
-        Command::Server { ip, port, directory } => {
+        Command::Server { ip, port, directory, mode, workers } => {
             if let Some(dir) = directory {
                 std::env::set_current_dir(dir)?;
             }
-            run_spark_connect_server(ip.parse()?, port)
+            match mode.as_deref() {
+                Some("local-cluster") | Some("local_cluster") => {
+                    run_spark_connect_server_local_cluster(ip.parse()?, port, workers)
+                }
+                Some(other) => {
+                    // For other modes (local, kubernetes-cluster) honour SAIL_MODE or the
+                    // config file; the --mode flag is informational / a convenience alias.
+                    eprintln!(
+                        "note: --mode {other} — use SAIL_MODE env var for full config control"
+                    );
+                    run_spark_connect_server(ip.parse()?, port)
+                }
+                None => run_spark_connect_server(ip.parse()?, port),
+            }
         }
 
         Command::Sql { query, directory } => {
@@ -161,14 +191,18 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             run_bench(scale_factor, &data_path)
         }
 
-        Command::Cluster { role, ip, port, scheduler } => {
+        Command::Cluster { role, ip, port, scheduler, workers } => {
             match role {
                 ClusterRole::Scheduler => {
-                    eprintln!("ignite cluster scheduler at {ip}:{port}");
-                    eprintln!("Distributed scheduler (Phase 2) — coming soon.");
-                    Ok(())
+                    // The "scheduler" role runs the Spark Connect server in
+                    // local-cluster mode: the driver actor lives in-process and
+                    // spawns N LocalWorkerManager worker threads.
+                    run_spark_connect_server_local_cluster(ip.parse()?, port, workers)
                 }
                 ClusterRole::Worker => {
+                    // Standalone worker: connects back to the driver gRPC endpoint.
+                    // SAIL_CLUSTER__DRIVER_EXTERNAL_HOST / PORT must be set (or
+                    // the defaults from application.yaml apply).
                     let sched = scheduler.unwrap_or_else(|| format!("{}:{}", ip, port));
                     eprintln!("ignite cluster worker → scheduler at {sched}");
                     run_worker()

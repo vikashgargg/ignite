@@ -44,12 +44,13 @@ pub fn run_spark_mcp_server(
         None => {
             // We follow the same setup as `run_pyspark_shell`.
             // Please refer to the comments in that function for details.
+            let config = Arc::new(AppConfig::load()?);
             let (tx, rx) = oneshot::channel::<()>();
             let address = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
             let shutdown = async {
                 let _ = rx.await;
             };
-            with_spark_connect_server(address, shutdown, |addr| async move {
+            with_spark_connect_server(config, address, shutdown, |addr| async move {
                 let _tx = tx;
                 _run_mcp_server(settings, format!("sc://127.0.0.1:{}", addr.port()))
             })

@@ -4,16 +4,24 @@ Ignite Spark Compatibility Scorecard
 Tests ~50 key Spark features across SQL, DataFrames, UDFs, DML,
 JSON/Parquet, and complex types.
 
-Usage (starts its own server):
+Usage (starts its own server — single-node local mode):
     IGNITE_BIN=./target/debug/ignite \\
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
 
-Against a running server (start server first with PYTHONPATH set):
+Against a running server — single-node (local mode):
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
       ./target/debug/ignite server --port 50055
+
+    SPARK_REMOTE=sc://localhost:50055 \\
+      .venvs/smoke/bin/python scripts/spark_compat_score.py
+
+Against a running server — multi-worker (local-cluster mode, N workers in-process):
+    DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
+    PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
+      ./target/debug/ignite cluster --role scheduler --port 50055 --workers 4
 
     SPARK_REMOTE=sc://localhost:50055 \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
