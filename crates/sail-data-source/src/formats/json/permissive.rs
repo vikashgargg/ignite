@@ -707,4 +707,56 @@ mod tests {
         assert_eq!(inner.fields().len(), 2);
         assert!(info.is_none());
     }
+
+    /// Test the full streaming pipeline as used by PermissiveJsonOpener:
+    /// DecoderDeserializer wrapping PermissiveJsonDecoder, fed via deserialize_stream.
+    #[tokio::test]
+    async fn test_streaming_pipeline_permissive() {
+        use bytes::Bytes;
+        use datafusion_common::DataFusionError;
+        use datafusion_datasource::decoder::{DecoderDeserializer, deserialize_stream};
+        use futures::TryStreamExt;
+
+        let schema = schema_with_corrupt();
+        let (inner_schema, corrupt_info) = split_corrupt_col(&schema, "_corrupt_record");
+        let (corrupt_col_idx, output_schema) = match corrupt_info {
+            Some((i, s)) => (Some(i), Some(s)),
+            None => (None, None),
+        };
+        let decoder = PermissiveJsonDecoder::new(
+            inner_schema,
+            1024,
+            JsonMode::Permissive,
+            corrupt_col_idx,
+            output_schema,
+        );
+        let deser = DecoderDeserializer::new(decoder);
+
+        let data =
+            Bytes::from_static(b"{\"id\":1,\"name\":\"alice\"}\nbad_json\n{\"id\":3,\"name\":\"carol\"}\n");
+        let input = futures::stream::once(std::future::ready(
+            Ok::<_, DataFusionError>(data),
+        ));
+        let batches: Vec<_> = deserialize_stream(input, deser)
+            .map_err(|e: datafusion::arrow::error::ArrowError| {
+                datafusion_common::DataFusionError::from(e)
+            })
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 3);
+
+        let batch = &batches[0];
+        let idx = batch.schema().index_of("_corrupt_record").unwrap();
+        let corrupt_col = batch
+            .column(idx)
+            .as_any()
+            .downcast_ref::<datafusion::arrow::array::StringArray>()
+            .unwrap();
+        assert!(corrupt_col.is_null(0), "valid row → null corrupt_record");
+        assert_eq!(corrupt_col.value(1), "bad_json", "malformed row captured");
+        assert!(corrupt_col.is_null(2), "valid row → null corrupt_record");
+    }
 }
