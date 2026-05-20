@@ -1,5 +1,6 @@
 use datafusion_expr::{col, when, Expr, LogicalPlan, LogicalPlanBuilder};
 use sail_common::spec;
+use sail_common_datafusion::rename::logical_plan::rename_logical_plan;
 
 use crate::error::{PlanError, PlanResult};
 use crate::resolver::command::write::{WriteColumnMatch, WriteMode, WritePlanBuilder, WriteTarget};
@@ -20,20 +21,22 @@ impl PlanResolver<'_> {
         state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
         // Build a full scan of the target table.
+        // The raw scan has opaque DataFusion field IDs (#0, #1, …) in its schema.
+        // The PlanResolverState maps those IDs to the real column names — resolve
+        // the WHERE condition and SET expressions BEFORE renaming, while the state
+        // still knows about those opaque IDs.
         let table_plan = self.resolve_merge_table_plan_for_update(table.clone(), state).await?;
         let schema = table_plan.schema().clone();
 
-        // Resolve the WHERE condition (if any) against the table schema.
+        // Resolve the WHERE condition (if any) against the opaque schema.
         let condition_expr: Option<Expr> = if let Some(cond) = condition {
-            let resolved = self
-                .resolve_expression(cond, &schema, state)
-                .await?;
-            Some(resolved)
+            Some(self.resolve_expression(cond, &schema, state).await?)
         } else {
             None
         };
 
         // Resolve SET assignments into (column_name_lowercase, Expr) pairs.
+        // The column names from the spec are the user-visible names (e.g. "name").
         let mut assignment_exprs: Vec<(String, Expr)> = Vec::with_capacity(assignments.len());
         for (col_name, value_expr) in assignments {
             let col_name = col_name
@@ -45,17 +48,22 @@ impl PlanResolver<'_> {
             assignment_exprs.push((col_name, value));
         }
 
-        // Build projection: for each column in the table schema, produce either
-        //   CASE WHEN condition THEN new_value ELSE original_col END  (updated cols)
-        //   original_col                                               (unchanged cols)
+        // Resolve the human-readable column names from state (opaque ID → real name).
+        let column_names = PlanResolver::get_field_names(&schema, state)?;
+
+        // Build projection using opaque IDs (col("#0") etc.), then alias each
+        // column to its real name so the output schema carries "id", "name", …
+        // For updated columns wrap in CASE WHEN to apply the change conditionally.
         let projections: Vec<Expr> = schema
             .fields()
             .iter()
-            .map(|field| {
-                let field_name = field.name().to_lowercase();
+            .zip(column_names.iter())
+            .map(|(field, real_name)| {
+                let real_name_lower = real_name.to_lowercase();
+                // col("#0") etc. — the opaque reference DataFusion knows about.
                 let original = col(field.name().as_str());
 
-                match assignment_exprs.iter().find(|(c, _)| c == &field_name) {
+                match assignment_exprs.iter().find(|(c, _)| c == &real_name_lower) {
                     None => original,
                     Some((_, new_value)) => match &condition_expr {
                         None => new_value.clone(),
@@ -64,7 +72,7 @@ impl PlanResolver<'_> {
                             .expect("CASE expression is always valid here"),
                     },
                 }
-                .alias(field.name().as_str())
+                .alias(real_name.as_str())
             })
             .collect();
 
@@ -72,7 +80,7 @@ impl PlanResolver<'_> {
             .project(projections)?
             .build()?;
 
-        // Write back with Truncate (full overwrite).
+        // Write back with Truncate (full overwrite), matching columns by name.
         let builder = WritePlanBuilder::new()
             .with_mode(WriteMode::Truncate)
             .with_target(WriteTarget::Table {
