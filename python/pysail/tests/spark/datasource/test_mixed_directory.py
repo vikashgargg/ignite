@@ -160,13 +160,11 @@ def test_hidden_files_are_excluded(spark, mixed_files_dir):
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="Sail's JSON reader errors on non-JSON lines; Spark uses _corrupt_record.")
 def test_json_no_schema_show(spark, mixed_files_dir):
     df = spark.read.format("json").load(str(mixed_files_dir))
     df.show()  # smoke test
 
 
-@pytest.mark.skip(reason="Sail's JSON reader errors on non-JSON lines; Spark uses _corrupt_record.")
 def test_json_no_schema_collect(spark, mixed_files_dir):
     df = spark.read.format("json").load(str(mixed_files_dir))
     rows = df.collect()

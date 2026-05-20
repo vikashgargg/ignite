@@ -12,7 +12,7 @@
 |---|---|---|---|
 | [C1] DML — DELETE / UPDATE | 8 | P1 | ✅ Fixed (Day 4) |
 | [C2] monotonically_increasing_id in aggregates | 5 | P1 | ✅ Fixed (Day 4) |
-| [C3] UDF implicit type casting | 3 | P2 | 🔄 Skip removed (Day 6) — awaiting CI |
+| [C3] UDF implicit type casting | 3 | P2 | ✅ Fixed (Day 10): arrow-mode fallback added to `PySparkArrowBatchUdf` |
 | [C4] FILTER clause in aggregations | 2 | P1 | ✅ Fixed (Day 4 — stale skip) |
 | [C5] JSON reader — `_corrupt_record` compat | 4 | P2 | ✅ Fixed (Day 9) schema case: PERMISSIVE/DROPMALFORMED/FAILFAST + custom column name; 🔄 open: no-schema `_corrupt_record` inference |
 | [C6] INSERT OVERWRITE | 1 | P1 | ✅ Fixed (Day 5 — stale skip) |

@@ -530,7 +530,15 @@ class PySparkArrowBatchUdf:
             inputs = tuple(_arrow_column_to_pandas(a, self._serializer) for a in args)
         [result] = list(self._udf(None, (inputs,)))
         output, output_type = result[0], result[1]
-        return _pandas_to_arrow_array(output, output_type, self._serializer)
+        try:
+            return _pandas_to_arrow_array(output, output_type, self._serializer)
+        except (pa.lib.ArrowInvalid, pa.lib.ArrowNotImplementedError):
+            # Spark's type coercion rules (e.g. int → binary = None, int → string
+            # = str(int)) are not always implemented by pyarrow's cast kernel.
+            # Fall back to our Converter which matches Spark's behaviour.
+            converter = _get_converter(output_type)
+            values = output.tolist() if hasattr(output, "tolist") else list(output)
+            return converter.from_pyspark(values)
 
     def _call_arrow(self, args: list[pa.Array], num_rows: int) -> pa.Array:
         # Convert Arrow arrays to Python lists with proper type conversion,
@@ -547,15 +555,23 @@ class PySparkArrowBatchUdf:
         if isinstance(output, pa.ChunkedArray):
             output = output.combine_chunks()
         if not isinstance(output, pa.Array):
-            output = _python_values_to_arrow_array(
-                output,
-                output_type,
-                spark_return_type,
-                int_to_decimal_coercion_enabled=self._int_to_decimal_coercion_enabled,
-                safecheck=self._safecheck,
-            )
+            try:
+                output = _python_values_to_arrow_array(
+                    output,
+                    output_type,
+                    spark_return_type,
+                    int_to_decimal_coercion_enabled=self._int_to_decimal_coercion_enabled,
+                    safecheck=self._safecheck,
+                )
+            except (pa.lib.ArrowInvalid, pa.lib.ArrowNotImplementedError):
+                converter = _get_converter(output_type)
+                return converter.from_pyspark(list(output))
         if output.type != output_type:
-            output = output.cast(output_type)
+            try:
+                output = output.cast(output_type)
+            except (pa.lib.ArrowInvalid, pa.lib.ArrowNotImplementedError):
+                converter = _get_converter(output_type)
+                return converter.from_pyspark(output.to_pylist())
         return output
 
 
