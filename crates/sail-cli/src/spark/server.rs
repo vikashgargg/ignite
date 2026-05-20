@@ -8,22 +8,33 @@ use sail_common::runtime::RuntimeManager;
 use sail_spark_connect::entrypoint::serve;
 use tokio::net::TcpListener;
 
-/// Handles graceful shutdown by waiting for a `SIGINT` signal in [tokio].
+/// Handles graceful shutdown by waiting for a `SIGINT` or `SIGTERM` signal.
 ///
-/// The `SIGINT` signal is captured by Python if the `_signal` module is imported [1].
-/// To prevent this, we would need to run Python code like the following [2].
-/// ```python
-/// import signal
-/// signal.signal(signal.SIGINT, signal.SIG_DFL)
-/// ```
-/// The workaround above is not necessary if we use this function to handle the signal.
+/// `SIGTERM` is sent by Docker (`docker stop`), Kubernetes pod eviction, and
+/// `container stop`.  `SIGINT` is the interactive Ctrl-C signal.
 ///
-/// References:
-///   - [1] https://github.com/PyO3/pyo3/issues/2576
-///   - [2] https://github.com/PyO3/pyo3/issues/3218
+/// The `SIGINT` signal is captured by Python if the `_signal` module is
+/// imported (https://github.com/PyO3/pyo3/issues/2576). Handling it here
+/// prevents a double-signal scenario where Python and the server both respond.
 async fn shutdown() {
-    let _ = tokio::signal::ctrl_c().await;
-    info!("Shutting down the Spark Connect server...");
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let sigterm = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let sigterm = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c  => info!("Received SIGINT, shutting down gracefully..."),
+        _ = sigterm => info!("Received SIGTERM, shutting down gracefully..."),
+    }
 }
 
 pub(super) mod telemetry {
@@ -91,7 +102,7 @@ where
         let listener = TcpListener::bind(address).await?;
         let server_address = listener.local_addr()?;
         let server_task = async move {
-            info!("Starting the Spark Connect server on {server_address}...");
+            info!("Ignite ready on {server_address} (Spark Connect gRPC)");
             match serve(listener, signal, config, handle).await {
                 Ok(()) => {
                     info!("The Spark Connect server has stopped.");
