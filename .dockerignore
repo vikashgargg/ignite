@@ -1,7 +1,12 @@
-# Ignore everything by default
-**
-
-# Allow only the files and directories you need
-!Cargo.toml
-!Cargo.lock
-!crates/
+# Exclude large / sensitive directories that must never be in the build context.
+# Using an exclude-list (not a ** catch-all) so that Apple Container's
+# .dockerignore parser correctly passes sub-directory contents.
+target/
+.git/
+python/
+deployments/
+docs/
+scripts/
+node_modules/
+*.log
+.env

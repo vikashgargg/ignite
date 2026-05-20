@@ -14,7 +14,7 @@
 | [C2] monotonically_increasing_id in aggregates | 5 | P1 | ✅ Fixed (Day 4) |
 | [C3] UDF implicit type casting | 3 | P2 | 🔄 Skip removed (Day 6) — awaiting CI |
 | [C4] FILTER clause in aggregations | 2 | P1 | ✅ Fixed (Day 4 — stale skip) |
-| [C5] JSON reader — `_corrupt_record` compat | 4 | P2 | Open |
+| [C5] JSON reader — `_corrupt_record` compat | 4 | P2 | 🔄 Partial (Day 6): schema case fixed; no-schema `_corrupt_record` open |
 | [C6] INSERT OVERWRITE | 1 | P1 | ✅ Fixed (Day 5 — stale skip) |
 | [C7] GeometryType / GeographyType | 2 | P3 | Open |
 | [C8] Persistent tables default to EXTERNAL | 2 | P2 | ✅ Fixed (Day 6) |
@@ -138,9 +138,16 @@ The `FILTER (WHERE ...)` clause on aggregate functions is parsed but not lowered
 - **Spark:** Malformed JSON lines are written to a `_corrupt_record` column; valid lines are processed
 - **Ignite (Sail):** Malformed JSON causes a hard error / the entire file read fails
 
-### Fix path
-1. In `sail-data-source` JSON reader, wrap per-row parse errors
-2. On JSON parse failure, emit a `null` row with `_corrupt_record` populated (matching Spark's `PERMISSIVE` mode default)
+### Fix (partial — Day 6)
+**Schema-specified case**: `PermissiveJsonDecoder` in `sail-data-source/src/formats/json/permissive.rs` buffers bytes,
+validates each `\n`-delimited line with `serde_json`, and replaces malformed lines with `{}` so Arrow produces
+null rows instead of errors. Wired in via `PermissiveJsonFormat` → `PermissiveJsonSource` → `PermissiveJsonOpener`.
+Skip markers removed from `test_json_schema_show` and `test_json_schema_collect`.
+
+**Remaining — no-schema `_corrupt_record` case**: When no schema is provided, Spark infers a `_corrupt_record: String`
+column and populates it for each malformed line. Implementing this requires schema inference changes.
+1. Detect malformed lines during schema inference and add `_corrupt_record: String` to the inferred schema
+2. During reading, populate `_corrupt_record` with the raw line text for each malformed row
 3. Respect `spark.sql.columnNameOfCorruptRecord` config key
 
 ---
