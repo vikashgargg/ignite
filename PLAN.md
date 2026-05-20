@@ -1,8 +1,8 @@
 # Ignite — Master Build Plan
 
-> Last updated: 2026-05-19  
-> Branch: `phase1/foundation`  
-> Status: **Day 8 complete — `ignite:latest` running in Apple Container; PySpark smoke test passed (`SELECT 1+1 = 2`); next: C5 no-schema _corrupt_record**
+> Last updated: 2026-05-20  
+> Branch: `phase1/production-hardening`  
+> Status: **Day 10 complete — C5 JSON permissive mode fully implemented + PySpark smoke tests green; Apple Container optimised (layer caching, SIGTERM, HEALTHCHECK); next: C3 UDF type casting, C5 no-schema _corrupt_record**
 
 ---
 
@@ -616,6 +616,8 @@ W3: compat audit
 | **Day 6** | ✅ Done | C8 managed tables fixed; C3 UDF skip removed (awaiting CI); README compat + memory target section added |
 | **Day 7** | ✅ Done | C5 JSON permissive mode (schema case): `PermissiveJsonDecoder` + `PermissiveJsonFormat` + `PermissiveJsonSource`; skip markers removed from `test_json_schema_show` / `test_json_schema_collect`; no-schema `_corrupt_record` remains open |
 | **Day 8** | ✅ Done | Apple Container local dev: fixed DNS (#656) + context bug (#425); thin LTO fix (OOM); `ignite:latest` built; PySpark smoke test ✅ `SELECT 1+1=2` |
+| **Day 9** | ✅ Done | C5 full impl: `PermissiveJsonDecoder` streaming pipeline + 7 Rust unit tests (incl. `test_streaming_pipeline_permissive`); `scripts/smoke_json_permissive.py` — 5 PySpark end-to-end tests: PERMISSIVE, DROPMALFORMED, FAILFAST, columnNameOfCorruptRecord ✅ all green; merged via PR #1 squash into `phase1/foundation` |
+| **Day 10** | ✅ Done | Production hardening: Apple Container layer-cache split (`manifests.tar.gz` → `cargo fetch` + `crates.tar.gz` → build); SIGTERM handler in `sail-cli/src/spark/server.rs`; `Ignite ready on …` readiness log; HEALTHCHECK TCP probe; `container-build` / `container-build-clean` Makefile targets; smoke test updated for new readiness string |
 
 ### Day 2 Delivery Notes
 
