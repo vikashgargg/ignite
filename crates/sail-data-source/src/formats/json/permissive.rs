@@ -18,6 +18,7 @@ use datafusion::arrow::array::{ArrayRef, RecordBatch, StringArray};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::error::ArrowError;
 use datafusion::arrow::json::ReaderBuilder;
+use datafusion::arrow::json::reader::infer_json_schema_from_iterator;
 use datafusion_common::config::JsonOptions;
 use datafusion_common::{Result, Statistics};
 use datafusion_datasource::decoder::{Decoder, DecoderDeserializer, deserialize_stream};
@@ -34,7 +35,7 @@ use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
 use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion_session::Session;
 use futures::{StreamExt, TryStreamExt};
-use object_store::{GetOptions, GetResultPayload, ObjectMeta, ObjectStore};
+use object_store::{GetOptions, GetResultPayload, ObjectMeta, ObjectStore, ObjectStoreExt};
 
 // ---------------------------------------------------------------------------
 // JsonMode
@@ -567,28 +568,57 @@ impl FileFormat for PermissiveJsonFormat {
         store: &Arc<dyn ObjectStore>,
         objects: &[ObjectMeta],
     ) -> Result<SchemaRef> {
-        let schema = self.inner().infer_schema(state, store, objects).await?;
-        // In PERMISSIVE mode with no user-supplied schema, Spark automatically
-        // appends a _corrupt_record column (or the custom name from
-        // columnNameOfCorruptRecord) so callers can identify malformed rows.
-        if self.mode == JsonMode::Permissive {
-            let col = corrupt_col_name(&self.corrupt_col_name);
-            if !schema.fields().iter().any(|f| f.name() == col) {
-                let mut fields = schema.fields().to_vec();
-                fields.push(Arc::new(datafusion::arrow::datatypes::Field::new(
-                    col,
-                    datafusion::arrow::datatypes::DataType::Utf8,
-                    true,
-                )));
-                return Ok(Arc::new(
-                    datafusion::arrow::datatypes::Schema::new_with_metadata(
-                        fields,
-                        schema.metadata().clone(),
-                    ),
-                ));
+        if self.mode != JsonMode::Permissive {
+            return self.inner().infer_schema(state, store, objects).await;
+        }
+
+        // PERMISSIVE mode: DataFusion's default inferrer errors on malformed lines.
+        // We filter to valid JSON lines only, infer from those, then append _corrupt_record.
+        let max_records = self.options.schema_infer_max_rec.unwrap_or(1000);
+        let mut merged_fields: Vec<Arc<datafusion::arrow::datatypes::Field>> = Vec::new();
+        let mut merged_meta = std::collections::HashMap::new();
+
+        for object in objects {
+            let raw = store.get(&object.location).await?.bytes().await?;
+            let mut values: Vec<serde_json::Value> = Vec::new();
+            for line in raw.split(|b| *b == b'\n') {
+                let trimmed = trim_ascii(line);
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(trimmed) {
+                    values.push(v);
+                    if values.len() >= max_records {
+                        break;
+                    }
+                }
+            }
+            if values.is_empty() {
+                continue;
+            }
+            let file_schema = infer_json_schema_from_iterator(
+                values.iter().map(|v| Ok::<_, ArrowError>(v)),
+            )?;
+            merged_meta.extend(file_schema.metadata().clone());
+            for field in file_schema.fields() {
+                if !merged_fields.iter().any(|f| f.name() == field.name()) {
+                    merged_fields.push(Arc::clone(field));
+                }
             }
         }
-        Ok(schema)
+
+        // Append _corrupt_record unless already present.
+        let col = corrupt_col_name(&self.corrupt_col_name);
+        if !merged_fields.iter().any(|f| f.name() == col) {
+            merged_fields.push(Arc::new(datafusion::arrow::datatypes::Field::new(
+                col,
+                datafusion::arrow::datatypes::DataType::Utf8,
+                true,
+            )));
+        }
+        Ok(Arc::new(
+            datafusion::arrow::datatypes::Schema::new_with_metadata(merged_fields, merged_meta),
+        ))
     }
 
     async fn infer_stats(
