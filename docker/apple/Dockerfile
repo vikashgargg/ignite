@@ -6,7 +6,7 @@
 #
 # Use the Makefile target to build — it handles Apple Container workarounds:
 #
-#   container builder start --cpus 4 --memory 5g
+#   container builder start --cpus 4 --memory 8g --dns 8.8.8.8
 #   make container-build                    # ~25-35 min first time
 #
 # Run after building:
@@ -63,7 +63,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock crates.tar.gz ./
 RUN tar -xzf crates.tar.gz && rm crates.tar.gz
 
-RUN cargo build --release -p sail-cli --bins \
+RUN CARGO_PROFILE_RELEASE_LTO=thin cargo build --release -p sail-cli --bins \
     && cp /app/target/release/ignite /usr/local/bin/ignite
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────

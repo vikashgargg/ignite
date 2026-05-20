@@ -1,8 +1,8 @@
 # Ignite — Master Build Plan
 
-> Last updated: 2026-05-17  
+> Last updated: 2026-05-19  
 > Branch: `phase1/foundation`  
-> Status: **Day 7 done — C5 JSON permissive mode (schema case); next: C5 no-schema _corrupt_record or C7**
+> Status: **Day 8 complete — `ignite:latest` running in Apple Container; PySpark smoke test passed (`SELECT 1+1 = 2`); next: C5 no-schema _corrupt_record**
 
 ---
 
@@ -615,6 +615,7 @@ W3: compat audit
 | **Day 5** | ✅ Done | `ignite bench` implemented (DuckDB-driven, all 22 queries, timing table); C6 INSERT OVERWRITE stale skip removed; Makefile bench targets; end-goal memory + perf targets set |
 | **Day 6** | ✅ Done | C8 managed tables fixed; C3 UDF skip removed (awaiting CI); README compat + memory target section added |
 | **Day 7** | ✅ Done | C5 JSON permissive mode (schema case): `PermissiveJsonDecoder` + `PermissiveJsonFormat` + `PermissiveJsonSource`; skip markers removed from `test_json_schema_show` / `test_json_schema_collect`; no-schema `_corrupt_record` remains open |
+| **Day 8** | ✅ Done | Apple Container local dev: fixed DNS (#656) + context bug (#425); thin LTO fix (OOM); `ignite:latest` built; PySpark smoke test ✅ `SELECT 1+1=2` |
 
 ### Day 2 Delivery Notes
 
