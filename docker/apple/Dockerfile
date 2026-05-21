@@ -30,7 +30,7 @@
 #    container to use 8.8.8.8 before starting the build.
 
 ARG PYTHON_VERSION=3.12
-ARG PYSPARK_VERSION=4.1.1
+ARG PYSPARK_VERSION=4.0.0
 ARG RUST_VERSION=1.95.0
 
 # ── Stage 1: Rust builder ─────────────────────────────────────────────────────
@@ -86,8 +86,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# pyspark-client is the lightweight Spark Connect-only client (no JVM).
-RUN pip install --no-cache-dir "pyspark-client==${PYSPARK_VERSION}"
+# Full pyspark (not pyspark-client) is required for UDF cloudpickle deserialization
+# on the server side. pyspark-client is Connect-protocol only and lacks pyspark.worker.
+RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}"
 
 COPY --from=builder /usr/local/bin/ignite /usr/local/bin/ignite
 
@@ -101,4 +102,10 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
     || exit 1
 
 ENTRYPOINT ["/usr/local/bin/ignite"]
+# Default: single-node local mode.
+# Distributed modes (set via SAIL_MODE env var or --mode CLI flag):
+#   local-cluster (in-process workers):
+#     container run -e SAIL_MODE=local-cluster -p 50051:50051 ignite:latest
+#   kubernetes-cluster (worker pods via K8s RBAC — see k8s/sail.yaml):
+#     env SAIL_MODE=kubernetes-cluster (set in K8s manifest)
 CMD ["server", "--ip", "0.0.0.0", "--port", "50051"]

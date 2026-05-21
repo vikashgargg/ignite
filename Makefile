@@ -1,7 +1,7 @@
 # Ignite build targets
 # Usage: make <target>
 
-.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10 container-build container-build-clean
+.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10 container-build container-build-clean container-run container-run-cluster docker-build kind-setup kind-teardown
 
 CARGO := $(shell which cargo)
 BINARY := target/debug/ignite
@@ -28,6 +28,11 @@ help:
 	@echo "  make bench-sf10   Run TPC-H SF-10 benchmark (larger, ~60s)"
 	@echo "  make container-build        Build Apple Container image (uses layer cache)"
 	@echo "  make container-build-clean  Same, but forces a clean rebuild (--no-cache)"
+	@echo "  make container-run          Run ignite container in local (single-node) mode"
+	@echo "  make container-run-cluster  Run ignite container in local-cluster mode"
+	@echo "  make docker-build           Build ignite Docker image for use with kind/k8s"
+	@echo "  make kind-setup             Create kind cluster, load image, deploy ignite"
+	@echo "  make kind-teardown          Delete kind cluster"
 	@echo "  make clean                  cargo clean"
 
 dev:
@@ -147,7 +152,7 @@ _container-ctx:
 	mkdir -p /tmp/ignite-apple-ctx
 	cp Cargo.toml Cargo.lock /tmp/ignite-apple-ctx/
 	cp docker/apple/Dockerfile /tmp/ignite-apple-ctx/Dockerfile
-	find crates -name "Cargo.toml" | sort | tar -czf /tmp/ignite-apple-ctx/manifests.tar.gz -T -
+	bash scripts/make-manifests.sh /tmp/ignite-apple-ctx/manifests.tar.gz
 	tar -czf /tmp/ignite-apple-ctx/crates.tar.gz crates/
 	@echo "=== Build context ==="
 	@du -sh /tmp/ignite-apple-ctx/
@@ -161,3 +166,43 @@ container-build-clean: _container-ctx
 	@echo "=== Running container build (clean, no cache) ==="
 	container build --no-cache --platform linux/arm64 -t ignite:latest /tmp/ignite-apple-ctx
 	@echo "=== Done. Run with: container run --name ignite -p 50051:50051 ignite:latest ==="
+
+# ── Apple Container run helpers ───────────────────────────────────────────────
+container-run:
+	@echo "=== Starting ignite (local single-node mode) ==="
+	container run --rm --name ignite -p 50051:50051 ignite:latest
+
+container-run-cluster:
+	@echo "=== Starting ignite (local-cluster distributed mode) ==="
+	container run --rm --name ignite-cluster -p 50051:50051 \
+		-e SAIL_MODE=local-cluster \
+		ignite:latest
+
+# ── Docker build (for kind/k8s — uses same Dockerfile, requires Docker Desktop) ─
+# Reuses the same _container-ctx bundle to avoid duplicating the tarball logic.
+docker-build: _container-ctx
+	@echo "=== Building Docker image ignite:latest (linux/arm64) ==="
+	docker build --platform linux/arm64 -t ignite:latest /tmp/ignite-apple-ctx
+	@echo "=== Done. Load into kind with: kind load docker-image ignite:latest ==="
+
+# ── kind Kubernetes cluster ───────────────────────────────────────────────────
+# Prerequisites: kind installed (brew install kind), docker-build run first.
+KIND_CLUSTER ?= ignite-dev
+
+kind-setup:
+	@echo "=== Creating kind cluster '$(KIND_CLUSTER)' ==="
+	mkdir -p /tmp/sail /private/tmp/sail
+	kind create cluster --name $(KIND_CLUSTER) --config k8s/kind-config.yaml
+	@echo "=== Loading ignite:latest into kind ==="
+	kind load docker-image ignite:latest --name $(KIND_CLUSTER)
+	@echo "=== Deploying ignite to kind ==="
+	kubectl apply -f k8s/sail.yaml
+	@echo "=== Waiting for ignite pod to be ready ==="
+	kubectl rollout status deployment/ignite-spark-server -n ignite --timeout=120s
+	@echo ""
+	@echo "=== Port-forward with: kubectl port-forward -n ignite svc/ignite-spark-server 50051:50051 ==="
+	@echo "=== Then run: SPARK_REMOTE=sc://localhost:50051 .venvs/smoke/bin/python scripts/spark_compat_score.py ==="
+
+kind-teardown:
+	@echo "=== Deleting kind cluster '$(KIND_CLUSTER)' ==="
+	kind delete cluster --name $(KIND_CLUSTER)
