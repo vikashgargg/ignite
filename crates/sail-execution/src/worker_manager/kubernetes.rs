@@ -93,7 +93,7 @@ impl KubernetesWorkerManager {
 
     fn build_pod_labels(&self, id: WorkerId) -> BTreeMap<String, String> {
         BTreeMap::from([
-            ("app.kubernetes.io/name".to_string(), "sail".to_string()),
+            ("app.kubernetes.io/name".to_string(), "ignite".to_string()),
             (
                 "app.kubernetes.io/component".to_string(),
                 "worker".to_string(),
@@ -231,7 +231,7 @@ impl WorkerManager for KubernetesWorkerManager {
         let mut spec = PodSpec {
             containers: vec![Container {
                 name: "worker".to_string(),
-                command: Some(vec!["sail".to_string()]),
+                command: Some(vec!["ignite".to_string()]),
                 args: Some(vec!["worker".to_string()]),
                 env: Some(self.build_pod_env(id, options)),
                 image: Some(self.options.image.clone()),
@@ -319,7 +319,7 @@ mod tests {
 
         // Add default labels (simulating build_pod_labels)
         let default_labels = BTreeMap::from([
-            ("app.kubernetes.io/name".to_string(), "sail".to_string()),
+            ("app.kubernetes.io/name".to_string(), "ignite".to_string()),
             (
                 "app.kubernetes.io/component".to_string(),
                 "worker".to_string(),
@@ -340,7 +340,7 @@ mod tests {
         // Verify default labels override template labels
         assert_eq!(
             labels.get("app.kubernetes.io/name"),
-            Some(&"sail".to_string())
+            Some(&"ignite".to_string())
         );
         assert_ne!(
             labels.get("app.kubernetes.io/name"),
