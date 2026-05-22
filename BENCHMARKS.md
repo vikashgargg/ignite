@@ -32,14 +32,14 @@
   Q15     0.049s         1  PASS
   Q16     0.094s     18314  PASS
   Q17     0.160s         1  PASS
-  Q18     0.005s          --  FAIL (subquery column ID bug, tracked)
+  Q18     0.159s         9  PASS
   Q19     0.085s         1  PASS
   Q20     0.068s       186  PASS
   Q21     0.113s       100  PASS
   Q22     0.021s         7  PASS
 
 ======================================================================
-  21/22 PASSED, 1 FAILED | total query time: 1.545s
+  22/22 PASSED, 0 FAILED | total query time: 1.704s
 ======================================================================
 ```
 
@@ -47,17 +47,15 @@
 
 | Metric              | Value             |
 |---------------------|-------------------|
-| TPC-H SF-1 pass     | **21 / 22** (95%) |
-| Total query time    | **1.545 s**       |
-| Median query time   | **0.072 s**       |
-| Fastest query (Q11) | **0.018 s**       |
-| Slowest query (Q17) | **0.160 s**       |
-| Q18 status          | FAIL (resolver bug, tracked) |
+| TPC-H SF-1 pass     | **22 / 22** (100%) |
+| Total query time    | **1.704 s**        |
+| Median query time   | **0.072 s**        |
+| Fastest query (Q11) | **0.018 s**        |
+| Slowest query (Q17) | **0.159 s**        |
 
 ### Notes
 
 - Times include gRPC round-trip from Python client but **not** Parquet I/O startup cost (tables are registered as lazy views; I/O happens inside query execution).
-- Q18 fails with "No field named lineitem.#37" — a subquery column ID tracking bug when the same table appears in both the outer and inner query. Fix tracked.
 - No JVM, no Hadoop, no HDFS — pure Rust + DataFusion.
 
 ---
@@ -65,10 +63,49 @@
 ## Spark Compatibility
 
 > Tested against the Spark compat scorecard (`scripts/spark_compat_score.py`),  
-> which covers ~50 key Spark features: SQL, DataFrames, UDFs, DML,  
+> which covers 71 key Spark features: SQL, DataFrames, UDFs, DML,  
 > JSON/Parquet, complex types, aggregation, window functions.
+>
+> Binary: `./target/release/vajra server --port 50055`  
+> Client: PySpark 4.0.0 on Python 3.12  
+> Platform: macOS 26 ARM64  
 
-*(Results pending — run `SPARK_REMOTE=sc://localhost:50055 python scripts/spark_compat_score.py`)*
+```
+═══════════════════════════════════════════════════════
+  VAJRA SPARK COMPATIBILITY SCORECARD
+═══════════════════════════════════════════════════════
+  1. Basic SQL                           ✓✓✓✓✓✓✓✓✓✓✓✓✓  13/13
+  2. Aggregate Functions                     ✓✓✓✓✓✓  6/6
+  3. Window Functions                          ✓✓✓✓  4/4
+  4. String Functions                         ✓✓✓✓✓  5/5
+  5. Date / Time Functions                     ✓✓✓✓  4/4
+  6. Complex Types                            ✓✓✓✓✓  5/5
+  7. DataFrame API                        ✓✓✓✓✓✓✓✓✓  9/9
+  8. Python UDFs                              ✓✓✓✓✓  5/5
+  9. JSON Reading                             ✓✓✓✓✓  5/5
+  10. Parquet Read / Write                      ✓✓✓  3/3
+  11. DML (Delta Lake)                         ✓✓✓✓  4/4
+  12. Misc Spark SQL                       ✓✓✓✓✓✓✓✓  8/8
+───────────────────────────────────────────────────────
+  Total:  71 passed, 0 failed, 0 skipped
+  Score:  100% (71/71 executed)
+═══════════════════════════════════════════════════════
+```
+
+### Compatibility Summary
+
+| Metric                    | Vajra      | LakeSail (baseline) |
+|---------------------------|------------|---------------------|
+| Spark compat score        | **100%**   | 80.1%               |
+| UDF support               | ✓ (5/5)    | ✓ partial           |
+| DML (DELETE/UPDATE)       | ✓ (4/4)    | partial             |
+| JSON PERMISSIVE           | ✓          | ✓                   |
+
+### Notes
+
+- UDFs require `PYTHONPATH` pointing to a PySpark installation on both the server and client.
+- The binary must be built WITHOUT mimalloc (`default = []` in `sail-cli/Cargo.toml`); mimalloc
+  causes re-entrant allocator recursion when Python UDFs run on Tokio worker threads.
 
 ---
 

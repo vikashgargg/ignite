@@ -198,7 +198,17 @@ impl PlanResolver<'_> {
             })
             .collect::<Vec<_>>();
 
-        let aggregate_exprs = find_aggregate_exprs(&aggregate_candidates);
+        // Include the HAVING expression when searching for aggregate functions so that
+        // aggregates used only in HAVING (e.g. `HAVING sum(l_quantity) > 313` with no
+        // corresponding aggregate in the SELECT list) are still included in the DataFusion
+        // Aggregate plan's output and can be referenced by the subsequent HAVING filter.
+        let aggregate_exprs = {
+            let mut candidates_with_having = aggregate_candidates.clone();
+            if let Some(ref h) = having {
+                candidates_with_having.push(h.clone());
+            }
+            find_aggregate_exprs(&candidates_with_having)
+        };
         let group_exprs = grouping.iter().map(|x| x.expr.clone()).collect::<Vec<_>>();
         let plan = LogicalPlanBuilder::from(input)
             .aggregate(group_exprs, aggregate_exprs.clone())?
