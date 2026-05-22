@@ -244,7 +244,6 @@ def test_aggregation_with_nulls(spark):
     assert_frame_equal(actual, expected)
 
 
-@pytest.mark.skip(reason="not implemented")
 def test_aggregation_ignore_nulls(spark):
     actual = spark.sql("SELECT FIRST(age IGNORE NULLS), LAST(id), SUM(id) FROM person").toPandas()
     expected = pd.DataFrame({"first(age)": [30], "last(id)": [400], "sum(id)": [1000]})
