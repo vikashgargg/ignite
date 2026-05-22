@@ -82,6 +82,7 @@ use sail_common_datafusion::system::catalog::SystemTable;
 use sail_common_datafusion::udf::StreamUDF;
 use sail_data_source::formats::binary::source::BinarySource;
 use sail_data_source::formats::console::ConsoleSinkExec;
+use sail_data_source::formats::json::permissive::{JsonMode, PermissiveJsonSource};
 use sail_data_source::formats::python::{
     InputPartition, PythonDataSourceExec, PythonDataSourceWriteCommitExec,
     PythonDataSourceWriteExec,
@@ -426,6 +427,29 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     self,
                     &DefaultPhysicalProtoConverter {},
                     Arc::new(JsonSource::new(table_schema)),
+                )?;
+                let source = FileScanConfigBuilder::from(source)
+                    .with_file_compression_type(file_compression_type)
+                    .build();
+                Ok(Arc::new(DataSourceExec::new(Arc::new(source))))
+            }
+            NodeKind::PermissiveJson(gen::PermissiveJsonExecNode {
+                base_config,
+                file_compression_type,
+                mode,
+                corrupt_col_name,
+            }) => {
+                let file_compression_type: FileCompressionType =
+                    self.try_decode_file_compression_type(file_compression_type)?;
+                let proto = self.try_decode_message(&base_config)?;
+                let table_schema = parse_protobuf_file_scan_schema(&proto)?;
+                let json_mode = JsonMode::parse_str(&mode);
+                let source = parse_protobuf_file_scan_config(
+                    &proto,
+                    ctx,
+                    self,
+                    &DefaultPhysicalProtoConverter {},
+                    Arc::new(PermissiveJsonSource::new(table_schema, json_mode, corrupt_col_name)),
                 )?;
                 let source = FileScanConfigBuilder::from(source)
                     .with_file_compression_type(file_compression_type)
@@ -1490,6 +1514,20 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     NodeKind::BinarySource(gen::BinarySourceExecNode {
                         base_config,
                         path_glob_filter: binary_source.path_glob_filter().cloned(),
+                    })
+                } else if let Some(pjson) = file_source.as_any().downcast_ref::<PermissiveJsonSource>() {
+                    let base_config = self.try_encode_message(serialize_file_scan_config(
+                        file_scan,
+                        self,
+                        &DefaultPhysicalProtoConverter {},
+                    )?)?;
+                    let file_compression_type =
+                        self.try_encode_file_compression_type(file_scan.file_compression_type)?;
+                    NodeKind::PermissiveJson(gen::PermissiveJsonExecNode {
+                        base_config,
+                        file_compression_type,
+                        mode: pjson.mode().as_str().to_string(),
+                        corrupt_col_name: pjson.corrupt_col_name().to_string(),
                     })
                 } else if file_source.as_any().is::<JsonSource>() {
                     // TODO: Check if we still need to have JsonSource: https://github.com/apache/datafusion/pull/14224

@@ -14,7 +14,7 @@ use crate::options::gen::{JsonReadOptions, JsonWriteOptions};
 use crate::options::ResolveOptions;
 
 mod options;
-mod permissive;
+pub mod permissive;
 
 pub type JsonTableFormat = ListingTableFormat<JsonFormatFactory>;
 

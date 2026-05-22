@@ -1,7 +1,7 @@
 # Ignite build targets
 # Usage: make <target>
 
-.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10 container-build container-build-clean container-run container-run-cluster docker-build kind-setup kind-teardown
+.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10 container-build container-build-clean container-run container-run-cluster docker-build _docker-ctx kind-setup kind-teardown
 
 CARGO := $(shell which cargo)
 BINARY := target/debug/ignite
@@ -179,8 +179,20 @@ container-run-cluster:
 		ignite:latest
 
 # ── Docker build (for kind/k8s — uses same Dockerfile, requires Docker Desktop) ─
-# Reuses the same _container-ctx bundle to avoid duplicating the tarball logic.
-docker-build: _container-ctx
+# Uses _docker-ctx (no Apple Container DNS fix) to avoid hanging when container builder
+# is absent or busy. Context is the same /tmp/ignite-apple-ctx directory.
+_docker-ctx:
+	@echo "=== Creating build context in /tmp/ignite-apple-ctx ==="
+	rm -rf /tmp/ignite-apple-ctx
+	mkdir -p /tmp/ignite-apple-ctx
+	cp Cargo.toml Cargo.lock /tmp/ignite-apple-ctx/
+	cp docker/apple/Dockerfile /tmp/ignite-apple-ctx/Dockerfile
+	bash scripts/make-manifests.sh /tmp/ignite-apple-ctx/manifests.tar.gz
+	tar -czf /tmp/ignite-apple-ctx/crates.tar.gz crates/
+	@echo "=== Build context ==="
+	@du -sh /tmp/ignite-apple-ctx/
+
+docker-build: _docker-ctx
 	@echo "=== Building Docker image ignite:latest (linux/arm64) ==="
 	docker build --platform linux/arm64 -t ignite:latest /tmp/ignite-apple-ctx
 	@echo "=== Done. Load into kind with: kind load docker-image ignite:latest ==="

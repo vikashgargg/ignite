@@ -25,6 +25,15 @@ spec:
         app.kubernetes.io/component: spark-server
     spec:
       serviceAccountName: ignite-user
+      volumes:
+        - name: tmp-sail
+          hostPath:
+            path: /private/tmp/sail
+            type: DirectoryOrCreate
+        - name: tmp-sail-alt
+          hostPath:
+            path: /tmp/sail
+            type: DirectoryOrCreate
       containers:
         - name: server
           image: ignite:latest
@@ -33,6 +42,11 @@ spec:
           ports:
             - containerPort: 50051
           imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: tmp-sail
+              mountPath: /private/tmp/sail
+            - name: tmp-sail-alt
+              mountPath: /tmp/sail
           env:
             - name: RUST_LOG
               value: info
@@ -54,6 +68,9 @@ spec:
                   fieldPath: metadata.name
             - name: SAIL_KUBERNETES__WORKER_SERVICE_ACCOUNT_NAME
               value: ignite-user
+            - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
+              value: >-
+                {"spec":{"volumes":[{"name":"tmp-sail","hostPath":{"path":"/private/tmp/sail","type":"DirectoryOrCreate"}},{"name":"tmp-sail-alt","hostPath":{"path":"/tmp/sail","type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"tmp-sail","mountPath":"/private/tmp/sail"},{"name":"tmp-sail-alt","mountPath":"/tmp/sail"}]}]}}
 ---
 apiVersion: v1
 kind: Service

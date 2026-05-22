@@ -56,6 +56,18 @@ impl JsonMode {
             _ => JsonMode::Permissive,
         }
     }
+
+    pub fn parse_str(s: &str) -> Self {
+        Self::parse(s)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JsonMode::Permissive => "PERMISSIVE",
+            JsonMode::DropMalformed => "DROPMALFORMED",
+            JsonMode::FailFast => "FAILFAST",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -436,6 +448,16 @@ impl PermissiveJsonSource {
             mode,
             corrupt_col_name,
         }
+    }
+}
+
+impl PermissiveJsonSource {
+    pub fn mode(&self) -> &JsonMode {
+        &self.mode
+    }
+
+    pub fn corrupt_col_name(&self) -> &str {
+        &self.corrupt_col_name
     }
 }
 

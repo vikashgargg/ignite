@@ -72,7 +72,7 @@ RUN cargo fetch --locked
 COPY crates.tar.gz ./
 RUN tar -xzf crates.tar.gz && rm crates.tar.gz
 
-RUN CARGO_PROFILE_RELEASE_LTO=thin cargo build --release -p sail-cli --bins \
+RUN CARGO_BUILD_JOBS=2 CARGO_PROFILE_RELEASE_LTO=off cargo build --release -p sail-cli --bins \
     && cp /app/target/release/ignite /usr/local/bin/ignite
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Full pyspark (not pyspark-client) is required for UDF cloudpickle deserialization
 # on the server side. pyspark-client is Connect-protocol only and lacks pyspark.worker.
-RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}"
+RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}" pandas pyarrow
 
 COPY --from=builder /usr/local/bin/ignite /usr/local/bin/ignite
 
