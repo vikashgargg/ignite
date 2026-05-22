@@ -110,7 +110,7 @@ where
             ExecutionMode::KubernetesCluster => "kubernetes-cluster".to_string(),
         };
         let server_task = async move {
-            info!("Ignite ready on {server_address} (Spark Connect gRPC) [mode: {mode_tag}]");
+            info!("Vajra ready on {server_address} (Spark Connect gRPC) [mode: {mode_tag}]");
             match serve(listener, signal, config, handle).await {
                 Ok(()) => {
                     info!("The Spark Connect server has stopped.");

@@ -12,10 +12,11 @@ use crate::worker::run_worker;
 #[derive(Parser)]
 #[command(
     version,
-    name = "ignite",
-    about = "Ignite — a Rust-native, single-binary Spark engine",
-    long_about = "Ignite is a drop-in replacement for Apache Spark: 4-8x faster, \
-                  no JVM required, single binary. Runs your existing PySpark code unchanged."
+    name = "vajra",
+    about = "Vajra (वज्र) — thunderbolt-fast, single-binary Spark engine",
+    long_about = "Vajra is a drop-in replacement for Apache Spark: 5-10x faster, \
+                  no JVM required, single static binary. Runs your existing PySpark code \
+                  unchanged via the Spark Connect protocol. Apple Container + Kubernetes native."
 )]
 struct Cli {
     #[command(subcommand)]

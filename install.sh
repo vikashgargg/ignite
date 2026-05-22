@@ -1,14 +1,14 @@
 #!/usr/bin/env sh
-# Ignite installer — curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+# Vajra installer — curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
 set -e
 
 REPO="vikashgargg/ignite"
-INSTALL_DIR="${IGNITE_INSTALL_DIR:-$HOME/.local/bin}"
-BINARY="ignite"
+INSTALL_DIR="${VAJRA_INSTALL_DIR:-${IGNITE_INSTALL_DIR:-$HOME/.local/bin}}"
+BINARY="vajra"
 
-info()  { printf "\033[32m[ignite]\033[0m %s\n" "$*"; }
-warn()  { printf "\033[33m[ignite]\033[0m %s\n" "$*"; }
-error() { printf "\033[31m[ignite]\033[0m %s\n" "$*" >&2; exit 1; }
+info()  { printf "\033[32m[vajra]\033[0m %s\n" "$*"; }
+warn()  { printf "\033[33m[vajra]\033[0m %s\n" "$*"; }
+error() { printf "\033[31m[vajra]\033[0m %s\n" "$*" >&2; exit 1; }
 
 # Detect OS and architecture
 OS="$(uname -s)"
@@ -39,11 +39,11 @@ if [ -z "$LATEST" ]; then
   error "Could not determine latest release. Check https://github.com/$REPO/releases"
 fi
 
-info "Installing Ignite $LATEST for $TARGET"
+info "Installing Vajra $LATEST for $TARGET"
 
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST/ignite-$TARGET"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST/vajra-$TARGET"
 TMP_DIR="$(mktemp -d)"
-TMP_BIN="$TMP_DIR/ignite"
+TMP_BIN="$TMP_DIR/vajra"
 
 info "Downloading from $DOWNLOAD_URL"
 curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN" \
@@ -67,4 +67,4 @@ case ":$PATH:" in
     ;;
 esac
 
-info "Done! Run: ignite --version"
+info "Done! Run: vajra --version"

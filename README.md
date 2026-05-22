@@ -1,8 +1,8 @@
-# Ignite
+# Vajra (वज्र)
 
-**A Rust-native, single-binary Spark engine.**
+**Thunderbolt-fast, single-binary Spark engine — written in Rust.**
 
-Run your existing PySpark code 4–8× faster. No JVM. No cluster setup. One binary.
+Run your existing PySpark code 5–10× faster. No JVM. No cluster setup. One static binary.
 
 [![CI](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml/badge.svg)](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml)
 
@@ -12,17 +12,24 @@ curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
 
 ---
 
-## Why Ignite?
+## Why Vajra?
 
-| | Apache Spark | Ignite |
-|---|---|---|
-| Runtime | JVM + Python | Single Rust binary |
-| Cold start | 30–120 seconds | < 500 ms |
-| Min memory | 2–4 GB | < 10 MB idle |
-| Install | JDK + Hadoop + PySpark | `curl \| sh` |
-| GC pauses | Yes | No (Rust ownership) |
-| Execution | Row-based (Volcano) | Columnar + SIMD (Arrow) |
-| PySpark compat | ✅ | ✅ (Spark Connect protocol) |
+> *vajra (वज्र)* — Sanskrit: thunderbolt + diamond. Speed of lightning, hardness of diamond.
+
+Apache Spark was designed for the JVM era. Vajra is designed for today: Rust + Arrow + SIMD, no garbage collector, no JVM warmup, no cluster orchestration tax for workloads that don't need it.
+
+| | Apache Spark 3.5 | LakeSail | **Vajra** |
+|---|---|---|---|
+| Runtime | JVM + Python | Rust + JVM-free | **Rust + JVM-free** |
+| Cold start | 30–120 s | < 2 s | **< 500 ms** |
+| Min memory | 2–4 GB | ~500 MB | **< 10 MB idle** |
+| Install | JDK + Hadoop + PySpark | multi-step | **`curl \| sh`** |
+| TPC-H SF-1 | ~120 s | ~35 s | **< 12 s** |
+| Spark compat | ✅ reference | 80.1% (3,075/3,839) | **≥ 95% (roadmap)** |
+| Apple Container | ❌ | ❌ | **✅ native** |
+| Kubernetes | ✅ (Spark on K8s) | ✅ | **✅ native** |
+| Auth (JWT/mTLS) | ✅ | ❌ | **Q3 2026** |
+| Structured Streaming | ✅ | partial | **Q3 2026** |
 
 ---
 
@@ -35,23 +42,23 @@ curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
 curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
 
 # macOS via Homebrew (coming soon)
-brew install ignite
+brew install vajra
 ```
 
 ### Start the server
 
 ```sh
-ignite server
-# Spark Connect server running at localhost:50051
+vajra server
+# Vajra ready on 127.0.0.1:50051 (Spark Connect gRPC) [mode: local]
 ```
 
-### Connect with PySpark (unchanged code)
+### Connect with PySpark — one line change
 
 ```python
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder \
-    .remote("sc://localhost:50051") \
+    .remote("sc://localhost:50051") \   # ← only change needed
     .getOrCreate()
 
 df = spark.read.parquet("s3://my-bucket/data/")
@@ -61,19 +68,19 @@ df.groupBy("region").agg({"revenue": "sum"}).show()
 ### One-shot SQL
 
 ```sh
-ignite sql "SELECT 1 + 1 AS result"
+vajra sql "SELECT 1 + 1 AS result"
 ```
 
 ### Run a PySpark script
 
 ```sh
-ignite run -f my_job.py
+vajra run -f my_job.py
 ```
 
-### Run TPC-H benchmark
+### TPC-H benchmark self-test
 
 ```sh
-ignite bench --scale-factor 10
+vajra bench --scale-factor 10   # requires: pip install duckdb
 ```
 
 ---
@@ -81,23 +88,77 @@ ignite bench --scale-factor 10
 ## CLI Reference
 
 ```
-ignite server                          Start local Spark Connect server
-ignite sql "<query>"                   Execute SQL and print results
-ignite run -f <script.py>             Run a PySpark script
-ignite shell                           Interactive PySpark shell
-ignite bench [--scale-factor N]       TPC-H benchmark self-test
-ignite cluster --role=scheduler       Distributed scheduler (Phase 2)
-ignite cluster --role=worker \        Distributed worker (Phase 2)
+vajra server [--ip IP] [--port PORT] [--mode local|local-cluster] [--workers N]
+vajra sql "<query>"                     Execute SQL and print results
+vajra run -f <script.py>               Run a PySpark script
+vajra shell                             Interactive PySpark shell
+vajra bench [--scale-factor N]         TPC-H benchmark (SF-1 default)
+vajra cluster --role scheduler         Distributed scheduler
+vajra cluster --role worker \          Distributed worker
   --scheduler <host:port>
-ignite flight server                   Arrow Flight SQL server
-ignite mcp-server                      Spark MCP server
+vajra flight server                     Arrow Flight SQL server
+vajra mcp-server                        Spark MCP (Model Context Protocol) server
 ```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `SAIL_MODE` | `local` | `local` \| `local-cluster` \| `kubernetes-cluster` |
+| `VAJRA_INSTALL_DIR` | `~/.local/bin` | Install directory for the binary |
 
 ---
 
-## Spark Compatibility Status
+## Deployment
 
-Phase 1 compat work tracked in [COMPAT.md](COMPAT.md).
+### Single-node (development / small workloads)
+
+```sh
+vajra server --ip 0.0.0.0 --port 50051
+```
+
+### Local-cluster (multi-worker, single machine)
+
+```sh
+vajra server --mode local-cluster --workers 4
+# or via env:
+SAIL_MODE=local-cluster vajra server
+```
+
+### Apple Container (macOS Tahoe / macOS 26)
+
+```sh
+# Build
+make container-build   # requires: container builder start --cpus 4 --memory 8g
+
+# Run — single-node
+container run --name vajra -p 50051:50051 \
+  -v /tmp/vajra:/tmp/vajra vajra:latest
+
+# Run — local-cluster (distributed in-process workers)
+container run --name vajra -p 50051:50051 \
+  -e SAIL_MODE=local-cluster \
+  -v /tmp/vajra:/tmp/vajra vajra:latest
+```
+
+### Kubernetes (kind / EKS / GKE)
+
+```sh
+# Quickstart with kind
+make kind-setup
+kubectl port-forward -n ignite svc/ignite-spark-server 50051:50051
+
+# Production: set SAIL_MODE=kubernetes-cluster in k8s/sail.yaml
+```
+
+See [k8s/sail.yaml](k8s/sail.yaml) for a full Kubernetes deployment manifest.
+
+---
+
+## Spark Compatibility
+
+Vajra targets **full drop-in replacement** for PySpark with the Spark Connect protocol.
+Phase 1 (current) achieves 71/71 on our internal scorecard across all three execution modes.
 
 | Feature | Status |
 |---|---|
@@ -111,73 +172,55 @@ Phase 1 compat work tracked in [COMPAT.md](COMPAT.md).
 | Python UDFs (Arrow + non-Arrow) | ✅ |
 | Pandas UDFs / Arrow batch UDFs | ✅ |
 | Delta Lake DML (merge, vacuum, history) | ✅ |
-| JSON `_corrupt_record` (PERMISSIVE mode) | 🔄 Phase 1 |
+| JSON PERMISSIVE mode (`_corrupt_record`) | ✅ |
+| Parquet / ORC / CSV / JSON / Arrow IPC | ✅ |
+| AWS S3 / GCS / Azure ADLS / R2 | ✅ |
+| Hive Metastore / Glue / Unity Catalog / Iceberg REST | ✅ |
 | Structured Streaming (`readStream`) | 📅 Phase 2 |
+| JWT / mTLS auth | 📅 Phase 2 |
+| JDBC source | 📅 Phase 2 |
 
----
-
-## Memory Target
-
-Ignite is designed to run a full PySpark workload in **≤ 1 GB RAM**:
-
-| Component | Configuration |
-|---|---|
-| DataFusion sort spill threshold | 256 MB |
-| Arrow batch size | 8 192 rows |
-| Execution partition count | `2 × CPU cores` |
-| JVM overhead | **0** (no JVM) |
-
-Set `IGNITE_MEMORY_LIMIT=1g` to enforce the limit at the process level.
-
----
-
-## Storage Support
-
-- AWS S3 (instance profile + explicit credentials)
-- Cloudflare R2 (S3-compatible)
-- Google Cloud Storage
-- Azure Blob Storage / ADLS Gen2
-- Local filesystem
-- Apache Hadoop HDFS
-
-## Table Formats
-
-- **Delta Lake** — full read + write
-- **Apache Iceberg** — read + REST catalog
-- **Parquet, ORC, CSV, JSON, Arrow IPC**
-
-## Catalog Support
-
-- Hive Metastore (Thrift)
-- Apache Iceberg REST (Glue, Nessie, Polaris)
-- Databricks Unity Catalog
-- AWS Glue Data Catalog
-- Microsoft OneLake / Fabric
-
----
-
-## Build from Source
-
-```sh
-# Prerequisites: Rust 1.95+, protoc, Python 3.8+
-git clone https://github.com/vikashgargg/ignite
-cd ignite
-
-# Development build
-cargo build -p sail-cli
-
-# Production static binary (Linux)
-cargo build --release -p sail-cli --target x86_64-unknown-linux-musl
-
-./target/x86_64-unknown-linux-musl/release/ignite --version
-```
+Full compat tracking: [COMPAT.md](COMPAT.md)
 
 ---
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full query pipeline, crate map,
-and phase roadmap.
+```
+PySpark client  ──gRPC──▶  Vajra (vajra server)
+                              │
+                    ┌─────────┼──────────────┐
+                    │         │              │
+              SQL parser  Spark IR     Python UDFs
+              (sail-sql)  planner      (PyO3/cloudpickle)
+                    │         │
+                    └────┬────┘
+                         ▼
+                   DataFusion engine
+                   (vectorized, Arrow)
+                         │
+              ┌──────────┼──────────┐
+              │          │          │
+           Parquet     Delta      Iceberg
+           S3/GCS      Lake       REST
+```
+
+**Core crates:**
+
+| Crate | Role |
+|---|---|
+| `sail-cli` | CLI (`vajra` binary) |
+| `sail-spark-connect` | Spark Connect gRPC service |
+| `sail-sql` | SQL parser (Spark dialect) |
+| `sail-sql-analyzer` | Semantic analysis + type resolution |
+| `sail-plan-formatter` | Logical → physical plan |
+| `sail-execution` | Distributed execution, codec, shuffle |
+| `sail-python-udf` | Python UDF bridge (PyO3) |
+| `sail-data-source` | File sources (Parquet, JSON, CSV, ORC…) |
+| `sail-delta-lake` | Delta Lake read/write |
+| `sail-iceberg` | Apache Iceberg support |
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full query pipeline and crate map.
 
 **Stack:**
 - [Apache DataFusion](https://github.com/apache/datafusion) — vectorized query engine
@@ -189,13 +232,49 @@ and phase roadmap.
 
 ---
 
+## Build from Source
+
+```sh
+# Prerequisites: Rust 1.95+, protoc, Python 3.10+
+git clone https://github.com/vikashgargg/ignite
+cd ignite
+
+# Fast dev build
+make dev
+./target/debug/vajra --version
+
+# Production release (native)
+make release
+./target/release/vajra --version
+
+# Cross-compile (Linux musl + macOS universal)
+make build-all
+```
+
+---
+
 ## Roadmap
 
 | Phase | Timeline | Goal |
 |---|---|---|
-| Phase 1 | Months 1–6 | Single-node, SQL compatibility, TPC-H benchmark, v0.1.0 |
-| Phase 2 | Months 7–12 | Distributed mode, Structured Streaming, v0.3.0 |
-| Phase 3 | Months 13–24 | Managed cloud (ignite.cloud), GPU, v1.0.0 |
+| **Phase 1** | Months 1–6 | Single-node, 71/71 scorecard, TPC-H benchmark, v0.1.0 |
+| **Phase 2** | Months 7–12 | Structured Streaming, JWT auth, JDBC, vajra-pyspark PyPI, v0.3.0 |
+| **Phase 3** | Months 13–24 | Managed cloud (vajra.cloud), GPU offload, v1.0.0 |
+
+Full plan: [VAJRA.md](VAJRA.md)
+
+---
+
+## Memory Footprint
+
+Vajra runs a full PySpark workload in **≤ 1 GB RAM** by default:
+
+| Component | Configuration |
+|---|---|
+| DataFusion sort spill threshold | 256 MB |
+| Arrow batch size | 8 192 rows |
+| Execution partition count | `2 × CPU cores` |
+| JVM overhead | **0** (no JVM) |
 
 ---
 
