@@ -11,8 +11,12 @@ name = "vajra"
 path = "src/main.rs"
 
 [features]
+# mimalloc improves throughput for pure Rust workloads but causes re-entrant
+# mi_malloc_generic recursion when PyO3 runs Python UDFs on Tokio worker threads.
+# Keep disabled by default; users can opt-in with --features mimalloc if they
+# do not use Python UDFs and want the allocator performance benefit.
 mimalloc = ["dep:mimalloc"]
-default = ["mimalloc"]
+default = []
 
 [dependencies]
 sail-common = { path = "../sail-common" }
