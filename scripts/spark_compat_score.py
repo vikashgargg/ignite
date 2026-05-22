@@ -1,11 +1,11 @@
 """
-Ignite Spark Compatibility Scorecard
+Vajra Spark Compatibility Scorecard
 =====================================
 Tests ~50 key Spark features across SQL, DataFrames, UDFs, DML,
 JSON/Parquet, and complex types.
 
 Usage (starts its own server — single-node local mode):
-    IGNITE_BIN=./target/debug/ignite \\
+    VAJRA_BIN=./target/debug/vajra \\
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
@@ -13,7 +13,7 @@ Usage (starts its own server — single-node local mode):
 Against a running server — single-node (local mode):
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
-      ./target/debug/ignite server --port 50055
+      ./target/debug/vajra server --port 50055
 
     SPARK_REMOTE=sc://localhost:50055 \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
@@ -21,7 +21,7 @@ Against a running server — single-node (local mode):
 Against a running server — multi-worker (local-cluster mode, N workers in-process):
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
-      ./target/debug/ignite cluster --role scheduler --port 50055 --workers 4
+      ./target/debug/vajra cluster --role scheduler --port 50055 --workers 4
 
     SPARK_REMOTE=sc://localhost:50055 \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
@@ -44,7 +44,7 @@ SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "")
 _proc = None
 
 if not SPARK_REMOTE:
-    ignite_bin = os.environ.get("IGNITE_BIN", "./target/debug/ignite")
+    ignite_bin = os.environ.get("VAJRA_BIN", os.environ.get("IGNITE_BIN", "./target/debug/vajra"))
     _proc = subprocess.Popen(
         [ignite_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
         stdout=subprocess.DEVNULL,
