@@ -205,7 +205,7 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     // SAIL_CLUSTER__DRIVER_EXTERNAL_HOST / PORT must be set (or
                     // the defaults from application.yaml apply).
                     let sched = scheduler.unwrap_or_else(|| format!("{}:{}", ip, port));
-                    eprintln!("ignite cluster worker → scheduler at {sched}");
+                    eprintln!("vajra cluster worker → scheduler at {sched}");
                     run_worker()
                 }
             }
@@ -275,7 +275,7 @@ print(f"{{LINE}}\n")
 try:
     import duckdb
 except ImportError:
-    print("ERROR: duckdb is required for ignite bench.")
+    print("ERROR: duckdb is required for vajra bench.")
     print("       pip install 'duckdb>=1.0'")
     sys.exit(1)
 

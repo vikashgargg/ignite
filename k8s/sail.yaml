@@ -36,8 +36,8 @@ spec:
             type: DirectoryOrCreate
       containers:
         - name: server
-          image: ignite:latest
-          command: [ "ignite" ]
+          image: vajra:latest
+          command: [ "vajra" ]
           args: [ "server", "--ip", "0.0.0.0", "--port", "50051" ]
           ports:
             - containerPort: 50051
@@ -59,7 +59,7 @@ spec:
                 fieldRef:
                   fieldPath: status.podIP
             - name: SAIL_KUBERNETES__IMAGE
-              value: ignite:latest
+              value: vajra:latest
             - name: SAIL_KUBERNETES__NAMESPACE
               value: ignite
             - name: SAIL_KUBERNETES__DRIVER_POD_NAME
