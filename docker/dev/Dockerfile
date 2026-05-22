@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry/ \
         *) echo "${RUST_PROFILE}" ;; \
     esac) && \
     cargo build -p sail-cli --profile ${RUST_PROFILE} --bins && \
-    cp /app/target/${RUST_TARGET_SUBDIR}/ignite /usr/local/bin
+    cp /app/target/${RUST_TARGET_SUBDIR}/vajra /usr/local/bin
 
 FROM python:3.14-slim
 
@@ -51,6 +51,6 @@ ARG PYSPARK_VERSION
 
 RUN python3 -m pip install --no-cache-dir "pyspark-client==${PYSPARK_VERSION}"
 
-COPY --from=builder /usr/local/bin/ignite /usr/local/bin
+COPY --from=builder /usr/local/bin/vajra /usr/local/bin
 
-ENTRYPOINT ["/usr/local/bin/ignite"]
+ENTRYPOINT ["/usr/local/bin/vajra"]
