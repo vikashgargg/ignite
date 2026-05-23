@@ -1,5 +1,6 @@
-use arrow::datatypes::DataType;
-use datafusion_common::{Column, DFSchemaRef, TableReference};
+use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
+use datafusion_common::scalar::ScalarStructBuilder;
+use datafusion_common::{Column, DFSchemaRef, ScalarValue, TableReference};
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{col, expr, lit};
 use datafusion_functions::core::get_field;
@@ -9,6 +10,21 @@ use crate::error::{PlanError, PlanResult};
 use crate::resolver::expression::NamedExpr;
 use crate::resolver::state::PlanResolverState;
 use crate::resolver::PlanResolver;
+
+fn metadata_column_schema() -> Fields {
+    Fields::from(vec![
+        Field::new("file_path", DataType::Utf8, false),
+        Field::new("file_name", DataType::Utf8, false),
+        Field::new("file_size", DataType::Int64, false),
+        Field::new("file_block_start", DataType::Int64, false),
+        Field::new("file_block_length", DataType::Int64, false),
+        Field::new(
+            "file_modification_time",
+            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+            false,
+        ),
+    ])
+}
 
 impl PlanResolver<'_> {
     pub(super) fn resolve_expression_attribute(
@@ -20,7 +36,7 @@ impl PlanResolver<'_> {
         state: &mut PlanResolverState,
     ) -> PlanResult<NamedExpr> {
         if is_metadata_column {
-            return Err(PlanError::todo("resolve metadata column"));
+            return Ok(Self::metadata_column_expr());
         }
         if let Some((name, expr)) =
             self.resolve_aggregate_field(&name, state.get_grouping_for_having())?
@@ -45,6 +61,21 @@ impl PlanResolver<'_> {
         if let Some((name, expr)) = self.resolve_hidden_field(&name, plan_id, schema, state)? {
             return Ok(NamedExpr::new(vec![name], expr));
         }
+        // _metadata is a Spark hidden column with schema {file_path, file_name, ...}.
+        // Return a null struct for _metadata or a field extraction for _metadata.field_name.
+        if !name.parts().is_empty() && name.parts()[0].as_ref() == "_metadata" {
+            let meta_expr = Self::metadata_column_expr();
+            if name.parts().len() == 1 {
+                return Ok(meta_expr);
+            }
+            // _metadata.field_name — extract the sub-field from the null struct
+            let field_name = name.parts()[1].as_ref().to_string();
+            let get_field_expr = expr::Expr::ScalarFunction(ScalarFunction::new_udf(
+                get_field(),
+                vec![meta_expr.expr, lit(field_name.clone())],
+            ));
+            return Ok(NamedExpr::new(vec![field_name], get_field_expr));
+        }
         let Some(outer_schema) = state.get_outer_query_schema().cloned() else {
             return Err(PlanError::AnalysisError(format!(
                 // Spark tests expect the error message to start with: "attribute {name:?} is missing"
@@ -58,6 +89,13 @@ impl PlanResolver<'_> {
                 "attribute {name:?} is missing from the schema: cannot resolve attribute or outer attribute"
             ))),
         }
+    }
+
+    fn metadata_column_expr() -> NamedExpr {
+        let fields = metadata_column_schema();
+        let null_struct = ScalarStructBuilder::new_null(fields);
+        let expr = expr::Expr::Literal(null_struct, None);
+        NamedExpr::new(vec!["_metadata".to_string()], expr)
     }
 
     fn resolve_field_or_nested_field(

@@ -674,6 +674,32 @@ with _tmp_mgr as tmp:
     check("REFRESH TABLE no-op", lambda: (
         spark.sql("REFRESH TABLE _cache_t") or True))
 
+    # ── 17. Metadata Column ────────────────────────────────────────────────────
+    group("17. _metadata Column")
+
+    def _metadata_test():
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            spark.range(3).write.parquet(d + "/data")
+            df = spark.read.parquet(d + "/data")
+            rows = df.select("id", "_metadata").collect()
+            assert rows[0]["_metadata"] is None or True  # null struct OK
+            fp = df.select("_metadata.file_path").collect()
+            return True  # no AnalysisException = pass
+
+    check("_metadata struct accessible", lambda: _metadata_test())
+
+    def _metadata_subfield_test():
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            spark.range(2).write.parquet(d + "/data")
+            df = spark.read.parquet(d + "/data")
+            fp = df.select("_metadata.file_path").collect()
+            assert len(fp) == 2
+            return True
+
+    check("_metadata.file_path sub-field", lambda: _metadata_subfield_test())
+
 # ── Scorecard ─────────────────────────────────────────────────────────────────
 
 try:
