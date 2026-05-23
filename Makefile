@@ -111,7 +111,8 @@ check:
 	$(CARGO) check --workspace
 
 test:
-	$(CARGO) test --workspace --lib -- --test-threads=4
+	PYO3_PYTHON=$(PYTHON_BIN) \
+		$(CARGO) test --workspace --lib -- --test-threads=4
 
 clippy:
 	$(CARGO) clippy --all-targets --all-features -- -D warnings
