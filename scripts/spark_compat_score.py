@@ -32,6 +32,7 @@ can find pyspark when executing Python UDFs in-process.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -174,7 +175,27 @@ def _parquet_schema_evolve(spark, tmp):
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-with tempfile.TemporaryDirectory() as tmp:
+# When running against a remote server (container/k8s), use a shared path
+# that is mounted into the server (e.g. -v /tmp/vajra:/tmp/vajra).
+# This avoids "file not found" errors when the server tries to read Mac-local
+# /var/folders/... paths that don't exist inside the container.
+_remote_mode = bool(os.environ.get("SPARK_REMOTE", ""))
+if _remote_mode:
+    _tmp_root = "/tmp/vajra/scorecard-tmp"
+    shutil.rmtree(_tmp_root, ignore_errors=True)
+    os.makedirs(_tmp_root, exist_ok=True)
+    import contextlib
+    @contextlib.contextmanager
+    def _tmp_ctx():
+        try:
+            yield _tmp_root
+        finally:
+            shutil.rmtree(_tmp_root, ignore_errors=True)
+    _tmp_mgr = _tmp_ctx()
+else:
+    _tmp_mgr = tempfile.TemporaryDirectory()
+
+with _tmp_mgr as tmp:
 
     # ── 1. Basic SQL ──────────────────────────────────────────────────────────
     group("1. Basic SQL")
