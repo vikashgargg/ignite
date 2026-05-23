@@ -67,6 +67,14 @@ spec:
             - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
               value: >-
                 {"spec":{"volumes":[{"name":"scratch","hostPath":{"path":{{ .Values.scratch.hostPath | quote }},"type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"scratch","mountPath":{{ .Values.scratch.hostPath | quote }}}],"resources":{{ .Values.workers.resources | toJson }}}]}}
+            - name: SAIL_CLUSTER__TASK_MAX_ATTEMPTS
+              value: {{ .Values.faultTolerance.taskMaxAttempts | quote }}
+            - name: SAIL_CLUSTER__WORKER_HEARTBEAT_INTERVAL_SECS
+              value: {{ .Values.faultTolerance.workerHeartbeatIntervalSecs | quote }}
+            - name: SAIL_CLUSTER__WORKER_HEARTBEAT_TIMEOUT_SECS
+              value: {{ .Values.faultTolerance.workerHeartbeatTimeoutSecs | quote }}
+            - name: SAIL_CLUSTER__WORKER_LAUNCH_TIMEOUT_SECS
+              value: {{ .Values.faultTolerance.workerLaunchTimeoutSecs | quote }}
             {{- with .Values.server.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
