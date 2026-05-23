@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Validation-only runner: assumes vajra:latest already built in both Docker and Apple Container.
 # Tests all three execution modes: k8s-cluster, apple-container-local, apple-container-local-cluster.
+#
+# Prerequisites:
+#   make smoke-setup          (creates .venvs/smoke with the right Python version)
+#   make docker-build         (builds vajra:latest Docker image)
+#   make container-build      (builds vajra:latest Apple Container image)
 set -euo pipefail
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
@@ -9,10 +14,16 @@ VAJRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="/tmp/vajra-validation"
 mkdir -p "$LOG_DIR"
 
+# ── Smoke venv ────────────────────────────────────────────────────────────────
 SMOKE_PYTHON="$VAJRA_DIR/.venvs/smoke/bin/python"
+if [[ ! -x "$SMOKE_PYTHON" ]]; then
+    echo "ERROR: smoke venv not found. Run: make smoke-setup" >&2
+    exit 1
+fi
+
 SCORECARD_PY="$VAJRA_DIR/scripts/spark_compat_score.py"
-PYSPARK_PYTHON="$(command -v python3.12 2>/dev/null || command -v python3)"
-PYTHONPATH_VAL="$($PYSPARK_PYTHON -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null || echo "")"
+# Derive PYTHONPATH from the venv itself — no need to guess Python version.
+PYTHONPATH_VAL="$(ls -d "$VAJRA_DIR"/.venvs/smoke/lib/python*/site-packages 2>/dev/null | head -1)"
 KIND_CLUSTER="vajra-dev"
 PASS=0
 FAIL=0
@@ -26,8 +37,11 @@ run_scorecard() {
     local label="$1"
     local logfile="$LOG_DIR/scorecard_${label}.log"
     log "Running scorecard ($label) → $logfile"
+    mkdir -p /tmp/vajra  # ensure shared mount point exists
+    # Use || true so scorecard's sys.exit(1) on test failures does NOT abort this
+    # script (set -euo pipefail would otherwise kill us here).
     PYTHONPATH="$PYTHONPATH_VAL" SPARK_REMOTE="sc://localhost:50051" \
-        "$SMOKE_PYTHON" "$SCORECARD_PY" 2>&1 | tee "$logfile"
+        "$SMOKE_PYTHON" "$SCORECARD_PY" 2>&1 | tee "$logfile" || true
     local score
     score=$(grep -oE '[0-9]+/[0-9]+' "$logfile" | tail -1 || echo "0/0")
     local passed total
@@ -36,7 +50,7 @@ run_scorecard() {
     if [ "$passed" = "$total" ] && [ "$total" -gt 0 ]; then
         ok "$label: $score"
     else
-        fail "$label: $score"
+        fail "$label: $score (see $logfile)"
     fi
 }
 

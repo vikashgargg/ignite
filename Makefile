@@ -5,7 +5,8 @@
         bench bench-sf1 bench-sf10 size-report \
         container-build container-build-clean container-run container-run-cluster \
         docker-build _docker-ctx _container-ctx \
-        kind-setup kind-teardown
+        kind-setup kind-teardown \
+        smoke-setup scorecard scorecard-container scorecard-k8s
 
 CARGO      := $(shell which cargo)
 BINARY     := target/debug/vajra
@@ -16,6 +17,14 @@ PYO3_CROSS_PYTHON_VERSION ?= 3.11
 
 # Image + container names
 IMAGE      ?= vajra:latest
+
+# ── Smoke test venv ───────────────────────────────────────────────────────────
+# Python version must match the container (ARG PYTHON_VERSION in Dockerfile).
+CONTAINER_PY   := $(shell grep -oE 'ARG PYTHON_VERSION=[0-9]+\.[0-9]+' docker/apple/Dockerfile | cut -d= -f2)
+SMOKE_VENV     := .venvs/smoke
+SMOKE_PYTHON   := $(SMOKE_VENV)/bin/python
+SMOKE_PYPATH   := $(SMOKE_VENV)/lib/python$(CONTAINER_PY)/site-packages
+SCORECARD      := $(SMOKE_PYTHON) scripts/spark_compat_score.py
 CONTAINER  ?= vajra
 
 help:
@@ -40,7 +49,35 @@ help:
 	@echo "  make docker-build            Build vajra Docker image for use with kind/k8s"
 	@echo "  make kind-setup              Create kind cluster, load image, deploy vajra"
 	@echo "  make kind-teardown           Delete kind cluster"
+	@echo "  make smoke-setup             Create .venvs/smoke with correct Python version"
+	@echo "  make scorecard               Run 71-test compat scorecard (local binary, debug)"
+	@echo "  make scorecard-container     Run scorecard against running Apple Container (:50051)"
+	@echo "  make scorecard-k8s           Run scorecard against running k8s port-forward (:50051)"
 	@echo "  make clean                   cargo clean"
+
+# ── Smoke venv + scorecard ────────────────────────────────────────────────────
+smoke-setup:
+	bash scripts/setup-smoke-venv.sh
+
+# Local binary mode — starts its own server, no running container needed.
+scorecard: $(SMOKE_PYTHON)
+	DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \
+	PYTHONPATH=$(SMOKE_PYPATH) \
+	VAJRA_BIN=$(RELEASE_DIR)/vajra \
+		$(SCORECARD)
+
+# Remote container/k8s mode — requires a server already running on :50051.
+# File-based tests (JSON, Parquet, Delta) use /tmp/vajra which is mounted
+# into every container via -v /tmp/vajra:/tmp/vajra.
+scorecard-container scorecard-k8s: $(SMOKE_PYTHON)
+	@mkdir -p /tmp/vajra
+	SPARK_REMOTE=sc://localhost:50051 \
+	PYTHONPATH=$(SMOKE_PYPATH) \
+		$(SCORECARD)
+
+$(SMOKE_PYTHON):
+	@echo "Smoke venv not found — run: make smoke-setup"
+	@exit 1
 
 dev:
 	$(CARGO) build -p sail-cli
