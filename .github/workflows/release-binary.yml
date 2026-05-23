@@ -20,10 +20,10 @@ jobs:
         include:
           - arch: x86_64
             target: x86_64-unknown-linux-musl
-            asset_name: ignite-x86_64-unknown-linux-musl
+            asset_name: vajra-x86_64-unknown-linux-musl
           - arch: aarch64
             target: aarch64-unknown-linux-musl
-            asset_name: ignite-aarch64-unknown-linux-musl
+            asset_name: vajra-aarch64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -50,7 +50,7 @@ jobs:
       - name: Build
         run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
       - name: Rename binary
-        run: cp target/${{ matrix.target }}/release/ignite ${{ matrix.asset_name }}
+        run: cp target/${{ matrix.target }}/release/vajra ${{ matrix.asset_name }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
@@ -89,13 +89,13 @@ jobs:
         run: cargo build --release -p sail-cli --target aarch64-apple-darwin
       - name: Create universal binary
         run: |
-          lipo -create -output ignite-universal2-apple-darwin \
-            target/x86_64-apple-darwin/release/ignite \
-            target/aarch64-apple-darwin/release/ignite
+          lipo -create -output vajra-universal2-apple-darwin \
+            target/x86_64-apple-darwin/release/vajra \
+            target/aarch64-apple-darwin/release/vajra
       - uses: actions/upload-artifact@v4
         with:
-          name: ignite-universal2-apple-darwin
-          path: ignite-universal2-apple-darwin
+          name: vajra-universal2-apple-darwin
+          path: vajra-universal2-apple-darwin
           retention-days: 1
 
   release:
@@ -107,7 +107,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: ignite-*
+          pattern: vajra-*
           merge-multiple: true
           path: dist
       - name: Show release assets

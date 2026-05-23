@@ -268,7 +268,7 @@ DATA = {data_path:?}
 
 LINE = "=" * 62
 print(f"\n{{LINE}}")
-print(f"  Ignite TPC-H Benchmark  —  Scale Factor {{SF}}")
+print(f"  Vajra TPC-H Benchmark  —  Scale Factor {{SF}}")
 print(f"{{LINE}}\n")
 
 # ── 1. Generate / load data ──────────────────────────────────
@@ -293,7 +293,7 @@ if DATA == "local":
     queries = dict(q_rows)
     print(f"Generated {{len(tables)}} tables.\n")
 
-    print("Loading into Ignite via Arrow...")
+    print("Loading into Vajra via Arrow...")
     t_load = time.time()
     for tbl in tables:
         arrow = conn.sql(f"FROM {{tbl}}").fetch_arrow_table()

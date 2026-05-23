@@ -1,9 +1,9 @@
-# Ignite — Architecture
+# Vajra — Architecture
 
-Ignite is a Rust-native, single-binary Spark engine. It is a fork of
-[lakehq/sail](https://github.com/lakehq/sail), rebranded and extended with a
-streamlined deployment story, a richer CLI, and a roadmap toward a managed
-cloud offering.
+Vajra is a Rust-native, single-binary Spark engine. It is a fork of
+[lakehq/sail](https://github.com/lakehq/sail), extended with a streamlined
+deployment story, a richer CLI, full Spark compatibility fixes, and a roadmap
+toward a managed cloud offering.
 
 ## Design Principles
 
@@ -73,7 +73,7 @@ PySpark / SQL client
 
 | Crate | Role |
 |---|---|
-| `sail-cli` | Single binary entrypoint (`ignite`). Clap CLI with `server`, `sql`, `run`, `shell`, `bench`, `cluster`, `flight` subcommands. |
+| `sail-cli` | Single binary entrypoint (`vajra`). Clap CLI with `server`, `sql`, `run`, `shell`, `bench`, `cluster`, `flight` subcommands. |
 | `sail-spark-connect` | Spark Connect gRPC server (tonic). Deserialises Spark Connect proto messages. |
 | `sail-sql-parser` | SQL parser (chumsky + custom grammar). Produces an AST from SQL strings. |
 | `sail-sql-analyzer` | Name resolution, type inference, semantic analysis. |
@@ -113,16 +113,16 @@ PySpark / SQL client
 ## Binary Modes
 
 ```
-ignite server                          # Spark Connect server (local dev)
-ignite sql "SELECT 1 + 1"             # One-shot SQL
-ignite run -f job.py                  # Run PySpark script
-ignite shell                          # Interactive PySpark shell
-ignite bench --scale-factor 10        # TPC-H benchmark
-ignite cluster --role=scheduler       # Distributed scheduler (Phase 2)
-ignite cluster --role=worker \        # Distributed worker (Phase 2)
+vajra server                          # Spark Connect server (local dev)
+vajra sql "SELECT 1 + 1"             # One-shot SQL
+vajra run -f job.py                  # Run PySpark script
+vajra shell                          # Interactive PySpark shell
+vajra bench --scale-factor 10        # TPC-H benchmark
+vajra cluster --role=scheduler       # Distributed scheduler (Phase 2)
+vajra cluster --role=worker \        # Distributed worker (Phase 2)
   --scheduler scheduler:7070
-ignite flight server                  # Arrow Flight SQL server
-ignite mcp-server                     # Spark MCP server
+vajra flight server                  # Arrow Flight SQL server
+vajra mcp-server                     # Spark MCP server
 ```
 
 ---
@@ -147,9 +147,9 @@ ignite mcp-server                     # Spark MCP server
 
 | Phase | Scope | Target |
 |---|---|---|
-| **Phase 1** (Months 1–6) | Single-node, local mode, SQL compatibility, TPC-H benchmark, PyPI package | v0.1.0 |
-| **Phase 2** (Months 7–12) | Distributed scheduler + workers, Arrow Flight shuffle, Structured Streaming, catalog integrations | v0.3.0 |
-| **Phase 3** (Months 13–24) | Managed cloud (ignite.cloud), auto-scaling, GPU execution, MLflow compatibility | v1.0.0 |
+| **Phase 1** ✅ (Months 1–6) | Single-node, local mode, 100% SQL compat (71/71), 22/22 TPC-H, k8s + Apple Container | v0.1.0-alpha |
+| **Phase 2** (Months 7–12) | Distributed scheduler + workers, Arrow Flight shuffle at TB scale, Structured Streaming, JWT auth | v0.3.0 |
+| **Phase 3** (Months 13–24) | Managed cloud (vajra.cloud), auto-scaling, GPU execution, MLflow compatibility | v1.0.0 |
 
 ---
 
