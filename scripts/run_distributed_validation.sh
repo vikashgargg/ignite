@@ -75,11 +75,11 @@ log "Deploying Vajra to kind..."
 kubectl apply -f "$VAJRA_DIR/k8s/sail.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Waiting for deployment rollout (up to 3 min)..."
-kubectl rollout status deployment/ignite-spark-server -n ignite --timeout=180s \
+kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=180s \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Starting port-forward on 50051..."
-kubectl port-forward -n ignite svc/ignite-spark-server 50051:50051 \
+kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 \
     > "$LOG_DIR/portforward.log" 2>&1 &
 PF_PID=$!
 sleep 5

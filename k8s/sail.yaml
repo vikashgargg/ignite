@@ -1,30 +1,30 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ignite
+  name: vajra
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ignite-spark-server
-  namespace: ignite
+  name: vajra-spark-server
+  namespace: vajra
   labels:
-    app.kubernetes.io/name: ignite
+    app.kubernetes.io/name: vajra
     app.kubernetes.io/component: spark-server
 spec:
   # We cannot have more than one replica because each Spark session is tied to a single pod.
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: ignite
+      app.kubernetes.io/name: vajra
       app.kubernetes.io/component: spark-server
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: ignite
+        app.kubernetes.io/name: vajra
         app.kubernetes.io/component: spark-server
     spec:
-      serviceAccountName: ignite-user
+      serviceAccountName: vajra-user
       volumes:
         - name: tmp-sail
           hostPath:
@@ -61,13 +61,13 @@ spec:
             - name: SAIL_KUBERNETES__IMAGE
               value: vajra:latest
             - name: SAIL_KUBERNETES__NAMESPACE
-              value: ignite
+              value: vajra
             - name: SAIL_KUBERNETES__DRIVER_POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
             - name: SAIL_KUBERNETES__WORKER_SERVICE_ACCOUNT_NAME
-              value: ignite-user
+              value: vajra-user
             - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
               value: >-
                 {"spec":{"volumes":[{"name":"tmp-sail","hostPath":{"path":"/private/tmp/sail","type":"DirectoryOrCreate"}},{"name":"tmp-sail-alt","hostPath":{"path":"/tmp/sail","type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"tmp-sail","mountPath":"/private/tmp/sail"},{"name":"tmp-sail-alt","mountPath":"/tmp/sail"}]}]}}
@@ -75,14 +75,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: ignite-spark-server
-  namespace: ignite
+  name: vajra-spark-server
+  namespace: vajra
   labels:
-    app.kubernetes.io/name: ignite
+    app.kubernetes.io/name: vajra
     app.kubernetes.io/component: spark-server
 spec:
   selector:
-    app.kubernetes.io/name: ignite
+    app.kubernetes.io/name: vajra
     app.kubernetes.io/component: spark-server
   ports:
     - protocol: TCP
@@ -92,8 +92,8 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: ignite-spark-server
-  namespace: ignite
+  name: vajra-spark-server
+  namespace: vajra
 rules:
   - apiGroups: [ "" ]
     resources: [ "pods" ]
@@ -102,19 +102,19 @@ rules:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ignite-user
-  namespace: ignite
+  name: vajra-user
+  namespace: vajra
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: ignite-spark-server
-  namespace: ignite
+  name: vajra-spark-server
+  namespace: vajra
 subjects:
   - kind: ServiceAccount
-    name: ignite-user
-    namespace: ignite
+    name: vajra-user
+    namespace: vajra
 roleRef:
   kind: Role
-  name: ignite-spark-server
+  name: vajra-spark-server
   apiGroup: rbac.authorization.k8s.io

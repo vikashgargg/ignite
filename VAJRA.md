@@ -266,7 +266,7 @@ vajra-worker:
 2. **[P0] Run full gold test suite** — quantify compat % vs LakeSail's 80.1%  
    Run `python/pysail/tests/spark/` against running server
 
-3. **[P1] Binary rename: `ignite` → `vajra`**  
+3. **[P1] Binary rename: `vajra` ✅ done**  
    - `Cargo.toml` bin name, README, install.sh, Makefile targets
    - Keep internal `sail-*` crate names (upstream compat)
 

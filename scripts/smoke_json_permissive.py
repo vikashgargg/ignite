@@ -2,7 +2,7 @@
 Smoke test: JSON permissive mode with _corrupt_record column.
 
 Run as:
-    IGNITE_BIN=./target/debug/ignite \
+    VAJRA_BIN=./target/debug/ignite \
     .venvs/smoke/bin/python scripts/smoke_json_permissive.py
 """
 from __future__ import annotations
@@ -14,12 +14,12 @@ import tempfile
 import time
 
 # ---------------------------------------------------------------------------
-# Start Ignite server
+# Start Vajra server
 # ---------------------------------------------------------------------------
 
-ignite_bin = os.environ.get("IGNITE_BIN", "./target/debug/ignite")
+vajra_bin = os.environ.get("VAJRA_BIN", "./target/debug/ignite")
 proc = subprocess.Popen(
-    [ignite_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
+    [vajra_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.PIPE,
 )

@@ -8,4 +8,4 @@ patches:
   - path: test-volume-patch.yaml
     target:
       kind: Deployment
-      name: ignite-spark-server
+      name: vajra-spark-server

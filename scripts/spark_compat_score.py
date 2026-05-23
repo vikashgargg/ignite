@@ -44,9 +44,9 @@ SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "")
 _proc = None
 
 if not SPARK_REMOTE:
-    ignite_bin = os.environ.get("VAJRA_BIN", os.environ.get("IGNITE_BIN", "./target/debug/vajra"))
+    vajra_bin = os.environ.get("VAJRA_BIN", os.environ.get("VAJRA_BIN", "./target/debug/vajra"))
     _proc = subprocess.Popen(
-        [ignite_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
+        [vajra_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
@@ -56,7 +56,7 @@ if not SPARK_REMOTE:
         line = _proc.stderr.readline().decode(errors="replace")
         if line:
             print(f"  server: {line.strip()}")
-        if "ready" in line.lower() or "Ignite" in line:
+        if "ready" in line.lower() or "Vajra" in line:
             started = True
             break
         time.sleep(0.05)
@@ -562,7 +562,7 @@ finally:
 
 total_pass = total_fail = total_skip = 0
 print(f"\n{'═'*55}")
-print("  IGNITE SPARK COMPATIBILITY SCORECARD")
+print("  VAJRA SPARK COMPATIBILITY SCORECARD")
 print(f"{'═'*55}")
 
 for grp, tests in results.items():
