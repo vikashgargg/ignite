@@ -731,6 +731,84 @@ with _tmp_mgr as tmp:
             UNPIVOT (revenue FOR quarter IN (q1, q2))
         """).count() == 2))
 
+    # ── 19. Window Frames & Joins ─────────────────────────────────────────────
+    group("19. Window Frames & Joins")
+
+    check("GROUPS BETWEEN window frame", lambda: assert_true(
+        spark.sql("""
+            SELECT id,
+                   sum(id) OVER (ORDER BY id GROUPS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+                   AS gs
+            FROM range(5)
+        """).count() == 5))
+
+    check("NATURAL JOIN", lambda: assert_true(
+        spark.sql("""
+            SELECT * FROM
+              (SELECT 1 AS id, 'a' AS name) t1
+              NATURAL JOIN
+              (SELECT 1 AS id, 42 AS score) t2
+        """).count() == 1))
+
+    check("LATERAL VIEW explode", lambda: assert_true(
+        spark.sql("""
+            SELECT id, v
+            FROM (SELECT 1 AS id, array(10, 20, 30) AS arr)
+            LATERAL VIEW explode(arr) tmp AS v
+        """).count() == 3))
+
+    check("LATERAL VIEW OUTER empty", lambda: assert_true(
+        spark.sql("""
+            SELECT id, v
+            FROM (SELECT 1 AS id, array() AS arr)
+            LATERAL VIEW OUTER explode(arr) tmp AS v
+        """).count() == 1))
+
+    check("CROSS JOIN LATERAL table func", lambda: assert_true(
+        spark.sql("""
+            SELECT t.id, x.n
+            FROM range(2) t
+            CROSS JOIN LATERAL (SELECT t.id * 10 AS n) x
+        """).count() == 2))
+
+    # ── 20. QUALIFY & Recursive CTEs ─────────────────────────────────────────
+    group("20. QUALIFY & Recursive CTEs")
+
+    check("QUALIFY window filter", lambda: assert_true(
+        spark.sql("""
+            SELECT id, rank() OVER (ORDER BY id) AS r
+            FROM range(5)
+            QUALIFY r <= 3
+        """).count() == 3))
+
+    check("QUALIFY row_number dedup", lambda: assert_true(
+        spark.sql("""
+            SELECT id % 3 AS grp, id,
+                   row_number() OVER (PARTITION BY id % 3 ORDER BY id) AS rn
+            FROM range(9)
+            QUALIFY rn = 1
+        """).count() == 3))
+
+    check("WITH RECURSIVE counting", lambda: assert_true(
+        spark.sql("""
+            WITH RECURSIVE nums(n) AS (
+                SELECT 1
+                UNION ALL
+                SELECT n + 1 FROM nums WHERE n < 5
+            )
+            SELECT COUNT(*) AS c FROM nums
+        """).collect()[0]["c"] == 5))
+
+    check("WITH RECURSIVE fibonacci", lambda: assert_true(
+        spark.sql("""
+            WITH RECURSIVE fib(a, b) AS (
+                SELECT 1, 1
+                UNION ALL
+                SELECT b, a + b FROM fib WHERE b < 100
+            )
+            SELECT MAX(b) AS m FROM fib
+        """).collect()[0]["m"] >= 89))
+
 # ── Scorecard ─────────────────────────────────────────────────────────────────
 
 try:

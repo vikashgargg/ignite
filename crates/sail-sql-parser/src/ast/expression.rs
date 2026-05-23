@@ -12,7 +12,7 @@ use crate::ast::identifier::{Ident, ObjectName, Variable};
 use crate::ast::keywords::{
     All, And, Any, As, Asc, Between, Both, By, Case, Cast, Cube, Current, CurrentDate,
     CurrentTimestamp, CurrentUser, Date, Day, Days, Desc, Distinct, Div, Else, End, Escape, Exists,
-    Extract, False, Filter, First, Following, For, From, Group, Grouping, Hour, Hours, Identifier,
+    Extract, False, Filter, First, Following, For, From, Group, Grouping, Groups, Hour, Hours, Identifier,
     Ignore, Ilike, In, Interval, Is, Last, Leading, Like, Microsecond, Microseconds, Millisecond,
     Milliseconds, Minute, Minutes, Month, Months, Not, Null, Nulls, Or, Order, Over, Overlay,
     Placing, Position, Preceding, Range, Regexp, Respect, Rlike, Rollup, Row, Rows, Second,
@@ -505,6 +505,17 @@ pub enum WindowFrame {
     ),
     Rows(
         Rows,
+        #[parser(function = |e, o| compose(e, o))] WindowFrameBound,
+    ),
+    GroupsBetween(
+        Groups,
+        Between,
+        #[parser(function = |e, o| compose(e, o))] WindowFrameBound,
+        And,
+        #[parser(function = |e, o| compose(e, o))] WindowFrameBound,
+    ),
+    GroupsOnly(
+        Groups,
         #[parser(function = |e, o| compose(e, o))] WindowFrameBound,
     ),
 }

@@ -1,4 +1,7 @@
-use datafusion_expr::LogicalPlan;
+use std::sync::Arc;
+
+use datafusion_common::DFSchemaRef;
+use datafusion_expr::{Expr, LogicalPlan, Projection};
 use sail_common::spec;
 
 use crate::error::{PlanError, PlanResult};
@@ -70,51 +73,83 @@ impl PlanResolver<'_> {
             ));
         }
 
-        let input = self.resolve_write_input(input, state).await?;
+        let mut input = self.resolve_write_input(input, state).await?;
 
+        // Apply static partition values: inject them as literal columns into the input plan.
+        // Dynamic partition columns (no value) are already in the SELECT output — no injection needed.
         if !partition.is_empty() {
-            return Err(PlanError::todo("PARTITION for write"));
+            let empty_schema: DFSchemaRef = Arc::new(datafusion_common::DFSchema::empty());
+            let mut static_cols: Vec<Expr> = vec![];
+            for (col_name, opt_val) in partition {
+                if let Some(val_expr) = opt_val {
+                    let lit_expr = self
+                        .resolve_expression(val_expr, &empty_schema, state)
+                        .await?;
+                    static_cols.push(lit_expr.alias(state.register_field_name(col_name)));
+                }
+            }
+            if !static_cols.is_empty() {
+                // Prefix the static partition literals; existing columns follow.
+                let existing: Vec<Expr> = input
+                    .schema()
+                    .columns()
+                    .into_iter()
+                    .map(Expr::Column)
+                    .collect();
+                let all_cols: Vec<Expr> = existing.into_iter().chain(static_cols).collect();
+                input = LogicalPlan::Projection(Projection::try_new(
+                    all_cols,
+                    Arc::new(input),
+                )?);
+            }
         }
+
         let mut builder = WritePlanBuilder::new();
         match mode {
             InsertMode::InsertByPosition { overwrite } => {
-                let mode = if overwrite {
-                    WriteMode::Truncate
+                let write_mode = if overwrite {
+                    WriteMode::TruncatePartitions
                 } else {
                     WriteMode::Append {
                         error_if_absent: true,
                     }
                 };
-                builder = builder.with_mode(mode).with_target(WriteTarget::Table {
-                    table,
-                    column_match: WriteColumnMatch::ByPosition,
-                });
+                builder = builder
+                    .with_mode(write_mode)
+                    .with_target(WriteTarget::Table {
+                        table,
+                        column_match: WriteColumnMatch::ByPosition,
+                    });
             }
             InsertMode::InsertByName { overwrite } => {
-                let mode = if overwrite {
-                    WriteMode::Truncate
+                let write_mode = if overwrite {
+                    WriteMode::TruncatePartitions
                 } else {
                     WriteMode::Append {
                         error_if_absent: true,
                     }
                 };
-                builder = builder.with_mode(mode).with_target(WriteTarget::Table {
-                    table,
-                    column_match: WriteColumnMatch::ByName,
-                });
+                builder = builder
+                    .with_mode(write_mode)
+                    .with_target(WriteTarget::Table {
+                        table,
+                        column_match: WriteColumnMatch::ByName,
+                    });
             }
             InsertMode::InsertByColumns { columns, overwrite } => {
-                let mode = if overwrite {
-                    WriteMode::Truncate
+                let write_mode = if overwrite {
+                    WriteMode::TruncatePartitions
                 } else {
                     WriteMode::Append {
                         error_if_absent: true,
                     }
                 };
-                builder = builder.with_mode(mode).with_target(WriteTarget::Table {
-                    table,
-                    column_match: WriteColumnMatch::ByColumns { columns },
-                });
+                builder = builder
+                    .with_mode(write_mode)
+                    .with_target(WriteTarget::Table {
+                        table,
+                        column_match: WriteColumnMatch::ByColumns { columns },
+                    });
             }
             InsertMode::Replace { condition } => {
                 builder = builder

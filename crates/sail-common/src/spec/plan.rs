@@ -1317,7 +1317,10 @@ pub enum AlterTableOperation {
 #[serde(rename_all = "camelCase")]
 pub enum AlterViewOperation {
     Unknown,
-    // TODO: add all the alter view operations
+    SetQuery {
+        definition: String,
+        input: Box<QueryPlan>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

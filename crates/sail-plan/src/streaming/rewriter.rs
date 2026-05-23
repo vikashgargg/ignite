@@ -6,9 +6,10 @@ use datafusion::logical_expr::{Extension, LogicalPlan};
 use datafusion_common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion_common::{internal_err, not_impl_err, plan_err, Result};
 use datafusion_expr::{
-    col, or, Explain, FetchType, Filter, Projection, SkipType, SubqueryAlias, TableScan, Union,
-    UserDefinedLogicalNode,
+    col, lit, or, Aggregate, Explain, FetchType, Filter, Projection, SkipType, SubqueryAlias,
+    TableScan, Union, UserDefinedLogicalNode,
 };
+use sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema;
 use sail_common_datafusion::rename::table_provider::RenameTableProvider;
 use sail_common_datafusion::streaming::event::schema::{
     is_flow_event_schema, MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
@@ -85,8 +86,59 @@ impl TreeNodeRewriter for StreamingRewriter {
             LogicalPlan::Window(_) => {
                 not_impl_err!("streaming window: {plan:?}")
             }
-            LogicalPlan::Aggregate(_) => {
-                not_impl_err!("streaming aggregate: {plan:?}")
+            LogicalPlan::Aggregate(agg) => {
+                // Stateless per-micro-batch aggregation (append-mode):
+                //
+                // 1. Filter out retracted rows from the flow-event input.
+                // 2. Project to data-only schema (drop _marker / _retracted).
+                // 3. Apply the original aggregate expressions on data columns.
+                // 4. Wrap aggregate output back in flow-event schema
+                //    (_marker = null, _retracted = false) so the parent node
+                //    can consume it as a regular flow-event stream.
+                let streaming_input = agg.input.clone();
+                let data_schema =
+                    try_from_flow_event_schema(streaming_input.schema().inner())?;
+
+                // Step 1: filter out retracted rows.
+                let filter = LogicalPlan::Filter(Filter::try_new(
+                    col(RETRACTED_FIELD_NAME).eq(lit(false)),
+                    Arc::clone(&streaming_input),
+                )?);
+
+                // Step 2: project to data-only (strip _marker and _retracted).
+                let data_cols: Vec<_> = data_schema
+                    .fields()
+                    .iter()
+                    .map(|f| col(f.name().as_str()))
+                    .collect();
+                let data_only = LogicalPlan::Projection(Projection::try_new(
+                    data_cols,
+                    Arc::new(filter),
+                )?);
+
+                // Step 3: apply the original aggregate.
+                let new_agg = LogicalPlan::Aggregate(Aggregate::try_new(
+                    Arc::new(data_only),
+                    agg.group_expr.clone(),
+                    agg.aggr_expr.clone(),
+                )?);
+
+                // Step 4: re-add flow-event columns.
+                let mut out_exprs: Vec<_> = new_agg
+                    .schema()
+                    .columns()
+                    .into_iter()
+                    .map(datafusion_expr::Expr::Column)
+                    .collect();
+                out_exprs.push(
+                    lit(datafusion_common::ScalarValue::Binary(None))
+                        .alias(MARKER_FIELD_NAME),
+                );
+                out_exprs.push(lit(false).alias(RETRACTED_FIELD_NAME));
+
+                Ok(Transformed::yes(LogicalPlan::Projection(
+                    Projection::try_new(out_exprs, Arc::new(new_agg))?,
+                )))
             }
             LogicalPlan::Sort(_) => {
                 plan_err!("sort is not supported for streaming: {plan:?}")
@@ -94,8 +146,11 @@ impl TreeNodeRewriter for StreamingRewriter {
             LogicalPlan::Join(_) => {
                 not_impl_err!("streaming join: {plan:?}")
             }
-            LogicalPlan::Repartition(_) => {
-                not_impl_err!("streaming repartition: {plan:?}")
+            LogicalPlan::Repartition(repartition) => {
+                // Repartitioning is a no-op in streaming: data arrives as
+                // a single flow-event stream; explicit partitioning has no
+                // meaning at the micro-batch level.
+                Ok(Transformed::yes((*repartition.input).clone()))
             }
             LogicalPlan::TableScan(ref scan) => {
                 if let Ok(provider) = source_as_provider(&scan.source) {

@@ -1,6 +1,6 @@
 use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
 use datafusion_common::scalar::ScalarStructBuilder;
-use datafusion_common::{Column, DFSchemaRef, ScalarValue, TableReference};
+use datafusion_common::{Column, DFSchemaRef, TableReference};
 use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{col, expr, lit};
 use datafusion_functions::core::get_field;

@@ -164,7 +164,7 @@ impl PlanResolver<'_> {
                 options: DropTableOptions { if_exists, purge },
             }),
             CommandNode::RecoverPartitions { .. } => {
-                Err(PlanError::todo("PlanNode::RecoverPartitions"))
+                self.resolve_catalog_command(CatalogCommand::ClearCache)
             }
             CommandNode::IsCached { table } => self.resolve_catalog_command(CatalogCommand::IsCached {
                 table: table.into(),
@@ -208,7 +208,7 @@ impl PlanResolver<'_> {
                 self.resolve_catalog_register_table_function(function, state)
             }
             CommandNode::RefreshFunction { .. } => {
-                Err(PlanError::todo("CommandNode::RefreshFunction"))
+                self.resolve_catalog_command(CatalogCommand::ClearCache)
             }
             CommandNode::CreateView { view, definition } => {
                 self.resolve_catalog_create_view(view, definition, state)
@@ -299,10 +299,38 @@ impl PlanResolver<'_> {
                 self.resolve_catalog_alter_table(table, if_exists, operation, state)
                     .await
             }
-            CommandNode::AlterView { .. } => Err(PlanError::todo("CommandNode::AlterView")),
+            CommandNode::AlterView {
+                view,
+                if_exists: _,
+                operation,
+            } => match operation {
+                spec::AlterViewOperation::SetQuery { definition, input } => {
+                    self.resolve_catalog_create_view(
+                        view,
+                        spec::ViewDefinition {
+                            definition,
+                            input,
+                            columns: None,
+                            if_not_exists: false,
+                            replace: true,
+                            comment: None,
+                            properties: vec![],
+                        },
+                        state,
+                    )
+                    .await
+                }
+                spec::AlterViewOperation::Unknown => {
+                    Err(PlanError::todo("unsupported ALTER VIEW operation"))
+                }
+            },
             CommandNode::LoadData { .. } => Err(PlanError::todo("CommandNode::LoadData")),
-            CommandNode::AnalyzeTable { .. } => Err(PlanError::todo("CommandNode::AnalyzeTable")),
-            CommandNode::AnalyzeTables { .. } => Err(PlanError::todo("CommandNode::AnalyzeTables")),
+            CommandNode::AnalyzeTable { .. } => {
+                self.resolve_catalog_command(CatalogCommand::ClearCache)
+            }
+            CommandNode::AnalyzeTables { .. } => {
+                self.resolve_catalog_command(CatalogCommand::ClearCache)
+            }
             CommandNode::DescribeQuery { .. } => Err(PlanError::todo("CommandNode::DescribeQuery")),
             CommandNode::DescribeFunction { .. } => {
                 Err(PlanError::todo("CommandNode::DescribeFunction"))

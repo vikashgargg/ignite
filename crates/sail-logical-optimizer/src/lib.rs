@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use datafusion::optimizer::{Analyzer, AnalyzerRule, Optimizer, OptimizerRule};
+use datafusion::common::tree_node::{Transformed, TreeNode};
+use datafusion::common::Result;
+use datafusion::optimizer::{Analyzer, AnalyzerRule, Optimizer, OptimizerConfig, OptimizerRule};
+use datafusion_expr::LogicalPlan;
 
 mod lateral_join;
 pub use lateral_join::DecorrelateLateralProjection;
@@ -26,6 +29,67 @@ pub fn default_optimizer_rules() -> Vec<Arc<dyn OptimizerRule + Send + Sync>> {
     // in Filter/Aggregate) are left for DataFusion's `DecorrelateLateralJoin`.
     let mut custom: Vec<Arc<dyn OptimizerRule + Send + Sync>> =
         vec![Arc::new(DecorrelateLateralProjection::new())];
+    // Replace DataFusion's `optimize_projections` with a safe version that
+    // skips plans containing RecursiveQuery nodes.  DataFusion 53's rule
+    // incorrectly reduces RecursiveQuery children to zero columns when the
+    // parent (e.g. COUNT(*)) does not reference any specific column, which
+    // causes "Unexpected empty work table" at execution time.
+    let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = rules
+        .into_iter()
+        .map(|rule| -> Arc<dyn OptimizerRule + Send + Sync> {
+            if rule.name() == "optimize_projections" {
+                Arc::new(SafeOptimizeProjections { inner: rule })
+            } else {
+                rule
+            }
+        })
+        .collect();
     custom.extend(rules);
     custom
+}
+
+/// Wrapper around DataFusion's `optimize_projections` rule that skips plans
+/// containing `RecursiveQuery` nodes to prevent incorrect schema reduction.
+#[derive(Debug)]
+struct SafeOptimizeProjections {
+    inner: Arc<dyn OptimizerRule + Send + Sync>,
+}
+
+impl OptimizerRule for SafeOptimizeProjections {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn apply_order(&self) -> Option<datafusion::optimizer::ApplyOrder> {
+        self.inner.apply_order()
+    }
+
+    fn supports_rewrite(&self) -> bool {
+        self.inner.supports_rewrite()
+    }
+
+    fn rewrite(
+        &self,
+        plan: LogicalPlan,
+        config: &dyn OptimizerConfig,
+    ) -> Result<Transformed<LogicalPlan>> {
+        if plan_has_recursive_query(&plan) {
+            return Ok(Transformed::no(plan));
+        }
+        self.inner.rewrite(plan, config)
+    }
+}
+
+fn plan_has_recursive_query(plan: &LogicalPlan) -> bool {
+    let mut found = false;
+    plan.apply(|node| {
+        if matches!(node, LogicalPlan::RecursiveQuery(_)) {
+            found = true;
+            Ok(datafusion::common::tree_node::TreeNodeRecursion::Stop)
+        } else {
+            Ok(datafusion::common::tree_node::TreeNodeRecursion::Continue)
+        }
+    })
+    .expect("plan traversal never fails");
+    found
 }

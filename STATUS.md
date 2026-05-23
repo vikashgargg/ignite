@@ -1,8 +1,9 @@
 # Vajra — Build Status
 
-> Last updated: 2026-05-23
-> Tag: **v0.1.0-alpha** (Phase 1 complete)
-> Branch: `main`
+> Last updated: 2026-05-24  
+> Tag: **v0.1.0-alpha** (Phase 1 complete)  
+> Branch: `phase1/spark-100`  
+> See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the full plan to reach production GA.
 
 ---
 
@@ -15,7 +16,7 @@
 - Release workflow: publishes binaries on `v*` tags
 - `install.sh` for `curl | sh` install
 
-### Spark Compatibility — 71/71 (100%) ✅
+### Spark Compatibility — 105/105 (100%) ✅
 
 | Fix | Description |
 |---|---|
@@ -34,8 +35,15 @@
 | `describe()` field IDs | Opaque `#N` IDs resolved to column names |
 | UPDATE SET NULL literals | Correct NULL handling in update expression |
 | Python 3.9 UDF worker compat | `spark.py` UDF worker compatible with Python 3.9+ |
+| `GROUPS BETWEEN` window frames | Mapped to Range semantics in sail-sql-parser |
+| `QUALIFY` clause | Post-window Filter after SELECT projection |
+| `WITH RECURSIVE` CTEs | DataFusion RecursiveQuery + CteWorkTable + WorkTableExec |
+| RecursiveQuery optimizer bug (DataFusion 53) | `SafeOptimizeProjections` wrapper skips plans with RecursiveQuery |
+| NATURAL JOIN | `spec::JoinCriteria::Natural` — resolver matches on common columns |
+| LATERAL VIEW OUTER | Maps `explode` → `explode_outer` for OUTER variant |
+| CROSS JOIN LATERAL | Handled via `LateralJoin` with `JoinType::Cross` |
 
-### TPC-H — 22/22 PASS ✅
+### TPC-H — 22/22 PASS ✅ (SF-1 single-node; SF-100 distributed TBD)
 
 All 22 queries pass on the release binary (LTO). Total: **1.515s**.
 
@@ -51,9 +59,9 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 
 | Mode | Status |
 |---|---|
-| `local` | ✅ 71/71 |
-| `local-cluster` | ✅ 71/71 |
-| `kubernetes-cluster` (kind) | ✅ 71/71 |
+| `local` | ✅ 105/105 |
+| `local-cluster` | ✅ 105/105 |
+| `kubernetes-cluster` (kind) | ✅ 105/105 |
 
 ### Apple Container ✅
 - `docker/apple/Dockerfile` — linux/arm64 optimised
@@ -65,7 +73,7 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 ### Release ✅
 - Tag: `v0.1.0-alpha`
 - Binary: `./target/release/vajra` (105 MB macOS ARM64)
-- Scorecard: **100% (71/71)**
+- Scorecard: **100% (105/105)** — Groups 1-20
 - TPC-H: **22/22, 1.515s**
 
 ---
@@ -74,16 +82,24 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 
 Target: `v0.3.0` — "Distributed GA"
 
-| Item | Status |
-|---|---|
-| Structured Streaming (Kafka → Delta) | Not started |
-| Arrow Flight shuffle at TB scale | Not started |
-| JWT / mTLS auth middleware | Not started |
-| `vajra-pyspark` PyPI package | Not started |
-| Unity Catalog production hardening | Not started |
-| TPC-H SF-100 distributed benchmark | Not started |
+| Item | Status | Tracking |
+|---|---|---|
+| ALTER VIEW | Not started | PRODUCTION_ROADMAP.md §1.1 |
+| INSERT PARTITION | Not started | PRODUCTION_ROADMAP.md §1.2 |
+| Structured Streaming aggregates | Not started | PRODUCTION_ROADMAP.md §2.1 |
+| Kafka source | Not started | PRODUCTION_ROADMAP.md §2.2 |
+| foreachBatch sink | Not started | PRODUCTION_ROADMAP.md §2.3 |
+| Streaming event-time windows | Not started | PRODUCTION_ROADMAP.md §2.4 |
+| Scheduler HA (K8s Lease) | Not started | PRODUCTION_ROADMAP.md §3.2 |
+| mTLS / JWT auth middleware | Not started | PRODUCTION_ROADMAP.md §3.3 |
+| K8s CI validation (kind in Actions) | Not started | PRODUCTION_ROADMAP.md §3.1 |
+| Arrow Flight shuffle at TB scale | Not started | — |
+| TPC-H SF-100 distributed benchmark | Not started | PRODUCTION_ROADMAP.md §3.8 |
+| TPC-DS query suite | Not started | PRODUCTION_ROADMAP.md §4.1 |
+| `vajra-pyspark` PyPI package | Not started | — |
+| Web UI on :4040 | Not started | PRODUCTION_ROADMAP.md §3.7 |
 
-See [PLAN.md](PLAN.md) for full Phase 2 breakdown.
+See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for full sprint breakdown and definition of done.
 
 ---
 

@@ -15,7 +15,7 @@ use crate::ast::keywords::{
     All, Anti, As, Bucket, By, Cluster, Cross, Cube, Distinct, Distribute, Except, Exclude, For,
     From, Full, Group, Having, Identifier, In, Include, Inner, Intersect, Join, Lateral, Left,
     Limit, Minus, Name, Natural, Nulls, Of, Offset, On, Order, Out, Outer, Partition, Percent,
-    Pivot, Recursive, Repeatable, Right, Rollup, Rows, Select, Semi, Sort, SystemTime,
+    Pivot, Qualify, Recursive, Repeatable, Right, Rollup, Rows, Select, Semi, Sort, SystemTime,
     SystemVersion, Table, Tablesample, Timestamp, Union, Unpivot, Using, Values, Version, View,
     Where, Window, With,
 };
@@ -184,6 +184,8 @@ pub struct QuerySelect {
     pub group_by: Option<GroupByClause>,
     #[parser(function = |(_, e, _), o| compose(e, o))]
     pub having: Option<HavingClause>,
+    #[parser(function = |(_, e, _), o| compose(e, o))]
+    pub qualify: Option<QualifyClause>,
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
@@ -526,6 +528,14 @@ pub enum GroupByModifier {
 #[parser(dependency = "Expr")]
 pub struct HavingClause {
     pub having: Having,
+    #[parser(function = |e, _| e)]
+    pub condition: Expr,
+}
+
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
+pub struct QualifyClause {
+    pub qualify: Qualify,
     #[parser(function = |e, _| e)]
     pub condition: Expr,
 }

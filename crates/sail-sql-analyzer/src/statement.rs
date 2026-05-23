@@ -1947,9 +1947,20 @@ fn from_ast_alter_table_operation(
 }
 
 fn from_ast_alter_view_operation(
-    _operation: AlterViewOperation,
+    operation: AlterViewOperation,
 ) -> SqlResult<spec::AlterViewOperation> {
-    Ok(spec::AlterViewOperation::Unknown)
+    match operation {
+        AlterViewOperation::Query(clause) => {
+            let AsQueryClause { r#as: _, query } = clause;
+            let definition = query.text();
+            let input = from_ast_query(query)?;
+            Ok(spec::AlterViewOperation::SetQuery {
+                definition,
+                input: Box::new(input),
+            })
+        }
+        _ => Ok(spec::AlterViewOperation::Unknown),
+    }
 }
 
 // TODO: add the following test cases as gold tests:

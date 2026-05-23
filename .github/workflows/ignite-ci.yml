@@ -205,6 +205,110 @@ jobs:
         if: always()
         run: kill "$VAJRA_PID" 2>/dev/null || true
 
+  k8s-scorecard:
+    name: K8s scorecard (kubernetes-cluster / kind)
+    runs-on: ubuntu-latest
+    # Only run on PRs targeting main and on pushes to main/phase* to keep CI cost down.
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-k8s-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system deps
+        run: |
+          sudo apt-get install -y protobuf-compiler netcat-openbsd
+
+      - name: Install kind
+        run: |
+          curl -Lo kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+          chmod +x kind && sudo mv kind /usr/local/bin/kind
+
+      - name: Install kubectl
+        run: |
+          curl -Lo kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+
+      - name: Build release binary
+        env:
+          PYO3_PYTHON: python3.12
+        run: cargo build --release -p sail-cli
+
+      - name: Build Docker image
+        run: docker build -t vajra:latest -f docker/Dockerfile .
+
+      - name: Set up smoke venv
+        run: |
+          python3.12 -m venv .venvs/smoke
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+
+      - name: Prepare shared scratch directories
+        run: mkdir -p /tmp/vajra /tmp/sail /private/tmp/sail
+
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name vajra-ci --config k8s/kind-config.yaml
+          kind load docker-image vajra:latest --name vajra-ci
+
+      - name: Apply k8s manifests
+        run: kubectl apply -f k8s/sail.yaml
+
+      - name: Wait for deployment rollout
+        run: kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=180s
+
+      - name: Port-forward Spark Connect
+        run: |
+          kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 &
+          echo "PF_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do
+            nc -z localhost 50051 2>/dev/null && break
+            sleep 2
+          done
+          nc -z localhost 50051 || { echo "Port-forward not ready"; exit 1; }
+
+      - name: Run Spark compat scorecard (kubernetes-cluster)
+        env:
+          SPARK_REMOTE: sc://localhost:50051
+          PYTHONPATH: .venvs/smoke/lib/python3.12/site-packages
+        run: |
+          .venvs/smoke/bin/python scripts/spark_compat_score.py 2>&1 | tee k8s-scorecard.log || true
+
+      - name: Enforce minimum pass rate
+        run: |
+          PASSED=$(grep -oE '[0-9]+ passed' k8s-scorecard.log | grep -oE '[0-9]+' | head -1 || echo 0)
+          FAILED=$(grep -oE '[0-9]+ failed' k8s-scorecard.log | grep -oE '[0-9]+' | head -1 || echo 99)
+          TOTAL=$(( PASSED + FAILED ))
+          echo "K8s scorecard: ${PASSED}/${TOTAL}"
+          [ "${PASSED}" -ge 100 ] || { echo "FAIL: only ${PASSED}/${TOTAL} passed (need ≥100)"; exit 1; }
+
+      - name: Upload scorecard log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-scorecard
+          path: k8s-scorecard.log
+          retention-days: 7
+
+      - name: Tear down kind cluster
+        if: always()
+        run: |
+          kill "$PF_PID" 2>/dev/null || true
+          kind delete cluster --name vajra-ci 2>/dev/null || true
+
   build-macos-universal:
     name: Build ignite macOS universal binary
     runs-on: macos-latest

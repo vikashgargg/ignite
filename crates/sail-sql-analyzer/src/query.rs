@@ -8,11 +8,11 @@ use sail_sql_parser::ast::query::{
     AliasClause, ClusterByClause, DistributeByClause, FromClause, GroupByClause, GroupByModifier,
     HavingClause, IdentList, JoinCriteria, JoinOperator, LateralViewClause, LimitClause,
     LimitValue, NamedExpr, NamedExprList, NamedQuery, NamedWindow, OffsetClause, OrderByClause,
-    PivotClause, Query, QueryBody, QueryModifier, QuerySelect, QueryTerm, SelectClause,
-    SetOperator, SetQuantifier, SortByClause, TableFactor, TableFunction, TableJoin, TableModifier,
-    TableSampleClause, TableSampleMethod, TableSampleRepeatable, TableWithJoins, TemporalClause,
-    UnpivotClause, UnpivotColumns, UnpivotNulls, ValuesClause, WhereClause, WindowClause,
-    WithClause,
+    PivotClause, QualifyClause, Query, QueryBody, QueryModifier, QuerySelect, QueryTerm,
+    SelectClause, SetOperator, SetQuantifier, SortByClause, TableFactor, TableFunction, TableJoin,
+    TableModifier, TableSampleClause, TableSampleMethod, TableSampleRepeatable, TableWithJoins,
+    TemporalClause, UnpivotClause, UnpivotColumns, UnpivotNulls, ValuesClause, WhereClause,
+    WindowClause, WithClause,
 };
 use sail_sql_parser::common::Sequence;
 
@@ -351,6 +351,7 @@ fn from_ast_query_select(select: QuerySelect) -> SqlResult<spec::QueryPlan> {
         r#where,
         group_by,
         having,
+        qualify,
     } = select;
 
     let tables = from
@@ -432,6 +433,16 @@ fn from_ast_query_select(select: QuerySelect) -> SqlResult<spec::QueryPlan> {
                 within_watermark: false,
             }))
         }
+    };
+
+    let plan = if let Some(QualifyClause {
+        qualify: _,
+        condition,
+    }) = qualify
+    {
+        query_plan_with_filter(plan, condition)?
+    } else {
+        plan
     };
 
     Ok(plan)

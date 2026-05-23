@@ -214,6 +214,10 @@ fn from_ast_window_frame(frame: WindowFrame) -> SqlResult<spec::WindowFrame> {
         WindowFrame::RowsBetween(_, _, start, _, end) => {
             (spec::WindowFrameType::Row, start, Some(end))
         }
+        WindowFrame::GroupsBetween(_, _, start, _, end) => {
+            (spec::WindowFrameType::Range, start, Some(end))
+        }
+        WindowFrame::GroupsOnly(_, start) => (spec::WindowFrameType::Range, start, None),
     };
     let lower = from_ast_window_frame_bound(start_bound)?;
     let upper = end_bound
