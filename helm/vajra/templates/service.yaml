@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vajra.fullname" . }}-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "vajra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spark-server
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "vajra.serverSelectorLabels" . | nindent 4 }}
+  ports:
+    - name: spark-connect
+      port: {{ .Values.service.port }}
+      targetPort: spark-connect
+      protocol: TCP
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}

@@ -1,0 +1,18 @@
+apiVersion: v2
+name: vajra
+description: Vajra — thunderbolt-fast, single-binary Spark engine. Drop-in PySpark replacement via Spark Connect, no JVM required.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - spark
+  - data
+  - analytics
+  - arrow
+  - datafusion
+home: https://github.com/vikashgargg/ignite
+sources:
+  - https://github.com/vikashgargg/ignite
+maintainers:
+  - name: Vajra Contributors
+    url: https://github.com/vikashgargg/ignite

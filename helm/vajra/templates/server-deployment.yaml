@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vajra.fullname" . }}-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "vajra.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spark-server
+spec:
+  replicas: {{ .Values.server.replicas }}
+  selector:
+    matchLabels:
+      {{- include "vajra.serverSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vajra.serverSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "vajra.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - server
+            - --ip
+            - "0.0.0.0"
+            - --port
+            - {{ .Values.server.port | quote }}
+          ports:
+            - name: spark-connect
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.logLevel }}
+            - name: SAIL_MODE
+              value: {{ .Values.mode }}
+            - name: SAIL_CLUSTER__DRIVER_LISTEN_HOST
+              value: "0.0.0.0"
+            - name: SAIL_CLUSTER__DRIVER_EXTERNAL_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: SAIL_KUBERNETES__IMAGE
+              value: {{ include "vajra.image" . }}
+            - name: SAIL_KUBERNETES__NAMESPACE
+              value: {{ .Values.namespace }}
+            - name: SAIL_KUBERNETES__DRIVER_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SAIL_KUBERNETES__WORKER_SERVICE_ACCOUNT_NAME
+              value: {{ .Values.serviceAccount }}
+            - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
+              value: >-
+                {"spec":{"volumes":[{"name":"scratch","hostPath":{"path":{{ .Values.scratch.hostPath | quote }},"type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"scratch","mountPath":{{ .Values.scratch.hostPath | quote }}}],"resources":{{ .Values.workers.resources | toJson }}}]}}
+            {{- with .Values.server.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            tcpSocket:
+              port: spark-connect
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: spark-connect
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+          volumeMounts:
+            - name: scratch
+              mountPath: {{ .Values.scratch.hostPath }}
+      volumes:
+        {{- include "vajra.scratchVolume" . | nindent 8 }}

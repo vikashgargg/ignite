@@ -1,0 +1,32 @@
+Vajra has been deployed!
+
+Server: {{ .Values.mode }} mode, {{ .Values.server.replicas }} replica(s)
+
+Get the Spark Connect endpoint:
+{{- if eq .Values.service.type "LoadBalancer" }}
+  export VAJRA_IP=$(kubectl get svc -n {{ .Values.namespace }} {{ include "vajra.fullname" . }}-server -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  export SPARK_REMOTE="sc://${VAJRA_IP}:{{ .Values.service.port }}"
+{{- else if eq .Values.service.type "NodePort" }}
+  export VAJRA_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[0].address}')
+  export SPARK_REMOTE="sc://${VAJRA_IP}:$(kubectl get svc -n {{ .Values.namespace }} {{ include "vajra.fullname" . }}-server -o jsonpath='{.spec.ports[0].nodePort}')"
+{{- else }}
+  # Port-forward for local access:
+  kubectl port-forward -n {{ .Values.namespace }} svc/{{ include "vajra.fullname" . }}-server {{ .Values.service.port }}:{{ .Values.service.port }}
+  export SPARK_REMOTE="sc://localhost:{{ .Values.service.port }}"
+{{- end }}
+
+Connect with PySpark:
+  python3 -c "
+  from pyspark.sql import SparkSession
+  spark = SparkSession.builder.remote('${SPARK_REMOTE}').getOrCreate()
+  spark.sql('SELECT 1+1').show()
+  "
+
+Run the compatibility scorecard:
+  SPARK_REMOTE=${SPARK_REMOTE} make scorecard-k8s
+
+Check worker pods:
+  kubectl get pods -n {{ .Values.namespace }}
+
+View logs:
+  kubectl logs -n {{ .Values.namespace }} -l app.kubernetes.io/component=spark-server -f

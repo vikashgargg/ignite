@@ -1,0 +1,101 @@
+# Vajra Helm Chart — default values
+# Override with: helm install vajra vajra/ -f my-values.yaml
+
+# -- Container image
+image:
+  repository: vajra
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# -- Execution mode: "local" | "local-cluster" | "kubernetes-cluster"
+mode: kubernetes-cluster
+
+# -- Spark Connect server (scheduler / driver)
+server:
+  port: 50051
+  replicas: 1
+  resources:
+    requests:
+      cpu: "1"
+      memory: "1Gi"
+    limits:
+      cpu: "4"
+      memory: "4Gi"
+  # Extra environment variables for the server pod
+  env: []
+  # - name: RUST_LOG
+  #   value: info
+
+# -- Worker pool (only used when mode=kubernetes-cluster)
+workers:
+  # Initial / minimum number of worker pods
+  minReplicas: 2
+  # Maximum workers HPA may scale to
+  maxReplicas: 20
+  resources:
+    requests:
+      cpu: "1"
+      memory: "1Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+  env: []
+
+# -- Horizontal Pod Autoscaler for workers
+autoscaling:
+  enabled: true
+  # Scale up when average CPU across workers exceeds this %
+  targetCPUUtilizationPercentage: 70
+  # Scale up when average memory exceeds this %
+  targetMemoryUtilizationPercentage: 80
+
+# -- Shared scratch space for shuffle spill and temp files
+# Mount a hostPath on each node, or use an emptyDir for ephemeral pods.
+scratch:
+  # "hostPath" uses a fixed path on the node (good for kind/local dev)
+  # "emptyDir" creates a fresh volume per pod (good for cloud k8s)
+  type: hostPath
+  hostPath: /tmp/vajra
+  # Size limit when type=emptyDir
+  sizeLimit: 20Gi
+
+# -- Kubernetes namespace
+namespace: vajra
+
+# -- Service account name used by scheduler and workers (needs pod create/delete)
+serviceAccount: vajra-user
+
+# -- Service type for external access ("ClusterIP" | "NodePort" | "LoadBalancer")
+service:
+  type: ClusterIP
+  port: 50051
+  # Set a nodePort when type=NodePort (30000-32767)
+  nodePort: ""
+
+# -- Ingress (optional — expose Spark Connect over HTTP/2)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+# -- Pod disruption budget: keep at least 1 worker available during rolling updates
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# -- Logging level for the Vajra server
+logLevel: info
+
+# -- Extra labels applied to all resources
+commonLabels: {}
+
+# -- Node selector applied to all pods
+nodeSelector: {}
+
+# -- Tolerations applied to all pods
+tolerations: []
+
+# -- Affinity rules applied to all pods
+affinity: {}

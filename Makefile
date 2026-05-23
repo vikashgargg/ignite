@@ -6,6 +6,7 @@
         container-build container-build-clean container-run container-run-cluster \
         docker-build _docker-ctx _container-ctx \
         kind-setup kind-teardown \
+        helm-install helm-upgrade helm-uninstall helm-lint \
         smoke-setup scorecard scorecard-container scorecard-k8s
 
 CARGO      := $(shell which cargo)
@@ -49,11 +50,34 @@ help:
 	@echo "  make docker-build            Build vajra Docker image for use with kind/k8s"
 	@echo "  make kind-setup              Create kind cluster, load image, deploy vajra"
 	@echo "  make kind-teardown           Delete kind cluster"
+	@echo "  make helm-lint               Lint the Helm chart"
+	@echo "  make helm-install            Install/upgrade Vajra via Helm into current k8s context"
+	@echo "  make helm-upgrade            Upgrade existing Helm release"
+	@echo "  make helm-uninstall          Uninstall Vajra Helm release"
 	@echo "  make smoke-setup             Create .venvs/smoke with correct Python version"
 	@echo "  make scorecard               Run 71-test compat scorecard (local binary, debug)"
 	@echo "  make scorecard-container     Run scorecard against running Apple Container (:50051)"
 	@echo "  make scorecard-k8s           Run scorecard against running k8s port-forward (:50051)"
 	@echo "  make clean                   cargo clean"
+
+# ── Helm ─────────────────────────────────────────────────────────────────────
+HELM       := $(shell command -v helm 2>/dev/null || echo helm)
+HELM_CHART := helm/vajra
+HELM_RELEASE ?= vajra
+HELM_NAMESPACE ?= vajra
+
+helm-lint:
+	$(HELM) lint $(HELM_CHART)
+
+helm-install:
+	$(HELM) upgrade --install $(HELM_RELEASE) $(HELM_CHART) \
+		--namespace $(HELM_NAMESPACE) --create-namespace
+
+helm-upgrade: helm-install
+
+helm-uninstall:
+	$(HELM) uninstall $(HELM_RELEASE) --namespace $(HELM_NAMESPACE) || true
+	kubectl delete namespace $(HELM_NAMESPACE) --ignore-not-found
 
 # ── Smoke venv + scorecard ────────────────────────────────────────────────────
 smoke-setup:
