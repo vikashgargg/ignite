@@ -1,15 +1,23 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use sail_common::error::CommonError;
 
 use crate::flight::run_flight_server;
 use crate::spark::run::run_pyspark_script;
 use crate::spark::{
-    run_pyspark_shell, run_spark_connect_server, run_spark_mcp_server, McpSettings, McpTransport,
+    run_pyspark_shell, run_spark_connect_server, run_spark_connect_server_local_cluster,
+    run_spark_mcp_server, McpSettings, McpTransport,
 };
 use crate::worker::run_worker;
 
 #[derive(Parser)]
-#[command(version, name = "sail", about = "Sail CLI")]
+#[command(
+    version,
+    name = "vajra",
+    about = "Vajra (वज्र) — thunderbolt-fast, single-binary Spark engine",
+    long_about = "Vajra is a drop-in replacement for Apache Spark: 5-10x faster, \
+                  no JVM required, single static binary. Runs your existing PySpark code \
+                  unchanged via the Spark Connect protocol. Apple Container + Kubernetes native."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -17,109 +25,114 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    #[command(subcommand, about = "Run Spark workloads with Sail")]
-    Spark(SparkCommand),
-    #[command(subcommand, about = "Arrow Flight SQL interface for Sail")]
+    /// Start the Spark Connect server (default dev mode)
+    Server {
+        #[arg(long, default_value = "127.0.0.1", help = "IP address to bind to")]
+        ip: String,
+        #[arg(long, default_value_t = 50051, help = "Port to listen on")]
+        port: u16,
+        #[arg(short = 'C', long, help = "Directory to change to before starting")]
+        directory: Option<String>,
+        #[arg(
+            long,
+            help = "Execution mode: local | local-cluster | kubernetes-cluster (overrides SAIL_MODE)"
+        )]
+        mode: Option<String>,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Number of local workers for local-cluster mode (0 = config default)"
+        )]
+        workers: usize,
+    },
+
+    /// Execute a SQL query and print results, then exit
+    Sql {
+        /// SQL statement to execute
+        query: String,
+        #[arg(short = 'C', long, help = "Directory to change to before executing")]
+        directory: Option<String>,
+    },
+
+    /// Run a PySpark script file and exit
+    Run {
+        #[arg(
+            short = 'f',
+            long,
+            help = "PySpark script to run, or '-' for stdin",
+            default_value = "-"
+        )]
+        file: String,
+        #[arg(short = 'C', long, help = "Directory to change to before running")]
+        directory: Option<String>,
+    },
+
+    /// Start an interactive PySpark shell
+    Shell,
+
+    /// Run the TPC-H benchmark self-test (22 queries at SF-1 by default)
+    Bench {
+        #[arg(long, default_value_t = 1, help = "TPC-H scale factor")]
+        scale_factor: u32,
+        #[arg(long, default_value = "local", help = "Storage path or S3 URI for data")]
+        data_path: String,
+    },
+
+    /// Distributed cluster mode
+    Cluster {
+        #[arg(long, help = "Role this node plays in the cluster")]
+        role: ClusterRole,
+        #[arg(long, default_value = "0.0.0.0", help = "IP address to bind to")]
+        ip: String,
+        #[arg(long, default_value_t = 50051, help = "Spark Connect port (scheduler role)")]
+        port: u16,
+        #[arg(long, help = "Scheduler address (host:port), required for worker role")]
+        scheduler: Option<String>,
+        #[arg(
+            long,
+            default_value_t = 0,
+            help = "Number of local workers to launch (0 = config default, scheduler role only)"
+        )]
+        workers: usize,
+    },
+
+    /// Arrow Flight SQL interface
+    #[command(subcommand)]
     Flight(FlightCommand),
-    #[command(about = "Start the Sail worker (internal use only)")]
+
+    /// Start the Spark MCP (Model Context Protocol) server
+    McpServer {
+        #[arg(long, default_value = "127.0.0.1", help = "Host to bind to")]
+        host: String,
+        #[arg(long, default_value_t = 8000, help = "Port to listen on")]
+        port: u16,
+        #[arg(long, default_value_t = McpTransport::Sse, help = "MCP transport")]
+        transport: McpTransport,
+        #[arg(long, help = "Spark remote address to connect to")]
+        spark_remote: Option<String>,
+        #[arg(short = 'C', long, help = "Directory to change to before starting")]
+        directory: Option<String>,
+    },
+
+    #[command(hide = true)]
+    Worker,
+}
+
+#[derive(Clone, ValueEnum)]
+pub enum ClusterRole {
+    Scheduler,
     Worker,
 }
 
 #[derive(Subcommand)]
 enum FlightCommand {
-    #[command(about = "Start the Arrow Flight SQL server")]
+    /// Start the Arrow Flight SQL server
     Server {
-        #[arg(
-            long,
-            default_value = "127.0.0.1",
-            help = "The IP address that the server binds to"
-        )]
+        #[arg(long, default_value = "127.0.0.1", help = "IP address to bind to")]
         ip: String,
-        #[arg(
-            long,
-            default_value_t = 32010,
-            help = "The port number that the server listens on"
-        )]
+        #[arg(long, default_value_t = 32010, help = "Port to listen on")]
         port: u16,
-        #[arg(
-            short = 'C',
-            long,
-            help = "The directory to change to before starting the server"
-        )]
-        directory: Option<String>,
-    },
-}
-
-#[derive(Subcommand)]
-enum SparkCommand {
-    #[command(about = "Start the Spark Connect server")]
-    Server {
-        #[arg(
-            long,
-            default_value = "127.0.0.1",
-            help = "The IP address that the server binds to"
-        )]
-        ip: String,
-        #[arg(
-            long,
-            default_value_t = 50051,
-            help = "The port number that the server listens on"
-        )]
-        port: u16,
-        #[arg(
-            short = 'C',
-            long,
-            help = "The directory to change to before starting the server"
-        )]
-        directory: Option<String>,
-    },
-    #[command(
-        about = "Start the PySpark shell with a Spark Connect server running in the background"
-    )]
-    Shell,
-    #[command(about = "Run a PySpark script and exit")]
-    Run {
-        #[arg(
-            short = 'f',
-            long,
-            help = "The PySpark script file to run, or '-' for stdin",
-            default_value = "-"
-        )]
-        file: String,
-        #[arg(
-            short = 'C',
-            long,
-            help = "The directory to change to before running the script"
-        )]
-        directory: Option<String>,
-    },
-    #[command(about = "Start the Spark MCP (Model Context Protocol) server")]
-    McpServer {
-        #[arg(
-            long,
-            default_value = "127.0.0.1",
-            help = "The host that the MCP server binds to (ignored for the stdio transport)"
-        )]
-        host: String,
-        #[arg(
-            long,
-            default_value_t = 8000,
-            help = "The port number that the server listens on (ignored for the stdio transport)"
-        )]
-        port: u16,
-        #[arg(
-            long,
-            default_value_t = McpTransport::Sse,
-            help = "The transport to use for the MCP server"
-        )]
-        transport: McpTransport,
-        #[arg(long, help = "The Spark remote address to connect to (if specified)")]
-        spark_remote: Option<String>,
-        #[arg(
-            short = 'C',
-            long,
-            help = "The directory to change to before starting the server"
-        )]
+        #[arg(short = 'C', long, help = "Directory to change to before starting")]
         directory: Option<String>,
     },
 }
@@ -138,59 +151,208 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Command::Worker => run_worker(),
-        Command::Spark(command) => match command {
-            SparkCommand::Server {
-                ip,
-                port,
-                directory,
-            } => {
-                if let Some(directory) = directory {
-                    std::env::set_current_dir(directory)?;
+
+        Command::Server { ip, port, directory, mode, workers } => {
+            if let Some(dir) = directory {
+                std::env::set_current_dir(dir)?;
+            }
+            match mode.as_deref() {
+                Some("local-cluster") | Some("local_cluster") => {
+                    run_spark_connect_server_local_cluster(ip.parse()?, port, workers)
                 }
-                run_spark_connect_server(ip.parse()?, port)
-            }
-            SparkCommand::Shell => {
-                // TODO: Why is there warning about leaked semaphore objects
-                //   according to the Python multiprocessing resource tracker?
-                run_pyspark_shell()
-            }
-            SparkCommand::Run { file, directory } => {
-                if let Some(directory) = directory {
-                    std::env::set_current_dir(directory)?;
+                Some(other) => {
+                    // For other modes (local, kubernetes-cluster) honour SAIL_MODE or the
+                    // config file; the --mode flag is informational / a convenience alias.
+                    eprintln!(
+                        "note: --mode {other} — use SAIL_MODE env var for full config control"
+                    );
+                    run_spark_connect_server(ip.parse()?, port)
                 }
-                run_pyspark_script(file)
+                None => run_spark_connect_server(ip.parse()?, port),
             }
-            SparkCommand::McpServer {
-                host,
-                port,
-                transport,
-                spark_remote,
-                directory,
-            } => {
-                if let Some(directory) = directory {
-                    std::env::set_current_dir(directory)?;
+        }
+
+        Command::Sql { query, directory } => {
+            if let Some(dir) = directory {
+                std::env::set_current_dir(dir)?;
+            }
+            run_pyspark_script(format_sql_script(&query))
+        }
+
+        Command::Run { file, directory } => {
+            if let Some(dir) = directory {
+                std::env::set_current_dir(dir)?;
+            }
+            run_pyspark_script(file)
+        }
+
+        Command::Shell => run_pyspark_shell(),
+
+        Command::Bench { scale_factor, data_path } => {
+            run_bench(scale_factor, &data_path)
+        }
+
+        Command::Cluster { role, ip, port, scheduler, workers } => {
+            match role {
+                ClusterRole::Scheduler => {
+                    // The "scheduler" role runs the Spark Connect server in
+                    // local-cluster mode: the driver actor lives in-process and
+                    // spawns N LocalWorkerManager worker threads.
+                    run_spark_connect_server_local_cluster(ip.parse()?, port, workers)
                 }
-                run_spark_mcp_server(
-                    McpSettings {
-                        transport,
-                        host,
-                        port,
-                    },
-                    spark_remote,
-                )
+                ClusterRole::Worker => {
+                    // Standalone worker: connects back to the driver gRPC endpoint.
+                    // SAIL_CLUSTER__DRIVER_EXTERNAL_HOST / PORT must be set (or
+                    // the defaults from application.yaml apply).
+                    let sched = scheduler.unwrap_or_else(|| format!("{}:{}", ip, port));
+                    eprintln!("vajra cluster worker → scheduler at {sched}");
+                    run_worker()
+                }
             }
-        },
-        Command::Flight(command) => match command {
-            FlightCommand::Server {
-                ip,
-                port,
-                directory,
-            } => {
-                if let Some(directory) = directory {
-                    std::env::set_current_dir(directory)?;
+        }
+
+        Command::Flight(cmd) => match cmd {
+            FlightCommand::Server { ip, port, directory } => {
+                if let Some(dir) = directory {
+                    std::env::set_current_dir(dir)?;
                 }
                 run_flight_server(ip.parse()?, port)
             }
         },
+
+        Command::McpServer { host, port, transport, spark_remote, directory } => {
+            if let Some(dir) = directory {
+                std::env::set_current_dir(dir)?;
+            }
+            run_spark_mcp_server(McpSettings { transport, host, port }, spark_remote)
+        }
     }
+}
+
+fn format_sql_script(query: &str) -> String {
+    // Write a tiny PySpark script that runs the SQL and prints results.
+    // This is passed to run_pyspark_script which expects a file path or "-".
+    // We write to a temp file and return the path.
+    use std::io::Write;
+    let mut tmp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+    writeln!(
+        tmp,
+        r#"from pyspark.sql import SparkSession
+spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
+spark.sql({query:?}).show(truncate=False)
+"#,
+        query = query
+    )
+    .expect("failed to write temp script");
+    let path = tmp.into_temp_path();
+    path.keep().expect("failed to keep temp file").to_string_lossy().to_string()
+}
+
+fn run_bench(scale_factor: u32, data_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write;
+    let script = format_bench_script(scale_factor, data_path);
+    let mut tmp = tempfile::NamedTempFile::new()?;
+    writeln!(tmp, "{script}")?;
+    let path = tmp.into_temp_path().keep()?;
+    run_pyspark_script(path.to_string_lossy().to_string())
+}
+
+fn format_bench_script(scale_factor: u32, data_path: &str) -> String {
+    // spark is injected into scope by spark_run.py — no SparkSession.builder needed.
+    format!(
+        r#"
+import sys, time
+
+SF = {sf}
+DATA = {data_path:?}
+
+LINE = "=" * 62
+print(f"\n{{LINE}}")
+print(f"  Ignite TPC-H Benchmark  —  Scale Factor {{SF}}")
+print(f"{{LINE}}\n")
+
+# ── 1. Generate / load data ──────────────────────────────────
+try:
+    import duckdb
+except ImportError:
+    print("ERROR: duckdb is required for vajra bench.")
+    print("       pip install 'duckdb>=1.0'")
+    sys.exit(1)
+
+conn = duckdb.connect()
+try:
+    conn.sql("INSTALL tpch; LOAD tpch;")
+except Exception:
+    pass  # already installed in some bundles
+
+if DATA == "local":
+    print(f"Generating TPC-H SF={{SF}} with DuckDB (in-memory)...")
+    conn.sql(f"CALL dbgen(sf={{SF}})")
+    tables = [r[0] for r in conn.sql("SHOW TABLES").fetchall()]
+    q_rows  = conn.sql("SELECT query_nr, query FROM tpch_queries()").fetchall()
+    queries = dict(q_rows)
+    print(f"Generated {{len(tables)}} tables.\n")
+
+    print("Loading into Ignite via Arrow...")
+    t_load = time.time()
+    for tbl in tables:
+        arrow = conn.sql(f"FROM {{tbl}}").fetch_arrow_table()
+        spark.createDataFrame(arrow.to_pandas()).createOrReplaceTempView(tbl)
+    print(f"Load time: {{time.time()-t_load:.2f}}s\n")
+else:
+    import os
+    TABLES = ["customer","lineitem","nation","orders","part","partsupp","region","supplier"]
+    queries = dict(conn.sql("SELECT query_nr, query FROM tpch_queries()").fetchall())
+    print(f"Loading Parquet files from {{DATA}}...")
+    t_load = time.time()
+    for tbl in TABLES:
+        p = os.path.join(DATA, f"{{tbl}}.parquet")
+        if os.path.isfile(p):
+            spark.read.parquet(p).createOrReplaceTempView(tbl)
+        else:
+            # try directory of part files
+            spark.read.parquet(os.path.join(DATA, tbl)).createOrReplaceTempView(tbl)
+    print(f"Load time: {{time.time()-t_load:.2f}}s\n")
+
+# ── 2. Run all 22 TPC-H queries ──────────────────────────────
+print(f"  {{' Q':>4}}  {{' Time':>8}}  {{' Rows':>10}}  Status")
+print(f"  {{'-'*4}}  {{'-'*8}}  {{'-'*10}}  ------")
+results = []
+for q_num in range(1, 23):
+    sql = queries.get(q_num, "")
+    if not sql:
+        print(f"  Q{{q_num:02d}}  {{'(no query)':>8}}")
+        results.append((q_num, None, 0, "SKIP"))
+        continue
+    last_df = None
+    try:
+        t0 = time.time()
+        for stmt in (s.strip() for s in sql.split(";") if s.strip()):
+            stmt = stmt.replace("CREATE VIEW", "CREATE TEMP VIEW")
+            last_df = spark.sql(stmt)
+        count = last_df.count() if last_df is not None else 0
+        elapsed = time.time() - t0
+        print(f"  Q{{q_num:02d}}  {{elapsed:>7.3f}}s  {{count:>10}}  OK")
+        results.append((q_num, elapsed, count, "OK"))
+    except Exception as exc:
+        print(f"  Q{{q_num:02d}}  {{' FAILED':>8}}  {{' ':>10}}  {{str(exc)[:55]}}")
+        results.append((q_num, None, 0, "FAIL"))
+
+# ── 3. Summary ───────────────────────────────────────────────
+ok     = [r for r in results if r[3] == "OK"]
+failed = [r[0] for r in results if r[3] == "FAIL"]
+total  = sum(r[1] for r in ok)
+times  = sorted(r[1] for r in ok)
+median = times[len(times)//2] if times else 0
+
+print(f"\n{{LINE}}")
+print(f"  Passed : {{len(ok):>2}}/22    Failed : {{len(failed):>2}}/22")
+print(f"  Total  : {{total:>8.3f}}s   Median : {{median:>7.3f}}s")
+if failed:
+    print(f"  Failed queries: {{failed}}")
+print(f"{{LINE}}\n")
+"#,
+        sf = scale_factor,
+        data_path = data_path,
+    )
 }

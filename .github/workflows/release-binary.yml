@@ -1,0 +1,119 @@
+name: Release Binary
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  PYO3_CROSS_PYTHON_VERSION: "3.11"
+
+jobs:
+  build-linux:
+    name: Build Linux (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+            asset_name: ignite-x86_64-unknown-linux-musl
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+            asset_name: ignite-aarch64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system deps
+        run: |
+          sudo apt-get install -y protobuf-compiler musl-tools
+          pip install cargo-zigbuild 2>/dev/null || cargo install cargo-zigbuild
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.14.0"
+      - name: Build
+        run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
+      - name: Rename binary
+        run: cp target/${{ matrix.target }}/release/ignite ${{ matrix.asset_name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+          retention-days: 1
+
+  build-macos:
+    name: Build macOS universal
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-cargo-universal-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system deps
+        run: brew install protobuf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install cargo-zigbuild
+        run: pip install cargo-zigbuild || cargo install cargo-zigbuild
+      - name: Install zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.14.0"
+      - name: Build x86_64 (cross)
+        run: cargo zigbuild --release -p sail-cli --target x86_64-apple-darwin
+      - name: Build aarch64 (native)
+        run: cargo build --release -p sail-cli --target aarch64-apple-darwin
+      - name: Create universal binary
+        run: |
+          lipo -create -output ignite-universal2-apple-darwin \
+            target/x86_64-apple-darwin/release/ignite \
+            target/aarch64-apple-darwin/release/ignite
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ignite-universal2-apple-darwin
+          path: ignite-universal2-apple-darwin
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-macos]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ignite-*
+          merge-multiple: true
+          path: dist
+      - name: Show release assets
+        run: ls -lh dist/
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: ${{ github.event_name == 'workflow_dispatch' }}

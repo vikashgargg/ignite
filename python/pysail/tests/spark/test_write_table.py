@@ -64,7 +64,6 @@ def test_insert_into_with_invalid_options(spark):
         df.write.partitionBy("id").insertInto("t1")
 
 
-@pytest.mark.skipif(not is_jvm_spark(), reason="`INSERT OVERWRITE` is not supported in Sail yet")
 def test_insert_overwrite(spark):
     spark.sql("INSERT INTO t1 VALUES (401, 'Alice', 22)")
     spark.sql("INSERT OVERWRITE t1 VALUES (402, 'Bob', 32)")
@@ -139,18 +138,17 @@ def test_save_as_table(spark, tmp_path):
 
 
 @pytest.mark.catalog_integration
-@pytest.mark.skipif(is_jvm_spark(), reason="Sail defaults persistent tables to EXTERNAL")
-def test_save_as_table_without_path_surfaces_external(spark):
-    table_name = "t_external_default"
+def test_save_as_table_without_path_is_managed(spark):
+    table_name = "t_managed_default"
     df = spark.createDataFrame([(1, "Alice")], schema="id LONG, name STRING")
     try:
         df.write.saveAsTable(table_name)
         table = spark.catalog.getTable(table_name)
-        assert table.tableType == "EXTERNAL"
+        assert table.tableType == "MANAGED"
 
         show_rows = spark.sql(f"SHOW TABLE EXTENDED LIKE '{table_name}'").collect()
         show_row = next(row for row in show_rows if row.tableName == table_name)
-        assert "Type: EXTERNAL" in show_row.information
+        assert "Type: MANAGED" in show_row.information
     finally:
         spark.sql(f"DROP TABLE IF EXISTS {table_name}")
 

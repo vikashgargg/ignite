@@ -24,14 +24,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::set_var(CliConfigEnv::RUN_PYTHON, "true");
         // Initialize the Python interpreter.
         Python::initialize();
-        let args = std::env::args().collect();
-        match sail_cli::runner::main(args) {
-            Ok(()) => {}
-            Err(e) => {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            }
-        }
+        let args: Vec<String> = std::env::args().collect();
+        // Spawn the CLI logic on a thread with a large stack. When `Handle::block_on`
+        // is called inside the Tokio runtime, the calling thread can temporarily be
+        // used as a runtime worker, so it needs enough stack for deep async futures
+        // (e.g. recursive plan resolution).
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || match sail_cli::runner::main(args) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            })
+            .expect("failed to spawn main thread")
+            .join()
+            .expect("main thread panicked");
     }
     Ok(())
 }

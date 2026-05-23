@@ -1249,6 +1249,7 @@ mod tests {
                     comment: None,
                     constraints: vec![],
                     location: None,
+                    is_external: false,
                     format: "iceberg".to_string(),
                     partition_by: vec![],
                     sort_by: vec![],

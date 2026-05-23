@@ -242,7 +242,7 @@ impl PlanResolver<'_> {
         let data_type = expr.get_type(schema)?;
 
         // For Maps, we support non-literal expressions as keys
-        if matches!(data_type, DataType::Map(_, _)) {
+        if let DataType::Map(ref entries_field, _) = data_type {
             let NamedExpr {
                 name: extraction_name,
                 expr: extraction_expr,
@@ -250,6 +250,30 @@ impl PlanResolver<'_> {
             } = self
                 .resolve_named_expression(extraction, schema, state)
                 .await?;
+
+            // Cast extraction key to the map's key type to handle integer width
+            // mismatches (e.g. SQL `map(1, 2)` infers Int64 keys while PySpark
+            // sends `getItem(1)` as Int32).
+            let extraction_expr =
+                if let DataType::Struct(entries_fields) = entries_field.data_type() {
+                    if let Some(key_field) = entries_fields.first() {
+                        let key_type = key_field.data_type().clone();
+                        let extraction_type =
+                            extraction_expr.get_type(schema).unwrap_or(DataType::Null);
+                        if extraction_type != key_type {
+                            expr::Expr::Cast(expr::Cast {
+                                expr: Box::new(extraction_expr),
+                                data_type: key_type,
+                            })
+                        } else {
+                            extraction_expr
+                        }
+                    } else {
+                        extraction_expr
+                    }
+                } else {
+                    extraction_expr
+                };
 
             let result_name = format!("{}[{}]", name.one()?, extraction_name.one()?);
             // Use map_extract which supports dynamic keys, then extract first element

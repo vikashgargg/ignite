@@ -6,7 +6,7 @@ use datafusion::arrow::datatypes::{DataType as ArrowDataType, SchemaRef};
 use datafusion::catalog::Session;
 use datafusion::common::{not_impl_err, plan_err, DFSchema, DataFusionError, Result};
 use datafusion::datasource::listing::ListingTableUrl;
-use datafusion::logical_expr::TableSource;
+use datafusion::logical_expr::{lit, TableSource};
 use datafusion::physical_plan::ExecutionPlan;
 use sail_common_datafusion::column_features::ColumnFeatures;
 use sail_common_datafusion::datasource::{
@@ -279,9 +279,11 @@ impl TableFormat for DeltaTableFormat {
             // ── Merge-on-Read DELETE ──────────────────────────────────────────
             (MergeStrategy::MergeOnRead, RowLevelCommand::Delete) => {
                 let table_url = Self::parse_table_url(ctx, vec![info.target.path]).await?;
-                let condition = info.condition.ok_or_else(|| {
-                    DataFusionError::Plan("DELETE operation requires a WHERE condition".to_string())
-                })?;
+                // DELETE without WHERE deletes all rows — use Lit(true) as the predicate so
+                // the negated filter keeps nothing and every file is rewritten/removed.
+                let condition = info.condition.unwrap_or_else(|| {
+                    sail_common_datafusion::logical_expr::ExprWithSource::new(lit(true), None)
+                });
                 let delta_options = DeltaWriteOptions::resolve(ctx, info.target.options)?;
                 let delete_config = DeltaPlannerConfig::new(
                     table_url,
@@ -317,9 +319,9 @@ impl TableFormat for DeltaTableFormat {
             // ── Copy-on-Write DELETE ─────────────────────────────────────────
             (MergeStrategy::Eager, RowLevelCommand::Delete) => {
                 let table_url = Self::parse_table_url(ctx, vec![info.target.path]).await?;
-                let condition = info.condition.ok_or_else(|| {
-                    DataFusionError::Plan("DELETE operation requires a WHERE condition".to_string())
-                })?;
+                let condition = info.condition.unwrap_or_else(|| {
+                    sail_common_datafusion::logical_expr::ExprWithSource::new(lit(true), None)
+                });
                 let delta_options = DeltaWriteOptions::resolve(ctx, info.target.options)?;
                 let delete_config = DeltaPlannerConfig::new(
                     table_url,

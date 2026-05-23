@@ -1,0 +1,162 @@
+name: Ignite CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Required by PyO3 when cross-compiling to a different OS/arch.
+  PYO3_CROSS_PYTHON_VERSION: "3.11"
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system deps
+        run: sudo apt-get install -y protobuf-compiler
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system deps
+        run: sudo apt-get install -y protobuf-compiler
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run unit tests
+        run: cargo test --workspace --lib -- --test-threads=4
+
+  build-linux:
+    name: Build ignite Linux binaries (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            target: x86_64-unknown-linux-musl
+            artifact: ignite-linux-x86_64
+          - arch: aarch64
+            target: aarch64-unknown-linux-musl
+            artifact: ignite-linux-aarch64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system deps
+        run: |
+          sudo apt-get install -y protobuf-compiler musl-tools
+          pip install cargo-zigbuild 2>/dev/null || cargo install cargo-zigbuild
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.14.0"
+      - name: Build static binary (musl via zigbuild)
+        run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
+      - name: Show binary size
+        run: |
+          ls -lh target/${{ matrix.target }}/release/ignite
+          file target/${{ matrix.target }}/release/ignite
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/${{ matrix.target }}/release/ignite
+          retention-days: 7
+
+  build-macos-universal:
+    name: Build ignite macOS universal binary
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-cargo-universal-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system deps
+        run: brew install protobuf
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install cargo-zigbuild
+        run: pip install cargo-zigbuild || cargo install cargo-zigbuild
+      - name: Install zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: "0.14.0"
+      - name: Build x86_64 (cross via zigbuild)
+        run: cargo zigbuild --release -p sail-cli --target x86_64-apple-darwin
+      - name: Build aarch64 (native)
+        run: cargo build --release -p sail-cli --target aarch64-apple-darwin
+      - name: Create universal binary with lipo
+        run: |
+          lipo -create -output target/ignite-universal2-apple-darwin \
+            target/x86_64-apple-darwin/release/ignite \
+            target/aarch64-apple-darwin/release/ignite
+      - name: Show binary sizes
+        run: |
+          ls -lh target/x86_64-apple-darwin/release/ignite
+          ls -lh target/aarch64-apple-darwin/release/ignite
+          ls -lh target/ignite-universal2-apple-darwin
+          file target/ignite-universal2-apple-darwin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ignite-macos-universal
+          path: target/ignite-universal2-apple-darwin
+          retention-days: 7

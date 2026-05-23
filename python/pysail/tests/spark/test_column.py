@@ -71,7 +71,6 @@ def test_struct_wildcard_on_struct_column(spark):
     ]
 
 
-@pytest.mark.skip(reason="not working")
 def test_get_item_nested_map(spark):
     df = spark.sql("SELECT struct(map(1, 2) AS b) AS a")
     assert df.select(df.a.getItem("b").getItem(1)).collect() == [Row(**{"a.b[1]": 2})]

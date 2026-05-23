@@ -374,14 +374,6 @@ def test_parquet_hidden_files_are_excluded(spark, sample_df, tmp_path):
     assert sorted(df.collect(), key=safe_sort_key) == sorted(sample_df.collect(), key=safe_sort_key)
 
 
-@pytest.mark.skip(
-    reason=(
-        "FIXME: Sail's partition-column type inference returns every "
-        "discovered column as STRING; Spark infers Int/Double/String from "
-        "the observed `key=value` strings (see FIXME above "
-        "`rewrite_listing_partitions` in `crates/sail-data-source/src/listing.rs`)."
-    )
-)
 @pytest.mark.parametrize("provide_schema", [True, False])
 def test_parquet_read_partitioned_directory_type_inference(spark, tmp_path, provide_schema):
     # Verify partition-column type inference against Spark behavior across
@@ -497,14 +489,6 @@ def test_parquet_read_partitioned_directory_type_inference_string_only(spark, tm
     ]
 
 
-@pytest.mark.skip(
-    reason=(
-        "FIXME: Sail's partition-column type inference returns every "
-        "discovered column as STRING; Spark infers Int/Double/String from "
-        "the observed `key=value` strings (see FIXME above "
-        "`rewrite_listing_partitions` in `crates/sail-data-source/src/listing.rs`)."
-    )
-)
 @pytest.mark.parametrize("provide_schema", [True, False])
 def test_parquet_read_multi_level_partitioned_directory(spark, tmp_path, provide_schema):
     # Two-level partition tree: `year=2024/month=11/...`. Partition discovery

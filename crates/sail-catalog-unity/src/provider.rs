@@ -511,6 +511,7 @@ impl CatalogProvider for UnityCatalogProvider {
             comment,
             constraints,
             location,
+            is_external: _,
             format,
             partition_by,
             sort_by,

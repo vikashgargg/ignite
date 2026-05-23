@@ -1,13 +1,16 @@
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 
 use pyo3::prelude::PyAnyMethods;
 use pyo3::{PyResult, Python};
+use sail_common::config::AppConfig;
 use tokio::sync::oneshot;
 
 use crate::python::Modules;
 use crate::spark::server::with_spark_connect_server;
 
 pub fn run_pyspark_shell() -> Result<(), Box<dyn std::error::Error>> {
+    let config = Arc::new(AppConfig::load()?);
     let (tx, rx) = oneshot::channel::<()>();
     // Listen on only the loopback interface for security.
     let address = (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
@@ -19,7 +22,7 @@ pub fn run_pyspark_shell() -> Result<(), Box<dyn std::error::Error>> {
         // even if no value is sent through the channel.
         let _ = rx.await;
     };
-    with_spark_connect_server(address, shutdown, |addr| async move {
+    with_spark_connect_server(config, address, shutdown, |addr| async move {
         // Move `tx` to the async block so that it will be dropped after running the PySpark shell,
         // which will signal the server to shut down.
         // Note: `let _ = tx;` does not work!!!

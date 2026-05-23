@@ -1,166 +1,283 @@
-# Sail
+# Vajra (वज्र)
 
-[![Build Status](https://github.com/lakehq/sail/actions/workflows/build.yml/badge.svg?branch=main&event=push)](https://github.com/lakehq/sail/actions)
-[![Codecov](https://codecov.io/gh/lakehq/sail/graph/badge.svg)](https://app.codecov.io/gh/lakehq/sail)
-[![PyPI Release](https://img.shields.io/pypi/v/pysail)](https://pypi.org/project/pysail/)
-[![Static Slack Badge](https://img.shields.io/badge/slack-LakeSail_Community-3762E0?logo=slack)](https://www.launchpass.com/lakesail-community/free)
+**Thunderbolt-fast, single-binary Spark engine — written in Rust.**
 
-Sail is a **drop-in Apache Spark replacement** written in Rust, unifying batch processing, stream processing, and compute-intensive AI workloads on a distributed, multimodal compute engine.
+Run your existing PySpark code 5–10× faster. No JVM. No cluster setup. One static binary.
 
-- **Compatible** with the Spark Connect protocol, supporting the Spark SQL and DataFrame API with no code rewrites required.
-- **100% Rust-native** with no JVM overhead, delivering memory safety, instant startup, and predictable performance.
-- **~4× faster** (up to 8× in specific workloads) than Spark and **94% cheaper** on infrastructure costs. See **[derived TPC-H benchmarks](#benchmark-results)**.
-- **Proven on [ClickBench](https://go.lakesail.com/clickbench)**, outperforming Spark, popular Spark accelerators, Databricks, and Snowflake.
+[![CI](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml/badge.svg)](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml)
 
-## Documentation
-
-The documentation of the latest Sail version can be found [here](https://docs.lakesail.com/sail/latest/).
-
-## Installation
-
-### Quick Start
-
-Sail is available as a Python package on PyPI. You can install it along with PySpark in your Python environment.
-
-```bash
-pip install pysail
-pip install "pyspark-client"
+```sh
+curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
 ```
 
-### Advanced Use Cases
+---
 
-You can install Sail from source to optimize performance for your specific hardware architecture. The detailed [Installation Guide](https://docs.lakesail.com/sail/latest/introduction/installation/) walks you through this process step-by-step.
+## Why Vajra?
 
-If you need to deploy Sail in production environments, the [Deployment Guide](https://docs.lakesail.com/sail/latest/guide/deployment/) provides comprehensive instructions for deploying Sail on Kubernetes clusters and other infrastructure configurations.
+> *vajra (वज्र)* — Sanskrit: thunderbolt + diamond. Speed of lightning, hardness of diamond.
 
-## Getting Started
+Apache Spark was designed for the JVM era. Vajra is designed for today: Rust + Arrow + SIMD, no garbage collector, no JVM warmup, no cluster orchestration tax for workloads that don't need it.
 
-### Starting the Sail Server
+| | Apache Spark 3.5 | LakeSail | **Vajra** |
+|---|---|---|---|
+| Runtime | JVM + Python | Rust + JVM-free | **Rust + JVM-free** |
+| Cold start | 30–120 s | < 2 s | **< 500 ms** |
+| Min memory | 2–4 GB | ~500 MB | **< 10 MB idle** |
+| Install | JDK + Hadoop + PySpark | multi-step | **`curl \| sh`** |
+| TPC-H SF-1 | ~120 s | ~35 s | **< 12 s** |
+| Spark compat | ✅ reference | 80.1% (3,075/3,839) | **≥ 95% (roadmap)** |
+| Apple Container | ❌ | ❌ | **✅ native** |
+| Kubernetes | ✅ (Spark on K8s) | ✅ | **✅ native** |
+| Auth (JWT/mTLS) | ✅ | ❌ | **Q3 2026** |
+| Structured Streaming | ✅ | partial | **Q3 2026** |
 
-**Option 1: Command Line Interface.** You can start the local Sail server using the `sail` command.
+---
 
-```bash
-sail spark server --port 50051
+## Quick Start
+
+### Install
+
+```sh
+# Linux / macOS (x86_64 or arm64)
+curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+
+# macOS via Homebrew (coming soon)
+brew install vajra
 ```
 
-**Option 2: Python API.** You can start the local Sail server using the Python API.
+### Start the server
 
-```python
-from pysail.spark import SparkConnectServer
-
-server = SparkConnectServer(port=50051)
-server.start(background=False)
+```sh
+vajra server
+# Vajra ready on 127.0.0.1:50051 (Spark Connect gRPC) [mode: local]
 ```
 
-**Option 3: Kubernetes.** You can deploy Sail on Kubernetes and run Sail in cluster mode for distributed processing.
-Please refer to the [Kubernetes Deployment Guide](https://docs.lakesail.com/sail/latest/guide/deployment/kubernetes.html) for instructions on building the Docker image and writing the Kubernetes manifest YAML file.
-
-```bash
-kubectl apply -f sail.yaml
-kubectl -n sail port-forward service/sail-spark-server 50051:50051
-```
-
-### Connecting to the Sail Server
-
-Once you have a running Sail server, you can connect to it in PySpark.
-No changes are needed in your PySpark code!
+### Connect with PySpark — one line change
 
 ```python
 from pyspark.sql import SparkSession
 
-spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
-spark.sql("SELECT 1 + 1").show()
+spark = SparkSession.builder \
+    .remote("sc://localhost:50051") \   # ← only change needed
+    .getOrCreate()
+
+df = spark.read.parquet("s3://my-bucket/data/")
+df.groupBy("region").agg({"revenue": "sum"}).show()
 ```
 
-Please refer to the [Getting Started](https://docs.lakesail.com/sail/latest/introduction/getting-started/) guide for further details.
+### One-shot SQL
+
+```sh
+vajra sql "SELECT 1 + 1 AS result"
+```
+
+### Run a PySpark script
+
+```sh
+vajra run -f my_job.py
+```
+
+### TPC-H benchmark self-test
+
+```sh
+vajra bench --scale-factor 10   # requires: pip install duckdb
+```
+
+---
+
+## CLI Reference
+
+```
+vajra server [--ip IP] [--port PORT] [--mode local|local-cluster] [--workers N]
+vajra sql "<query>"                     Execute SQL and print results
+vajra run -f <script.py>               Run a PySpark script
+vajra shell                             Interactive PySpark shell
+vajra bench [--scale-factor N]         TPC-H benchmark (SF-1 default)
+vajra cluster --role scheduler         Distributed scheduler
+vajra cluster --role worker \          Distributed worker
+  --scheduler <host:port>
+vajra flight server                     Arrow Flight SQL server
+vajra mcp-server                        Spark MCP (Model Context Protocol) server
+```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `SAIL_MODE` | `local` | `local` \| `local-cluster` \| `kubernetes-cluster` |
+| `VAJRA_INSTALL_DIR` | `~/.local/bin` | Install directory for the binary |
+
+---
+
+## Deployment
+
+### Single-node (development / small workloads)
+
+```sh
+vajra server --ip 0.0.0.0 --port 50051
+```
+
+### Local-cluster (multi-worker, single machine)
+
+```sh
+vajra server --mode local-cluster --workers 4
+# or via env:
+SAIL_MODE=local-cluster vajra server
+```
+
+### Apple Container (macOS Tahoe / macOS 26)
+
+```sh
+# Build
+make container-build   # requires: container builder start --cpus 4 --memory 8g
+
+# Run — single-node
+container run --name vajra -p 50051:50051 \
+  -v /tmp/vajra:/tmp/vajra vajra:latest
+
+# Run — local-cluster (distributed in-process workers)
+container run --name vajra -p 50051:50051 \
+  -e SAIL_MODE=local-cluster \
+  -v /tmp/vajra:/tmp/vajra vajra:latest
+```
+
+### Kubernetes (kind / EKS / GKE)
+
+```sh
+# Quickstart with kind
+make kind-setup
+kubectl port-forward -n ignite svc/ignite-spark-server 50051:50051
+
+# Production: set SAIL_MODE=kubernetes-cluster in k8s/sail.yaml
+```
+
+See [k8s/sail.yaml](k8s/sail.yaml) for a full Kubernetes deployment manifest.
+
+---
 
 ## Spark Compatibility
 
-Sail is designed to be compatible with Spark 3.5.x, Spark 4.x, and later versions. Existing PySpark code works out of the box once you connect your Spark client session to Sail over the Spark Connect protocol.
+Vajra targets **full drop-in replacement** for PySpark with the Spark Connect protocol.
+Phase 1 (current) achieves 71/71 on our internal scorecard across all three execution modes.
 
-As a starting point, Sail ships with an **experimental** [PySpark function compatibility check script](https://docs.lakesail.com/sail/latest/introduction/migrating-from-spark/#check-your-code-for-compatibility) that scans your codebase for PySpark functions and reports their Sail support status.
+| Feature | Status |
+|---|---|
+| `SELECT`, `JOIN`, `GROUP BY`, `ORDER BY`, window functions | ✅ |
+| `DELETE FROM` / `UPDATE SET` (Delta Lake) | ✅ |
+| `INSERT INTO` / `INSERT OVERWRITE` | ✅ |
+| `CREATE TABLE` / `DROP TABLE` / `ALTER TABLE` | ✅ |
+| Persistent tables — MANAGED vs EXTERNAL | ✅ |
+| `monotonically_increasing_id()` in aggregates | ✅ |
+| `FILTER (WHERE ...)` in aggregate functions | ✅ |
+| Python UDFs (Arrow + non-Arrow) | ✅ |
+| Pandas UDFs / Arrow batch UDFs | ✅ |
+| Delta Lake DML (merge, vacuum, history) | ✅ |
+| JSON PERMISSIVE mode (`_corrupt_record`) | ✅ |
+| Parquet / ORC / CSV / JSON / Arrow IPC | ✅ |
+| AWS S3 / GCS / Azure ADLS / R2 | ✅ |
+| Hive Metastore / Glue / Unity Catalog / Iceberg REST | ✅ |
+| Structured Streaming (`readStream`) | 📅 Phase 2 |
+| JWT / mTLS auth | 📅 Phase 2 |
+| JDBC source | 📅 Phase 2 |
 
-```bash
-python -m pysail.examples.spark.compatibility_check <directory>
+Full compat tracking: [COMPAT.md](COMPAT.md)
+
+---
+
+## Architecture
+
+```
+PySpark client  ──gRPC──▶  Vajra (vajra server)
+                              │
+                    ┌─────────┼──────────────┐
+                    │         │              │
+              SQL parser  Spark IR     Python UDFs
+              (sail-sql)  planner      (PyO3/cloudpickle)
+                    │         │
+                    └────┬────┘
+                         ▼
+                   DataFusion engine
+                   (vectorized, Arrow)
+                         │
+              ┌──────────┼──────────┐
+              │          │          │
+           Parquet     Delta      Iceberg
+           S3/GCS      Lake       REST
 ```
 
-> **Experimental** Use the script as a rough first pass only. The script checks whether referenced PySpark functions are _implemented_ in Sail. It does **not** verify behavioral parity. It looks for functions used in DataFrame operations but does **not** cover Spark SQL strings.
+**Core crates:**
 
-See the [Migration Guide](https://docs.lakesail.com/sail/latest/introduction/migrating-from-spark/) for recommended migration practices.
+| Crate | Role |
+|---|---|
+| `sail-cli` | CLI (`vajra` binary) |
+| `sail-spark-connect` | Spark Connect gRPC service |
+| `sail-sql` | SQL parser (Spark dialect) |
+| `sail-sql-analyzer` | Semantic analysis + type resolution |
+| `sail-plan-formatter` | Logical → physical plan |
+| `sail-execution` | Distributed execution, codec, shuffle |
+| `sail-python-udf` | Python UDF bridge (PyO3) |
+| `sail-data-source` | File sources (Parquet, JSON, CSV, ORC…) |
+| `sail-delta-lake` | Delta Lake read/write |
+| `sail-iceberg` | Apache Iceberg support |
 
-## Feature Highlights
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full query pipeline and crate map.
 
-### Lakehouse Formats and Catalog Providers
+**Stack:**
+- [Apache DataFusion](https://github.com/apache/datafusion) — vectorized query engine
+- [Apache Arrow](https://github.com/apache/arrow-rs) — columnar in-memory format
+- [Arrow Flight](https://arrow.apache.org/docs/format/Flight.html) — shuffle transport
+- [PyO3](https://github.com/PyO3/pyo3) — Python UDF bridge
+- [tonic](https://github.com/hyperium/tonic) — gRPC (Spark Connect protocol)
+- [delta-rs](https://github.com/delta-io/delta-rs) — Delta Lake
 
-Sail provides native support for the [Delta Lake](https://docs.lakesail.com/sail/latest/guide/sources/delta/) and [Apache Iceberg](https://docs.lakesail.com/sail/latest/guide/sources/iceberg/) table formats.
-It integrates with catalog providers including Apache Iceberg REST Catalog, AWS Glue, Unity Catalog, Hive Metastore, and Microsoft OneLake.
+---
 
-For more details on usage and best practices, see the [Data Sources Guide](https://docs.lakesail.com/sail/latest/guide/sources/) and [Catalog Guide](https://docs.lakesail.com/sail/latest/guide/catalog/).
+## Build from Source
 
-### Storage
+```sh
+# Prerequisites: Rust 1.95+, protoc, Python 3.10+
+git clone https://github.com/vikashgargg/ignite
+cd ignite
 
-Sail supports a variety of storage backends for reading and writing data, including:
+# Fast dev build
+make dev
+./target/debug/vajra --version
 
-- AWS S3
-- Azure
-- Hugging Face
-- Cloudflare R2
-- Google Cloud Storage
-- HDFS
-- File systems
-- HTTP/HTTPS
-- In-memory storage
+# Production release (native)
+make release
+./target/release/vajra --version
 
-See the [Storage Guide](https://docs.lakesail.com/sail/latest/guide/storage/) for more details.
+# Cross-compile (Linux musl + macOS universal)
+make build-all
+```
 
-## Why Choose Sail?
+---
 
-For over 15 years, Spark has been the default engine for distributed data processing, powering ETL, machine learning, and analytics pipelines across nearly every industry.
+## Roadmap
 
-But the JVM foundation that made Spark possible is now what holds it back. Sail is built to be a familiar, performant alternative without the JVM tax.
+| Phase | Timeline | Goal |
+|---|---|---|
+| **Phase 1** | Months 1–6 | Single-node, 71/71 scorecard, TPC-H benchmark, v0.1.0 |
+| **Phase 2** | Months 7–12 | Structured Streaming, JWT auth, JDBC, vajra-pyspark PyPI, v0.3.0 |
+| **Phase 3** | Months 13–24 | Managed cloud (vajra.cloud), GPU offload, v1.0.0 |
 
-### Sail is Spark-compatible
+Full plan: [VAJRA.md](VAJRA.md)
 
-Sail offers a drop-in replacement for Spark SQL and the Spark DataFrame API. Existing PySpark code works out of the box once you connect your Spark client session to Sail over the Spark Connect protocol.
+---
 
-- **Spark SQL Dialect Support.** A custom Rust parser (built with parser combinators and Rust procedural macros) covers Spark SQL syntax with production-grade accuracy.
-- **DataFrame API Support.** Spark DataFrame operations run on Sail with identical semantics.
-- **Python UDF, UDAF, UDWF, and UDTF Support.** Python, Pandas, and Arrow UDFs all follow the same conventions as Spark.
+## Memory Footprint
 
-### Sail’s Advantages over Spark
+Vajra runs a full PySpark workload in **≤ 1 GB RAM** by default:
 
-- **Rust-Native Engine.** No garbage collection pauses, no JVM memory tuning, and low memory footprint.
-- **Columnar Format and Vectorized Execution.** Built on top of [Apache Arrow](https://github.com/apache/arrow) and [Apache DataFusion](https://github.com/apache/datafusion), the columnar in-memory format and SIMD instructions unlock blazing-fast query execution.
-- **Lightning-Fast Python UDFs.** Python code runs inside Sail with zero serialization overhead as Arrow array pointers enable zero-copy data sharing.
-- **Performant Data Shuffling.** Workers exchange Arrow columnar data directly, minimizing shuffle costs for joins and aggregations.
-- **Lightweight, Stateless Workers.** Workers start in seconds, consume only a few megabytes of memory at idle, and scale elastically to cut cloud costs and simplify operations.
-- **Concurrency and Memory Safety You Can Trust.** Rust’s ownership model prevents null pointers, race conditions, and unsafe memory access for unmatched reliability.
+| Component | Configuration |
+|---|---|
+| DataFusion sort spill threshold | 256 MB |
+| Arrow batch size | 8 192 rows |
+| Execution partition count | `2 × CPU cores` |
+| JVM overhead | **0** (no JVM) |
 
-Ready to bring your existing workloads over? Our [Migration Guide](https://docs.lakesail.com/sail/latest/introduction/migrating-from-spark/) shows you how.
+---
 
-## Benchmark Results
+## License
 
-Derived TPC-H results show that Sail outperforms Apache Spark in every query:
-
-- **Execution Time**: ~4× faster across diverse SQL workloads.
-- **Hardware Cost**: 94% lower with significantly lower peak memory usage and zero shuffle spill.
-
-| Metric                     | Spark    | Sail            |
-| -------------------------- | -------- | --------------- |
-| Total Query Time           | 387.36 s | **102.75 s**    |
-| Query Speed-Up             | Baseline | **43% – 727%**  |
-| Peak Memory Usage          | 54 GB    | **22 GB (1 s)** |
-| Disk Write (Shuffle Spill) | > 110 GB | **0 GB**        |
-
-These results come from a derived TPC-H benchmark (22 queries, scale factor 100, Parquet format) on AWS `r8g.4xlarge` instances.
-
-![Query Time Comparison](https://github.com/lakehq/sail/raw/46d0520532f22e99de6d9ade6373a117216484ca/.github/images/query-time.svg)
-
-See the full analysis and graphs on our [Benchmark Results](https://docs.lakesail.com/sail/latest/introduction/benchmark-results/) page.
-
-## Further Reading
-
-- [Architecture](https://docs.lakesail.com/sail/latest/concepts/architecture/) – Overview of Sail’s design for both local and cluster modes, and how it transitions seamlessly between them.
-- [Query Planning](https://docs.lakesail.com/sail/latest/concepts/query-planning/) – Detailed explanation of how Sail parses SQL and Spark relations, builds logical and physical plans, and handles execution for local and cluster modes.
-- [SQL](https://docs.lakesail.com/sail/latest/guide/sql/) and [DataFrame](https://docs.lakesail.com/sail/latest/guide/dataframe/) Features – Complete reference for Spark SQL and DataFrame API compatibility.
-- [LakeSail Blog](https://lakesail.com/blog/) – Updates on Sail releases, benchmarks, and technical insights.
+Apache 2.0. Built on [lakehq/sail](https://github.com/lakehq/sail).

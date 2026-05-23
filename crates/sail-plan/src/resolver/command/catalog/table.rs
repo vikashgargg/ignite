@@ -48,10 +48,10 @@ impl PlanResolver<'_> {
         }
         let mut columns = self.resolve_table_columns(columns, state)?;
         let constraints = self.resolve_table_constraints(constraints)?;
-        let location = if let Some(location) = location {
-            location
+        let (location, is_external) = if let Some(loc) = location {
+            (loc, true)
         } else {
-            self.resolve_default_table_location(&table).await?
+            (self.resolve_default_table_location(&table).await?, false)
         };
         let format = self.resolve_catalog_table_format(file_format)?;
         let partition_by =
@@ -70,6 +70,7 @@ impl PlanResolver<'_> {
                 comment,
                 constraints,
                 location: Some(location),
+                is_external,
                 format,
                 partition_by,
                 sort_by,

@@ -313,19 +313,72 @@ pub async fn list_all_files<'a>(
 }
 
 /// The inferred partition columns are of `Dictionary` types by default, which cannot be
-/// understood by the Spark client. So we rewrite the type to be `Utf8`.
-pub fn rewrite_listing_partitions(mut config: ListingTableConfig) -> Result<ListingTableConfig> {
+/// understood by the Spark client. So we rewrite the type using the same type-inference
+/// logic as Spark's `partitionColumnTypeInference`:
+///  1. Sample file paths to extract observed partition key=value pairs.
+///  2. For each column, try to parse every observed value as Int64, then Float64.
+///  3. Fall back to Utf8 if neither numeric type works.
+pub async fn rewrite_listing_partitions(
+    mut config: ListingTableConfig,
+    ctx: &dyn Session,
+) -> Result<ListingTableConfig> {
     let Some(options) = config.options.as_mut() else {
         return internal_err!("listing options should be present in the config");
     };
-    options
-        .table_partition_cols
-        .iter_mut()
-        .for_each(|(_col, data_type)| {
-            // FIXME: infer concrete partition types (Int / Float / String) from observed values to match Spark's `partitionColumnTypeInference`.
-            if matches!(data_type, DataType::Dictionary(_, _)) {
-                *data_type = DataType::Utf8;
+
+    // Collect sample partition values from file paths for type inference.
+    let mut partition_values: HashMap<String, Vec<String>> = HashMap::new();
+    for url in &config.table_paths {
+        if let Ok(store) = ctx.runtime_env().object_store(url) {
+            let files: Vec<ObjectMeta> =
+                list_all_files(url, ctx, store.as_ref(), "", None)
+                    .await
+                    .unwrap_or_else(|_| futures::stream::empty().boxed())
+                    .take(10)
+                    .try_collect()
+                    .await
+                    .unwrap_or_default();
+            for file in &files {
+                if let Some(segments) = url.strip_prefix(&file.location) {
+                    // Collect all segments except the last (the file itself).
+                    let parts: Vec<&str> = segments.collect();
+                    for segment in parts.iter().take(parts.len().saturating_sub(1)) {
+                        if let Some((key, value)) = segment.split_once('=') {
+                            partition_values
+                                .entry(key.to_string())
+                                .or_default()
+                                .push(value.to_string());
+                        }
+                    }
+                }
             }
-        });
+        }
+    }
+
+    options.table_partition_cols.iter_mut().for_each(|(col, data_type)| {
+        if matches!(data_type, DataType::Dictionary(_, _)) {
+            let values = partition_values.get(col).map(|v| v.as_slice()).unwrap_or(&[]);
+            *data_type = infer_partition_col_type(values);
+        }
+    });
     Ok(config)
+}
+
+/// Infer a concrete Arrow DataType for a partition column from its observed string values.
+/// Matches Spark's `partitionColumnTypeInference` heuristic: Int64 → Float64 → Utf8.
+fn infer_partition_col_type(values: &[String]) -> DataType {
+    if values.is_empty() {
+        return DataType::Utf8;
+    }
+    if values.iter().all(|v| v.parse::<i64>().is_ok()) {
+        return DataType::Int64;
+    }
+    if values.iter().all(|v| {
+        v.parse::<f64>()
+            .ok()
+            .is_some_and(|f| f.is_finite())
+    }) {
+        return DataType::Float64;
+    }
+    DataType::Utf8
 }

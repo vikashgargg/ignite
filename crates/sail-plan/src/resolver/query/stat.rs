@@ -219,42 +219,66 @@ impl PlanResolver<'_> {
                         &format!("count_{column_name}"),
                         state,
                     )?)),
-                    "mean" => self
-                        .resolve_optional_column(
+                    "mean" => Some(
+                        match self.resolve_optional_column(
                             stats_plan.schema(),
                             &format!("mean_{column_name}"),
                             None,
                             state,
-                        )?
-                        .map(Expr::Column),
-                    "stddev" => self
-                        .resolve_optional_column(
+                        )? {
+                            Some(col) => Expr::Column(col),
+                            None => Expr::Literal(ScalarValue::Utf8(None), None),
+                        },
+                    ),
+                    "stddev" => Some(
+                        match self.resolve_optional_column(
                             stats_plan.schema(),
                             &format!("stddev_{column_name}"),
                             None,
                             state,
-                        )?
-                        .map(Expr::Column),
+                        )? {
+                            Some(col) => Expr::Column(col),
+                            None => Expr::Literal(ScalarValue::Utf8(None), None),
+                        },
+                    ),
                     "min" => Some(Expr::Column(self.resolve_one_column(
                         stats_plan.schema(),
                         &format!("min_{column_name}"),
                         state,
                     )?)),
-                    "25%" => Some(Expr::Column(self.resolve_one_column(
-                        stats_plan.schema(),
-                        &format!("25%_{column_name}"),
-                        state,
-                    )?)),
-                    "50%" => Some(Expr::Column(self.resolve_one_column(
-                        stats_plan.schema(),
-                        &format!("50%_{column_name}"),
-                        state,
-                    )?)),
-                    "75%" => Some(Expr::Column(self.resolve_one_column(
-                        stats_plan.schema(),
-                        &format!("75%_{column_name}"),
-                        state,
-                    )?)),
+                    "25%" => Some(
+                        match self.resolve_optional_column(
+                            stats_plan.schema(),
+                            &format!("25%_{column_name}"),
+                            None,
+                            state,
+                        )? {
+                            Some(col) => Expr::Column(col),
+                            None => Expr::Literal(ScalarValue::Utf8(None), None),
+                        },
+                    ),
+                    "50%" => Some(
+                        match self.resolve_optional_column(
+                            stats_plan.schema(),
+                            &format!("50%_{column_name}"),
+                            None,
+                            state,
+                        )? {
+                            Some(col) => Expr::Column(col),
+                            None => Expr::Literal(ScalarValue::Utf8(None), None),
+                        },
+                    ),
+                    "75%" => Some(
+                        match self.resolve_optional_column(
+                            stats_plan.schema(),
+                            &format!("75%_{column_name}"),
+                            None,
+                            state,
+                        )? {
+                            Some(col) => Expr::Column(col),
+                            None => Expr::Literal(ScalarValue::Utf8(None), None),
+                        },
+                    ),
                     "max" => Some(Expr::Column(self.resolve_one_column(
                         stats_plan.schema(),
                         &format!("max_{column_name}"),

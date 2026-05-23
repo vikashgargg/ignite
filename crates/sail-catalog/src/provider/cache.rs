@@ -633,6 +633,7 @@ mod tests {
             comment: None,
             constraints: vec![],
             location: None,
+            is_external: false,
             format: "parquet".to_string(),
             partition_by: vec![],
             sort_by: vec![],

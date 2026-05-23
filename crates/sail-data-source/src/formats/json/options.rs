@@ -16,6 +16,9 @@ impl BuildPartialOptions<JsonReadPartialOptions> for JsonOptions {
         Ok(JsonReadPartialOptions {
             schema_infer_max_records: self.schema_infer_max_rec,
             compression: Some(self.compression.to_string()),
+            // Spark-specific fields have no DataFusion equivalent; keep defaults.
+            mode: None,
+            column_name_of_corrupt_record: None,
         })
     }
 }
@@ -33,6 +36,8 @@ impl JsonReadOptions {
         let JsonReadOptions {
             schema_infer_max_records,
             compression,
+            mode: _,                        // Spark-specific, used by PermissiveJsonFormat
+            column_name_of_corrupt_record: _, // Spark-specific, used by PermissiveJsonFormat
         } = self;
         let compression = FileCompressionType::from_str(&compression)
             .map_err(|e| DataSourceError::InvalidOption {

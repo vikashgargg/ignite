@@ -13,6 +13,7 @@ sail-sql-analyzer = { path = "../sail-sql-analyzer" }
 
 async-trait = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 futures = { workspace = true }
 datafusion = { workspace = true }
 datafusion-common = { workspace = true }

@@ -2,6 +2,7 @@ use datafusion_common::tree_node::{Transformed, TransformedResult, TreeNode, Tre
 use datafusion_common::ScalarValue;
 use datafusion_expr::utils::{expr_as_column_expr, find_aggregate_exprs};
 use datafusion_expr::{Expr, LogicalPlan, LogicalPlanBuilder, Volatility};
+use sail_function::scalar::misc::monotonically_increasing_id::SparkMonotonicallyIncreasingId;
 use sail_common::spec;
 use sail_common_datafusion::utils::items::ItemTaker;
 use sail_python_udf::get_udf_display_name;
@@ -13,6 +14,7 @@ use crate::resolver::state::{AggregateState, PlanResolverState};
 use crate::resolver::tree::explode::ExplodeRewriter;
 use crate::resolver::tree::monotonic_id::MonotonicIdRewriter;
 use crate::resolver::tree::spark_partition_id::SparkPartitionIdRewriter;
+use crate::resolver::tree::PlanRewriter;
 use crate::resolver::tree::window::WindowRewriter;
 use crate::resolver::PlanResolver;
 
@@ -20,11 +22,20 @@ use crate::resolver::PlanResolver;
 /// in an aggregate context. Catches two Spark CheckAnalysis violations:
 /// 1. Volatile scalar UDF used directly in aggregate projections (outside any aggregate fn)
 /// 2. Volatile scalar UDF nested inside aggregate function arguments
+///
+/// `monotonically_increasing_id` is excluded: it is handled by `MonotonicIdRewriter`
+/// which pre-projects it into a deterministic column before the aggregate is built.
 fn find_volatile_in_aggregate_context(expr: &Expr) -> Option<String> {
     let mut found_name: Option<String> = None;
     let _ = expr.apply(|e| {
         if let Expr::ScalarFunction(f) = e {
-            if f.func.signature().volatility == Volatility::Volatile {
+            if f.func.signature().volatility == Volatility::Volatile
+                && f.func
+                    .inner()
+                    .as_any()
+                    .downcast_ref::<SparkMonotonicallyIncreasingId>()
+                    .is_none()
+            {
                 found_name = Some(f.func.name().to_string());
                 return Ok(TreeNodeRecursion::Stop);
             }
@@ -32,6 +43,22 @@ fn find_volatile_in_aggregate_context(expr: &Expr) -> Option<String> {
         Ok(TreeNodeRecursion::Continue)
     });
     found_name
+}
+
+/// Applies `MonotonicIdRewriter` to a flat list of `Expr`s, pre-projecting any
+/// `monotonically_increasing_id()` calls (including those nested inside aggregate
+/// function args) into deterministic column references on the input plan.
+fn pre_project_monotonic_id_in_exprs(
+    input: LogicalPlan,
+    exprs: Vec<Expr>,
+    state: &mut PlanResolverState,
+) -> PlanResult<(LogicalPlan, Vec<Expr>)> {
+    let mut rewriter = MonotonicIdRewriter::new_from_plan(input, state);
+    let exprs = exprs
+        .into_iter()
+        .map(|e| Ok(e.rewrite(&mut rewriter)?.data))
+        .collect::<PlanResult<Vec<_>>>()?;
+    Ok((rewriter.into_plan(), exprs))
 }
 
 impl PlanResolver<'_> {
@@ -144,10 +171,44 @@ impl PlanResolver<'_> {
             .iter()
             .map(|x| x.expr.clone())
             .collect::<Vec<_>>();
+        let having_present = having.is_some();
         if let Some(having) = having.as_ref() {
             aggregate_candidates.push(having.clone());
         }
-        let aggregate_exprs = find_aggregate_exprs(&aggregate_candidates);
+
+        // Pre-project monotonically_increasing_id() out of aggregate function arguments.
+        // This rewrites e.g. MAX(monotonically_increasing_id()) → MAX(col("__mid"))
+        // and prepends a MonotonicIdNode to the input so __mid is available as a column.
+        let (input, mut aggregate_candidates) =
+            pre_project_monotonic_id_in_exprs(input, aggregate_candidates, state)?;
+
+        // Propagate rewritten exprs back into projections and having.
+        let having = if having_present {
+            aggregate_candidates.pop()
+        } else {
+            None
+        };
+        let projections = projections
+            .into_iter()
+            .zip(aggregate_candidates.iter().cloned())
+            .map(|(named, expr)| NamedExpr {
+                expr,
+                name: named.name,
+                metadata: named.metadata,
+            })
+            .collect::<Vec<_>>();
+
+        // Include the HAVING expression when searching for aggregate functions so that
+        // aggregates used only in HAVING (e.g. `HAVING sum(l_quantity) > 313` with no
+        // corresponding aggregate in the SELECT list) are still included in the DataFusion
+        // Aggregate plan's output and can be referenced by the subsequent HAVING filter.
+        let aggregate_exprs = {
+            let mut candidates_with_having = aggregate_candidates.clone();
+            if let Some(ref h) = having {
+                candidates_with_having.push(h.clone());
+            }
+            find_aggregate_exprs(&candidates_with_having)
+        };
         let group_exprs = grouping.iter().map(|x| x.expr.clone()).collect::<Vec<_>>();
         let plan = LogicalPlanBuilder::from(input)
             .aggregate(group_exprs, aggregate_exprs.clone())?

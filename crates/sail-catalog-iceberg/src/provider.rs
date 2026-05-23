@@ -746,6 +746,7 @@ impl CatalogProvider for IcebergRestCatalogProvider {
             comment,
             constraints,
             location,
+            is_external: _,
             format: _, // TODO: What to do with format?
             partition_by,
             sort_by,

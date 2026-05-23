@@ -3,27 +3,38 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use log::{error, info};
-use sail_common::config::AppConfig;
+use sail_common::config::{AppConfig, ExecutionMode};
 use sail_common::runtime::RuntimeManager;
 use sail_spark_connect::entrypoint::serve;
 use tokio::net::TcpListener;
 
-/// Handles graceful shutdown by waiting for a `SIGINT` signal in [tokio].
+/// Handles graceful shutdown by waiting for a `SIGINT` or `SIGTERM` signal.
 ///
-/// The `SIGINT` signal is captured by Python if the `_signal` module is imported [1].
-/// To prevent this, we would need to run Python code like the following [2].
-/// ```python
-/// import signal
-/// signal.signal(signal.SIGINT, signal.SIG_DFL)
-/// ```
-/// The workaround above is not necessary if we use this function to handle the signal.
+/// `SIGTERM` is sent by Docker (`docker stop`), Kubernetes pod eviction, and
+/// `container stop`.  `SIGINT` is the interactive Ctrl-C signal.
 ///
-/// References:
-///   - [1] https://github.com/PyO3/pyo3/issues/2576
-///   - [2] https://github.com/PyO3/pyo3/issues/3218
+/// The `SIGINT` signal is captured by Python if the `_signal` module is
+/// imported (https://github.com/PyO3/pyo3/issues/2576). Handling it here
+/// prevents a double-signal scenario where Python and the server both respond.
 async fn shutdown() {
-    let _ = tokio::signal::ctrl_c().await;
-    info!("Shutting down the Spark Connect server...");
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let sigterm = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let sigterm = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c  => info!("Received SIGINT, shutting down gracefully..."),
+        _ = sigterm => info!("Received SIGTERM, shutting down gracefully..."),
+    }
 }
 
 pub(super) mod telemetry {
@@ -68,6 +79,7 @@ impl std::error::Error for ServerError {}
 /// This function should be called only once in the entire process since it initializes
 /// the telemetry and shuts down the telemetry when the server stops.
 pub(super) fn with_spark_connect_server<S, W, F>(
+    config: Arc<AppConfig>,
     address: (IpAddr, u16),
     signal: S,
     workload: W,
@@ -77,7 +89,6 @@ where
     W: FnOnce(SocketAddr) -> F,
     F: Future<Output = Result<(), Box<dyn std::error::Error>>>,
 {
-    let config = Arc::new(AppConfig::load()?);
     let runtime = RuntimeManager::try_new(&config.runtime)?;
 
     let _telemetry = runtime
@@ -90,8 +101,16 @@ where
         // A secure connection can be handled by a gateway in production.
         let listener = TcpListener::bind(address).await?;
         let server_address = listener.local_addr()?;
+        let mode_tag = match config.mode {
+            ExecutionMode::Local => "local".to_string(),
+            ExecutionMode::LocalCluster => format!(
+                "local-cluster, workers: {}",
+                config.cluster.worker_initial_count
+            ),
+            ExecutionMode::KubernetesCluster => "kubernetes-cluster".to_string(),
+        };
         let server_task = async move {
-            info!("Starting the Spark Connect server on {server_address}...");
+            info!("Vajra ready on {server_address} (Spark Connect gRPC) [mode: {mode_tag}]");
             match serve(listener, signal, config, handle).await {
                 Ok(()) => {
                     info!("The Spark Connect server has stopped.");
@@ -121,5 +140,21 @@ where
 }
 
 pub fn run_spark_connect_server(ip: IpAddr, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    with_spark_connect_server((ip, port), shutdown(), |_| async { Ok(()) })
+    let config = Arc::new(AppConfig::load()?);
+    with_spark_connect_server(config, (ip, port), shutdown(), |_| async { Ok(()) })
+}
+
+/// Start the Spark Connect server in `local-cluster` mode, overriding whatever
+/// `SAIL_MODE` says.  `workers == 0` keeps the config-file default.
+pub fn run_spark_connect_server_local_cluster(
+    ip: IpAddr,
+    port: u16,
+    workers: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = AppConfig::load()?;
+    config.mode = ExecutionMode::LocalCluster;
+    if workers > 0 {
+        config.cluster.worker_initial_count = workers;
+    }
+    with_spark_connect_server(Arc::new(config), (ip, port), shutdown(), |_| async { Ok(()) })
 }
