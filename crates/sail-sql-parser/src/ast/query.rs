@@ -382,7 +382,7 @@ pub struct PivotClause {
     #[parser(function = |e, o| sequence(compose((e, column_ident(o)), o), unit(o)))]
     pub aggregates: Sequence<NamedExpr, Comma>,
     pub r#for: For,
-    pub columns: IdentList,
+    pub columns: Either<Ident, IdentList>,
     pub r#in: In,
     #[parser(function = |e, o| compose(e, o))]
     pub values: NamedExprList,

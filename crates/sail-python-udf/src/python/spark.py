@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+try:
+    import setuptools as _setuptools  # noqa: F401 — installs distutils shim for Python 3.12+
+except ImportError:
+    pass
+
 import ctypes
 import decimal
 import itertools

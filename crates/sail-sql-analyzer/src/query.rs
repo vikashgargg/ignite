@@ -636,14 +636,17 @@ fn query_plan_with_table_modifier(
                 .into_items()
                 .map(from_ast_named_expression)
                 .collect::<SqlResult<Vec<_>>>()?;
-            let columns = from_ast_identifier_list(columns)?
-                .into_iter()
-                .map(|c| spec::Expr::UnresolvedAttribute {
-                    name: spec::ObjectName::bare(c),
-                    plan_id: None,
-                    is_metadata_column: false,
-                })
-                .collect();
+            let columns = match columns {
+                Either::Left(ident) => vec![ident.value.into()],
+                Either::Right(list) => from_ast_identifier_list(list)?,
+            }
+            .into_iter()
+            .map(|c| spec::Expr::UnresolvedAttribute {
+                name: spec::ObjectName::bare(c),
+                plan_id: None,
+                is_metadata_column: false,
+            })
+            .collect();
             let NamedExprList {
                 left: _,
                 items: values,
