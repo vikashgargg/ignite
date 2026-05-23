@@ -85,6 +85,20 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
+# -- OpenTelemetry / observability
+# Vajra exports traces, metrics, and logs via OTLP. Point these at any
+# OTLP-compatible backend: Grafana Alloy, OpenTelemetry Collector, etc.
+telemetry:
+  # Enable OTLP export for each signal
+  exportMetrics: false
+  exportTraces: false
+  exportLogs: false
+  # OTLP endpoint (gRPC by default — set protocol to http_json for HTTP)
+  otlpEndpoint: "http://otel-collector:4317"
+  # Metrics scrape / export interval in seconds
+  metricsExportIntervalSecs: 60
+  metricsCollectionIntervalSecs: 60
+
 # -- Fault tolerance tuning
 # These map directly to SAIL_CLUSTER__ environment variables.
 faultTolerance:

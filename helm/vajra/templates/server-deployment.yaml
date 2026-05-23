@@ -67,6 +67,18 @@ spec:
             - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
               value: >-
                 {"spec":{"volumes":[{"name":"scratch","hostPath":{"path":{{ .Values.scratch.hostPath | quote }},"type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"scratch","mountPath":{{ .Values.scratch.hostPath | quote }}}],"resources":{{ .Values.workers.resources | toJson }}}]}}
+            - name: SAIL_TELEMETRY__EXPORT_METRICS
+              value: {{ .Values.telemetry.exportMetrics | quote }}
+            - name: SAIL_TELEMETRY__EXPORT_TRACES
+              value: {{ .Values.telemetry.exportTraces | quote }}
+            - name: SAIL_TELEMETRY__EXPORT_LOGS
+              value: {{ .Values.telemetry.exportLogs | quote }}
+            - name: SAIL_TELEMETRY__OTLP_ENDPOINT
+              value: {{ .Values.telemetry.otlpEndpoint | quote }}
+            - name: SAIL_TELEMETRY__METRICS_EXPORT_INTERVAL_SECS
+              value: {{ .Values.telemetry.metricsExportIntervalSecs | quote }}
+            - name: SAIL_TELEMETRY__METRICS_COLLECTION_INTERVAL_SECS
+              value: {{ .Values.telemetry.metricsCollectionIntervalSecs | quote }}
             - name: SAIL_CLUSTER__TASK_MAX_ATTEMPTS
               value: {{ .Values.faultTolerance.taskMaxAttempts | quote }}
             - name: SAIL_CLUSTER__WORKER_HEARTBEAT_INTERVAL_SECS
