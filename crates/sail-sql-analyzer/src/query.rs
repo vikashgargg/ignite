@@ -611,7 +611,11 @@ fn from_ast_table_factor(table: TableFactor) -> SqlResult<spec::QueryPlan> {
             let plan = query_plan_with_table_modifiers(plan, modifiers)?;
             query_plan_with_table_alias(plan, alias)
         }
-        TableFactor::TableFunction { function, alias } => {
+        TableFactor::TableFunction {
+            function,
+            sample,
+            alias,
+        } => {
             let TableFunction {
                 name,
                 left: _,
@@ -631,6 +635,14 @@ fn from_ast_table_factor(table: TableFactor) -> SqlResult<spec::QueryPlan> {
                     options: Default::default(),
                 })),
             });
+            let plan = if let Some(sample) = sample {
+                spec::QueryPlan::new(spec::QueryNode::TableSample {
+                    input: Box::new(plan),
+                    sample: from_ast_table_sample(*sample)?,
+                })
+            } else {
+                plan
+            };
             query_plan_with_table_alias(plan, alias)
         }
         TableFactor::Values { values, alias } => {
@@ -1076,6 +1088,7 @@ fn query_plan_with_lateral_table_factor(
                 arguments,
                 right: _,
             },
+        sample: _,
         alias,
     } = table
     else {

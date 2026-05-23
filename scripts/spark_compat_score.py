@@ -700,6 +700,37 @@ with _tmp_mgr as tmp:
 
     check("_metadata.file_path sub-field", lambda: _metadata_subfield_test())
 
+    # ── 18. Advanced SQL ───────────────────────────────────────────────────────
+    group("18. Advanced SQL")
+
+    check("TABLESAMPLE ROWS", lambda: assert_true(
+        spark.sql("SELECT * FROM range(100) TABLESAMPLE (10 ROWS)").count() == 10))
+
+    check("TABLESAMPLE PERCENT", lambda: assert_true(
+        0 <= spark.sql("SELECT * FROM range(100) TABLESAMPLE (20 PERCENT)").count() <= 100))
+
+    check("ROLLUP", lambda: assert_true(
+        spark.sql("SELECT id % 3, COUNT(*) FROM range(9) GROUP BY ROLLUP(id % 3)").count() == 4))
+
+    check("CUBE", lambda: assert_true(
+        spark.sql("SELECT id % 2, id % 3, COUNT(*) FROM range(6) GROUP BY CUBE(id % 2, id % 3)").count() == 12))
+
+    check("GROUPING SETS", lambda: assert_true(
+        spark.sql("SELECT id % 2, id % 3, COUNT(*) FROM range(6) GROUP BY GROUPING SETS((id % 2), (id % 3))").count() == 5))
+
+    check("INTERSECT", lambda: assert_true(
+        spark.sql("SELECT id FROM range(5) INTERSECT SELECT id FROM range(3)").count() == 3))
+
+    check("EXCEPT", lambda: assert_true(
+        spark.sql("SELECT id FROM range(5) EXCEPT SELECT id FROM range(3)").count() == 2))
+
+    check("UNPIVOT", lambda: assert_true(
+        spark.sql("""
+            SELECT id, quarter, revenue
+            FROM (SELECT 1 AS id, 10 AS q1, 20 AS q2)
+            UNPIVOT (revenue FOR quarter IN (q1, q2))
+        """).count() == 2))
+
 # ── Scorecard ─────────────────────────────────────────────────────────────────
 
 try:

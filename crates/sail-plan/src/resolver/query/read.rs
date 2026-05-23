@@ -240,8 +240,14 @@ impl PlanResolver<'_> {
                 }
                 (0.0, fraction)
             }
-            spec::TableSampleMethod::Rows { value: _ } => {
-                return Err(PlanError::todo("TABLESAMPLE with ROWS"));
+            spec::TableSampleMethod::Rows { value } => {
+                let n = self.evaluate_sample_expr_to_f64(value, state).await? as i64;
+                let plan = datafusion_expr::LogicalPlan::Limit(datafusion_expr::Limit {
+                    skip: None,
+                    fetch: Some(Box::new(datafusion_expr::lit(n))),
+                    input: std::sync::Arc::new(plan),
+                });
+                return Ok(plan);
             }
             spec::TableSampleMethod::Bucket {
                 numerator,

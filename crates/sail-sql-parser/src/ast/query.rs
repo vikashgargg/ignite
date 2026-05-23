@@ -294,6 +294,8 @@ pub enum TableFactor {
     TableFunction {
         #[parser(function = |(_, e, _), o| compose(e, o))]
         function: TableFunction,
+        #[parser(function = |(_, e, _), o| boxed(compose(e, o)).or_not())]
+        sample: Option<Box<TableSampleClause>>,
         alias: Option<AliasClause>,
     },
     Name {
