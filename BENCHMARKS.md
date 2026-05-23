@@ -1,6 +1,6 @@
 # Vajra (वज्र) Benchmark Results
 
-> Measured 2026-05-22 on Apple M-series (macOS 26, ARM64)  
+> Measured 2026-05-23 on Apple M-series (macOS 26, ARM64)  
 > Release build with LTO (`lto = true, codegen-units = 1`)  
 > Runtime: Vajra server (`./target/release/vajra server --port 50055`)  
 > Data: TPC-H tables as Parquet files, read lazily via Spark Connect gRPC  
@@ -15,31 +15,31 @@
 ======================================================================
   Q         Time      Rows  Status
   ----  --------  --------  ------
-  Q01     0.158s         4  PASS
-  Q02     0.030s       100  PASS
-  Q03     0.045s        10  PASS
-  Q04     0.040s         5  PASS
+  Q01     0.120s         4  PASS
+  Q02     0.032s       100  PASS
+  Q03     0.047s        10  PASS
+  Q04     0.039s         5  PASS
   Q05     0.079s         5  PASS
-  Q06     0.033s         1  PASS
-  Q07     0.102s         4  PASS
-  Q08     0.077s         2  PASS
-  Q09     0.091s       175  PASS
-  Q10     0.096s        20  PASS
-  Q11     0.018s      1048  PASS
+  Q06     0.032s         1  PASS
+  Q07     0.090s         4  PASS
+  Q08     0.069s         2  PASS
+  Q09     0.089s       175  PASS
+  Q10     0.097s        20  PASS
+  Q11     0.019s       665  PASS
   Q12     0.071s         2  PASS
-  Q13     0.072s        42  PASS
-  Q14     0.040s         1  PASS
-  Q15     0.049s         1  PASS
-  Q16     0.094s     18314  PASS
-  Q17     0.160s         1  PASS
-  Q18     0.159s         9  PASS
+  Q13     0.053s        41  PASS
+  Q14     0.039s         1  PASS
+  Q15     0.053s         1  PASS
+  Q16     0.042s     18267  PASS
+  Q17     0.131s         1  PASS
+  Q18     0.137s         9  PASS
   Q19     0.085s         1  PASS
-  Q20     0.068s       186  PASS
-  Q21     0.113s       100  PASS
-  Q22     0.021s         7  PASS
+  Q20     0.058s       162  PASS
+  Q21     0.108s       100  PASS
+  Q22     0.023s         7  PASS
 
 ======================================================================
-  22/22 PASSED, 0 FAILED | total query time: 1.704s
+  22/22 PASSED, 0 FAILED | total query time: 1.515s
 ======================================================================
 ```
 
@@ -48,10 +48,10 @@
 | Metric              | Value             |
 |---------------------|-------------------|
 | TPC-H SF-1 pass     | **22 / 22** (100%) |
-| Total query time    | **1.704 s**        |
-| Median query time   | **0.072 s**        |
-| Fastest query (Q11) | **0.018 s**        |
-| Slowest query (Q17) | **0.159 s**        |
+| Total query time    | **1.515 s**        |
+| Median query time   | **0.064 s**        |
+| Fastest query (Q11) | **0.019 s**        |
+| Slowest query (Q18) | **0.137 s**        |
 
 ### Notes
 
