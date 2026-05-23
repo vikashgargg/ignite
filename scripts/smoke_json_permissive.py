@@ -30,7 +30,7 @@ while time.time() < deadline:
     line = proc.stderr.readline().decode(errors="replace")
     if line:
         print(f"  server: {line.strip()}")
-    if "Starting" in line or "listening" in line.lower():
+    if "ready" in line.lower() or "Starting" in line:
         started = True
         break
     time.sleep(0.05)

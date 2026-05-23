@@ -567,7 +567,28 @@ impl FileFormat for PermissiveJsonFormat {
         store: &Arc<dyn ObjectStore>,
         objects: &[ObjectMeta],
     ) -> Result<SchemaRef> {
-        self.inner().infer_schema(state, store, objects).await
+        let schema = self.inner().infer_schema(state, store, objects).await?;
+        // In PERMISSIVE mode with no user-supplied schema, Spark automatically
+        // appends a _corrupt_record column (or the custom name from
+        // columnNameOfCorruptRecord) so callers can identify malformed rows.
+        if self.mode == JsonMode::Permissive {
+            let col = corrupt_col_name(&self.corrupt_col_name);
+            if !schema.fields().iter().any(|f| f.name() == col) {
+                let mut fields = schema.fields().to_vec();
+                fields.push(Arc::new(datafusion::arrow::datatypes::Field::new(
+                    col,
+                    datafusion::arrow::datatypes::DataType::Utf8,
+                    true,
+                )));
+                return Ok(Arc::new(
+                    datafusion::arrow::datatypes::Schema::new_with_metadata(
+                        fields,
+                        schema.metadata().clone(),
+                    ),
+                ));
+            }
+        }
+        Ok(schema)
     }
 
     async fn infer_stats(

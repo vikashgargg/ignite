@@ -58,9 +58,18 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
+# ── Layer: dependency manifests only (cached unless Cargo.lock changes) ────────
+# manifests.tar.gz contains crates/*/Cargo.toml (no source). This lets
+# `cargo fetch` download all registry crates before source arrives, so
+# source-only edits skip the ~10 min registry download entirely.
+COPY Cargo.toml Cargo.lock manifests.tar.gz ./
+RUN tar -xzf manifests.tar.gz && rm manifests.tar.gz
+RUN cargo fetch --locked
+
+# ── Layer: full source (invalidated on any src change) ────────────────────────
 # crates.tar.gz is created by `make container-build` (workaround for Apple
 # Container issue #425 — only root-level files reach the builder VM).
-COPY Cargo.toml Cargo.lock crates.tar.gz ./
+COPY crates.tar.gz ./
 RUN tar -xzf crates.tar.gz && rm crates.tar.gz
 
 RUN CARGO_PROFILE_RELEASE_LTO=thin cargo build --release -p sail-cli --bins \
@@ -83,6 +92,13 @@ RUN pip install --no-cache-dir "pyspark-client==${PYSPARK_VERSION}"
 COPY --from=builder /usr/local/bin/ignite /usr/local/bin/ignite
 
 EXPOSE 50051
+
+# TCP probe: confirm gRPC port is accepting connections.
+# --start-period gives the server up to 90 s to bind before health checks count.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD python3 -c \
+        "import socket; s = socket.create_connection(('localhost', 50051), timeout=4); s.close()" \
+    || exit 1
 
 ENTRYPOINT ["/usr/local/bin/ignite"]
 CMD ["server", "--ip", "0.0.0.0", "--port", "50051"]

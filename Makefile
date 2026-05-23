@@ -1,7 +1,7 @@
 # Ignite build targets
 # Usage: make <target>
 
-.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10 container-build
+.PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean bench bench-sf1 bench-sf10 container-build container-build-clean
 
 CARGO := $(shell which cargo)
 BINARY := target/debug/ignite
@@ -26,7 +26,9 @@ help:
 	@echo "  make bench        Run TPC-H SF-1 benchmark (in-memory, requires duckdb)"
 	@echo "  make bench-sf1    Same as bench"
 	@echo "  make bench-sf10   Run TPC-H SF-10 benchmark (larger, ~60s)"
-	@echo "  make clean        cargo clean"
+	@echo "  make container-build        Build Apple Container image (uses layer cache)"
+	@echo "  make container-build-clean  Same, but forces a clean rebuild (--no-cache)"
+	@echo "  make clean                  cargo clean"
 
 dev:
 	$(CARGO) build -p sail-cli
@@ -127,18 +129,35 @@ clean:
 #   #425 — only root-level files reach the builder VM (subdirs silently dropped)
 #   #656 — builder VM may have stale DNS after system restart
 #
-# Prerequisites: `container builder start --cpus 4 --memory 5g`
-container-build:
+# Build strategy (layer caching):
+#   manifests.tar.gz  — crates/*/Cargo.toml only; invalidates `cargo fetch` layer
+#   crates.tar.gz     — full source; invalidates compile layer
+#   Cargo.lock        — changes → both layers above must rerun
+#
+# First build:  ~25-35 min (download deps + compile)
+# Source-only:  ~12-18 min (deps cached, recompile changed crates only)
+# Cargo.lock:   ~20-25 min (re-fetch + recompile)
+#
+# Prerequisites: `container builder start --cpus 4 --memory 8g --dns 8.8.8.8`
+_container-ctx:
 	@echo "=== Fixing buildkit DNS (Apple Container issue #656) ==="
 	container exec buildkit /bin/sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf' 2>/dev/null || true
-	@echo "=== Creating clean build context in /tmp/ignite-apple-ctx ==="
+	@echo "=== Creating build context in /tmp/ignite-apple-ctx ==="
 	rm -rf /tmp/ignite-apple-ctx
 	mkdir -p /tmp/ignite-apple-ctx
 	cp Cargo.toml Cargo.lock /tmp/ignite-apple-ctx/
 	cp docker/apple/Dockerfile /tmp/ignite-apple-ctx/Dockerfile
+	find crates -name "Cargo.toml" | sort | tar -czf /tmp/ignite-apple-ctx/manifests.tar.gz -T -
 	tar -czf /tmp/ignite-apple-ctx/crates.tar.gz crates/
-	@echo "=== Build context size ==="
-	du -sh /tmp/ignite-apple-ctx/
-	@echo "=== Running container build (~25-35 min) ==="
+	@echo "=== Build context ==="
+	@du -sh /tmp/ignite-apple-ctx/
+
+container-build: _container-ctx
+	@echo "=== Running container build (incremental, uses layer cache) ==="
+	container build --platform linux/arm64 -t ignite:latest /tmp/ignite-apple-ctx
+	@echo "=== Done. Run with: container run --name ignite -p 50051:50051 ignite:latest ==="
+
+container-build-clean: _container-ctx
+	@echo "=== Running container build (clean, no cache) ==="
 	container build --no-cache --platform linux/arm64 -t ignite:latest /tmp/ignite-apple-ctx
 	@echo "=== Done. Run with: container run --name ignite -p 50051:50051 ignite:latest ==="
