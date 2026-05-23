@@ -114,6 +114,97 @@ jobs:
           path: target/${{ matrix.target }}/release/ignite
           retention-days: 7
 
+  distributed-scorecard:
+    name: Distributed scorecard (local-cluster)
+    runs-on: ubuntu-latest
+    # Only run on PRs targeting main and on pushes to main/phase2/* to keep CI cost down.
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main')
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python 3.12 must match the container Dockerfile (ARG PYTHON_VERSION=3.12)
+      # so that PySpark UDF pickling works end-to-end against the local-cluster server.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-distributed-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system deps
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Build release binary
+        env:
+          PYO3_PYTHON: python3.12
+        run: cargo build --release -p sail-cli
+
+      - name: Set up smoke venv
+        run: |
+          # Override CONTAINER_PY detection since we are not in a container build context.
+          # The venv Python version must match the PYO3_PYTHON used to build the binary.
+          python3.12 -m venv .venvs/smoke
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+
+      - name: Start vajra in local-cluster mode
+        env:
+          SAIL_MODE: local-cluster
+          RUST_LOG: warn
+        run: |
+          mkdir -p /tmp/vajra
+          target/release/vajra server --ip 0.0.0.0 --port 50051 &
+          echo "VAJRA_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for Spark Connect to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z localhost 50051 2>/dev/null; then
+              echo "Vajra ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          nc -z localhost 50051 || { echo "Vajra did not start in 30s"; exit 1; }
+
+      - name: Run Spark compat scorecard
+        env:
+          SPARK_REMOTE: sc://localhost:50051
+          PYTHONPATH: .venvs/smoke/lib/python3.12/site-packages
+        run: |
+          mkdir -p /tmp/vajra
+          python3.12 scripts/spark_compat_score.py 2>&1 | tee scorecard.log || true
+
+      - name: Enforce minimum pass rate
+        run: |
+          # Scorecard prints: "  Total:  N passed, N failed, N skipped"
+          PASSED=$(grep -oE '[0-9]+ passed' scorecard.log | grep -oE '[0-9]+' | head -1 || echo 0)
+          FAILED=$(grep -oE '[0-9]+ failed' scorecard.log | grep -oE '[0-9]+' | head -1 || echo 99)
+          TOTAL=$(( PASSED + FAILED ))
+          echo "Scorecard result: ${PASSED}/${TOTAL}"
+          # Require at least 65/71 to pass CI (some tests need Java/Hadoop for remote file paths)
+          [ "${PASSED}" -ge 65 ] || { echo "FAIL: only ${PASSED}/${TOTAL} passed (need ≥65)"; exit 1; }
+
+      - name: Upload scorecard log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-distributed
+          path: scorecard.log
+          retention-days: 7
+
+      - name: Stop vajra
+        if: always()
+        run: kill "$VAJRA_PID" 2>/dev/null || true
+
   build-macos-universal:
     name: Build ignite macOS universal binary
     runs-on: macos-latest
