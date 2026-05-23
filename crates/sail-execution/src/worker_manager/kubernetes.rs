@@ -113,6 +113,7 @@ impl KubernetesWorkerManager {
             worker_heartbeat_interval,
             task_stream_buffer,
             task_stream_creation_timeout,
+            shuffle_spill_dir,
             rpc_retry_strategy,
         } = options;
         let w3c_traceparent =
@@ -198,6 +199,11 @@ impl KubernetesWorkerManager {
             EnvVar {
                 name: ClusterConfigEnv::TASK_STREAM_CREATION_TIMEOUT_SECS.to_string(),
                 value: Some(task_stream_creation_timeout.as_secs().to_string()),
+                value_from: None,
+            },
+            EnvVar {
+                name: ClusterConfigEnv::SHUFFLE_SPILL_DIR.to_string(),
+                value: Some(shuffle_spill_dir),
                 value_from: None,
             },
             EnvVar {

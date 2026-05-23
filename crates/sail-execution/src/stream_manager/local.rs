@@ -1,9 +1,15 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::arrow::ipc::reader::FileReader as IpcFileReader;
+use datafusion::arrow::ipc::writer::FileWriter as IpcFileWriter;
 use datafusion::common::Result;
 use log::debug;
 use tokio::sync::mpsc;
+use tokio::sync::Notify;
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 
 use crate::error::{ExecutionError, ExecutionResult};
@@ -170,4 +176,119 @@ impl TaskStreamSink for MemoryStreamReplicaSender {
         }
         Ok(())
     }
+}
+
+/// A disk-backed stream.  Batches are serialized to an Arrow IPC file; subscribers
+/// read the file back (from the beginning) after writing is complete.
+pub(crate) struct DiskStream {
+    path: PathBuf,
+    schema: SchemaRef,
+    /// Notify subscribers that the IPC file is fully written and ready to read.
+    done: Arc<Notify>,
+    /// Pending subscribers that called `subscribe()` before the file was written.
+    senders: Vec<mpsc::Sender<TaskStreamResult<RecordBatch>>>,
+    buffer: usize,
+}
+
+impl DiskStream {
+    pub fn new(
+        path: PathBuf,
+        schema: SchemaRef,
+        buffer: usize,
+        senders: Vec<mpsc::Sender<TaskStreamResult<RecordBatch>>>,
+    ) -> Self {
+        Self {
+            path,
+            schema,
+            done: Arc::new(Notify::new()),
+            senders,
+            buffer,
+        }
+    }
+}
+
+impl LocalStream for DiskStream {
+    fn publish(&mut self) -> ExecutionResult<Box<dyn TaskStreamSink>> {
+        let file = std::fs::File::create(&self.path).map_err(|e| {
+            ExecutionError::InternalError(format!(
+                "disk stream: failed to create file {:?}: {e}",
+                self.path
+            ))
+        })?;
+        let writer = IpcFileWriter::try_new(file, &self.schema).map_err(|e| {
+            ExecutionError::InternalError(format!("disk stream: IPC writer init: {e}"))
+        })?;
+        Ok(Box::new(DiskStreamSink {
+            writer,
+            path: self.path.clone(),
+            done: Arc::clone(&self.done),
+            pending_senders: std::mem::take(&mut self.senders),
+            buffer: self.buffer,
+        }))
+    }
+
+    fn subscribe(&mut self) -> ExecutionResult<TaskStreamSource> {
+        let (tx, rx) = mpsc::channel(self.buffer);
+        self.senders.push(tx);
+        Ok(Box::pin(ReceiverStream::new(rx)))
+    }
+}
+
+struct DiskStreamSink {
+    writer: IpcFileWriter<std::fs::File>,
+    path: PathBuf,
+    done: Arc<Notify>,
+    pending_senders: Vec<mpsc::Sender<TaskStreamResult<RecordBatch>>>,
+    buffer: usize,
+}
+
+#[tonic::async_trait]
+impl TaskStreamSink for DiskStreamSink {
+    async fn write(&mut self, batch: TaskStreamResult<RecordBatch>) -> TaskStreamSinkState {
+        match batch {
+            Ok(b) => {
+                if let Err(e) = self.writer.write(&b) {
+                    return TaskStreamSinkState::Error(
+                        datafusion::common::DataFusionError::External(Box::new(e)),
+                    );
+                }
+                TaskStreamSinkState::Ok
+            }
+            Err(e) => TaskStreamSinkState::Error(
+                datafusion::common::DataFusionError::External(Box::new(e)),
+            ),
+        }
+    }
+
+    async fn close(mut self: Box<Self>) -> Result<()> {
+        self.writer.finish()?;
+        // Signal all pending subscribers that the file is ready.
+        self.done.notify_waiters();
+        // Replay all batches to pending senders (those who subscribed before write started).
+        let path = self.path.clone();
+        let pending = std::mem::take(&mut self.pending_senders);
+        if !pending.is_empty() {
+            let batches = read_ipc_file(&path)?;
+            for tx in &pending {
+                for batch in &batches {
+                    if tx.send(Ok(batch.clone())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn read_ipc_file(path: &PathBuf) -> Result<Vec<RecordBatch>> {
+    let file = std::fs::File::open(path)
+        .map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?;
+    let reader = IpcFileReader::try_new(file, None)
+        .map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?;
+    let mut batches = Vec::new();
+    for batch in reader {
+        batches.push(batch.map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?);
+    }
+    Ok(batches)
 }

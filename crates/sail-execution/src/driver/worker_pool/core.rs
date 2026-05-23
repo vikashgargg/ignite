@@ -85,6 +85,7 @@ impl WorkerPool {
             worker_heartbeat_interval: self.options.worker_heartbeat_interval,
             task_stream_buffer: self.options.task_stream_buffer,
             task_stream_creation_timeout: self.options.task_stream_creation_timeout,
+            shuffle_spill_dir: self.options.shuffle_spill_dir.to_string(),
             rpc_retry_strategy: self.options.rpc_retry_strategy.clone(),
         };
         let worker_manager = Arc::clone(&self.worker_manager);

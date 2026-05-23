@@ -573,6 +573,69 @@ with _tmp_mgr as tmp:
         spark.sql("SELECT NAMED_STRUCT('a',1,'b',2).a v").collect(),
         [Row(v=1)]))
 
+    # ── 13. Higher-Order / Lambda Functions ───────────────────────────────────
+    group("13. Lambda / Higher-Order Functions")
+
+    check("transform array", lambda: assert_eq(
+        spark.sql("SELECT transform(array(1,2,3), x -> x * 2) r").collect()[0].r,
+        [2, 4, 6]))
+
+    check("filter array", lambda: assert_eq(
+        spark.sql("SELECT filter(array(1,2,3,4), x -> x % 2 = 0) r").collect()[0].r,
+        [2, 4]))
+
+    check("exists array", lambda: assert_eq(
+        spark.sql("SELECT exists(array(1,2,3), x -> x = 2) r").collect(),
+        [Row(r=True)]))
+
+    check("forall array", lambda: assert_eq(
+        spark.sql("SELECT forall(array(2,4,6), x -> x % 2 = 0) r").collect(),
+        [Row(r=True)]))
+
+    check("aggregate (reduce)", lambda: assert_eq(
+        spark.sql("SELECT aggregate(array(1,2,3), 0, (acc, x) -> acc + x) r").collect(),
+        [Row(r=6)]))
+
+    check("zip_with", lambda: assert_eq(
+        spark.sql("SELECT zip_with(array(1,2), array(3,4), (a,b) -> a+b) r").collect()[0].r,
+        [4, 6]))
+
+    check("transform_values map", lambda: assert_eq(
+        sorted(
+            spark.sql("SELECT transform_values(map('a',1,'b',2), (k,v) -> v*10) r")
+            .collect()[0].r.items()
+        ),
+        [('a', 10), ('b', 20)]))
+
+    check("map_filter", lambda: assert_eq(
+        spark.sql("SELECT map_filter(map('a',1,'b',2,'c',3), (k,v) -> v > 1) r")
+        .collect()[0].r,
+        {'b': 2, 'c': 3}))
+
+    check("array_sort with lambda", lambda: assert_eq(
+        spark.sql("SELECT array_sort(array(3,1,2), (a,b) -> a-b) r").collect()[0].r,
+        [1, 2, 3]))
+
+    # ── 14. PIVOT ──────────────────────────────────────────────────────────────
+    group("14. PIVOT")
+
+    check("PIVOT basic", lambda: (
+        spark.sql("""
+            SELECT * FROM (
+                SELECT id % 2 AS parity, id AS val FROM range(6)
+            )
+            PIVOT (SUM(val) FOR parity IN (0, 1))
+        """).collect()
+        and True))
+
+    check("DataFrame pivot", lambda: assert_true(
+        spark.createDataFrame(
+            [("Q1", "A", 100), ("Q2", "A", 200), ("Q1", "B", 300)],
+            ["quarter", "dept", "revenue"]
+        ).groupBy("dept").pivot("quarter", ["Q1", "Q2"])
+        .agg(F.sum("revenue"))
+        .count() == 2))
+
 # ── Scorecard ─────────────────────────────────────────────────────────────────
 
 try:

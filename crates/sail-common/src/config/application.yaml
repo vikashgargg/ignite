@@ -183,6 +183,14 @@
     This gives a grace period when a task is launched simultaneously with its dependency tasks
     and the task stream inputs may not be ready immediately.
 
+- key: cluster.shuffle_spill_dir
+  type: string
+  default: "/tmp/vajra/shuffle"
+  description: |
+    The directory to use for spilling shuffle data to disk.
+    Must be a writable path accessible by both the driver and all workers.
+  experimental: true
+
 - key: cluster.task_max_attempts
   type: number
   default: "3"

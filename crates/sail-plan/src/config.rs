@@ -30,6 +30,8 @@ pub struct PlanConfig {
     pub ansi_mode: bool,
     /// Whether to allow cartesian products (cross joins) without explicit `CROSS JOIN` syntax.
     pub cross_join_enabled: bool,
+    /// Maximum number of pivot values (spark.sql.pivotMaxValues equivalent).
+    pub pivot_max_values: usize,
 }
 
 impl PlanConfig {
@@ -53,6 +55,7 @@ impl Default for PlanConfig {
             session_user_id: "".to_string(),
             ansi_mode: false,
             cross_join_enabled: true,
+            pivot_max_values: 10000,
         }
     }
 }

@@ -10,5 +10,6 @@ pub struct WorkerLaunchOptions {
     pub worker_heartbeat_interval: Duration,
     pub task_stream_buffer: usize,
     pub task_stream_creation_timeout: Duration,
+    pub shuffle_spill_dir: String,
     pub rpc_retry_strategy: RetryStrategy,
 }

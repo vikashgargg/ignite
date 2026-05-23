@@ -30,11 +30,11 @@ fn array_sort_spark(array: expr::Expr, asc: expr::Expr) -> PlanResult<expr::Expr
 fn array_sort(input: ScalarFunctionInput) -> PlanResult<datafusion_expr::Expr> {
     let (array, rest) = input.arguments.at_least_one()?;
 
-    // Check if there's a second argument (lambda comparator)
+    // Lambda comparator case is handled by the HOF resolver before this point.
+    // Here we only handle the no-lambda case.
     if !rest.is_empty() {
-        // array_sort with lambda comparator is not yet implemented
         return Err(crate::error::PlanError::todo(
-            "array_sort with lambda comparator is not yet implemented",
+            "array_sort with non-lambda second argument",
         ));
     }
 

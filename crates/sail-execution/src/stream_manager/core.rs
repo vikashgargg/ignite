@@ -15,7 +15,7 @@ use crate::id::{JobId, TaskStreamKey, TaskStreamKeyDisplay};
 use crate::stream::error::{TaskStreamError, TaskStreamResult};
 use crate::stream::reader::TaskStreamSource;
 use crate::stream::writer::{LocalStreamStorage, TaskStreamSink};
-use crate::stream_manager::local::{LocalStream, MemoryStream};
+use crate::stream_manager::local::{DiskStream, LocalStream, MemoryStream};
 use crate::stream_manager::options::StreamManagerOptions;
 use crate::stream_manager::{LocalStreamState, StreamManager, StreamManagerMessage};
 
@@ -31,11 +31,16 @@ impl StreamManager {
         &mut self,
         key: TaskStreamKey,
         storage: LocalStreamStorage,
-        _schema: SchemaRef,
+        schema: SchemaRef,
     ) -> ExecutionResult<Box<dyn TaskStreamSink>> {
         let create = |senders: Vec<_>| -> ExecutionResult<_> {
-            let mut stream =
-                Self::create_local_stream_with_senders(storage, senders, &self.options)?;
+            let mut stream = Self::create_local_stream_with_senders(
+                storage.clone(),
+                senders,
+                &self.options,
+                &key,
+                schema.clone(),
+            )?;
             let sink = stream.publish()?;
             Ok((stream, sink))
         };
@@ -200,6 +205,8 @@ impl StreamManager {
         storage: LocalStreamStorage,
         senders: Vec<mpsc::Sender<TaskStreamResult<RecordBatch>>>,
         options: &StreamManagerOptions,
+        key: &TaskStreamKey,
+        schema: SchemaRef,
     ) -> ExecutionResult<Box<dyn LocalStream>> {
         match storage {
             LocalStreamStorage::Memory { replicas } => Ok(Box::new(MemoryStream::new(
@@ -207,9 +214,28 @@ impl StreamManager {
                 replicas,
                 senders,
             ))),
-            LocalStreamStorage::Disk => Err(ExecutionError::InternalError(
-                "not implemented: local disk storage".to_string(),
-            )),
+            LocalStreamStorage::Disk => {
+                std::fs::create_dir_all(&options.shuffle_spill_dir).map_err(|e| {
+                    ExecutionError::InternalError(format!(
+                        "disk stream: failed to create spill dir {:?}: {e}",
+                        options.shuffle_spill_dir
+                    ))
+                })?;
+                let filename = format!(
+                    "shuffle_{}_{}_{}_{}.ipc",
+                    u64::from(key.job_id),
+                    key.stage,
+                    key.partition,
+                    key.attempt,
+                );
+                let path = options.shuffle_spill_dir.join(filename);
+                Ok(Box::new(DiskStream::new(
+                    path,
+                    schema,
+                    options.task_stream_buffer,
+                    senders,
+                )))
+            }
         }
     }
 }

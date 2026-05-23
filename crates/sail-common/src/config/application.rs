@@ -196,6 +196,7 @@ pub struct ClusterConfig {
     pub task_launch_timeout_secs: u64,
     pub task_stream_buffer: usize,
     pub task_stream_creation_timeout_secs: u64,
+    pub shuffle_spill_dir: String,
     pub task_max_attempts: usize,
     pub rpc_retry_strategy: RetryStrategy,
 }
@@ -649,6 +650,7 @@ impl ClusterConfigEnv {
         WORKER_HEARTBEAT_INTERVAL_SECS,
         TASK_STREAM_BUFFER,
         TASK_STREAM_CREATION_TIMEOUT_SECS,
+        SHUFFLE_SPILL_DIR,
         RPC_RETRY_STRATEGY,
     }
 }

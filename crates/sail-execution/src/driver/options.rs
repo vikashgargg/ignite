@@ -24,6 +24,7 @@ pub struct DriverOptions {
     pub task_launch_timeout: Duration,
     pub task_stream_buffer: usize,
     pub task_stream_creation_timeout: Duration,
+    pub shuffle_spill_dir: String,
     pub task_max_attempts: usize,
     pub rpc_retry_strategy: RetryStrategy,
     pub runtime: RuntimeHandle,
@@ -59,6 +60,7 @@ impl DriverOptions {
             task_stream_creation_timeout: Duration::from_secs(
                 config.cluster.task_stream_creation_timeout_secs,
             ),
+            shuffle_spill_dir: config.cluster.shuffle_spill_dir.clone(),
             task_max_attempts: config.cluster.task_max_attempts,
             runtime,
             worker_manager,

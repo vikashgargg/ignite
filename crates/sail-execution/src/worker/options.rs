@@ -21,6 +21,7 @@ pub struct WorkerOptions {
     pub worker_heartbeat_interval: Duration,
     pub task_stream_buffer: usize,
     pub task_stream_creation_timeout: Duration,
+    pub shuffle_spill_dir: String,
     pub rpc_retry_strategy: RetryStrategy,
     pub runtime: RuntimeHandle,
     pub session: SessionContext,
@@ -48,6 +49,7 @@ impl WorkerOptions {
             task_stream_creation_timeout: Duration::from_secs(
                 config.cluster.task_stream_creation_timeout_secs,
             ),
+            shuffle_spill_dir: config.cluster.shuffle_spill_dir.clone(),
             rpc_retry_strategy: (&config.cluster.rpc_retry_strategy).into(),
             runtime,
             session,
@@ -72,6 +74,7 @@ impl WorkerOptions {
             worker_heartbeat_interval: options.worker_heartbeat_interval,
             task_stream_buffer: options.task_stream_buffer,
             task_stream_creation_timeout: options.task_stream_creation_timeout,
+            shuffle_spill_dir: options.shuffle_spill_dir,
             rpc_retry_strategy: options.rpc_retry_strategy,
             runtime: runtime.clone(),
             session,

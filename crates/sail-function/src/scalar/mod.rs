@@ -1,5 +1,6 @@
 pub mod array;
 pub mod collection;
+pub mod higher_order;
 pub mod csv;
 pub mod datetime;
 pub mod drop_struct_field;
