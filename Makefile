@@ -220,9 +220,9 @@ kind-setup:
 	@echo "=== Deploying Vajra to kind ==="
 	kubectl apply -f k8s/sail.yaml
 	@echo "=== Waiting for pod to be ready ==="
-	kubectl rollout status deployment/ignite-spark-server -n ignite --timeout=120s
+	kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=120s
 	@echo ""
-	@echo "=== Port-forward: kubectl port-forward -n ignite svc/ignite-spark-server 50051:50051 ==="
+	@echo "=== Port-forward: kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 ==="
 
 kind-teardown:
 	@echo "=== Deleting kind cluster '$(KIND_CLUSTER)' ==="
