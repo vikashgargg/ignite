@@ -245,6 +245,48 @@ fn from_ast_window_frame_bound(bound: WindowFrameBound) -> SqlResult<spec::Windo
     }
 }
 
+pub(crate) fn from_ast_window_spec(window: WindowSpec) -> SqlResult<spec::Window> {
+    match window {
+        WindowSpec::Named(x) => Ok(spec::Window::Named(x.value.into())),
+        WindowSpec::Unnamed {
+            left: _,
+            modifiers,
+            window_frame,
+            right: _,
+        } => {
+            let WindowModifiers {
+                cluster_by,
+                partition_by,
+                order_by,
+            } = modifiers.try_into()?;
+            let cluster_by = cluster_by
+                .unwrap_or_default()
+                .into_iter()
+                .map(from_ast_expression)
+                .collect::<SqlResult<Vec<_>>>()?;
+            let partition_by = partition_by
+                .unwrap_or_default()
+                .into_iter()
+                .map(from_ast_expression)
+                .collect::<SqlResult<Vec<_>>>()?;
+            let order_by = order_by
+                .unwrap_or_default()
+                .into_iter()
+                .map(from_ast_order_by)
+                .collect::<SqlResult<Vec<_>>>()?;
+            let frame = window_frame
+                .map(|f| from_ast_window_frame(*f))
+                .transpose()?;
+            Ok(spec::Window::Unnamed {
+                cluster_by,
+                partition_by,
+                order_by,
+                frame,
+            })
+        }
+    }
+}
+
 pub fn from_ast_expression(expr: Expr) -> SqlResult<spec::Expr> {
     match expr {
         Expr::Atom(atom) => from_ast_atom_expression(atom),
@@ -895,45 +937,7 @@ fn from_ast_atom_expression(atom: AtomExpr) -> SqlResult<spec::Expr> {
             });
             if let Some(over_clause) = over_clause {
                 let OverClause { over: _, window } = over_clause;
-                let window = match window {
-                    WindowSpec::Named(x) => spec::Window::Named(x.value.into()),
-                    WindowSpec::Unnamed {
-                        left: _,
-                        modifiers,
-                        window_frame,
-                        right: _,
-                    } => {
-                        let WindowModifiers {
-                            cluster_by,
-                            partition_by,
-                            order_by,
-                        } = modifiers.try_into()?;
-                        let cluster_by = cluster_by
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(from_ast_expression)
-                            .collect::<SqlResult<Vec<_>>>()?;
-                        let partition_by = partition_by
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(from_ast_expression)
-                            .collect::<SqlResult<Vec<_>>>()?;
-                        let order_by = order_by
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(from_ast_order_by)
-                            .collect::<SqlResult<Vec<_>>>()?;
-                        let frame = window_frame
-                            .map(|f| from_ast_window_frame(*f))
-                            .transpose()?;
-                        spec::Window::Unnamed {
-                            cluster_by,
-                            partition_by,
-                            order_by,
-                            frame,
-                        }
-                    }
-                };
+                let window = from_ast_window_spec(window)?;
                 Ok(spec::Expr::Window {
                     window_function: Box::new(function),
                     window,

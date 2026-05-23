@@ -19,7 +19,7 @@ use sail_sql_parser::common::Sequence;
 use crate::error::{SqlError, SqlResult};
 use crate::expression::{
     from_ast_expression, from_ast_function_arguments, from_ast_grouping_expression,
-    from_ast_identifier_list, from_ast_object_name, from_ast_order_by,
+    from_ast_identifier_list, from_ast_object_name, from_ast_order_by, from_ast_window_spec,
 };
 
 #[derive(Default)]
@@ -119,6 +119,119 @@ pub fn from_ast_named_expression(expr: NamedExpr) -> SqlResult<spec::Expr> {
     }
 }
 
+fn from_ast_named_window_def(nw: NamedWindow) -> SqlResult<(String, spec::Window)> {
+    let NamedWindow { name, r#as: _, window } = nw;
+    Ok((name.value, from_ast_window_spec(window)?))
+}
+
+fn expand_named_windows_in_expr(
+    expr: spec::Expr,
+    defs: &std::collections::HashMap<String, spec::Window>,
+) -> SqlResult<spec::Expr> {
+    match expr {
+        spec::Expr::Window {
+            window_function,
+            window: spec::Window::Named(ref name),
+        } => {
+            let name_str: &str = name.as_ref();
+            let def = defs
+                .get(name_str)
+                .ok_or_else(|| SqlError::invalid(format!("undefined window: {name_str}")))?
+                .clone();
+            Ok(spec::Expr::Window {
+                window_function,
+                window: def,
+            })
+        }
+        spec::Expr::Alias { expr, name, metadata } => Ok(spec::Expr::Alias {
+            expr: Box::new(expand_named_windows_in_expr(*expr, defs)?),
+            name,
+            metadata,
+        }),
+        spec::Expr::Cast {
+            expr,
+            cast_to_type,
+            rename,
+            is_try,
+        } => Ok(spec::Expr::Cast {
+            expr: Box::new(expand_named_windows_in_expr(*expr, defs)?),
+            cast_to_type,
+            rename,
+            is_try,
+        }),
+        other => Ok(other),
+    }
+}
+
+fn expand_named_windows_in_plan(
+    plan: spec::QueryPlan,
+    defs: &std::collections::HashMap<String, spec::Window>,
+) -> SqlResult<spec::QueryPlan> {
+    if defs.is_empty() {
+        return Ok(plan);
+    }
+    let spec::QueryPlan { node, plan_id } = plan;
+    let node = match node {
+        spec::QueryNode::Project { expressions, input } => spec::QueryNode::Project {
+            expressions: expressions
+                .into_iter()
+                .map(|e| expand_named_windows_in_expr(e, defs))
+                .collect::<SqlResult<_>>()?,
+            input: input
+                .map(|p| expand_named_windows_in_plan(*p, defs).map(Box::new))
+                .transpose()?,
+        },
+        spec::QueryNode::Aggregate(agg) => {
+            let spec::Aggregate {
+                input,
+                grouping,
+                aggregate,
+                having,
+                with_grouping_expressions,
+            } = agg;
+            spec::QueryNode::Aggregate(spec::Aggregate {
+                input: Box::new(expand_named_windows_in_plan(*input, defs)?),
+                grouping,
+                aggregate: aggregate
+                    .into_iter()
+                    .map(|e| expand_named_windows_in_expr(e, defs))
+                    .collect::<SqlResult<_>>()?,
+                having,
+                with_grouping_expressions,
+            })
+        }
+        spec::QueryNode::Sort {
+            input,
+            order,
+            is_global,
+        } => spec::QueryNode::Sort {
+            input: Box::new(expand_named_windows_in_plan(*input, defs)?),
+            order,
+            is_global,
+        },
+        spec::QueryNode::Filter { input, condition } => spec::QueryNode::Filter {
+            input: Box::new(expand_named_windows_in_plan(*input, defs)?),
+            condition,
+        },
+        spec::QueryNode::Limit { input, skip, limit } => spec::QueryNode::Limit {
+            input: Box::new(expand_named_windows_in_plan(*input, defs)?),
+            skip,
+            limit,
+        },
+        spec::QueryNode::SubqueryAlias {
+            input,
+            alias,
+            qualifier,
+        } => spec::QueryNode::SubqueryAlias {
+            input: Box::new(expand_named_windows_in_plan(*input, defs)?),
+            alias,
+            qualifier,
+        },
+        other => other,
+    };
+    Ok(spec::QueryPlan { node, plan_id })
+}
+
 pub(crate) fn from_ast_query(query: Query) -> SqlResult<spec::QueryPlan> {
     let Query {
         with,
@@ -135,8 +248,14 @@ pub(crate) fn from_ast_query(query: Query) -> SqlResult<spec::QueryPlan> {
         distribute_by,
         offset,
         limit,
-        window: _, // TODO: support window
+        window,
     } = modifiers.try_into()?;
+
+    let window_defs: std::collections::HashMap<String, spec::Window> = window
+        .into_iter()
+        .map(from_ast_named_window_def)
+        .collect::<SqlResult<_>>()?;
+    let plan = expand_named_windows_in_plan(plan, &window_defs)?;
 
     if cluster_by.is_some() {
         return Err(SqlError::todo("CLUSTER BY"));

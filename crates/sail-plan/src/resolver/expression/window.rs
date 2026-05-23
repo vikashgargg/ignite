@@ -42,7 +42,10 @@ impl PlanResolver<'_> {
             frame,
         } = window
         else {
-            return Err(PlanError::todo("named window"));
+            return Err(PlanError::invalid(
+                "named window reference not resolved — SQL named windows \
+                 should be expanded by the SQL analyzer before plan resolution",
+            ));
         };
         if !cluster_by.is_empty() {
             return Err(PlanError::unsupported(

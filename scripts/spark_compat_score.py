@@ -636,6 +636,26 @@ with _tmp_mgr as tmp:
         .agg(F.sum("revenue"))
         .count() == 2))
 
+    # ── 15. Named Windows ──────────────────────────────────────────────────────
+    group("15. Named Windows")
+
+    check("named window reuse", lambda: assert_true(
+        spark.sql("""
+            SELECT id,
+                   sum(id) OVER w AS running_sum,
+                   rank() OVER w AS rnk
+            FROM range(5)
+            WINDOW w AS (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+        """).count() == 5))
+
+    check("named window PARTITION BY", lambda: assert_true(
+        spark.sql("""
+            SELECT id % 2 AS grp, id,
+                   row_number() OVER w AS rn
+            FROM range(6)
+            WINDOW w AS (PARTITION BY id % 2 ORDER BY id)
+        """).count() == 6))
+
 # ── Scorecard ─────────────────────────────────────────────────────────────────
 
 try:
