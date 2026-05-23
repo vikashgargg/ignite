@@ -12,8 +12,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # ── Read canonical Python version from the Dockerfile ────────────────────────
-CONTAINER_PY=$(grep -oP 'ARG PYTHON_VERSION=\K[0-9]+\.[0-9]+' \
-    "$REPO_ROOT/docker/apple/Dockerfile" 2>/dev/null | head -1)
+# Uses -oE (POSIX extended regex, portable across macOS BSD grep and GNU grep).
+CONTAINER_PY=$(grep -oE 'ARG PYTHON_VERSION=[0-9]+\.[0-9]+' \
+    "$REPO_ROOT/docker/apple/Dockerfile" 2>/dev/null | cut -d= -f2 | head -1)
 CONTAINER_PY="${CONTAINER_PY:-3.12}"
 
 # ── Locate a matching Python binary ──────────────────────────────────────────
