@@ -135,6 +135,23 @@ pub enum CatalogCommand {
         database: Vec<String>,
         extended: bool,
     },
+    IsCached {
+        table: Vec<String>,
+    },
+    CacheTable {
+        table: Vec<String>,
+    },
+    UncacheTable {
+        table: Vec<String>,
+        if_exists: bool,
+    },
+    ClearCache,
+    RefreshTable {
+        table: Vec<String>,
+    },
+    RefreshByPath {
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, PartialOrd, Serialize, Deserialize)]
@@ -178,6 +195,12 @@ impl CatalogCommand {
             CatalogCommand::CreateView { .. } => "CreateView",
             CatalogCommand::DescribeTable { .. } => "DescribeTable",
             CatalogCommand::DescribeDatabase { .. } => "DescribeDatabase",
+            CatalogCommand::IsCached { .. } => "IsCached",
+            CatalogCommand::CacheTable { .. } => "CacheTable",
+            CatalogCommand::UncacheTable { .. } => "UncacheTable",
+            CatalogCommand::ClearCache => "ClearCache",
+            CatalogCommand::RefreshTable { .. } => "RefreshTable",
+            CatalogCommand::RefreshByPath { .. } => "RefreshByPath",
         }
     }
 
@@ -227,7 +250,13 @@ impl CatalogCommand {
             | CatalogCommand::AlterTable { .. }
             | CatalogCommand::DropFunction { .. }
             | CatalogCommand::DropTemporaryView { .. }
-            | CatalogCommand::DropView { .. } => display.bools().schema()?,
+            | CatalogCommand::DropView { .. }
+            | CatalogCommand::IsCached { .. } => display.bools().schema()?,
+            CatalogCommand::CacheTable { .. }
+            | CatalogCommand::UncacheTable { .. }
+            | CatalogCommand::ClearCache
+            | CatalogCommand::RefreshTable { .. }
+            | CatalogCommand::RefreshByPath { .. } => display.empty().schema()?,
         };
         Ok(schema)
     }
@@ -633,6 +662,18 @@ impl CatalogCommand {
                 }
 
                 serializer.build_record_batch(&rows)?
+            }
+            CatalogCommand::IsCached { .. } => {
+                // We do not maintain a cache registry; report all tables as uncached.
+                display.bools().to_record_batch(vec![false])?
+            }
+            CatalogCommand::CacheTable { .. }
+            | CatalogCommand::UncacheTable { .. }
+            | CatalogCommand::ClearCache
+            | CatalogCommand::RefreshTable { .. }
+            | CatalogCommand::RefreshByPath { .. } => {
+                // No-op: Vajra does not maintain an in-memory table cache.
+                display.empty().to_record_batch(vec![])?
             }
         };
         Ok(batch)

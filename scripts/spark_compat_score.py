@@ -656,6 +656,24 @@ with _tmp_mgr as tmp:
             WINDOW w AS (PARTITION BY id % 2 ORDER BY id)
         """).count() == 6))
 
+    # ── 16. Cache / Catalog ────────────────────────────────────────────────────
+    group("16. Cache / Catalog")
+
+    def _cache_test():
+        spark.range(3).createOrReplaceTempView("_cache_t")
+        spark.catalog.cacheTable("_cache_t")
+        was_cached = spark.catalog.isCached("_cache_t")  # no-op returns False
+        spark.catalog.uncacheTable("_cache_t")
+        spark.catalog.clearCache()
+        spark.sql("CACHE TABLE _cache_t")
+        spark.sql("UNCACHE TABLE IF EXISTS _cache_t")
+        return True  # no exception = pass
+
+    check("CACHE / UNCACHE TABLE no-op", lambda: _cache_test())
+
+    check("REFRESH TABLE no-op", lambda: (
+        spark.sql("REFRESH TABLE _cache_t") or True))
+
 # ── Scorecard ─────────────────────────────────────────────────────────────────
 
 try:

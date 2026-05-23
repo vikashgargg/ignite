@@ -166,12 +166,25 @@ impl PlanResolver<'_> {
             CommandNode::RecoverPartitions { .. } => {
                 Err(PlanError::todo("PlanNode::RecoverPartitions"))
             }
-            CommandNode::IsCached { .. } => Err(PlanError::todo("PlanNode::IsCached")),
-            CommandNode::CacheTable { .. } => Err(PlanError::todo("PlanNode::CacheTable")),
-            CommandNode::UncacheTable { .. } => Err(PlanError::todo("PlanNode::UncacheTable")),
-            CommandNode::ClearCache => Err(PlanError::todo("PlanNode::ClearCache")),
-            CommandNode::RefreshTable { .. } => Err(PlanError::todo("PlanNode::RefreshTable")),
-            CommandNode::RefreshByPath { .. } => Err(PlanError::todo("PlanNode::RefreshByPath")),
+            CommandNode::IsCached { table } => self.resolve_catalog_command(CatalogCommand::IsCached {
+                table: table.into(),
+            }),
+            CommandNode::CacheTable { table, .. } => {
+                self.resolve_catalog_command(CatalogCommand::CacheTable { table: table.into() })
+            }
+            CommandNode::UncacheTable { table, if_exists } => {
+                self.resolve_catalog_command(CatalogCommand::UncacheTable {
+                    table: table.into(),
+                    if_exists,
+                })
+            }
+            CommandNode::ClearCache => self.resolve_catalog_command(CatalogCommand::ClearCache),
+            CommandNode::RefreshTable { table } => {
+                self.resolve_catalog_command(CatalogCommand::RefreshTable { table: table.into() })
+            }
+            CommandNode::RefreshByPath { path } => {
+                self.resolve_catalog_command(CatalogCommand::RefreshByPath { path })
+            }
             CommandNode::CurrentCatalog => {
                 self.resolve_catalog_command(CatalogCommand::CurrentCatalog)
             }
