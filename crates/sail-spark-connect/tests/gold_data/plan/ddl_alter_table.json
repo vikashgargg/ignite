@@ -1384,7 +1384,7 @@
       "input": "ALTER TABLE table_name ALTER COLUMN a.b.c TYPE bad_type",
       "exception": "\n[UNSUPPORTED_DATATYPE] Unsupported data type \"BAD_TYPE\". SQLSTATE: 0A000\n== SQL (line 1, position 48) ==\n...le_name ALTER COLUMN a.b.c TYPE bad_type\n                                   ^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: found bad_type at 47:55 expected data type"
+        "failure": "invalid argument: found bad_type at 47:55 expected data type, or '.'"
       }
     },
     {
@@ -1497,26 +1497,114 @@
     {
       "input": "ALTER TABLE table_name CHANGE COLUMN a.b.c c INT",
       "output": {
-        "failure": "invalid argument: found c at 43:44 expected '.', 'TYPE', 'COMMENT', 'SET', 'DROP', 'FIRST', or 'AFTER'"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "renameColumn": {
+                  "old": [
+                    "a",
+                    "b",
+                    "c"
+                  ],
+                  "new": [
+                    "c"
+                  ]
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "ALTER TABLE table_name CHANGE COLUMN a.b.c c INT AFTER other_col",
       "output": {
-        "failure": "invalid argument: found c at 43:44 expected '.', 'TYPE', 'COMMENT', 'SET', 'DROP', 'FIRST', or 'AFTER'"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "renameColumn": {
+                  "old": [
+                    "a",
+                    "b",
+                    "c"
+                  ],
+                  "new": [
+                    "c"
+                  ]
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "ALTER TABLE table_name CHANGE COLUMN a.b.c c INT COMMENT 'new_comment'",
       "output": {
-        "failure": "invalid argument: found c at 43:44 expected '.', 'TYPE', 'COMMENT', 'SET', 'DROP', 'FIRST', or 'AFTER'"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "renameColumn": {
+                  "old": [
+                    "a",
+                    "b",
+                    "c"
+                  ],
+                  "new": [
+                    "c"
+                  ]
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "ALTER TABLE table_name CHANGE COLUMN a.b.c new_name INT",
       "exception": "\nRenaming column is not supported in Hive-style ALTER COLUMN, please run RENAME COLUMN instead.\n== SQL (line 1, position 1) ==\nALTER TABLE table_name CHANGE COLUMN a.b.c new_name INT\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: found new_name at 43:51 expected '.', 'TYPE', 'COMMENT', 'SET', 'DROP', 'FIRST', or 'AFTER'"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "renameColumn": {
+                  "old": [
+                    "a",
+                    "b",
+                    "c"
+                  ],
+                  "new": [
+                    "new_name"
+                  ]
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {

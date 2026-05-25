@@ -1009,15 +1009,19 @@ pub fn from_ast_statement(statement: Statement) -> SqlResult<spec::Plan> {
                 .unwrap_or_default();
             let (columns, no_scan) = match modifier {
                 Some(AnalyzeTableModifier::NoScan(_)) => (vec![], true),
-                Some(AnalyzeTableModifier::ForAllColumns(_, _, _)) => (vec![], false),
+                Some(AnalyzeTableModifier::ForAllColumns(_, _, _, _)) => (vec![], false),
                 Some(AnalyzeTableModifier::ForColumns(_, _, x)) => {
                     let columns = x
-                        .into_items()
-                        .map(from_ast_object_name)
-                        .collect::<SqlResult<_>>()?;
+                        .map(|seq| {
+                            seq.into_items()
+                                .map(from_ast_object_name)
+                                .collect::<SqlResult<Vec<_>>>()
+                        })
+                        .transpose()?
+                        .unwrap_or_default();
                     (columns, false)
                 }
-                None => (vec![], false),
+                Some(AnalyzeTableModifier::Unknown(_)) | None => (vec![], false),
             };
             let node = spec::CommandNode::AnalyzeTable {
                 table: from_ast_object_name(name)?,
@@ -1818,6 +1822,7 @@ fn from_ast_explain_format(format: Option<ExplainFormat>) -> SqlResult<spec::Exp
         Some(ExplainFormat::Formatted(_)) => Ok(spec::ExplainMode::Formatted),
         Some(ExplainFormat::Analyze(_)) => Ok(spec::ExplainMode::Analyze),
         Some(ExplainFormat::Verbose(_)) => Ok(spec::ExplainMode::Verbose),
+        Some(ExplainFormat::Logical(_)) => Ok(spec::ExplainMode::Extended),
     }
 }
 
@@ -1961,6 +1966,17 @@ fn from_ast_alter_table_operation(
             name: from_ast_object_name(name)?,
             data_type: from_ast_data_type(data_type)?,
         }),
+        AlterTableOperation::AlterColumn {
+            name,
+            operation: AlterColumnOperation::RenameWithChange { new_name, .. },
+            ..
+        } => {
+            // CHANGE COLUMN old new type — treat as rename (type change not yet supported here)
+            Ok(spec::AlterTableOperation::RenameColumn {
+                old: from_ast_object_name(name)?,
+                new: from_ast_object_name(new_name)?,
+            })
+        }
         AlterTableOperation::AddColumns { items, .. }
         | AlterTableOperation::ReplaceColumns { items, .. } => {
             let columns = from_ast_column_alteration_list(items)?;

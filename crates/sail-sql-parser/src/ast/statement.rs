@@ -12,8 +12,8 @@ use crate::ast::keywords::{
     Delimited, Desc, Describe, Directory, Distributed, Drop, Escaped, Evolution, Exists, Explain,
     Extended, External, Fields, Fileformat, First, For, Format, Formatted, From, Function,
     Functions, Generated, Global, If, In, Inpath, Inputformat, Insert, Into, Is, Items, Keys, Lazy,
-    Like, Lines, Load, Local, Location, Map, Matched, Merge, Name, Namespace, Namespaces, Noscan,
-    Not, Null, On, Options, Or, Outputformat, Overwrite, Partition, Partitioned, Partitions,
+    Like, Lines, Load, Local, Location, Logical, Map, Matched, Merge, Name, Namespace, Namespaces,
+    Noscan, Not, Null, On, Options, Or, Outputformat, Overwrite, Partition, Partitioned, Partitions,
     Properties, Purge, Recover, Refresh, Rename, Replace, Restrict, Row, Schema, Schemas, Serde,
     Serdeproperties, Set, Show, Sorted, Source, Statistics, Stored, Table, Tables, Target,
     Tblproperties, Temp, Temporary, Terminated, Then, Time, To, Type, Uncache, Unset, Update, Use,
@@ -362,6 +362,7 @@ pub enum ExplainFormat {
     Formatted(Formatted),
     Analyze(Analyze),
     Verbose(Verbose),
+    Logical(Logical),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
@@ -753,6 +754,14 @@ pub enum AlterColumnOperation {
     Position(ColumnPosition),
     SetDefault(Set, Default, #[parser(function = |(e, _), _| e)] Expr),
     DropDefault(Drop, Default),
+    // CHANGE COLUMN old_name new_name [DataType] [options...] — must be last so keyword variants win
+    RenameWithChange {
+        new_name: ObjectName,
+        #[parser(function = |(_, d), _| d)]
+        data_type: DataType,
+        #[parser(function = |(e, _), o| compose(e, o))]
+        options: Vec<ColumnAlterationOption>,
+    },
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
@@ -965,8 +974,12 @@ pub struct DeleteTableAlias {
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
 pub enum AnalyzeTableModifier {
     NoScan(Noscan),
-    ForAllColumns(For, All, Columns),
-    ForColumns(For, Columns, Sequence<ObjectName, Comma>),
+    // FOR ALL COLUMNS [col1, col2, ...]
+    ForAllColumns(For, All, Option<Columns>, Option<Sequence<ObjectName, Comma>>),
+    // FOR COLUMNS [col1, col2, ...]
+    ForColumns(For, Columns, Option<Sequence<ObjectName, Comma>>),
+    // Unknown modifier (e.g. xxxx) — silently ignore for compatibility
+    Unknown(Ident),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
