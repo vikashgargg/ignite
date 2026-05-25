@@ -837,7 +837,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: input_file_block_length"
+        "success": "ok"
       }
     },
     {
@@ -859,7 +859,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: input_file_block_start"
+        "success": "ok"
       }
     },
     {
@@ -879,7 +879,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: input_file_name"
+        "success": "ok"
       }
     },
     {

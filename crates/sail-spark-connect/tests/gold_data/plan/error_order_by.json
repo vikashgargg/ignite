@@ -192,7 +192,84 @@
       "input": "select *\nfrom r\norder by q\ncluster by q",
       "exception": "\n[UNSUPPORTED_FEATURE.COMBINATION_QUERY_RESULT_CLAUSES] The feature is not supported: Combination of ORDER BY/SORT BY/DISTRIBUTE BY/CLUSTER BY. SQLSTATE: 0A000\n== SQL (line 3, position 1) ==\norder by q\n^^^^^^^^^^\ncluster by q\n^^^^^^^^^^^^\n",
       "output": {
-        "failure": "not implemented: CLUSTER BY"
+        "success": {
+          "query": {
+            "sort": {
+              "input": {
+                "sort": {
+                  "input": {
+                    "project": {
+                      "input": {
+                        "read": {
+                          "namedTable": {
+                            "name": [
+                              "r"
+                            ],
+                            "temporal": null,
+                            "sample": null,
+                            "options": []
+                          },
+                          "isStreaming": false
+                        },
+                        "planId": null
+                      },
+                      "expressions": [
+                        {
+                          "unresolvedStar": {
+                            "target": null,
+                            "planId": null,
+                            "wildcardOptions": {
+                              "ilikePattern": null,
+                              "excludeColumns": null,
+                              "exceptColumns": null,
+                              "replaceColumns": null,
+                              "renameColumns": null
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "planId": null
+                  },
+                  "order": [
+                    {
+                      "child": {
+                        "unresolvedAttribute": {
+                          "name": [
+                            "q"
+                          ],
+                          "planId": null,
+                          "isMetadataColumn": false
+                        }
+                      },
+                      "direction": "unspecified",
+                      "nullOrdering": "unspecified"
+                    }
+                  ],
+                  "isGlobal": false
+                },
+                "planId": null
+              },
+              "order": [
+                {
+                  "child": {
+                    "unresolvedAttribute": {
+                      "name": [
+                        "q"
+                      ],
+                      "planId": null,
+                      "isMetadataColumn": false
+                    }
+                  },
+                  "direction": "unspecified",
+                  "nullOrdering": "unspecified"
+                }
+              ],
+              "isGlobal": true
+            },
+            "planId": null
+          }
+        }
       }
     }
   ]

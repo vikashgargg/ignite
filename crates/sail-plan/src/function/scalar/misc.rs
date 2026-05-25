@@ -74,6 +74,21 @@ fn current_database(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
     )))
 }
 
+fn input_file_name(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    input.arguments.zero()?;
+    Ok(lit(ScalarValue::Utf8(Some(String::new()))))
+}
+
+fn input_file_block_start(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    input.arguments.zero()?;
+    Ok(lit(ScalarValue::Int64(Some(-1))))
+}
+
+fn input_file_block_length(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    input.arguments.zero()?;
+    Ok(lit(ScalarValue::Int64(Some(-1))))
+}
+
 fn current_user(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
     input.arguments.zero()?;
     Ok(lit(input
@@ -144,13 +159,13 @@ pub(super) fn list_built_in_misc_functions() -> Vec<(&'static str, ScalarFunctio
         ("hll_union", F::unknown("hll_union")),
         (
             "input_file_block_length",
-            F::unknown("input_file_block_length"),
+            F::custom(input_file_block_length),
         ),
         (
             "input_file_block_start",
-            F::unknown("input_file_block_start"),
+            F::custom(input_file_block_start),
         ),
-        ("input_file_name", F::unknown("input_file_name")),
+        ("input_file_name", F::custom(input_file_name)),
         ("java_method", F::unknown("java_method")),
         (
             "monotonically_increasing_id",

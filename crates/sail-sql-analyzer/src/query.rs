@@ -257,13 +257,29 @@ pub(crate) fn from_ast_query(query: Query) -> SqlResult<spec::QueryPlan> {
         .collect::<SqlResult<_>>()?;
     let plan = expand_named_windows_in_plan(plan, &window_defs)?;
 
-    if cluster_by.is_some() {
-        return Err(SqlError::todo("CLUSTER BY"));
-    }
+    // CLUSTER BY a is equivalent to DISTRIBUTE BY a SORT BY a; treat as SORT BY
+    let sort_by = if let Some(cluster_items) = cluster_by {
+        if sort_by.is_some() {
+            return Err(SqlError::invalid(
+                "CLUSTER BY cannot be combined with SORT BY or ORDER BY",
+            ));
+        }
+        Some(
+            cluster_items
+                .into_iter()
+                .map(|e| OrderByExpr {
+                    expr: e,
+                    direction: None,
+                    nulls: None,
+                })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        sort_by
+    };
 
-    if distribute_by.is_some() {
-        return Err(SqlError::todo("DISTRIBUTE BY"));
-    }
+    // DISTRIBUTE BY is a repartition hint; in single-node mode it's a no-op
+    let _ = distribute_by;
 
     let plan = if let Some(items) = sort_by {
         let sort_by = items
