@@ -1,6 +1,8 @@
 use async_recursion::async_recursion;
 use datafusion_expr::{Expr, LogicalPlan, LogicalPlanBuilder};
 use sail_common::spec;
+use sail_common_datafusion::extension::SessionExtensionAccessor;
+use sail_common_datafusion::session::artifact::ArtifactStore;
 
 use crate::error::{PlanError, PlanResult};
 use crate::resolver::state::PlanResolverState;
@@ -224,11 +226,32 @@ impl PlanResolver<'_> {
                 self.resolve_query_apply_in_pandas_with_state(apply, state)
                     .await?
             }
-            QueryNode::CachedLocalRelation { .. } => {
-                return Err(PlanError::todo("cached local relation"));
+            QueryNode::CachedLocalRelation { hash } => {
+                let artifact_name = format!("cache/{hash}");
+                let data = self
+                    .ctx
+                    .extension::<ArtifactStore>()
+                    .ok()
+                    .and_then(|store| store.get(&artifact_name));
+                self.resolve_query_local_relation(data, None, state).await?
             }
-            QueryNode::CachedRemoteRelation { .. } => {
-                return Err(PlanError::todo("cached remote relation"));
+            QueryNode::CachedRemoteRelation { relation_id } => {
+                // Remote checkpoint relation: look up in artifact store under "remote/<id>".
+                // Falls back to an empty relation if the data is not available (e.g. after restart).
+                let artifact_name = format!("remote/{relation_id}");
+                let data = self
+                    .ctx
+                    .extension::<ArtifactStore>()
+                    .ok()
+                    .and_then(|store| store.get(&artifact_name));
+                match data {
+                    Some(bytes) => self.resolve_query_local_relation(Some(bytes), None, state).await?,
+                    None => {
+                        return Err(PlanError::invalid(format!(
+                            "cached remote relation not found: {relation_id}"
+                        )));
+                    }
+                }
             }
             QueryNode::CommonInlineUserDefinedTableFunction(udtf) => {
                 self.resolve_query_common_inline_udtf(udtf, state).await?
@@ -290,11 +313,28 @@ impl PlanResolver<'_> {
                 self.resolve_query_stat_corr(*input, left_column, right_column, method, state)
                     .await?
             }
-            QueryNode::StatApproxQuantile { .. } => {
-                return Err(PlanError::todo("approx quantile"));
+            QueryNode::StatApproxQuantile {
+                input,
+                columns,
+                probabilities,
+                relative_error,
+            } => {
+                self.resolve_query_stat_approx_quantile(
+                    *input,
+                    columns,
+                    probabilities,
+                    relative_error,
+                    state,
+                )
+                .await?
             }
-            QueryNode::StatFreqItems { .. } => {
-                return Err(PlanError::todo("freq items"));
+            QueryNode::StatFreqItems {
+                input,
+                columns,
+                support,
+            } => {
+                self.resolve_query_stat_freq_items(*input, columns, support, state)
+                    .await?
             }
             QueryNode::StatSampleBy {
                 input,

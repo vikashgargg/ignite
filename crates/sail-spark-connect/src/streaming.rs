@@ -16,7 +16,6 @@ use crate::web_ui;
 
 pub struct StreamingQuery {
     name: String,
-    ui_id: String,
     info: Vec<StringifiedPlan>,
     error: watch::Receiver<Option<SparkThrowable>>,
     stopped: watch::Receiver<bool>,
@@ -64,7 +63,6 @@ impl StreamingQuery {
         });
         Self {
             name,
-            ui_id,
             info,
             error: error_rx,
             stopped: stopped_rx,

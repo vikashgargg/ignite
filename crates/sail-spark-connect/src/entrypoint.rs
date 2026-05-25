@@ -80,6 +80,12 @@ where
 
     let interceptor = BearerTokenInterceptor { expected: expected_token };
 
+    tokio::spawn(async {
+        if let Err(e) = crate::web_ui::serve(4040).await {
+            log::warn!("Web UI error: {e}");
+        }
+    });
+
     let session_manager = create_spark_session_manager(config, runtime)?;
     let server = SparkConnectServer::new(session_manager);
     // Configure message size and compression on the inner service first, then

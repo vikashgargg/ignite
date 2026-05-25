@@ -7715,6 +7715,7 @@ name = "sail-spark-connect"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "axum",
  "datafusion",
  "fastrace",
  "futures",

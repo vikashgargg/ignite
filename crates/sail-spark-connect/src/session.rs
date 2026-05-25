@@ -289,6 +289,7 @@ impl SparkSession {
         state.streaming_queries.reset_stopped_queries();
         Ok(())
     }
+
 }
 
 struct SparkSessionState {

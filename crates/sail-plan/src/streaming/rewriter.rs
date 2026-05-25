@@ -7,7 +7,7 @@ use datafusion_common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion_common::{internal_err, not_impl_err, plan_err, Result};
 use datafusion_expr::{
     col, lit, or, Aggregate, Explain, FetchType, Filter, Join, Projection, SkipType,
-    SubqueryAlias, TableScan, Union, UserDefinedLogicalNode,
+    SubqueryAlias, TableScan, Union, UserDefinedLogicalNode, Window,
 };
 use sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema;
 use sail_common_datafusion::rename::table_provider::RenameTableProvider;
@@ -89,8 +89,40 @@ impl TreeNodeRewriter for StreamingRewriter {
                     node: Arc::new(StreamFilterNode::new(input, predicate)),
                 })))
             }
-            LogicalPlan::Window(_) => {
-                not_impl_err!("streaming window: {plan:?}")
+            LogicalPlan::Window(window) => {
+                // Stateless per-micro-batch analytic window (e.g. rank, lag, row_number).
+                // Strip flow-event schema → apply window on data columns → re-add flow-event cols.
+                let streaming_input = window.input.clone();
+                let data_schema =
+                    try_from_flow_event_schema(streaming_input.schema().inner())?;
+                let data_cols: Vec<_> = data_schema
+                    .fields()
+                    .iter()
+                    .map(|f| col(f.name().as_str()))
+                    .collect();
+                let data_only = Arc::new(LogicalPlan::Projection(Projection::try_new(
+                    data_cols,
+                    Arc::clone(&streaming_input),
+                )?));
+                let new_window = Arc::new(LogicalPlan::Window(Window::try_new(
+                    window.window_expr.clone(),
+                    data_only,
+                )?));
+                let mut out_exprs: Vec<_> = new_window
+                    .schema()
+                    .columns()
+                    .into_iter()
+                    .map(datafusion_expr::Expr::Column)
+                    .collect();
+                out_exprs.push(
+                    lit(datafusion_common::ScalarValue::Binary(None))
+                        .alias(MARKER_FIELD_NAME),
+                );
+                out_exprs.push(lit(false).alias(RETRACTED_FIELD_NAME));
+                Ok(Transformed::yes(LogicalPlan::Projection(Projection::try_new(
+                    out_exprs,
+                    new_window,
+                )?)))
             }
             LogicalPlan::Aggregate(agg) => {
                 // Stateless per-micro-batch aggregation (append-mode):

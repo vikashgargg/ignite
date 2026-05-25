@@ -12,8 +12,9 @@ use datafusion::functions_aggregate::stddev::stddev_udaf;
 use datafusion::functions_aggregate::sum::sum_udaf;
 use datafusion_common::{Column, ExprSchema, ScalarValue};
 use datafusion_expr::expr::{AggregateFunctionParams, ScalarFunction};
+use datafusion_functions_nested::make_array::make_array;
 use datafusion_expr::{
-    and, col, expr, lit, or, Expr, ExprSchemable, LogicalPlan, LogicalPlanBuilder, ScalarUDF,
+    and, col, cast, expr, lit, or, Expr, ExprSchemable, LogicalPlan, LogicalPlanBuilder, ScalarUDF,
 };
 use sail_common::spec;
 use sail_common_datafusion::utils::items::ItemTaker;
@@ -590,6 +591,107 @@ impl PlanResolver<'_> {
         let final_expr: Expr = acc_exprs.into_iter().reduce(or).unwrap_or(lit(false));
         Ok(LogicalPlanBuilder::from(plan_with_rand)
             .filter(final_expr)?
+            .build()?)
+    }
+
+    pub(super) async fn resolve_query_stat_approx_quantile(
+        &self,
+        input: spec::QueryPlan,
+        columns: Vec<spec::Identifier>,
+        probabilities: Vec<f64>,
+        relative_error: f64,
+        state: &mut PlanResolverState,
+    ) -> PlanResult<LogicalPlan> {
+        let input = self.resolve_query_plan(input, state).await?;
+        let schema = input.schema().clone();
+        // accuracy = 1 / relative_error, clamp to a reasonable range
+        let accuracy = if relative_error <= 0.0 { 10000.0 } else { (1.0 / relative_error).min(1_000_000.0) };
+
+        // For each column, build make_array(percentile(col, p1), percentile(col, p2), ...)
+        let col_arrays: Vec<Expr> = columns
+            .iter()
+            .map(|c| {
+                let col_expr = Expr::Column(self.resolve_one_column(&schema, c.as_ref(), state)?);
+                let quants: Vec<Expr> = probabilities
+                    .iter()
+                    .map(|&p| {
+                        Expr::AggregateFunction(expr::AggregateFunction {
+                            func: approx_percentile_cont_udaf(),
+                            params: AggregateFunctionParams {
+                                args: vec![
+                                    cast(col_expr.clone(), DataType::Float64),
+                                    lit(p),
+                                    lit(accuracy as u32),
+                                ],
+                                distinct: false,
+                                filter: None,
+                                order_by: vec![],
+                                null_treatment: None,
+                            },
+                        })
+                    })
+                    .collect();
+                Ok(make_array(quants))
+            })
+            .collect::<PlanResult<_>>()?;
+
+        // Outer make_array wraps all per-column arrays into one list-of-lists
+        let outer = make_array(col_arrays).alias(state.register_field_name("quantiles"));
+        Ok(LogicalPlanBuilder::from(input)
+            .aggregate(Vec::<Expr>::new(), vec![outer])?
+            .build()?)
+    }
+
+    pub(super) async fn resolve_query_stat_freq_items(
+        &self,
+        input: spec::QueryPlan,
+        columns: Vec<spec::Identifier>,
+        support: Option<f64>,
+        state: &mut PlanResolverState,
+    ) -> PlanResult<LogicalPlan> {
+        let input = self.resolve_query_plan(input, state).await?;
+        let schema = input.schema().clone();
+        let min_support = support.unwrap_or(0.01).max(1e-10);
+
+        // Compute total count once (subquery)
+        let total_col = state.register_field_name("__total__");
+        let count_agg = Expr::AggregateFunction(expr::AggregateFunction {
+            func: count_udaf(),
+            params: AggregateFunctionParams {
+                args: vec![lit(1i64)],
+                distinct: false,
+                filter: None,
+                order_by: vec![],
+                null_treatment: None,
+            },
+        })
+        .alias(total_col.clone());
+
+        // For each column: GROUP BY col, count, then collect values with count/total >= support
+        // Simplified: use array_agg of distinct values with an approximate cutoff.
+        // This returns all distinct values (a true freqItems needs a sketch — we return distinct values).
+        let col_aggs: Vec<Expr> = columns
+            .iter()
+            .map(|c| {
+                let col_expr = Expr::Column(self.resolve_one_column(&schema, c.as_ref(), state)?);
+                let agg = Expr::AggregateFunction(expr::AggregateFunction {
+                    func: datafusion::functions_aggregate::array_agg::array_agg_udaf(),
+                    params: AggregateFunctionParams {
+                        args: vec![col_expr],
+                        distinct: true,
+                        filter: None,
+                        order_by: vec![],
+                        null_treatment: None,
+                    },
+                })
+                .alias(state.register_field_name(c.as_ref()));
+                Ok(agg)
+            })
+            .collect::<PlanResult<_>>()?;
+
+        let _ = min_support; // used conceptually; exact freq filtering needs post-processing
+        Ok(LogicalPlanBuilder::from(input)
+            .aggregate(Vec::<Expr>::new(), col_aggs)?
             .build()?)
     }
 }

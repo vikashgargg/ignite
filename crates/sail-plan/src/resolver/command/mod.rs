@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+use arrow::array::{StringArray, StringBuilder};
+use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
+use arrow::record_batch::RecordBatch;
+use datafusion::datasource::memory::MemTable;
 use datafusion_expr::{EmptyRelation, Extension, LogicalPlan};
 use sail_catalog::command::CatalogCommand;
 use sail_catalog::provider::{DropDatabaseOptions, DropTableOptions};
@@ -331,7 +335,41 @@ impl PlanResolver<'_> {
             CommandNode::AnalyzeTables { .. } => {
                 self.resolve_catalog_command(CatalogCommand::ClearCache)
             }
-            CommandNode::DescribeQuery { .. } => Err(PlanError::todo("CommandNode::DescribeQuery")),
+            CommandNode::DescribeQuery { query } => {
+                let plan = self.resolve_query_plan(*query, state).await?;
+                let schema = plan.schema();
+                let describe_schema = Arc::new(ArrowSchema::new(vec![
+                    ArrowField::new("col_name", ArrowDataType::Utf8, false),
+                    ArrowField::new("data_type", ArrowDataType::Utf8, false),
+                    ArrowField::new("comment", ArrowDataType::Utf8, true),
+                ]));
+                let mut col_names = StringBuilder::new();
+                let mut data_types = StringBuilder::new();
+                let mut comments = StringBuilder::new();
+                for (_, field) in schema.iter() {
+                    col_names.append_value(field.name());
+                    data_types.append_value(format!("{}", field.data_type()));
+                    comments.append_null();
+                }
+                let batch = RecordBatch::try_new(describe_schema.clone(), vec![
+                    Arc::new(col_names.finish()),
+                    Arc::new(data_types.finish()),
+                    Arc::new(comments.finish()),
+                ])
+                .map_err(|e| PlanError::internal(e.to_string()))?;
+                let table = Arc::new(
+                    MemTable::try_new(describe_schema, vec![vec![batch]])
+                        .map_err(|e| PlanError::internal(e.to_string()))?,
+                );
+                Ok(datafusion_expr::LogicalPlanBuilder::scan(
+                    "describe_query",
+                    datafusion::datasource::provider_as_source(table),
+                    None,
+                )
+                .map_err(|e| PlanError::internal(e.to_string()))?
+                .build()
+                .map_err(|e| PlanError::internal(e.to_string()))?)
+            }
             CommandNode::DescribeFunction { .. } => {
                 // Return an empty result rather than erroring — most callers
                 // (dbt, Great Expectations, spark-shell) only check that the

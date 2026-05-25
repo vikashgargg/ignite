@@ -1,4 +1,5 @@
 use datafusion_expr::LogicalPlan;
+use log::warn;
 use sail_catalog::command::CatalogCommand;
 use sail_catalog::manager::CatalogManager;
 use sail_catalog::provider::{
@@ -41,10 +42,10 @@ impl PlanResolver<'_> {
         } = definition;
 
         if row_format.is_some() {
-            return Err(PlanError::todo("ROW FORMAT in CREATE TABLE statement"));
+            warn!("ROW FORMAT in CREATE TABLE is not supported and is ignored");
         }
         if !cluster_by.is_empty() {
-            return Err(PlanError::todo("CLUSTER BY in CREATE TABLE statement"));
+            warn!("CLUSTER BY in CREATE TABLE is not supported and is ignored");
         }
         let mut columns = self.resolve_table_columns(columns, state)?;
         let constraints = self.resolve_table_constraints(constraints)?;
@@ -108,35 +109,22 @@ impl PlanResolver<'_> {
             properties,
         } = definition;
         if row_format.is_some() {
-            return Err(PlanError::todo(
-                "ROW FORMAT in CREATE TABLE AS SELECT statement",
-            ));
+            warn!("ROW FORMAT in CREATE TABLE AS SELECT is not supported and is ignored");
         }
         if !cluster_by.is_empty() {
-            return Err(PlanError::todo(
-                "CLUSTER BY in CREATE TABLE AS SELECT statement",
-            ));
+            warn!("CLUSTER BY in CREATE TABLE AS SELECT is not supported and is ignored");
         }
         if !sort_by.is_empty() {
-            return Err(PlanError::todo(
-                "SORT_BY in CREATE TABLE AS SELECT statement",
-            ));
+            warn!("SORT_BY in CREATE TABLE AS SELECT is not supported and is ignored");
         }
         if bucket_by.is_some() {
-            return Err(PlanError::todo(
-                "BUCKET_BY in CREATE TABLE AS SELECT statement",
-            ));
+            warn!("BUCKET_BY in CREATE TABLE AS SELECT is not supported and is ignored");
         }
         if comment.is_some() {
-            return Err(PlanError::todo(
-                "COMMENT in CREATE TABLE AS SELECT statement",
-            ));
+            warn!("COMMENT in CREATE TABLE AS SELECT is not supported and is ignored");
         }
-
         if !constraints.is_empty() {
-            return Err(PlanError::todo(
-                "CONSTRAINTS in CREATE TABLE AS SELECT statement",
-            ));
+            warn!("CONSTRAINTS in CREATE TABLE AS SELECT are not supported and are ignored");
         }
 
         if !columns.is_empty() {

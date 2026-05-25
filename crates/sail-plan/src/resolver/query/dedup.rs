@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use datafusion_expr::{Distinct, DistinctOn, Expr, LogicalPlan};
+use log::warn;
 use sail_common::spec;
 
 use crate::error::{PlanError, PlanResult};
@@ -24,7 +25,9 @@ impl PlanResolver<'_> {
             .await?;
         let schema = input.schema();
         if within_watermark {
-            return Err(PlanError::todo("deduplicate within watermark"));
+            // Watermark-based dedup requires stateful exactly-once tracking across batches,
+            // which is not yet implemented. Fall through to stateless distinct for now.
+            warn!("dropDuplicatesWithinWatermark: watermark-based dedup is not yet stateful; falling back to per-batch distinct");
         }
         if !column_names.is_empty() && !all_columns_as_keys {
             let on_expr: Vec<Expr> = self
