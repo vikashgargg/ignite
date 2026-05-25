@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use datafusion::execution::SendableRecordBatchStream;
@@ -12,14 +12,26 @@ use tokio::sync::{oneshot, watch};
 
 use crate::error::{SparkError, SparkResult, SparkThrowable};
 use crate::spark::connect;
+use crate::web_ui;
 
 pub struct StreamingQuery {
     name: String,
+    ui_id: String,
     info: Vec<StringifiedPlan>,
     error: watch::Receiver<Option<SparkThrowable>>,
     stopped: watch::Receiver<bool>,
     signal: Option<oneshot::Sender<()>>,
     awaitable: bool,
+}
+
+fn read_latest_batch_id(offsets_dir: &Path) -> Option<u64> {
+    std::fs::read_dir(offsets_dir)
+        .ok()?
+        .filter_map(|e| {
+            let name = e.ok()?.file_name();
+            name.to_str()?.parse::<u64>().ok()
+        })
+        .max()
 }
 
 impl StreamingQuery {
@@ -29,14 +41,30 @@ impl StreamingQuery {
         stream: SendableRecordBatchStream,
         checkpoint_location: Option<String>,
     ) -> Self {
+        let initial_batch_id = checkpoint_location.as_deref().map(|loc| {
+            let offsets_dir = PathBuf::from(loc).join("offsets");
+            read_latest_batch_id(&offsets_dir)
+                .map(|id| id + 1)
+                .unwrap_or(0)
+        }).unwrap_or(0);
+
+        let ui_id = uuid::Uuid::new_v4().to_string();
+        {
+            let id = ui_id.clone();
+            let n = name.clone();
+            tokio::spawn(async move { web_ui::register_query(id, n).await; });
+        }
+
         let (signal_tx, signal_rx) = oneshot::channel();
         let (error_tx, error_rx) = watch::channel(None);
         let (stopped_tx, stopped_rx) = watch::channel(false);
+        let ui_id_run = ui_id.clone();
         tokio::spawn(async move {
-            Self::run(signal_rx, error_tx, stopped_tx, stream, checkpoint_location).await;
+            Self::run(signal_rx, error_tx, stopped_tx, stream, checkpoint_location, initial_batch_id, ui_id_run).await;
         });
         Self {
             name,
+            ui_id,
             info,
             error: error_rx,
             stopped: stopped_rx,
@@ -70,6 +98,8 @@ impl StreamingQuery {
         stopped: watch::Sender<bool>,
         mut stream: SendableRecordBatchStream,
         checkpoint_location: Option<String>,
+        initial_batch_id: u64,
+        ui_id: String,
     ) {
         let offsets_dir = checkpoint_location.as_deref().map(|loc| {
             let mut p = PathBuf::from(loc);
@@ -81,7 +111,11 @@ impl StreamingQuery {
                 warn!("Failed to create checkpoint offsets dir {:?}: {e}", dir);
             }
         }
-        let mut batch_id: u64 = 0;
+        if initial_batch_id > 0 {
+            log::info!("Streaming checkpoint recovery: resuming from batch {initial_batch_id}");
+        }
+        let mut batch_id: u64 = initial_batch_id;
+        let ui_id_stop = ui_id.clone();
         let task = async move {
             while let Some(x) = stream.next().await {
                 match x {
@@ -99,6 +133,7 @@ impl StreamingQuery {
                                 warn!("Failed to write checkpoint offset {batch_id}: {e}");
                             }
                         }
+                        web_ui::increment_batch(&ui_id).await;
                         batch_id += 1;
                     }
                     Err(e) => {
@@ -112,6 +147,7 @@ impl StreamingQuery {
             _ = signal => {}
             _ = task => {}
         }
+        web_ui::mark_stopped(&ui_id_stop).await;
         let _ = stopped.send(true);
     }
 }

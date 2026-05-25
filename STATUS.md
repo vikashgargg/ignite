@@ -116,11 +116,11 @@ Target: `v0.3.0` — "Streaming GA + Multi-Tenant"
 | TPC-H SF-1/SF-100 distributed benchmark | ✅ `scripts/tpch_distributed.py` + CI job | PRODUCTION_ROADMAP.md §3.8 |
 | `vajra-pyspark` PyPI package | ✅ `python/vajra_pyspark/` (pure-Python wrapper) | — |
 | Streaming event-time window execution | Not started — planner accepts, executor not wired | PRODUCTION_ROADMAP.md §2.4 |
-| Streaming join (stream × static) | Not started | PRODUCTION_ROADMAP.md §2.5 |
-| Streaming checkpoint recovery on restart | Not started | PRODUCTION_ROADMAP.md §2.7 |
-| mTLS auth (full multi-tenant) | Not started | PRODUCTION_ROADMAP.md §3.3 |
+| Streaming join (stream × static) | ✅ stream×static join via flow-event schema stripping | — |
+| Streaming checkpoint recovery on restart | ✅ reads max batchId from `offsets/` dir on start | — |
+| mTLS auth (full multi-tenant) | ✅ `--tls-cert/--tls-key/--tls-ca` + `SAIL_AUTH__TLS__*` | — |
 | Official Apache Spark test suite | Not started | PRODUCTION_ROADMAP.md §4.2 |
-| Web UI on :4040 | Not started | PRODUCTION_ROADMAP.md §3.7 |
+| Web UI on :4040 | ✅ axum HTML dashboard + `/api/streaming` JSON at `:4040` | — |
 
 See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for full sprint breakdown and definition of done.
 
@@ -128,8 +128,7 @@ See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for full sprint breakdown and
 
 ## Known Limitations
 
-- **Streaming event-time**: `window()` and `withWatermark` accepted by planner; tumbling window execution not yet wired (Sprint 4)
-- **Streaming checkpoint**: Offset files written per batch; restart recovery not yet implemented
+- **Streaming event-time**: `window()` and `withWatermark` accepted by planner; tumbling window execution not yet wired (Sprint 5)
 - **Scale**: Distributed mode tested at SF-1 only; SF-100 validation is Sprint 3
 - **Catalogs**: Unity Catalog and HMS have provider stubs; not production-hardened
 - **Python UDFs**: Require `PYTHONPATH` pointing to PySpark installation on the server

@@ -10,6 +10,7 @@ mod service;
 mod session;
 mod session_manager;
 mod streaming;
+mod web_ui;
 
 pub use proto::data_type_json::JsonDataType;
 
