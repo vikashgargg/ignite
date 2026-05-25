@@ -42,14 +42,10 @@ impl PlanResolver<'_> {
             .await?;
         let schema = input.schema();
 
-        // 2. Resolve pivot column expressions.
+        // 2. Resolve pivot column expressions (supports one or more columns).
         let (pivot_col_names, pivot_col_exprs) = self
             .resolve_expressions_and_names(pivot_columns, schema, state)
             .await?;
-        if pivot_col_exprs.len() != 1 {
-            return Err(PlanError::todo("multi-column pivot"));
-        }
-        let pivot_col_expr = pivot_col_exprs[0].clone();
 
         // 3. Resolve aggregate expressions.
         let aggregate_named = self
@@ -68,23 +64,41 @@ impl PlanResolver<'_> {
 
         // 5. Determine pivot values.
         //    If no values are specified, eagerly compute the distinct values.
+        //    Each PivotValue may have multiple scalars (one per pivot column).
         let service = self.ctx.extension::<PlanService>()?;
         let formatter = service.plan_formatter();
-        let pivot_scalar_values = if pivot_values.is_empty() {
-            self.compute_distinct_pivot_values(&input, &pivot_col_expr, state)
+        // pivot_scalar_values: Vec<(Vec<ScalarValue>, String)>
+        // where the inner Vec has one entry per pivot column.
+        let pivot_scalar_values: Vec<(Vec<ScalarValue>, String)> = if pivot_values.is_empty() {
+            self.compute_distinct_pivot_values_multi(&input, &pivot_col_exprs, state)
                 .await?
         } else {
             let mut values = Vec::with_capacity(pivot_values.len());
             for pv in &pivot_values {
-                if pv.values.len() != 1 {
-                    return Err(PlanError::todo("multi-value pivot"));
-                }
-                let scalar = self.resolve_literal(pv.values[0].clone(), state)?;
+                let scalars: Vec<ScalarValue> = pv
+                    .values
+                    .iter()
+                    .map(|lit| self.resolve_literal(lit.clone(), state))
+                    .collect::<PlanResult<_>>()?;
                 let name = match &pv.alias {
                     Some(alias) => alias.as_ref().to_string(),
-                    None => formatter.literal_to_string(&scalar, &self.config.session_timezone)?,
+                    None => {
+                        let parts: Vec<String> = scalars
+                            .iter()
+                            .map(|s| {
+                                formatter
+                                    .literal_to_string(s, &self.config.session_timezone)
+                                    .map_err(PlanError::from)
+                            })
+                            .collect::<PlanResult<_>>()?;
+                        if parts.len() == 1 {
+                            parts.into_iter().next().unwrap()
+                        } else {
+                            format!("({})", parts.join(", "))
+                        }
+                    }
                 };
-                values.push((scalar, name));
+                values.push((scalars, name));
             }
             values
         };
@@ -95,13 +109,13 @@ impl PlanResolver<'_> {
         let mut pivot_projections: Vec<NamedExpr> = Vec::new();
         let single_agg = aggregate_named.len() == 1;
 
-        for (scalar_value, value_name) in &pivot_scalar_values {
+        for (scalar_values, value_name) in &pivot_scalar_values {
             for agg_named in &aggregate_named {
                 let agg_display_name = &agg_named.name;
                 let filtered_agg = rewrite_aggregate_with_pivot_filter(
                     &agg_named.expr,
-                    &pivot_col_expr,
-                    scalar_value,
+                    &pivot_col_exprs,
+                    scalar_values,
                 )?;
 
                 // Column naming follows Spark convention:
@@ -181,25 +195,30 @@ impl PlanResolver<'_> {
             .collect::<Vec<_>>())
     }
 
-    /// Compute distinct values for the pivot column by executing a query.
-    async fn compute_distinct_pivot_values(
+    /// Compute distinct value tuples for the pivot columns by executing a query.
+    /// Returns one `Vec<ScalarValue>` per distinct combination of pivot column values.
+    async fn compute_distinct_pivot_values_multi(
         &self,
         input: &LogicalPlan,
-        pivot_col_expr: &Expr,
+        pivot_col_exprs: &[Expr],
         _state: &mut PlanResolverState,
-    ) -> PlanResult<Vec<(ScalarValue, String)>> {
+    ) -> PlanResult<Vec<(Vec<ScalarValue>, String)>> {
         let service = self.ctx.extension::<PlanService>()?;
         let formatter = service.plan_formatter();
+        let n = pivot_col_exprs.len();
 
-        // Alias the projection so the sort can reference it by name. Without
-        // the alias, sorting by `pivot_col_expr` would re-evaluate against
-        // source columns that the project just dropped, breaking computed
-        // pivot expressions like `col("year") + 1`.
-        const PIVOT_VALUE_ALIAS: &str = "__pivot_value";
+        let aliases: Vec<String> = (0..n).map(|i| format!("__pivot_col_{i}")).collect();
+        let projected: Vec<Expr> = pivot_col_exprs
+            .iter()
+            .zip(&aliases)
+            .map(|(e, a)| e.clone().alias(a))
+            .collect();
+        let sort_exprs: Vec<_> = aliases.iter().map(|a| col(a).sort(true, true)).collect();
+
         let distinct_plan = LogicalPlanBuilder::from(input.clone())
-            .project(vec![pivot_col_expr.clone().alias(PIVOT_VALUE_ALIAS)])?
+            .project(projected)?
             .distinct()?
-            .sort(vec![col(PIVOT_VALUE_ALIAS).sort(true, true)])?
+            .sort(sort_exprs)?
             .build()?;
 
         let batches = self
@@ -211,22 +230,33 @@ impl PlanResolver<'_> {
 
         let mut values = Vec::new();
         for batch in &batches {
-            let array = batch.column(0);
-            for i in 0..array.len() {
-                if array.is_valid(i) {
-                    let scalar = ScalarValue::try_from_array(array, i)?;
-                    let name =
-                        formatter.literal_to_string(&scalar, &self.config.session_timezone)?;
-                    values.push((scalar, name));
-                    if values.len() > self.config.pivot_max_values {
-                        return Err(PlanError::AnalysisError(format!(
-                            "The pivot column {pivot_col_expr} has more than {} distinct values, \
-                             this could indicate an error. If this was intended, set \
-                             spark.sql.pivotMaxValues to at least the number of distinct values \
-                             of the pivot column.",
-                            self.config.pivot_max_values,
-                        )));
-                    }
+            for i in 0..batch.num_rows() {
+                let row: Vec<ScalarValue> = (0..n)
+                    .map(|col_idx| ScalarValue::try_from_array(batch.column(col_idx), i))
+                    .collect::<std::result::Result<_, _>>()?;
+                let name = if n == 1 {
+                    formatter
+                        .literal_to_string(&row[0], &self.config.session_timezone)
+                        .map_err(PlanError::from)?
+                } else {
+                    let parts: Vec<String> = row
+                        .iter()
+                        .map(|s| {
+                            formatter
+                                .literal_to_string(s, &self.config.session_timezone)
+                                .map_err(PlanError::from)
+                        })
+                        .collect::<PlanResult<_>>()?;
+                    format!("({})", parts.join(", "))
+                };
+                values.push((row, name));
+                if values.len() > self.config.pivot_max_values {
+                    return Err(PlanError::AnalysisError(format!(
+                        "The pivot columns have more than {} distinct value combinations, \
+                         this could indicate an error. If this was intended, set \
+                         spark.sql.pivotMaxValues to at least the number of distinct combinations.",
+                        self.config.pivot_max_values,
+                    )));
                 }
             }
         }
@@ -423,10 +453,10 @@ fn types_are_coercible(data_types: &[DataType]) -> bool {
 /// controls output column naming.
 fn rewrite_aggregate_with_pivot_filter(
     agg_expr: &Expr,
-    pivot_col: &Expr,
-    pivot_value: &ScalarValue,
+    pivot_cols: &[Expr],
+    pivot_values: &[ScalarValue],
 ) -> PlanResult<Expr> {
-    let pivot_predicate = build_pivot_predicate(pivot_col, pivot_value);
+    let pivot_predicate = build_pivot_predicate(pivot_cols, pivot_values);
     // Use transform_up so that inner AggregateFunction nodes are rewritten
     // before outer Alias nodes are stripped.
     let result = agg_expr
@@ -463,16 +493,21 @@ fn rewrite_aggregate_with_pivot_filter(
 }
 
 /// Build the predicate expression for pivot filtering.
-/// Uses `IS NULL` for NULL pivot values (since `col = NULL` is always NULL in SQL)
-/// and standard equality for non-NULL values.
-fn build_pivot_predicate(pivot_col: &Expr, pivot_value: &ScalarValue) -> Expr {
-    if pivot_value.is_null() {
-        pivot_col.clone().is_null()
-    } else {
-        pivot_col
-            .clone()
-            .eq(Expr::Literal(pivot_value.clone(), None))
-    }
+/// For multiple pivot columns, produces `(col1 = val1) AND (col2 = val2) AND ...`.
+/// Uses `IS NULL` for NULL values.
+fn build_pivot_predicate(pivot_cols: &[Expr], pivot_values: &[ScalarValue]) -> Expr {
+    pivot_cols
+        .iter()
+        .zip(pivot_values)
+        .map(|(col_expr, val)| {
+            if val.is_null() {
+                col_expr.clone().is_null()
+            } else {
+                col_expr.clone().eq(Expr::Literal(val.clone(), None))
+            }
+        })
+        .reduce(|a, b| a.and(b))
+        .unwrap_or(Expr::Literal(ScalarValue::Boolean(Some(true)), None))
 }
 
 /// Collect all column names referenced by an expression.

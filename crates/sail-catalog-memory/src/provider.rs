@@ -349,6 +349,53 @@ impl CatalogProvider for MemoryCatalogProvider {
                         ))
                     })
                 }
+                AlterTableOptions::AddColumns { columns: new_cols } => {
+                    for col in new_cols {
+                        columns.push(TableColumnStatus {
+                            name: col.name,
+                            data_type: col.data_type,
+                            nullable: col.nullable,
+                            comment: col.comment,
+                            default: col.default,
+                            generated_always_as: col.generated_always_as,
+                            is_partition: false,
+                            is_bucket: false,
+                            is_cluster: false,
+                        });
+                    }
+                    Ok(())
+                }
+                AlterTableOptions::DropColumns { names, if_exists } => {
+                    for name in &names {
+                        let col_name = name.join(".");
+                        let found = columns.iter().any(|c| c.name == col_name);
+                        if !found && !if_exists {
+                            return Err(CatalogError::NotFound(
+                                CatalogObject::Table,
+                                format!("column '{col_name}' not found on table '{table}'"),
+                            ));
+                        }
+                        columns.retain(|c| c.name != col_name);
+                    }
+                    Ok(())
+                }
+                AlterTableOptions::RenameColumn { old, new } => {
+                    let old_name = old.join(".");
+                    let new_name = new.join(".");
+                    columns
+                        .iter_mut()
+                        .find(|c| c.name == old_name)
+                        .map(|c| { c.name = new_name; })
+                        .ok_or_else(|| CatalogError::NotFound(
+                            CatalogObject::Table,
+                            format!("column '{old_name}' not found on table '{table}'"),
+                        ))
+                }
+                AlterTableOptions::RenameTable { .. } => {
+                    Err(CatalogError::NotSupported(
+                        "RENAME TABLE is not supported in memory catalog via ALTER TABLE; use CREATE TABLE AS SELECT instead".to_string(),
+                    ))
+                }
             },
             _ => Err(CatalogError::NotSupported(
                 "ALTER TABLE is not supported for views".to_string(),

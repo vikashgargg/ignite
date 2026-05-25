@@ -109,6 +109,19 @@ pub enum DeltaOperation {
     AlterColumn {
         column: Value,
     },
+    #[serde(rename_all = "camelCase")]
+    AddColumns {
+        fields: Vec<Value>,
+    },
+    #[serde(rename_all = "camelCase")]
+    DropColumns {
+        fields: Vec<String>,
+    },
+    #[serde(rename_all = "camelCase")]
+    RenameColumn {
+        column: String,
+        new_name: String,
+    },
 }
 
 impl DeltaOperation {
@@ -127,6 +140,9 @@ impl DeltaOperation {
             Self::SetTableProperties { .. } => "SET TBLPROPERTIES",
             Self::UnsetTableProperties { .. } => "UNSET TBLPROPERTIES",
             Self::AlterColumn { .. } => "CHANGE COLUMN",
+            Self::AddColumns { .. } => "ADD COLUMNS",
+            Self::DropColumns { .. } => "DROP COLUMNS",
+            Self::RenameColumn { .. } => "RENAME COLUMN",
         }
     }
 
@@ -210,6 +226,16 @@ impl DeltaOperation {
             }
             Self::AlterColumn { column } => {
                 insert_json(&mut parameters, "column", column)?;
+            }
+            Self::AddColumns { fields } => {
+                insert_json(&mut parameters, "fields", fields)?;
+            }
+            Self::DropColumns { fields } => {
+                insert_json(&mut parameters, "fields", fields)?;
+            }
+            Self::RenameColumn { column, new_name } => {
+                parameters.insert("column".to_string(), column.clone());
+                parameters.insert("newName".to_string(), new_name.clone());
             }
         }
 

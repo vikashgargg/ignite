@@ -1310,7 +1310,29 @@ pub enum AlterTableOperation {
         name: ObjectName,
         data_type: DataType,
     },
-    // TODO: add all the alter table operations
+    AddColumns {
+        columns: Vec<AlterTableColumnSpec>,
+    },
+    DropColumns {
+        names: Vec<ObjectName>,
+        if_exists: bool,
+    },
+    RenameColumn {
+        old: ObjectName,
+        new: ObjectName,
+    },
+    RenameTable {
+        new_name: ObjectName,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlterTableColumnSpec {
+    pub name: ObjectName,
+    pub data_type: DataType,
+    pub nullable: bool,
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

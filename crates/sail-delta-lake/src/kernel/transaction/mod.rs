@@ -430,7 +430,10 @@ impl OperationMetrics {
             | DeltaOperation::Create { .. }
             | DeltaOperation::SetTableProperties { .. }
             | DeltaOperation::UnsetTableProperties { .. }
-            | DeltaOperation::AlterColumn { .. } => {} // TODO: When the following operations are implemented, extend this match:
+            | DeltaOperation::AlterColumn { .. }
+            | DeltaOperation::AddColumns { .. }
+            | DeltaOperation::DropColumns { .. }
+            | DeltaOperation::RenameColumn { .. } => {}
                                                        //   - UPDATE: numAddedFiles, numRemovedFiles, numUpdatedRows, numCopiedRows,
                                                        //     executionTimeMs, scanTimeMs, rewriteTimeMs
                                                        //   - OPTIMIZE / ZORDER: numAdded/Removed files+bytes histograms,

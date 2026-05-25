@@ -422,6 +422,41 @@ impl PlanResolver<'_> {
                     data_type: self.resolve_data_type(&data_type, state)?,
                 }
             }
+            spec::AlterTableOperation::AddColumns { columns } => {
+                AlterTableOptions::AddColumns {
+                    columns: columns
+                        .into_iter()
+                        .map(|c| {
+                            let name_parts: Vec<String> = c.name.into();
+                            Ok(CreateTableColumnOptions {
+                                name: name_parts.one()?,
+                                data_type: self.resolve_data_type(&c.data_type, state)?,
+                                nullable: c.nullable,
+                                comment: c.comment,
+                                default: None,
+                                generated_always_as: None,
+                            })
+                        })
+                        .collect::<PlanResult<Vec<_>>>()?,
+                }
+            }
+            spec::AlterTableOperation::DropColumns { names, if_exists } => {
+                AlterTableOptions::DropColumns {
+                    names: names.into_iter().map(|n| n.into()).collect(),
+                    if_exists,
+                }
+            }
+            spec::AlterTableOperation::RenameColumn { old, new } => {
+                AlterTableOptions::RenameColumn {
+                    old: old.into(),
+                    new: new.into(),
+                }
+            }
+            spec::AlterTableOperation::RenameTable { new_name } => {
+                AlterTableOptions::RenameTable {
+                    new_name: new_name.into(),
+                }
+            }
             spec::AlterTableOperation::Unknown => {
                 return Err(PlanError::todo("unsupported ALTER TABLE operation"));
             }

@@ -11,7 +11,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use sail_common_datafusion::column_features::ColumnFeatures;
 use sail_common_datafusion::datasource::{
     find_path_in_options, MergeStrategy, OptionLayer, PhysicalSinkMode, RowLevelCommand,
-    RowLevelWriteInfo, SinkInfo, SourceInfo, TableFormat, TableFormatRegistry,
+    RowLevelWriteInfo, SinkInfo, SourceInfo, TableFormat, TableFormatColumnSpec, TableFormatRegistry,
 };
 use sail_common_datafusion::streaming::event::schema::is_flow_event_schema;
 use sail_data_source::options::gen::{DeltaReadOptions, DeltaWriteOptions};
@@ -564,6 +564,212 @@ impl TableFormat for DeltaTableFormat {
                 table.log_store(),
                 DeltaOperation::AlterColumn {
                     column: operation_column,
+                },
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| DataFusionError::External(Box::new(e)))
+    }
+
+    async fn alter_table_add_columns(
+        &self,
+        runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+        path: &str,
+        columns: Vec<TableFormatColumnSpec>,
+    ) -> Result<()> {
+        use crate::kernel::transaction::CommitBuilder;
+
+        let url = parse_location_to_url(path)?;
+        let object_store = runtime_env
+            .object_store_registry
+            .get_store(&url)
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let table = open_table_with_object_store_and_table_config(
+            url,
+            object_store,
+            Default::default(),
+            DeltaSnapshotConfig {
+                require_files: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        let snapshot = table
+            .snapshot()
+            .map_err(|e| DataFusionError::External(Box::new(e)))?
+            .clone();
+        let current_metadata = snapshot.metadata();
+        let current_schema = StructType::try_from(snapshot.schema())
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        let mut new_fields: Vec<StructField> = current_schema.fields().cloned().collect();
+        for col in &columns {
+            let delta_type = DeltaDataType::try_from(&col.data_type)
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let mut field = StructField::new(&col.name, delta_type, col.nullable);
+            if let Some(comment) = &col.comment {
+                field = field.with_metadata([("comment", comment.as_str())]);
+            }
+            new_fields.push(field);
+        }
+        let new_schema = StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let kmode = snapshot.effective_column_mapping_mode();
+        let (_, updated_metadata) = evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        CommitBuilder::default()
+            .with_actions(vec![CommitAction::Metadata(updated_metadata)])
+            .build(
+                Some(snapshot),
+                table.log_store(),
+                DeltaOperation::AddColumns {
+                    fields: columns
+                        .iter()
+                        .map(|c| serde_json::json!({"name": c.name, "type": c.data_type.to_string(), "nullable": c.nullable}))
+                        .collect(),
+                },
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| DataFusionError::External(Box::new(e)))
+    }
+
+    async fn alter_table_drop_columns(
+        &self,
+        runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+        path: &str,
+        names: Vec<Vec<String>>,
+        if_exists: bool,
+    ) -> Result<()> {
+        use crate::kernel::transaction::CommitBuilder;
+
+        let url = parse_location_to_url(path)?;
+        let object_store = runtime_env
+            .object_store_registry
+            .get_store(&url)
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let table = open_table_with_object_store_and_table_config(
+            url,
+            object_store,
+            Default::default(),
+            DeltaSnapshotConfig {
+                require_files: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        let snapshot = table
+            .snapshot()
+            .map_err(|e| DataFusionError::External(Box::new(e)))?
+            .clone();
+        let current_metadata = snapshot.metadata();
+        let current_schema = StructType::try_from(snapshot.schema())
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        let drop_names: std::collections::HashSet<String> =
+            names.iter().map(|n| n.join(".")).collect();
+
+        let new_fields: Vec<StructField> = current_schema
+            .fields()
+            .filter(|f| !drop_names.contains(f.name()))
+            .cloned()
+            .collect();
+
+        if new_fields.len() == current_schema.fields().count() && !if_exists {
+            return plan_err!(
+                "DROP COLUMNS: no matching columns found: {}",
+                drop_names.into_iter().collect::<Vec<_>>().join(", ")
+            );
+        }
+
+        let new_schema = StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let kmode = snapshot.effective_column_mapping_mode();
+        let (_, updated_metadata) = evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        CommitBuilder::default()
+            .with_actions(vec![CommitAction::Metadata(updated_metadata)])
+            .build(
+                Some(snapshot),
+                table.log_store(),
+                DeltaOperation::DropColumns {
+                    fields: names.iter().map(|n| n.join(".")).collect(),
+                },
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| DataFusionError::External(Box::new(e)))
+    }
+
+    async fn alter_table_rename_column(
+        &self,
+        runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+        path: &str,
+        old: Vec<String>,
+        new: Vec<String>,
+    ) -> Result<()> {
+        use crate::kernel::transaction::CommitBuilder;
+
+        if old.len() != 1 || new.len() != 1 {
+            return plan_err!("Delta RENAME COLUMN only supports top-level column renames");
+        }
+        let old_name = &old[0];
+        let new_name = &new[0];
+
+        let url = parse_location_to_url(path)?;
+        let object_store = runtime_env
+            .object_store_registry
+            .get_store(&url)
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let table = open_table_with_object_store_and_table_config(
+            url,
+            object_store,
+            Default::default(),
+            DeltaSnapshotConfig {
+                require_files: false,
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        let snapshot = table
+            .snapshot()
+            .map_err(|e| DataFusionError::External(Box::new(e)))?
+            .clone();
+        let current_metadata = snapshot.metadata();
+        let current_schema = StructType::try_from(snapshot.schema())
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        let new_fields: Vec<StructField> = current_schema
+            .fields()
+            .map(|f| {
+                if f.name() == old_name {
+                    StructField::new(new_name.clone(), f.data_type().clone(), f.is_nullable())
+                        .with_metadata(f.metadata().iter().map(|(k, v)| (k.clone(), v.clone())))
+                } else {
+                    f.clone()
+                }
+            })
+            .collect();
+
+        let new_schema = StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let kmode = snapshot.effective_column_mapping_mode();
+        let (_, updated_metadata) = evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+
+        CommitBuilder::default()
+            .with_actions(vec![CommitAction::Metadata(updated_metadata)])
+            .build(
+                Some(snapshot),
+                table.log_store(),
+                DeltaOperation::RenameColumn {
+                    column: old_name.clone(),
+                    new_name: new_name.clone(),
                 },
             )
             .await

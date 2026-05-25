@@ -372,6 +372,59 @@ pub trait TableFormat: Send + Sync {
             self.name()
         )
     }
+
+    /// Adds one or more columns to a table schema.
+    async fn alter_table_add_columns(
+        &self,
+        runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+        path: &str,
+        columns: Vec<TableFormatColumnSpec>,
+    ) -> Result<()> {
+        let _ = (runtime_env, path, columns);
+        not_impl_err!(
+            "ADD COLUMNS not supported for {} format",
+            self.name()
+        )
+    }
+
+    /// Drops one or more columns from a table schema.
+    async fn alter_table_drop_columns(
+        &self,
+        runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+        path: &str,
+        names: Vec<Vec<String>>,
+        if_exists: bool,
+    ) -> Result<()> {
+        let _ = (runtime_env, path, names, if_exists);
+        not_impl_err!(
+            "DROP COLUMNS not supported for {} format",
+            self.name()
+        )
+    }
+
+    /// Renames a column in a table schema.
+    async fn alter_table_rename_column(
+        &self,
+        runtime_env: Arc<datafusion::execution::runtime_env::RuntimeEnv>,
+        path: &str,
+        old: Vec<String>,
+        new: Vec<String>,
+    ) -> Result<()> {
+        let _ = (runtime_env, path, old, new);
+        not_impl_err!(
+            "RENAME COLUMN not supported for {} format",
+            self.name()
+        )
+    }
+}
+
+/// Column specification used when altering table schema via a `TableFormat`.
+#[derive(Debug, Clone)]
+pub struct TableFormatColumnSpec {
+    pub name: String,
+    pub data_type: datafusion::arrow::datatypes::DataType,
+    pub nullable: bool,
+    pub comment: Option<String>,
 }
 
 /// Thread-safe registry of available `TableFormat` implementations.

@@ -145,6 +145,14 @@ fn apply_alter_table_options(
             };
             column.r#type = Some(FastStr::from(hive_type));
         }
+        AlterTableOptions::AddColumns { .. }
+        | AlterTableOptions::DropColumns { .. }
+        | AlterTableOptions::RenameColumn { .. }
+        | AlterTableOptions::RenameTable { .. } => {
+            return Err(CatalogError::NotSupported(
+                "ADD/DROP/RENAME COLUMN is not yet implemented for HMS catalog".to_string(),
+            ));
+        }
     }
     Ok(())
 }

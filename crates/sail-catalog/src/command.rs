@@ -1,7 +1,9 @@
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use sail_common_datafusion::array::serde::ArrowSerializer;
-use sail_common_datafusion::datasource::{is_lakehouse_format, TableFormatRegistry};
+use sail_common_datafusion::datasource::{
+    is_lakehouse_format, TableFormatColumnSpec, TableFormatRegistry,
+};
 use sail_common_datafusion::extension::SessionExtensionAccessor;
 use sail_common_datafusion::session::plan::PlanService;
 use serde::{Deserialize, Serialize};
@@ -473,6 +475,48 @@ impl CatalogCommand {
                                 )
                                 .await
                                 .map_err(|e| CatalogError::External(e.to_string()))?;
+                        }
+                        AlterTableOptions::AddColumns { columns } => {
+                            let specs = columns
+                                .iter()
+                                .map(|c| TableFormatColumnSpec {
+                                    name: c.name.clone(),
+                                    data_type: c.data_type.clone(),
+                                    nullable: c.nullable,
+                                    comment: c.comment.clone(),
+                                })
+                                .collect::<Vec<_>>();
+                            table_format
+                                .alter_table_add_columns(runtime, &location, specs)
+                                .await
+                                .map_err(|e| CatalogError::External(e.to_string()))?;
+                        }
+                        AlterTableOptions::DropColumns { names, if_exists } => {
+                            table_format
+                                .alter_table_drop_columns(
+                                    runtime,
+                                    &location,
+                                    names.clone(),
+                                    *if_exists,
+                                )
+                                .await
+                                .map_err(|e| CatalogError::External(e.to_string()))?;
+                        }
+                        AlterTableOptions::RenameColumn { old, new } => {
+                            table_format
+                                .alter_table_rename_column(
+                                    runtime,
+                                    &location,
+                                    old.clone(),
+                                    new.clone(),
+                                )
+                                .await
+                                .map_err(|e| CatalogError::External(e.to_string()))?;
+                        }
+                        AlterTableOptions::RenameTable { .. } => {
+                            return Err(CatalogError::NotSupported(
+                                "RENAME TABLE is not yet supported for storage-backed tables".to_string(),
+                            ));
                         }
                     };
 

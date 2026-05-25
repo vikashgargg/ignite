@@ -10,7 +10,7 @@ use sail_sql_parser::ast::query::{IdentList, WhereClause};
 use sail_sql_parser::ast::statement::{
     AlterColumnOperation, AlterTableOperation, AlterViewOperation, AnalyzeTableModifier,
     AsQueryClause, Assignment, AssignmentList, ColumnAlteration, ColumnAlterationList,
-    ColumnAlterationOption, ColumnDefinition, ColumnDefinitionList, ColumnDefinitionOption,
+    ColumnAlterationOption, ColumnDefinition, ColumnDefinitionList, ColumnDefinitionOption, ColumnDropList,
     ColumnPosition, ColumnTypeDefinition, CommentValue, CreateDatabaseClause, CreateTableClause,
     CreateViewClause, DeleteTableAlias, DescribeItem, ExplainFormat, FileFormat,
     InsertDirectoryDestination, MergeMatchClause, MergeMatchedAction,
@@ -1842,9 +1842,9 @@ impl TryFrom<Vec<ColumnAlterationOption>> for ColumnAlterationOptions {
     }
 }
 
-// TODO: implement the conversion properly for column-level ALTER TABLE operations
-fn from_ast_column_alteration_list(items: ColumnAlterationList) -> SqlResult<()> {
-    // TODO: implement the conversion properly
+fn from_ast_column_alteration_list(
+    items: ColumnAlterationList,
+) -> SqlResult<Vec<spec::AlterTableColumnSpec>> {
     let columns = match items {
         ColumnAlterationList::Delimited {
             left: _,
@@ -1853,19 +1853,26 @@ fn from_ast_column_alteration_list(items: ColumnAlterationList) -> SqlResult<()>
         } => columns,
         ColumnAlterationList::NotDelimited { columns } => columns,
     };
-    let _ = columns
+    columns
         .into_items()
         .map(|x| {
             let ColumnAlteration {
-                name: _,
-                data_type: _,
+                name,
+                data_type,
                 options,
             } = x;
-            let _: ColumnAlterationOptions = options.try_into()?;
-            Ok(())
+            let opts: ColumnAlterationOptions = options.try_into()?;
+            Ok(spec::AlterTableColumnSpec {
+                name: from_ast_object_name(name)?,
+                data_type: from_ast_data_type(data_type)?,
+                nullable: !opts.not_null,
+                comment: opts
+                    .comment
+                    .map(from_ast_string)
+                    .transpose()?,
+            })
         })
-        .collect::<SqlResult<Vec<_>>>()?;
-    Ok(())
+        .collect()
 }
 
 fn from_ast_merge_optional_condition<T>(
@@ -1926,23 +1933,45 @@ fn from_ast_alter_table_operation(
             name: from_ast_object_name(name)?,
             data_type: from_ast_data_type(data_type)?,
         }),
-        AlterTableOperation::RenameTable { .. }
-        | AlterTableOperation::RenamePartition { .. }
-        | AlterTableOperation::DropColumns { .. }
-        | AlterTableOperation::RenameColumn { .. }
+        AlterTableOperation::AddColumns { items, .. }
+        | AlterTableOperation::ReplaceColumns { items, .. } => {
+            let columns = from_ast_column_alteration_list(items)?;
+            Ok(spec::AlterTableOperation::AddColumns { columns })
+        }
+        AlterTableOperation::DropColumns {
+            names, if_exists, ..
+        } => {
+            let names = match names {
+                ColumnDropList::Delimited { columns, .. } => columns,
+                ColumnDropList::NotDelimited { columns } => columns,
+            };
+            let names = names
+                .into_items()
+                .map(from_ast_object_name)
+                .collect::<SqlResult<Vec<_>>>()?;
+            Ok(spec::AlterTableOperation::DropColumns {
+                names,
+                if_exists: if_exists.is_some(),
+            })
+        }
+        AlterTableOperation::RenameColumn { old, new, .. } => {
+            Ok(spec::AlterTableOperation::RenameColumn {
+                old: from_ast_object_name(old)?,
+                new: from_ast_object_name(new)?,
+            })
+        }
+        AlterTableOperation::RenameTable { name, .. } => {
+            Ok(spec::AlterTableOperation::RenameTable {
+                new_name: from_ast_object_name(name)?,
+            })
+        }
+        AlterTableOperation::RenamePartition { .. }
         | AlterTableOperation::AddPartitions { .. }
         | AlterTableOperation::DropPartition { .. }
         | AlterTableOperation::SetFileFormat { .. }
         | AlterTableOperation::SetLocation { .. }
         | AlterTableOperation::RecoverPartitions { .. } => Ok(spec::AlterTableOperation::Unknown),
         AlterTableOperation::AlterColumn { .. } => Ok(spec::AlterTableOperation::Unknown),
-        AlterTableOperation::AddColumns { items, .. }
-        | AlterTableOperation::ReplaceColumns { items, .. } => {
-            // Validate column descriptors (e.g. detect duplicate COMMENT/DEFAULT/NOT NULL/POSITION
-            // clauses) even though we do not yet translate these operations.
-            from_ast_column_alteration_list(items)?;
-            Ok(spec::AlterTableOperation::Unknown)
-        }
     }
 }
 

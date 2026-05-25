@@ -114,4 +114,18 @@ pub enum AlterTableOptions {
         name: Vec<String>,
         data_type: DataType,
     },
+    AddColumns {
+        columns: Vec<CreateTableColumnOptions>,
+    },
+    DropColumns {
+        names: Vec<Vec<String>>,
+        if_exists: bool,
+    },
+    RenameColumn {
+        old: Vec<String>,
+        new: Vec<String>,
+    },
+    RenameTable {
+        new_name: Vec<String>,
+    },
 }
