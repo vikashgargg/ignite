@@ -30,6 +30,8 @@ pub struct AppConfig {
     pub flight: FlightConfig,
     pub python: PythonConfig,
     pub telemetry: TelemetryConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
     /// Reserved for internal use.
     /// This field ensures that environment variables with prefix `SAIL_INTERNAL_`
     /// can only be used for internal configuration.
@@ -628,6 +630,20 @@ pub enum OtlpProtocol {
     HttpBinary,
     #[serde(alias = "http-json")]
     HttpJson,
+}
+
+/// Bearer token authentication configuration.
+/// Set `SAIL_AUTH__TOKEN=<secret>` or `--auth-token` CLI flag to require
+/// clients to present `Authorization: Bearer <secret>` on every gRPC call.
+/// When `token` is `None`, the server accepts all connections without auth.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AuthConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_secret"
+    )]
+    pub token: Option<SecretString>,
 }
 
 /// Environment variables for application cluster configuration.

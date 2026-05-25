@@ -5,6 +5,7 @@ use std::sync::Arc;
 use log::{error, info};
 use sail_common::config::{AppConfig, ExecutionMode};
 use sail_common::runtime::RuntimeManager;
+use sail_execution::worker_manager::leader_election::{KubernetesLeaderElector, LeaderElectionConfig};
 use sail_spark_connect::entrypoint::serve;
 use tokio::net::TcpListener;
 
@@ -142,6 +143,61 @@ where
 pub fn run_spark_connect_server(ip: IpAddr, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(AppConfig::load()?);
     with_spark_connect_server(config, (ip, port), shutdown(), |_| async { Ok(()) })
+}
+
+/// Starts a Spark Connect server wrapped in Kubernetes Lease-based leader election.
+///
+/// Multiple replicas can run this; only one will hold the lease and serve traffic at
+/// a time. If the current leader loses the lease, the server stops and the caller
+/// can restart it (e.g., via `kubectl` restart policy).
+pub fn run_spark_connect_server_kubernetes_ha(
+    ip: IpAddr,
+    port: u16,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = Arc::new(AppConfig::load()?);
+    let election_config = LeaderElectionConfig {
+        namespace: config.kubernetes.namespace.clone(),
+        ..LeaderElectionConfig::default()
+    };
+
+    let runtime = RuntimeManager::try_new(&config.runtime)?;
+    let _telemetry = runtime
+        .handle()
+        .primary()
+        .block_on(async { telemetry::TelemetryGuard::try_new(&config) })?;
+
+    let handle = runtime.handle().clone();
+
+    runtime.handle().primary().block_on(async move {
+        let elector = KubernetesLeaderElector::try_new(election_config)
+            .await
+            .map_err(|e| Box::new(ServerError(e.to_string())) as Box<dyn std::error::Error>)?;
+
+        elector
+            .run_as_leader(|| {
+                let config = config.clone();
+                let handle = handle.clone();
+                async move {
+                    let listener = match TcpListener::bind((ip, port)).await {
+                        Ok(l) => l,
+                        Err(e) => {
+                            error!("Leader: failed to bind {ip}:{port}: {e}");
+                            return;
+                        }
+                    };
+                    let server_address = listener
+                        .local_addr()
+                        .expect("local_addr after successful bind");
+                    info!("Vajra ready on {server_address} (Spark Connect gRPC) [mode: kubernetes-cluster-ha]");
+                    if let Err(e) = serve(listener, shutdown(), config, handle).await {
+                        error!("{e}");
+                    }
+                }
+            })
+            .await;
+
+        Ok(())
+    })
 }
 
 /// Start the Spark Connect server in `local-cluster` mode, overriding whatever

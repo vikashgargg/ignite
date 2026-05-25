@@ -1,5 +1,6 @@
 use datafusion::arrow::datatypes::{
-    DataType, IntervalDayTimeType, IntervalUnit, IntervalYearMonthType, TimeUnit,
+    DataType, IntervalDayTimeType, IntervalUnit, IntervalYearMonthType,
+    TimeUnit,
 };
 use datafusion::functions::expr_fn;
 use datafusion_common::ScalarValue;
@@ -719,6 +720,103 @@ fn months_between(input: ScalarFunctionInput) -> PlanResult<Expr> {
     .end()?)
 }
 
+/// Parse a Spark duration string like "1 hour", "30 minutes", "5 seconds" into a
+/// `ScalarValue::IntervalDayTime` (millisecond precision) or
+/// `ScalarValue::IntervalYearMonth` (month-level).
+fn parse_spark_window_duration(s: &str) -> PlanResult<ScalarValue> {
+    let s = s.trim();
+    let (num_str, rest) = s
+        .split_once(char::is_whitespace)
+        .ok_or_else(|| PlanError::invalid(format!("invalid window duration: {s:?}")))?;
+    let n: i64 = num_str.parse().map_err(|_| {
+        PlanError::invalid(format!("non-numeric count in window duration: {num_str:?}"))
+    })?;
+    let unit = rest.trim().trim_end_matches('s'); // strip trailing 's' for plurals
+    match unit {
+        "second" | "millisecond" => {
+            let millis = if unit == "second" { n * 1_000 } else { n } as i32;
+            Ok(ScalarValue::IntervalDayTime(Some(
+                IntervalDayTimeType::make_value(0, millis),
+            )))
+        }
+        "minute" => Ok(ScalarValue::IntervalDayTime(Some(
+            IntervalDayTimeType::make_value(0, (n * 60_000) as i32),
+        ))),
+        "hour" => Ok(ScalarValue::IntervalDayTime(Some(
+            IntervalDayTimeType::make_value(0, (n * 3_600_000) as i32),
+        ))),
+        "day" => Ok(ScalarValue::IntervalDayTime(Some(
+            IntervalDayTimeType::make_value(n as i32, 0),
+        ))),
+        "week" => Ok(ScalarValue::IntervalDayTime(Some(
+            IntervalDayTimeType::make_value((n * 7) as i32, 0),
+        ))),
+        "month" => Ok(ScalarValue::IntervalYearMonth(Some(
+            IntervalYearMonthType::make_value(0, n as i32),
+        ))),
+        "year" => Ok(ScalarValue::IntervalYearMonth(Some(
+            IntervalYearMonthType::make_value(n as i32, 0),
+        ))),
+        other => Err(PlanError::invalid(format!(
+            "unsupported window duration unit: {other:?}"
+        ))),
+    }
+}
+
+/// Spark `window(timeColumn, windowDuration, [slideDuration], [startTime])`
+///
+/// Returns a `struct<start: timestamp, end: timestamp>` that bins each
+/// timestamp into its tumbling-window bucket.  Sliding windows (where
+/// slideDuration < windowDuration) are not yet supported.
+fn spark_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    let mut args = input.arguments;
+    if args.len() < 2 || args.len() > 4 {
+        return Err(PlanError::invalid(format!(
+            "window() expects 2-4 arguments, got {}",
+            args.len()
+        )));
+    }
+    // Optional args
+    let _start_time = if args.len() == 4 { Some(args.pop().unwrap()) } else { None };
+    let _slide_lit = if args.len() == 3 { Some(args.pop().unwrap()) } else { None };
+    let duration_expr = args.pop().unwrap();
+    let col_expr = args.pop().unwrap();
+
+    let duration_str = match &duration_expr {
+        Expr::Literal(ScalarValue::Utf8(Some(s)), _) => s.clone(),
+        Expr::Literal(ScalarValue::LargeUtf8(Some(s)), _) => s.clone(),
+        other => {
+            return Err(PlanError::invalid(format!(
+                "window() duration must be a string literal, got {other:?}"
+            )))
+        }
+    };
+
+    let interval_val = parse_spark_window_duration(&duration_str)?;
+    let interval_lit = lit(interval_val.clone());
+
+    // window_start = date_bin(interval, col, epoch)
+    // DataFusion date_bin(stride, source, origin) → start of the bin containing source.
+    let epoch = lit(ScalarValue::TimestampMicrosecond(Some(0), None));
+    let window_start = Expr::ScalarFunction(expr::ScalarFunction {
+        func: std::sync::Arc::new(ScalarUDF::from(
+            datafusion_functions::datetime::date_bin::DateBinFunc::new(),
+        )),
+        args: vec![interval_lit.clone(), col_expr, epoch],
+    });
+
+    // window_end = window_start + interval
+    let window_end = window_start.clone() + interval_lit;
+
+    // Result: named_struct("start", window_start, "end", window_end)
+    Ok(expr_fn::named_struct(vec![
+        lit("start"),
+        window_start,
+        lit("end"),
+        window_end,
+    ]))
+}
+
 pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFunction)> {
     use crate::function::common::ScalarFunctionBuilder as F;
 
@@ -890,7 +988,7 @@ pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFun
             "weekofyear",
             F::unary(|arg| cast(expr_fn::to_char(arg, lit("%V")), DataType::Int32)),
         ),
-        ("window", F::unknown("window")),
+        ("window", F::custom(spark_window)),
         ("window_time", F::unknown("window_time")),
         ("year", F::udf(SparkYear::new())),
         ("years", F::unary(years)),

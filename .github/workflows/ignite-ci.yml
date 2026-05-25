@@ -67,7 +67,7 @@ jobs:
         run: cargo test --workspace --lib -- --test-threads=4
 
   build-linux:
-    name: Build ignite Linux binaries (${{ matrix.arch }})
+    name: Build Linux binaries (${{ matrix.arch }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -75,10 +75,10 @@ jobs:
         include:
           - arch: x86_64
             target: x86_64-unknown-linux-musl
-            artifact: ignite-linux-x86_64
+            artifact: vajra-linux-x86_64
           - arch: aarch64
             target: aarch64-unknown-linux-musl
-            artifact: ignite-linux-aarch64
+            artifact: vajra-linux-aarch64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -106,18 +106,18 @@ jobs:
         run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
       - name: Show binary size
         run: |
-          ls -lh target/${{ matrix.target }}/release/ignite
-          file target/${{ matrix.target }}/release/ignite
+          ls -lh target/${{ matrix.target }}/release/vajra
+          file target/${{ matrix.target }}/release/vajra
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/ignite
+          path: target/${{ matrix.target }}/release/vajra
           retention-days: 7
 
   distributed-scorecard:
     name: Distributed scorecard (local-cluster)
     runs-on: ubuntu-latest
-    # Only run on PRs targeting main and on pushes to main/phase2/* to keep CI cost down.
+    # Only run on PRs targeting main and on pushes to main/phase* to keep CI cost down.
     if: |
       github.event_name == 'push' ||
       (github.event_name == 'pull_request' && github.base_ref == 'main')
@@ -150,8 +150,6 @@ jobs:
 
       - name: Set up smoke venv
         run: |
-          # Override CONTAINER_PY detection since we are not in a container build context.
-          # The venv Python version must match the PYO3_PYTHON used to build the binary.
           python3.12 -m venv .venvs/smoke
           .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
 
@@ -183,6 +181,15 @@ jobs:
           mkdir -p /tmp/vajra
           python3.12 scripts/spark_compat_score.py 2>&1 | tee scorecard.log || true
 
+      - name: Run streaming integration tests
+        env:
+          SPARK_REMOTE: sc://localhost:50051
+          PYTHONPATH: .venvs/smoke/lib/python3.12/site-packages
+        run: |
+          python3.12 scripts/test_streaming.py 2>&1 | tee streaming.log
+          # streaming test exits 1 on failure — propagate the exit code
+          python3.12 scripts/test_streaming.py
+
       - name: Enforce minimum pass rate
         run: |
           # Scorecard prints: "  Total:  N passed, N failed, N skipped"
@@ -190,15 +197,17 @@ jobs:
           FAILED=$(grep -oE '[0-9]+ failed' scorecard.log | grep -oE '[0-9]+' | head -1 || echo 99)
           TOTAL=$(( PASSED + FAILED ))
           echo "Scorecard result: ${PASSED}/${TOTAL}"
-          # Require at least 65/71 to pass CI (some tests need Java/Hadoop for remote file paths)
-          [ "${PASSED}" -ge 65 ] || { echo "FAIL: only ${PASSED}/${TOTAL} passed (need ≥65)"; exit 1; }
+          # Require at least 100/105 to pass CI
+          [ "${PASSED}" -ge 100 ] || { echo "FAIL: only ${PASSED}/${TOTAL} passed (need ≥100)"; exit 1; }
 
       - name: Upload scorecard log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: scorecard-distributed
-          path: scorecard.log
+          path: |
+            scorecard.log
+            streaming.log
           retention-days: 7
 
       - name: Stop vajra
@@ -243,12 +252,9 @@ jobs:
           curl -Lo kubectl "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
 
-      - name: Build release binary
+      - name: Build Docker image
         env:
           PYO3_PYTHON: python3.12
-        run: cargo build --release -p sail-cli
-
-      - name: Build Docker image
         run: docker build -t vajra:latest -f docker/Dockerfile .
 
       - name: Set up smoke venv
@@ -287,6 +293,12 @@ jobs:
         run: |
           .venvs/smoke/bin/python scripts/spark_compat_score.py 2>&1 | tee k8s-scorecard.log || true
 
+      - name: Run streaming integration tests (kubernetes-cluster)
+        env:
+          SPARK_REMOTE: sc://localhost:50051
+          PYTHONPATH: .venvs/smoke/lib/python3.12/site-packages
+        run: .venvs/smoke/bin/python scripts/test_streaming.py 2>&1 | tee k8s-streaming.log
+
       - name: Enforce minimum pass rate
         run: |
           PASSED=$(grep -oE '[0-9]+ passed' k8s-scorecard.log | grep -oE '[0-9]+' | head -1 || echo 0)
@@ -300,7 +312,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: k8s-scorecard
-          path: k8s-scorecard.log
+          path: |
+            k8s-scorecard.log
+            k8s-streaming.log
           retention-days: 7
 
       - name: Tear down kind cluster
@@ -309,8 +323,182 @@ jobs:
           kill "$PF_PID" 2>/dev/null || true
           kind delete cluster --name vajra-ci 2>/dev/null || true
 
+  macos-scorecard:
+    name: macOS scorecard (Apple Silicon native)
+    runs-on: macos-15
+    # Only run on PRs targeting main and on pushes to main/phase* to keep CI cost down.
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: macos-cargo-scorecard-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system deps
+        run: brew install protobuf
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build release binary (Apple Silicon)
+        env:
+          PYO3_PYTHON: python3.12
+        run: cargo build --release -p sail-cli
+
+      - name: Set up smoke venv
+        run: |
+          python3.12 -m venv .venvs/smoke
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+
+      - name: Start vajra in local-cluster mode
+        env:
+          SAIL_MODE: local-cluster
+          RUST_LOG: warn
+        run: |
+          mkdir -p /tmp/vajra
+          target/release/vajra server --ip 0.0.0.0 --port 50051 &
+          echo "VAJRA_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for Spark Connect to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z localhost 50051 2>/dev/null; then
+              echo "Vajra ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          nc -z localhost 50051 || { echo "Vajra did not start in 30s"; exit 1; }
+
+      - name: Run Spark compat scorecard (macOS)
+        env:
+          SPARK_REMOTE: sc://localhost:50051
+          PYTHONPATH: .venvs/smoke/lib/python3.12/site-packages
+        run: |
+          python3.12 scripts/spark_compat_score.py 2>&1 | tee macos-scorecard.log || true
+
+      - name: Run streaming integration tests (macOS)
+        env:
+          SPARK_REMOTE: sc://localhost:50051
+          PYTHONPATH: .venvs/smoke/lib/python3.12/site-packages
+        run: python3.12 scripts/test_streaming.py 2>&1 | tee macos-streaming.log
+
+      - name: Enforce minimum pass rate
+        run: |
+          PASSED=$(grep -oE '[0-9]+ passed' macos-scorecard.log | grep -oE '[0-9]+' | head -1 || echo 0)
+          FAILED=$(grep -oE '[0-9]+ failed' macos-scorecard.log | grep -oE '[0-9]+' | head -1 || echo 99)
+          TOTAL=$(( PASSED + FAILED ))
+          echo "macOS scorecard: ${PASSED}/${TOTAL}"
+          [ "${PASSED}" -ge 100 ] || { echo "FAIL: only ${PASSED}/${TOTAL} passed (need ≥100)"; exit 1; }
+
+      - name: Upload scorecard log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-scorecard
+          path: |
+            macos-scorecard.log
+            macos-streaming.log
+          retention-days: 7
+
+      - name: Stop vajra
+        if: always()
+        run: kill "$VAJRA_PID" 2>/dev/null || true
+
+  tpch-sf1:
+    name: TPC-H SF-1 (22 queries)
+    runs-on: ubuntu-latest
+    # Run on PRs to main and on pushes to main/phase* branches.
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-tpch-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system deps
+        run: sudo apt-get install -y protobuf-compiler
+
+      - name: Build release binary
+        env:
+          PYO3_PYTHON: python3.12
+        run: cargo build --release -p sail-cli
+
+      - name: Set up Python venv
+        run: |
+          python3.12 -m venv .venvs/smoke
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" duckdb pandas pyarrow setuptools
+
+      - name: Start vajra in local-cluster mode
+        env:
+          SAIL_MODE: local-cluster
+          RUST_LOG: warn
+        run: |
+          mkdir -p /tmp/tpch_data
+          target/release/vajra server --ip 0.0.0.0 --port 50051 &
+          echo "VAJRA_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for Vajra to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if nc -z localhost 50051 2>/dev/null; then
+              echo "Vajra ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          nc -z localhost 50051 || { echo "Vajra did not start in 30s"; exit 1; }
+
+      - name: Run TPC-H SF-1 benchmark (all 22 queries)
+        env:
+          SPARK_REMOTE: sc://localhost:50051
+          PYTHONPATH: .venvs/smoke/lib/python3.12/site-packages
+          TPCH_SF: "1"
+          TPCH_DATA_DIR: /tmp/tpch_data
+          TPCH_PASS_THRESHOLD: "22"
+        run: |
+          python3.12 scripts/tpch_distributed.py 2>&1 | tee tpch.log
+          python3.12 scripts/tpch_distributed.py
+
+      - name: Upload TPC-H log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpch-sf1-results
+          path: |
+            tpch.log
+            /tmp/tpch_data/benchmark_result.json
+          retention-days: 14
+
+      - name: Stop vajra
+        if: always()
+        run: kill "$VAJRA_PID" 2>/dev/null || true
+
   build-macos-universal:
-    name: Build ignite macOS universal binary
+    name: Build macOS universal binary
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -341,17 +529,17 @@ jobs:
         run: cargo build --release -p sail-cli --target aarch64-apple-darwin
       - name: Create universal binary with lipo
         run: |
-          lipo -create -output target/ignite-universal2-apple-darwin \
-            target/x86_64-apple-darwin/release/ignite \
-            target/aarch64-apple-darwin/release/ignite
+          lipo -create -output target/vajra-universal2-apple-darwin \
+            target/x86_64-apple-darwin/release/vajra \
+            target/aarch64-apple-darwin/release/vajra
       - name: Show binary sizes
         run: |
-          ls -lh target/x86_64-apple-darwin/release/ignite
-          ls -lh target/aarch64-apple-darwin/release/ignite
-          ls -lh target/ignite-universal2-apple-darwin
-          file target/ignite-universal2-apple-darwin
+          ls -lh target/x86_64-apple-darwin/release/vajra
+          ls -lh target/aarch64-apple-darwin/release/vajra
+          ls -lh target/vajra-universal2-apple-darwin
+          file target/vajra-universal2-apple-darwin
       - uses: actions/upload-artifact@v4
         with:
-          name: ignite-macos-universal
-          path: target/ignite-universal2-apple-darwin
+          name: vajra-macos-universal
+          path: target/vajra-universal2-apple-darwin
           retention-days: 7

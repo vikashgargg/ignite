@@ -1,6 +1,8 @@
 pub mod catalog;
 pub mod error;
+pub mod foreach_batch_exec;
 pub mod formats;
+pub mod memory_sink_exec;
 pub mod observable;
 pub mod optimizer;
 pub mod planner;

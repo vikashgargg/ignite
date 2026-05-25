@@ -12,6 +12,8 @@ sail-common-datafusion = { path = "../sail-common-datafusion" }
 sail-sql-analyzer = { path = "../sail-sql-analyzer" }
 
 async-trait = { workspace = true }
+async-stream = { workspace = true }
+rdkafka = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 futures = { workspace = true }

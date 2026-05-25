@@ -17,6 +17,8 @@ use sail_common_datafusion::streaming::event::schema::{
 use sail_common_datafusion::streaming::source::{StreamSource, StreamSourceTableProvider};
 use sail_logical_plan::barrier::BarrierNode;
 use sail_logical_plan::file_write::FileWriteNode;
+use sail_logical_plan::streaming::foreach_batch::ForeachBatchSinkNode;
+use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::range::RangeNode;
 use sail_logical_plan::show_string::ShowStringNode;
 use sail_logical_plan::streaming::collector::StreamCollectorNode;
@@ -48,6 +50,10 @@ impl StreamingRewriter {
                 node: show.with_exprs_and_inputs(vec![], vec![input])?,
             })))
         } else if node.as_any().is::<FileWriteNode>() {
+            Ok(Transformed::no(LogicalPlan::Extension(extension)))
+        } else if node.as_any().is::<ForeachBatchSinkNode>() {
+            Ok(Transformed::no(LogicalPlan::Extension(extension)))
+        } else if node.as_any().is::<MemorySinkNode>() {
             Ok(Transformed::no(LogicalPlan::Extension(extension)))
         } else if node.as_any().is::<BarrierNode>() {
             // TODO: support BarrierNode for streaming properly.

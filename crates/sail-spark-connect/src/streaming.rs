@@ -1,9 +1,11 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::{PlanType, StringifiedPlan};
 use futures::StreamExt;
+use log::warn;
 use sail_common_datafusion::error::CommonErrorCause;
 use sail_python_udf::error::PyErrExtractor;
 use tokio::sync::{oneshot, watch};
@@ -25,12 +27,13 @@ impl StreamingQuery {
         name: String,
         info: Vec<StringifiedPlan>,
         stream: SendableRecordBatchStream,
+        checkpoint_location: Option<String>,
     ) -> Self {
         let (signal_tx, signal_rx) = oneshot::channel();
         let (error_tx, error_rx) = watch::channel(None);
         let (stopped_tx, stopped_rx) = watch::channel(false);
         tokio::spawn(async move {
-            Self::run(signal_rx, error_tx, stopped_tx, stream).await;
+            Self::run(signal_rx, error_tx, stopped_tx, stream, checkpoint_location).await;
         });
         Self {
             name,
@@ -66,11 +69,38 @@ impl StreamingQuery {
         error: watch::Sender<Option<SparkThrowable>>,
         stopped: watch::Sender<bool>,
         mut stream: SendableRecordBatchStream,
+        checkpoint_location: Option<String>,
     ) {
+        let offsets_dir = checkpoint_location.as_deref().map(|loc| {
+            let mut p = PathBuf::from(loc);
+            p.push("offsets");
+            p
+        });
+        if let Some(ref dir) = offsets_dir {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                warn!("Failed to create checkpoint offsets dir {:?}: {e}", dir);
+            }
+        }
+        let mut batch_id: u64 = 0;
         let task = async move {
             while let Some(x) = stream.next().await {
                 match x {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        if let Some(ref dir) = offsets_dir {
+                            let offset_file = dir.join(batch_id.to_string());
+                            let payload = format!(
+                                "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis())
+                                    .unwrap_or(0)
+                            );
+                            if let Err(e) = std::fs::write(&offset_file, payload) {
+                                warn!("Failed to write checkpoint offset {batch_id}: {e}");
+                            }
+                        }
+                        batch_id += 1;
+                    }
                     Err(e) => {
                         let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
                         let _ = error.send(Some(cause.into()));

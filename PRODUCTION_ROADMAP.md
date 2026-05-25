@@ -108,7 +108,7 @@ assert spark.sql("SELECT v FROM t WHERE dt='2024-01-01'").collect()[0].v == 42
 
 Phase 2 goal: `readStream → transform → writeStream` end-to-end for Kafka → Delta.
 
-### 2.1 Streaming Aggregates (non-stateful)  `[ ]` P0 · ~2 weeks
+### 2.1 Streaming Aggregates (non-stateful)  `[x]` P0 · ~2 weeks
 
 **What:** `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` over each micro-batch window. No state carried between batches — append-mode aggregation.
 
@@ -139,7 +139,7 @@ assert spark.sql("SELECT * FROM counts").count() > 0
 
 ---
 
-### 2.2 Kafka Source  `[ ]` P0 · ~3 days
+### 2.2 Kafka Source  `[x]` P0 · ~3 days
 
 **What:** `spark.readStream.format("kafka").option("kafka.bootstrap.servers", ...).option("subscribe", "topic")`.
 
@@ -173,7 +173,7 @@ assert spark.sql("SELECT count(*) FROM kafka_test").collect()[0][0] > 0
 
 ---
 
-### 2.3 foreachBatch Sink  `[ ]` P0 · ~3 days
+### 2.3 foreachBatch Sink  `[x]` P0 · ~3 days
 
 **What:** `writeStream.foreachBatch(fn)` — call a Python function with each micro-batch as a DataFrame.
 
@@ -270,7 +270,7 @@ checkpoint/
 
 ## Track 3 — Kubernetes Production Hardening
 
-### 3.1 CI: K8s Validation in GitHub Actions  `[ ]` P0 · ~4h
+### 3.1 CI: K8s Validation in GitHub Actions  `[x]` P0 · ~4h
 
 **What:** Run `scripts/run_validation_only.sh` (kind cluster + 3 modes) on every PR.
 
@@ -296,7 +296,7 @@ validate-k8s:
 
 ---
 
-### 3.2 Scheduler High Availability (eliminate SPOF)  `[ ]` P0 · ~2 weeks
+### 3.2 Scheduler High Availability (eliminate SPOF)  `[x]` P0 · ~2 weeks
 
 **What:** The Spark Connect server / driver pod is a single point of failure. If it crashes, all in-flight queries are lost.
 
@@ -461,7 +461,7 @@ print("All 20 concurrent sessions OK")
 
 Currently 9 stub functions in `sail-plan/src/function/`. Most are obscure but some appear in production Spark code.
 
-### 5.1 Lambda Functions (transform / filter / aggregate)  `[ ]` P1 · ~1 week
+### 5.1 Lambda Functions (transform / filter / aggregate)  `[x]` P1 · ~1 week
 
 **What:** `transform(array, x -> x + 1)`, `filter(array, x -> x > 0)`, `aggregate(array, 0, (acc, x) -> acc + x)`.
 
@@ -500,19 +500,20 @@ spark.sql("SELECT transform(array(1,2,3), x -> x * 2)").collect()
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| S2.1 | Streaming aggregates (non-stateful) | `[ ]` | Biggest lift |
-| S2.2 | Kafka source | `[ ]` | rdkafka integration |
-| S2.3 | foreachBatch sink | `[ ]` | PyO3 callback |
-| S2.4 | Lambda functions (transform/filter/aggregate) | `[ ]` | |
+| S2.1 | Streaming aggregates + `memory` sink | `[x]` | Rewriter + MemorySinkExec |
+| S2.2 | Kafka source | `[x]` | rdkafka integration done |
+| S2.3 | foreachBatch sink | `[x]` | PyO3 callback done |
+| S2.4 | Lambda functions (transform/filter/aggregate) | `[x]` | Already in DataFusion |
 
 ### Sprint 3 (Production Hardening — Week of 2026-06-07)
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| S3.1 | Scheduler HA (K8s Lease election) | `[ ]` | Eliminates SPOF |
-| S3.2 | mTLS auth middleware | `[ ]` | Multi-tenant |
-| S3.3 | TPC-H SF-100 distributed benchmark | `[ ]` | Performance validation |
-| S3.4 | TPC-DS test suite | `[ ]` | Wider SQL coverage |
+| S3.1 | Scheduler HA (K8s Lease election) | `[x]` | `--ha` flag wired to CLI |
+| S3.2 | K8s CI validation in GitHub Actions | `[x]` | ignite-ci.yml done |
+| S3.3 | mTLS auth middleware | `[ ]` | Multi-tenant |
+| S3.4 | TPC-H SF-100 distributed benchmark | `[ ]` | Performance validation |
+| S3.5 | TPC-DS test suite | `[ ]` | Wider SQL coverage |
 
 ### Sprint 4 (GA — Week of 2026-06-14)
 

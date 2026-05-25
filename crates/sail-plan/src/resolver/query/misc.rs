@@ -171,9 +171,12 @@ impl PlanResolver<'_> {
 
     pub(super) async fn resolve_query_with_watermark(
         &self,
-        _watermark: spec::WithWatermark,
-        _state: &mut PlanResolverState,
+        watermark: spec::WithWatermark,
+        state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
-        Err(PlanError::todo("with watermark"))
+        // Pass through the child plan unchanged — watermark metadata is informational
+        // for event-time eviction (not yet implemented). Micro-batch streaming works
+        // without it; rejecting the plan would break any pipeline that calls withWatermark.
+        self.resolve_query_plan(*watermark.input, state).await
     }
 }

@@ -34,6 +34,8 @@ use sail_logical_plan::sort::SortWithinPartitionsNode;
 use sail_logical_plan::spark_partition_id::SparkPartitionIdNode;
 use sail_logical_plan::streaming::collector::StreamCollectorNode;
 use sail_logical_plan::streaming::filter::StreamFilterNode;
+use sail_logical_plan::streaming::foreach_batch::ForeachBatchSinkNode;
+use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::streaming::limit::StreamLimitNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
@@ -52,6 +54,8 @@ use sail_physical_plan::streaming::collector::StreamCollectorExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
+use crate::foreach_batch_exec::ForeachBatchSinkExec;
+use crate::memory_sink_exec::MemorySinkExec;
 use sail_plan::catalog::CatalogCommandNode;
 use sail_plan_lakehouse::new_lakehouse_extension_planners;
 
@@ -313,6 +317,57 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
         } else if let Some(node) = node.as_any().downcast_ref::<CatalogCommandNode>() {
             let schema = node.schema().inner().clone();
             Arc::new(CatalogCommandExec::new(node.command().clone(), schema))
+        } else if let Some(node) = node.as_any().downcast_ref::<ForeachBatchSinkNode>() {
+            let [input] = physical_inputs else {
+                return internal_err!("ForeachBatchSinkExec requires exactly one physical input");
+            };
+            Arc::new(ForeachBatchSinkExec::new(
+                input.clone(),
+                node.command.clone(),
+                node.eval_type,
+            )?)
+        } else if let Some(node) = node.as_any().downcast_ref::<MemorySinkNode>() {
+            let [input] = physical_inputs else {
+                return internal_err!("MemorySinkExec requires exactly one physical input");
+            };
+            let catalog_name = session_state
+                .config_options()
+                .catalog
+                .default_catalog
+                .clone();
+            let schema_name = session_state
+                .config_options()
+                .catalog
+                .default_schema
+                .clone();
+            let catalog = session_state
+                .catalog_list()
+                .catalog(&catalog_name)
+                .ok_or_else(|| internal_datafusion_err!("default catalog not found"))?;
+            let schema = catalog
+                .schema(&schema_name)
+                .ok_or_else(|| internal_datafusion_err!("default schema not found"))?;
+            let table = schema
+                .table(&node.query_name)
+                .await
+                .map_err(|e| internal_datafusion_err!("{e}"))?
+                .ok_or_else(|| {
+                    internal_datafusion_err!(
+                        "memory sink table '{}' not registered",
+                        node.query_name
+                    )
+                })?;
+            let buffer = table
+                .as_any()
+                .downcast_ref::<sail_plan::memory_buffer::MemoryStreamBuffer>()
+                .ok_or_else(|| {
+                    internal_datafusion_err!(
+                        "table '{}' is not a MemoryStreamBuffer",
+                        node.query_name
+                    )
+                })?
+                .buffer_handle();
+            Arc::new(MemorySinkExec::new(input.clone(), buffer))
         } else if let Some(_node) = node.as_any().downcast_ref::<BarrierNode>() {
             let (plan, preconditions) = physical_inputs.split_last().ok_or_else(|| {
                 datafusion_common::DataFusionError::Internal(format!(

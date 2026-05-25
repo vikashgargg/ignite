@@ -1,3 +1,4 @@
+pub mod leader_election;
 mod kubernetes;
 mod local;
 mod options;

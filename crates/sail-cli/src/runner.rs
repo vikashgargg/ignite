@@ -4,8 +4,8 @@ use sail_common::error::CommonError;
 use crate::flight::run_flight_server;
 use crate::spark::run::run_pyspark_script;
 use crate::spark::{
-    run_pyspark_shell, run_spark_connect_server, run_spark_connect_server_local_cluster,
-    run_spark_mcp_server, McpSettings, McpTransport,
+    run_pyspark_shell, run_spark_connect_server, run_spark_connect_server_kubernetes_ha,
+    run_spark_connect_server_local_cluster, run_spark_mcp_server, McpSettings, McpTransport,
 };
 use crate::worker::run_worker;
 
@@ -44,6 +44,17 @@ enum Command {
             help = "Number of local workers for local-cluster mode (0 = config default)"
         )]
         workers: usize,
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Enable Kubernetes Lease-based leader election for scheduler HA (kubernetes-cluster mode only)"
+        )]
+        ha: bool,
+        #[arg(
+            long,
+            help = "Require clients to present this Bearer token in every gRPC call (also settable via SAIL_AUTH__TOKEN env var)"
+        )]
+        auth_token: Option<String>,
     },
 
     /// Execute a SQL query and print results, then exit
@@ -152,13 +163,20 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Worker => run_worker(),
 
-        Command::Server { ip, port, directory, mode, workers } => {
+        Command::Server { ip, port, directory, mode, workers, ha, auth_token } => {
             if let Some(dir) = directory {
                 std::env::set_current_dir(dir)?;
+            }
+            if let Some(token) = auth_token {
+                // Inject into figment env-var namespace so AppConfig::load() picks it up.
+                std::env::set_var("SAIL_AUTH__TOKEN", token);
             }
             match mode.as_deref() {
                 Some("local-cluster") | Some("local_cluster") => {
                     run_spark_connect_server_local_cluster(ip.parse()?, port, workers)
+                }
+                Some("kubernetes-cluster") | Some("kubernetes_cluster") if ha => {
+                    run_spark_connect_server_kubernetes_ha(ip.parse()?, port)
                 }
                 Some(other) => {
                     // For other modes (local, kubernetes-cluster) honour SAIL_MODE or the
@@ -168,6 +186,7 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
                     );
                     run_spark_connect_server(ip.parse()?, port)
                 }
+                None if ha => run_spark_connect_server_kubernetes_ha(ip.parse()?, port),
                 None => run_spark_connect_server(ip.parse()?, port),
             }
         }

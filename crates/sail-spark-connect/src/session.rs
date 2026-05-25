@@ -206,6 +206,7 @@ impl SparkSession {
         name: String,
         info: Vec<StringifiedPlan>,
         stream: SendableRecordBatchStream,
+        checkpoint_location: Option<String>,
     ) -> SparkResult<StreamingQueryId> {
         if !stream.schema().fields().is_empty() {
             return Err(SparkError::invalid(
@@ -219,7 +220,7 @@ impl SparkSession {
             run_id: uuid::Uuid::new_v4().to_string(),
         };
         let mut state = self.state.lock()?;
-        let query = StreamingQuery::new(name, info, stream);
+        let query = StreamingQuery::new(name, info, stream, checkpoint_location);
         state.streaming_queries.add_query(id.clone(), query);
         Ok(id)
     }

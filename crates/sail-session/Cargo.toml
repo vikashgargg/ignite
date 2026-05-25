@@ -26,6 +26,7 @@ sail-physical-plan = { path = "../sail-physical-plan" }
 sail-physical-optimizer = { path = "../sail-physical-optimizer" }
 sail-plan = { path = "../sail-plan" }
 sail-execution = { path = "../sail-execution" }
+sail-python-udf = { path = "../sail-python-udf" }
 sail-object-store = { path = "../sail-object-store" }
 sail-plan-lakehouse = { path = "../sail-plan-lakehouse" }
 sail-server = { path = "../sail-server" }
@@ -48,3 +49,7 @@ tokio = { workspace = true }
 chrono = { workspace = true }
 indexmap = { workspace = true }
 futures = { workspace = true }
+async-stream = { workspace = true }
+pyo3 = { workspace = true }
+arrow-pyarrow = { workspace = true }
+arrow = { workspace = true }

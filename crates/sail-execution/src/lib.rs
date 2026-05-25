@@ -16,3 +16,4 @@ mod worker;
 pub mod worker_manager;
 
 pub use worker::entrypoint::run_worker;
+pub use worker_manager::leader_election::{KubernetesLeaderElector, LeaderElectionConfig};
