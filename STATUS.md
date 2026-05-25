@@ -1,8 +1,8 @@
 # Vajra — Build Status
 
-> Last updated: 2026-05-24  
-> Tag: **v0.2.0-alpha** (Phase 1 + Sprint 2 complete)  
-> Branch: `phase1/spark-100`  
+> Last updated: 2026-05-25  
+> Tag: **v0.3.0-alpha** (Phase 1 + Sprint 3 complete)  
+> Branch: `phase2/distributed`  
 > See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the full plan to reach production GA.
 
 ---
@@ -117,10 +117,18 @@ Target: `v0.3.0` — "Streaming GA + Multi-Tenant"
 | `vajra-pyspark` PyPI package | ✅ `python/vajra_pyspark/` (pure-Python wrapper) | — |
 | Streaming event-time window execution | Not started — planner accepts, executor not wired | PRODUCTION_ROADMAP.md §2.4 |
 | Streaming join (stream × static) | ✅ stream×static join via flow-event schema stripping | — |
+| Streaming analytic window (rank/lag/row_number OVER) | ✅ per-micro-batch via flow-event schema strip+wrap | — |
 | Streaming checkpoint recovery on restart | ✅ reads max batchId from `offsets/` dir on start | — |
 | mTLS auth (full multi-tenant) | ✅ `--tls-cert/--tls-key/--tls-ca` + `SAIL_AUTH__TLS__*` | — |
 | Official Apache Spark test suite | Not started | PRODUCTION_ROADMAP.md §4.2 |
 | Web UI on :4040 | ✅ axum HTML dashboard + `/api/streaming` JSON at `:4040` | — |
+| `AddArtifacts` RPC + `CachedLocalRelation` | ✅ `ArtifactStore` session extension; IPC bytes resolved via cache/{sha256} | — |
+| `df.approxQuantile()` | ✅ `approx_percentile_cont_udaf` → nested LIST<LIST<FLOAT64>> | — |
+| `df.freqItems()` | ✅ `array_agg(distinct)` per column | — |
+| `DESCRIBE QUERY` | ✅ returns (col_name, data_type, comment) schema rows | — |
+| `dropDuplicates` within watermark | ✅ warns + falls back to per-batch stateless distinct | — |
+| CTAS metadata options (COMMENT/SORT BY/BUCKET BY/CLUSTER BY/ROW FORMAT) | ✅ silently ignored; no longer errors | — |
+| Concurrency test (20 parallel sessions) | ✅ `scripts/test_concurrency.py` session-isolation validator | — |
 
 See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for full sprint breakdown and definition of done.
 
@@ -133,7 +141,8 @@ See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for full sprint breakdown and
 - **Catalogs**: Unity Catalog and HMS have provider stubs; not production-hardened
 - **Python UDFs**: Require `PYTHONPATH` pointing to PySpark installation on the server
 - **mimalloc**: Disabled by default — must NOT be re-enabled if Python UDFs are used (allocator re-entrancy crash with PyO3 on Tokio worker threads)
-- **TPC-DS**: Not yet validated (only TPC-H)
+- **TPC-DS**: Validation script exists (`scripts/tpcds_score.py`); full 99-query pass not yet verified end-to-end
+- **`df.approxQuantile`**: accuracy parameter mapped from `relativeError`; result type is LIST<LIST<FLOAT64>> matching PySpark semantics
 
 ---
 
