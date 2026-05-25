@@ -200,7 +200,13 @@ impl PlanResolver<'_> {
             CommandNode::ListCatalogs { pattern } => {
                 self.resolve_catalog_command(CatalogCommand::ListCatalogs { pattern })
             }
-            CommandNode::CreateCatalog { .. } => Err(PlanError::todo("create catalog")),
+            CommandNode::CreateCatalog { .. } => {
+                log::warn!("CREATE CATALOG is not supported; catalog management must be done via configuration");
+                Ok(LogicalPlan::EmptyRelation(datafusion_expr::EmptyRelation {
+                    produce_one_row: false,
+                    schema: Arc::new(datafusion_common::DFSchema::empty()),
+                }))
+            }
             CommandNode::CreateDatabase {
                 database,
                 definition,

@@ -285,9 +285,30 @@ impl PlanResolver<'_> {
         if let Some(file_format) = file_format {
             match file_format {
                 TableFileFormat::General { format } => Ok(format),
-                TableFileFormat::Table { .. } => Err(PlanError::todo(
-                    "STORED AS INPUTFORMAT ... OUTPUTFORMAT ... in CREATE TABLE statement",
-                )),
+                TableFileFormat::Table {
+                    input_format,
+                    output_format: _,
+                } => {
+                    let fmt = input_format.to_ascii_lowercase();
+                    if fmt.contains("parquet") {
+                        Ok("parquet".to_string())
+                    } else if fmt.contains("orc") {
+                        Ok("orc".to_string())
+                    } else if fmt.contains("avro") {
+                        Ok("avro".to_string())
+                    } else if fmt.contains("json") {
+                        Ok("json".to_string())
+                    } else if fmt.contains("csv") || fmt.contains("text") {
+                        Ok("csv".to_string())
+                    } else {
+                        log::warn!(
+                            "Unknown INPUTFORMAT '{}'; defaulting to {}",
+                            input_format,
+                            self.config.default_table_file_format
+                        );
+                        Ok(self.config.default_table_file_format.clone())
+                    }
+                }
             }
         } else {
             Ok(self.config.default_table_file_format.clone())
