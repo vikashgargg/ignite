@@ -19,7 +19,31 @@
                 "c"
               ],
               "ifExists": false,
-              "operation": "unknown"
+              "operation": {
+                "setQuery": {
+                  "definition": "SELECT 1 ",
+                  "input": {
+                    "project": {
+                      "input": {
+                        "empty": {
+                          "produceOneRow": true
+                        },
+                        "planId": null
+                      },
+                      "expressions": [
+                        {
+                          "literal": {
+                            "int32": {
+                              "value": 1
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    "planId": null
+                  }
+                }
+              }
             },
             "planId": null
           }
