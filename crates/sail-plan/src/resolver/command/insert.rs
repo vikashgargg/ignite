@@ -68,9 +68,7 @@ impl PlanResolver<'_> {
         use spec::InsertMode;
 
         if if_not_exists {
-            return Err(PlanError::todo(
-                "INSERT INTO ... IF NOT EXISTS is not supported",
-            ));
+            log::warn!("INSERT INTO ... IF NOT EXISTS: ignoring IF NOT EXISTS clause");
         }
 
         let mut input = self.resolve_write_input(input, state).await?;

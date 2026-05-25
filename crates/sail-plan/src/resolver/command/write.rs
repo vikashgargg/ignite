@@ -210,7 +210,7 @@ impl PlanResolver<'_> {
             return Err(PlanError::internal("target is required for write builder"));
         };
         if !cluster_by.is_empty() {
-            return Err(PlanError::todo("CLUSTER BY for write"));
+            log::warn!("CLUSTER BY is not yet implemented and will be ignored");
         }
         let input_schema = input.schema().inner().clone();
         let mut file_write_options = FileWriteOptions {
