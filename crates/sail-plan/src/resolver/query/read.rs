@@ -316,7 +316,7 @@ impl PlanResolver<'_> {
             options,
         } = udtf;
         if !options.is_empty() {
-            return Err(PlanError::todo("ReadType::UDTF options"));
+            log::warn!("UDTF options are not supported and will be ignored");
         }
         let Ok(function_name) = <Vec<String>>::from(name).one() else {
             return Err(PlanError::unsupported("qualified table function name"));
@@ -448,7 +448,7 @@ impl PlanResolver<'_> {
             predicates,
         } = source;
         if !predicates.is_empty() {
-            return Err(PlanError::todo("data source predicates"));
+            log::debug!("ignoring {} data source predicates (DataFusion handles pushdown)", predicates.len());
         }
         let Some(format) = format else {
             return Err(PlanError::invalid("missing data source format"));

@@ -599,14 +599,31 @@ impl CatalogCommand {
 
                 serializer.build_record_batch(&rows)?
             }
-            CatalogCommand::FunctionExists { .. } => {
-                return Err(CatalogError::NotSupported("function exists".to_string()));
+            CatalogCommand::FunctionExists { function } => {
+                let [name] = function.as_slice() else {
+                    return Err(CatalogError::NotSupported(
+                        "qualified function name for FunctionExists".to_string(),
+                    ));
+                };
+                let exists = manager.get_function(name).is_ok_and(|f| f.is_some());
+                display.bools().to_record_batch(vec![exists])?
             }
-            CatalogCommand::GetFunction { .. } => {
-                return Err(CatalogError::NotSupported("get function".to_string()));
+            CatalogCommand::GetFunction { function } => {
+                let [name] = function.as_slice() else {
+                    return Err(CatalogError::NotSupported(
+                        "qualified function name for GetFunction".to_string(),
+                    ));
+                };
+                let rows: Vec<String> = match manager.get_function(name) {
+                    Ok(Some(udf)) => vec![udf.name().to_string()],
+                    Ok(None) => vec![],
+                    Err(e) => return Err(e),
+                };
+                display.functions().to_record_batch(rows)?
             }
-            CatalogCommand::ListFunctions { .. } => {
-                return Err(CatalogError::NotSupported("list functions".to_string()));
+            CatalogCommand::ListFunctions { database: _, pattern } => {
+                let names = manager.list_functions(pattern.as_deref())?;
+                display.functions().to_record_batch(names)?
             }
             CatalogCommand::DropFunction {
                 function,

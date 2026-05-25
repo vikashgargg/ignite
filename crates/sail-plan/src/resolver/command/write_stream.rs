@@ -33,7 +33,9 @@ impl PlanResolver<'_> {
             sink_destination,
         } = write_stream;
         if foreach_writer.is_some() {
-            return Err(PlanError::todo("foreach sink in write stream"));
+            return Err(PlanError::invalid(
+                "writeStream.foreach() row-level writer is not supported; use writeStream.foreachBatch() instead",
+            ));
         }
 
         // foreachBatch: wrap the streaming input in a ForeachBatchSinkNode and return early.

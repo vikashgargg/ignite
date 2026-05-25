@@ -25,6 +25,17 @@ impl CatalogManager {
         Ok(state.functions.get(&name).cloned())
     }
 
+    pub fn list_functions(&self, pattern: Option<&str>) -> CatalogResult<Vec<String>> {
+        let state = self.state()?;
+        let mut names: Vec<String> = state.functions.keys().map(|k| k.to_string()).collect();
+        names.sort();
+        if let Some(pat) = pattern {
+            let pat_lower = pat.to_ascii_lowercase();
+            names.retain(|n| n.contains(&pat_lower));
+        }
+        Ok(names)
+    }
+
     pub fn register_table_function(
         &self,
         _name: String,

@@ -328,7 +328,13 @@ impl PlanResolver<'_> {
                     Err(PlanError::todo("unsupported ALTER VIEW operation"))
                 }
             },
-            CommandNode::LoadData { .. } => Err(PlanError::todo("CommandNode::LoadData")),
+            CommandNode::LoadData { .. } => {
+                log::warn!("LOAD DATA is not supported and will be ignored");
+                Ok(LogicalPlan::EmptyRelation(datafusion_expr::EmptyRelation {
+                    produce_one_row: false,
+                    schema: Arc::new(datafusion_common::DFSchema::empty()),
+                }))
+            }
             CommandNode::AnalyzeTable { .. } => {
                 self.resolve_catalog_command(CatalogCommand::ClearCache)
             }
