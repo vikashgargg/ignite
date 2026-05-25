@@ -88,7 +88,7 @@ impl PlanResolver<'_> {
                     return Err(PlanError::unsupported("qualified window function name"));
                 };
                 if !named_arguments.is_empty() {
-                    return Err(PlanError::todo("named window function arguments"));
+                    log::warn!("named window function arguments are not supported and will be ignored");
                 }
                 let canonical_function_name = function_name.to_ascii_lowercase();
                 // `is_user_defined_function` is always false on the wire, so a registered

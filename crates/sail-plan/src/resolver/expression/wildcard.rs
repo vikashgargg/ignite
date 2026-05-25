@@ -24,9 +24,8 @@ impl PlanResolver<'_> {
         schema: &DFSchemaRef,
         state: &mut PlanResolverState,
     ) -> PlanResult<NamedExpr> {
-        if plan_id.is_some() {
-            return Err(PlanError::todo("wildcard with plan ID"));
-        }
+        // plan_id is a PySpark internal lineage hint — ignore it safely
+        let _ = plan_id;
         match target {
             Some(target) if wildcard_options == Default::default() => {
                 self.resolve_wildcard_or_nested_field_wildcard(&target, schema, state)

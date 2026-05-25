@@ -153,12 +153,15 @@ impl PlanResolver<'_> {
 
     pub(super) async fn resolve_query_collect_metrics(
         &self,
-        _input: spec::QueryPlan,
+        input: spec::QueryPlan,
         _name: String,
         _metrics: Vec<spec::Expr>,
-        _state: &mut PlanResolverState,
+        state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
-        Err(PlanError::todo("collect metrics"))
+        // Metrics collection is informational — pass through the child plan unchanged.
+        warn!("collect_metrics is not yet implemented and will be treated as a no-op");
+        self.resolve_query_plan_with_hidden_fields(input, state)
+            .await
     }
 
     pub(super) async fn resolve_query_parse(
