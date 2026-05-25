@@ -189,6 +189,113 @@ def empty_query_name_errors():
 
 check("Empty queryName raises an error", empty_query_name_errors)
 
+# ── Test 4: F.window() batch groupBy ─────────────────────────────────────────
+# Validates that the window() function produces correct struct<start,end> keys
+# and that DataFusion can group by them in batch mode.
+
+def window_batch_groupby():
+    from pyspark.sql import functions as F
+    from pyspark.sql.types import StructType, StructField, TimestampType, LongType
+    import datetime
+
+    base = datetime.datetime(2024, 1, 1, 0, 0, 0)
+    rows = [(base + datetime.timedelta(minutes=i * 10), i) for i in range(12)]
+    df = spark.createDataFrame(rows, schema=["ts", "value"])
+
+    result = (
+        df.groupBy(F.window("ts", "1 hour"))
+        .agg(F.sum("value").alias("total"))
+        .orderBy("window")
+        .collect()
+    )
+    assert len(result) >= 2, f"expected at least 2 hourly buckets, got {len(result)}"
+    for row in result:
+        w = row["window"]
+        diff_mins = (w.end - w.start).total_seconds() / 60
+        assert abs(diff_mins - 60) < 1, f"window width should be 60 min, got {diff_mins}"
+    print(f"         F.window() produced {len(result)} hourly buckets")
+
+
+check("F.window() batch groupBy produces correct hourly buckets", window_batch_groupby)
+
+
+# ── Test 5: streaming × static join ──────────────────────────────────────────
+
+_query5 = None
+
+
+def start_stream_static_join():
+    global _query5
+    from pyspark.sql import functions as F
+
+    static = spark.createDataFrame([(1, "one"), (2, "two"), (3, "three")],
+                                   schema=["id", "label"])
+
+    stream = (
+        spark.readStream.format("rate")
+        .option("rowsPerSecond", "2")
+        .load()
+        .select((F.col("value") % 3 + 1).cast("long").alias("id"))
+    )
+
+    joined = stream.join(static, on="id", how="inner")
+    _query5 = (
+        joined.writeStream
+        .format("memory")
+        .queryName("joined_stream")
+        .outputMode("append")
+        .start()
+    )
+    time.sleep(4)
+
+
+check("Start stream × static join → memory sink", start_stream_static_join)
+
+
+def validate_stream_static_join():
+    rows = spark.sql("SELECT * FROM joined_stream LIMIT 10").collect()
+    assert len(rows) >= 1, f"expected joined rows, got {len(rows)}"
+    for row in rows:
+        assert row["label"] in ("one", "two", "three"), f"unexpected label: {row['label']}"
+    print(f"         joined_stream: {len(rows)} rows, labels valid")
+
+
+check("Query joined_stream table", validate_stream_static_join)
+
+
+def stop_query5():
+    if _query5 is not None:
+        _query5.stop()
+
+
+check("Stop stream×static join cleanly", stop_query5)
+
+# ── Test 6: streaming checkpoint writes offset files ─────────────────────────
+
+def checkpoint_writes_offsets():
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as ckpt_dir:
+        df = spark.readStream.format("rate").option("rowsPerSecond", "5").load()
+        q = (
+            df.writeStream
+            .format("memory")
+            .queryName("ckpt_test")
+            .outputMode("append")
+            .option("checkpointLocation", ckpt_dir)
+            .start()
+        )
+        time.sleep(4)
+        q.stop()
+        offsets_dir = os.path.join(ckpt_dir, "offsets")
+        files = os.listdir(offsets_dir) if os.path.isdir(offsets_dir) else []
+        assert len(files) >= 1, f"expected offset files in {offsets_dir}, found {files}"
+        print(f"         checkpoint offsets: {sorted(files)}")
+
+
+check("Streaming checkpoint writes offset files", checkpoint_writes_offsets)
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 passed = sum(1 for _, s, _ in results if "PASS" in s)

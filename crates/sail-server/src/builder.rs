@@ -8,8 +8,9 @@ use tonic::codegen::http::Request;
 use tonic::codegen::Service;
 use tonic::server::NamedService;
 use tonic::transport::server::{Router, TcpIncoming};
+use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic_health::server::HealthReporter;
-use tower::layer::util::{Identity, Stack};
+use tower::layer::util::{Identity as TowerIdentity, Stack};
 use tower::ServiceBuilder;
 
 pub struct ServerBuilderOptions {
@@ -18,6 +19,16 @@ pub struct ServerBuilderOptions {
     pub http2_keepalive_interval: Option<std::time::Duration>,
     pub http2_keepalive_timeout: Option<std::time::Duration>,
     pub http2_adaptive_window: Option<bool>,
+    /// Optional TLS configuration. Set cert + key for TLS, add ca for mTLS.
+    pub tls: Option<TlsOptions>,
+}
+
+/// TLS/mTLS options for the gRPC server.
+pub struct TlsOptions {
+    pub cert_pem: Vec<u8>,
+    pub key_pem: Vec<u8>,
+    /// CA PEM for client certificate verification (mTLS). When `None`, one-way TLS only.
+    pub ca_pem: Option<Vec<u8>>,
 }
 
 impl Default for ServerBuilderOptions {
@@ -29,6 +40,7 @@ impl Default for ServerBuilderOptions {
             http2_keepalive_interval: Some(std::time::Duration::from_secs(60)),
             http2_keepalive_timeout: Some(std::time::Duration::from_secs(10)),
             http2_adaptive_window: Some(true),
+            tls: None,
         }
     }
 }
@@ -40,11 +52,11 @@ pub struct ServerBuilder<'b> {
     health_reporter: HealthReporter,
     reflection_server_builder: tonic_reflection::server::Builder<'b>,
     // The router type has to change accordingly when layers are added.
-    router: Router<Stack<Stack<TracingServerLayer, Identity>, Identity>>,
+    router: Router<Stack<Stack<TracingServerLayer, TowerIdentity>, TowerIdentity>>,
 }
 
 impl<'b> ServerBuilder<'b> {
-    pub fn new(name: &'static str, options: ServerBuilderOptions) -> Self {
+    pub fn new(name: &'static str, options: ServerBuilderOptions) -> Result<Self, Box<dyn std::error::Error>> {
         let (health_reporter, health_server) = tonic_health::server::health_reporter();
 
         // TODO: We may want to turn off reflection in production if it affects performance.
@@ -60,7 +72,17 @@ impl<'b> ServerBuilder<'b> {
             .layer(TracingServerLayer)
             .into_inner();
 
-        let router = tonic::transport::Server::builder()
+        let mut server = tonic::transport::Server::builder();
+        if let Some(ref tls_opts) = options.tls {
+            let identity = Identity::from_pem(&tls_opts.cert_pem, &tls_opts.key_pem);
+            let mut tls = ServerTlsConfig::new().identity(identity);
+            if let Some(ref ca) = tls_opts.ca_pem {
+                tls = tls.client_ca_root(Certificate::from_pem(ca));
+            }
+            server = server.tls_config(tls)?;
+        }
+
+        let router = server
             .tcp_nodelay(options.nodelay)
             .tcp_keepalive(options.keepalive)
             .http2_keepalive_interval(options.http2_keepalive_interval)
@@ -69,13 +91,13 @@ impl<'b> ServerBuilder<'b> {
             .layer(layer)
             .add_service(health_server);
 
-        Self {
+        Ok(Self {
             name,
             options,
             health_reporter,
             reflection_server_builder,
             router,
-        }
+        })
     }
 
     pub async fn add_service<S>(mut self, service: S, file_descriptor_set: Option<&'b [u8]>) -> Self

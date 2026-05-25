@@ -65,7 +65,7 @@ impl DriverActor {
             .send(DriverEvent::ServerReady { port, signal: tx })
             .await?;
 
-        ServerBuilder::new("sail_driver", Default::default())
+        ServerBuilder::new("sail_driver", Default::default()).map_err(|e| ExecutionError::InternalError(e.to_string()))?
             .add_service(service, Some(crate::driver::gen::FILE_DESCRIPTOR_SET))
             .await
             .add_service(flight_service, None)

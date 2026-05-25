@@ -55,6 +55,12 @@ enum Command {
             help = "Require clients to present this Bearer token in every gRPC call (also settable via SAIL_AUTH__TOKEN env var)"
         )]
         auth_token: Option<String>,
+        #[arg(long, help = "Path to PEM-encoded server TLS certificate (enables TLS; also SAIL_AUTH__TLS__CERT)")]
+        tls_cert: Option<String>,
+        #[arg(long, help = "Path to PEM-encoded server TLS private key (also SAIL_AUTH__TLS__KEY)")]
+        tls_key: Option<String>,
+        #[arg(long, help = "Path to PEM-encoded CA certificate for client verification (enables mTLS; also SAIL_AUTH__TLS__CA)")]
+        tls_ca: Option<String>,
     },
 
     /// Execute a SQL query and print results, then exit
@@ -163,13 +169,22 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Worker => run_worker(),
 
-        Command::Server { ip, port, directory, mode, workers, ha, auth_token } => {
+        Command::Server { ip, port, directory, mode, workers, ha, auth_token, tls_cert, tls_key, tls_ca } => {
             if let Some(dir) = directory {
                 std::env::set_current_dir(dir)?;
             }
             if let Some(token) = auth_token {
                 // Inject into figment env-var namespace so AppConfig::load() picks it up.
                 std::env::set_var("SAIL_AUTH__TOKEN", token);
+            }
+            if let Some(cert) = tls_cert {
+                std::env::set_var("SAIL_AUTH__TLS__CERT", cert);
+            }
+            if let Some(key) = tls_key {
+                std::env::set_var("SAIL_AUTH__TLS__KEY", key);
+            }
+            if let Some(ca) = tls_ca {
+                std::env::set_var("SAIL_AUTH__TLS__CA", ca);
             }
             match mode.as_deref() {
                 Some("local-cluster") | Some("local_cluster") => {

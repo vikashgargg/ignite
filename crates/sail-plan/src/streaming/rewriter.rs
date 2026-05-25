@@ -6,8 +6,8 @@ use datafusion::logical_expr::{Extension, LogicalPlan};
 use datafusion_common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion_common::{internal_err, not_impl_err, plan_err, Result};
 use datafusion_expr::{
-    col, lit, or, Aggregate, Explain, FetchType, Filter, Projection, SkipType, SubqueryAlias,
-    TableScan, Union, UserDefinedLogicalNode,
+    col, lit, or, Aggregate, Explain, FetchType, Filter, Join, Projection, SkipType,
+    SubqueryAlias, TableScan, Union, UserDefinedLogicalNode,
 };
 use sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema;
 use sail_common_datafusion::rename::table_provider::RenameTableProvider;
@@ -149,8 +149,63 @@ impl TreeNodeRewriter for StreamingRewriter {
             LogicalPlan::Sort(_) => {
                 plan_err!("sort is not supported for streaming: {plan:?}")
             }
-            LogicalPlan::Join(_) => {
-                not_impl_err!("streaming join: {plan:?}")
+            LogicalPlan::Join(join) => {
+                // Per-micro-batch join: strip flow-event columns from both sides,
+                // run the original join on data-only schemas, then re-add flow-event
+                // columns. This handles stream × static and stream × stream joins.
+                // State-based windowed joins (stream × stream with watermark) are not
+                // yet supported and will produce per-batch results instead.
+                let left_data_schema =
+                    try_from_flow_event_schema(join.left.schema().inner())?;
+                let right_data_schema =
+                    try_from_flow_event_schema(join.right.schema().inner())?;
+
+                let left_cols: Vec<_> = left_data_schema
+                    .fields()
+                    .iter()
+                    .map(|f| col(f.name().as_str()))
+                    .collect();
+                let left_data = Arc::new(LogicalPlan::Projection(Projection::try_new(
+                    left_cols,
+                    Arc::clone(&join.left),
+                )?));
+
+                let right_cols: Vec<_> = right_data_schema
+                    .fields()
+                    .iter()
+                    .map(|f| col(f.name().as_str()))
+                    .collect();
+                let right_data = Arc::new(LogicalPlan::Projection(Projection::try_new(
+                    right_cols,
+                    Arc::clone(&join.right),
+                )?));
+
+                let new_join = Arc::new(LogicalPlan::Join(Join::try_new(
+                    left_data,
+                    right_data,
+                    join.on.clone(),
+                    join.filter.clone(),
+                    join.join_type,
+                    join.join_constraint,
+                    join.null_equality,
+                    join.null_aware,
+                )?));
+
+                let mut out_exprs: Vec<_> = new_join
+                    .schema()
+                    .columns()
+                    .into_iter()
+                    .map(datafusion_expr::Expr::Column)
+                    .collect();
+                out_exprs.push(
+                    lit(datafusion_common::ScalarValue::Binary(None))
+                        .alias(MARKER_FIELD_NAME),
+                );
+                out_exprs.push(lit(false).alias(RETRACTED_FIELD_NAME));
+
+                Ok(Transformed::yes(LogicalPlan::Projection(
+                    Projection::try_new(out_exprs, new_join)?,
+                )))
             }
             LogicalPlan::Repartition(repartition) => {
                 // Repartitioning is a no-op in streaming: data arrives as

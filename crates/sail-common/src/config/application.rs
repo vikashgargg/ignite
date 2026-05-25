@@ -644,6 +644,30 @@ pub struct AuthConfig {
         serialize_with = "serialize_optional_secret"
     )]
     pub token: Option<SecretString>,
+    /// TLS configuration for the gRPC server.
+    #[serde(default)]
+    pub tls: TlsConfig,
+}
+
+/// TLS / mTLS configuration for the gRPC server.
+///
+/// Set cert + key for TLS. Add `ca` to require client certificates (mTLS).
+///
+///   SAIL_AUTH__TLS__CERT=/path/to/server.crt
+///   SAIL_AUTH__TLS__KEY=/path/to/server.key
+///   SAIL_AUTH__TLS__CA=/path/to/ca.crt       # optional — enables mTLS
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TlsConfig {
+    /// Path to the PEM-encoded server certificate file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert: Option<String>,
+    /// Path to the PEM-encoded server private key file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Path to the PEM-encoded CA certificate used to verify client certificates.
+    /// When set, mTLS is enforced: clients must present a certificate signed by this CA.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca: Option<String>,
 }
 
 /// Environment variables for application cluster configuration.

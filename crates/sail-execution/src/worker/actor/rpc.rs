@@ -68,7 +68,7 @@ impl WorkerActor {
             .send(WorkerEvent::ServerReady { port, signal: tx })
             .await?;
 
-        ServerBuilder::new("sail_worker", Default::default())
+        ServerBuilder::new("sail_worker", Default::default()).map_err(|e| ExecutionError::InternalError(e.to_string()))?
             .add_service(service, Some(crate::worker::gen::FILE_DESCRIPTOR_SET))
             .await
             .add_service(flight_service, None)
