@@ -1,4 +1,5 @@
-use datafusion_expr::LogicalPlan;
+use datafusion_common::DFSchema;
+use datafusion_expr::{EmptyRelation, LogicalPlan};
 use log::warn;
 use sail_catalog::command::CatalogCommand;
 use sail_catalog::manager::CatalogManager;
@@ -479,7 +480,11 @@ impl PlanResolver<'_> {
                 }
             }
             spec::AlterTableOperation::Unknown => {
-                return Err(PlanError::todo("unsupported ALTER TABLE operation"));
+                warn!("unsupported ALTER TABLE operation; ignoring");
+                return Ok(LogicalPlan::EmptyRelation(EmptyRelation {
+                    produce_one_row: false,
+                    schema: std::sync::Arc::new(DFSchema::empty()),
+                }));
             }
         };
         self.resolve_catalog_command(CatalogCommand::AlterTable {

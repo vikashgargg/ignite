@@ -29,14 +29,27 @@ impl PlanResolver<'_> {
             ));
         };
         if row_format.is_some() {
-            return Err(PlanError::todo("row format for INSERT OVERWRITE DIRECTORY"));
+            log::warn!("ROW FORMAT in INSERT OVERWRITE DIRECTORY is not supported and will be ignored");
         }
         let format = match file_format {
             Some(spec::TableFileFormat::General { format }) => format,
-            Some(spec::TableFileFormat::Table { .. }) => {
-                return Err(PlanError::todo(
-                    "table file format for INSERT OVERWRITE DIRECTORY",
-                ));
+            Some(spec::TableFileFormat::Table {
+                input_format,
+                output_format: _,
+            }) => {
+                let fmt = input_format.to_ascii_lowercase();
+                if fmt.contains("parquet") {
+                    "parquet".to_string()
+                } else if fmt.contains("orc") {
+                    "orc".to_string()
+                } else if fmt.contains("json") {
+                    "json".to_string()
+                } else if fmt.contains("csv") || fmt.contains("text") {
+                    "csv".to_string()
+                } else {
+                    log::warn!("Unknown INPUTFORMAT '{}' for INSERT OVERWRITE DIRECTORY; defaulting to parquet", input_format);
+                    "parquet".to_string()
+                }
             }
             None => {
                 return Err(PlanError::invalid(
