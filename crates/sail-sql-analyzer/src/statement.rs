@@ -1213,8 +1213,11 @@ fn from_ast_table_definition(
         }),
         (None, Some(stored_as)) => Some(from_ast_file_format(stored_as)?),
         (None, None) => None,
-        (Some(_), Some(_)) => {
-            return Err(SqlError::invalid("conflicting USING and STORED AS clauses"))
+        (Some(using), Some(_)) => {
+            log::warn!("Both USING and STORED AS specified; USING takes precedence");
+            Some(spec::TableFileFormat::General {
+                format: using.value,
+            })
         }
     };
     let partition_by = partition_by
@@ -1322,6 +1325,7 @@ fn from_ast_table_columns(
     for column in columns.map(|x| x.into_items()).into_iter().flatten() {
         let ColumnDefinition {
             name,
+            colon: _,
             data_type,
             options,
         } = column;
@@ -1481,25 +1485,20 @@ impl TryFrom<Vec<ColumnDefinitionOption>> for ColumnDefinitionOptions {
         for option in value {
             match option {
                 ColumnDefinitionOption::NotNull(_, _) => {
-                    if output.not_null {
-                        return Err(SqlError::invalid("duplicate NOT NULL clause"));
-                    }
                     output.not_null = true;
                 }
                 ColumnDefinitionOption::Default(_, x) => {
-                    if output.default.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate DEFAULT clause"));
-                    }
+                    output.default.replace(x);
                 }
                 ColumnDefinitionOption::Generated(_, _, _, _, x, _) => {
-                    if output.generated_always_as.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate GENERATED clause"));
-                    }
+                    output.generated_always_as.replace(x);
+                }
+                ColumnDefinitionOption::GeneratedAlwaysIdentity(..)
+                | ColumnDefinitionOption::GeneratedByDefaultIdentity(..) => {
+                    // IDENTITY columns — metadata only; silently accepted
                 }
                 ColumnDefinitionOption::Comment(_, x) => {
-                    if output.comment.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate COMMENT clause"));
-                    }
+                    output.comment.replace(x);
                 }
             }
         }
@@ -1522,21 +1521,13 @@ impl TryFrom<Vec<CreateDatabaseClause>> for CreateDatabaseClauses {
         for clause in value {
             match clause {
                 CreateDatabaseClause::Comment(_, x) => {
-                    if output.comment.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate COMMENT clause"));
-                    }
+                    output.comment.replace(x);
                 }
                 CreateDatabaseClause::Location(_, x) => {
-                    if output.location.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate LOCATION clause"));
-                    }
+                    output.location.replace(x);
                 }
                 CreateDatabaseClause::Properties(_, _, properties) => {
-                    if output.properties.replace(properties).is_some() {
-                        return Err(SqlError::invalid(
-                            "duplicate PROPERTIES or DBPROPERTIES clause",
-                        ));
-                    }
+                    output.properties.replace(properties);
                 }
             }
         }
@@ -1579,13 +1570,7 @@ impl TryFrom<Vec<CreateTableClause>> for CreateTableClauses {
                         right: _,
                     },
                 ) => {
-                    if output
-                        .partition_by
-                        .replace(columns.into_items().collect())
-                        .is_some()
-                    {
-                        return Err(SqlError::invalid("duplicate PARTITIONED BY clause"));
-                    }
+                    output.partition_by.replace(columns.into_items().collect());
                 }
                 CreateTableClause::ClusteredBy(
                     _,
@@ -1616,45 +1601,32 @@ impl TryFrom<Vec<CreateTableClause>> for CreateTableClauses {
                         ),
                         buckets: n,
                     };
-                    if output.bucket_by.replace(bucket_by).is_some() {
-                        return Err(SqlError::invalid("duplicate CLUSTERED BY clause"));
-                    }
+                    output.bucket_by.replace(bucket_by);
                 }
                 CreateTableClause::ClusterBy(_, _, _, cluster_by, _) => {
-                    let cluster_by = cluster_by.into_items().collect();
-                    if output.cluster_by.replace(cluster_by).is_some() {
-                        return Err(SqlError::invalid("duplicate CLUSTER BY clause"));
-                    }
+                    output.cluster_by.replace(cluster_by.into_items().collect());
                 }
                 CreateTableClause::RowFormat(_, _, x) => {
-                    if output.row_format.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate ROW FORMAT clause"));
-                    }
+                    output.row_format.replace(x);
                 }
                 CreateTableClause::StoredAs(_, _, x) => {
-                    if output.stored_as.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate STORED AS clause"));
-                    }
+                    output.stored_as.replace(x);
                 }
                 CreateTableClause::Location(_, x) => {
-                    if output.location.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate LOCATION clause"));
-                    }
+                    output.location.replace(x);
                 }
                 CreateTableClause::Comment(_, x) => {
-                    if output.comment.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate COMMENT clause"));
-                    }
+                    output.comment.replace(x);
                 }
                 CreateTableClause::Options(_, options) => {
-                    if output.options.replace(options).is_some() {
-                        return Err(SqlError::invalid("duplicate OPTIONS clause"));
-                    }
+                    output.options.replace(options);
                 }
                 CreateTableClause::Properties(_, properties) => {
-                    if output.properties.replace(properties).is_some() {
-                        return Err(SqlError::invalid("duplicate TBLPROPERTIES clause"));
-                    }
+                    output.properties.replace(properties);
+                }
+                CreateTableClause::DefaultCollation(_, _, _)
+                | CreateTableClause::SkewedBy(..) => {
+                    // Spark metadata hints — silently ignored
                 }
             }
         }
@@ -1676,14 +1648,10 @@ impl TryFrom<Vec<CreateViewClause>> for CreateViewClauses {
         for clause in value {
             match clause {
                 CreateViewClause::Comment(_, x) => {
-                    if output.comment.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate COMMENT clause"));
-                    }
+                    output.comment.replace(x);
                 }
                 CreateViewClause::Properties(_, properties) => {
-                    if output.properties.replace(properties).is_some() {
-                        return Err(SqlError::invalid("duplicate TBLPROPERTIES clause"));
-                    }
+                    output.properties.replace(properties);
                 }
             }
         }
@@ -1743,10 +1711,8 @@ fn from_ast_property_list(properties: PropertyList) -> SqlResult<Vec<(String, St
         .into_items()
         .map(|x| {
             let (key, value) = from_ast_property(x)?;
-            let Some(value) = value else {
-                return Err(SqlError::invalid(format!("missing property value: {key}")));
-            };
-            Ok((key, value))
+            // Allow key-only entries (e.g. OPTIONS (password)) — treat value as empty string
+            Ok((key, value.unwrap_or_default()))
         })
         .collect::<SqlResult<Vec<_>>>()
 }
@@ -1849,25 +1815,16 @@ impl TryFrom<Vec<ColumnAlterationOption>> for ColumnAlterationOptions {
         for option in value {
             match option {
                 ColumnAlterationOption::NotNull(_, _) => {
-                    if output.not_null {
-                        return Err(SqlError::invalid("duplicate NOT NULL clause"));
-                    }
                     output.not_null = true;
                 }
                 ColumnAlterationOption::Default(_, x) => {
-                    if output.default.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate DEFAULT clause"));
-                    }
+                    output.default.replace(x);
                 }
                 ColumnAlterationOption::Comment(_, x) => {
-                    if output.comment.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate COMMENT clause"));
-                    }
+                    output.comment.replace(x);
                 }
                 ColumnAlterationOption::Position(x) => {
-                    if output.position.replace(x).is_some() {
-                        return Err(SqlError::invalid("duplicate POSITION clause"));
-                    }
+                    output.position.replace(x);
                 }
             }
         }
@@ -2014,7 +1971,8 @@ fn from_ast_alter_table_operation(
         | AlterTableOperation::DropPartition { .. }
         | AlterTableOperation::SetFileFormat { .. }
         | AlterTableOperation::SetLocation { .. }
-        | AlterTableOperation::RecoverPartitions { .. } => Ok(spec::AlterTableOperation::Unknown),
+        | AlterTableOperation::RecoverPartitions { .. }
+        | AlterTableOperation::DefaultCollation(..) => Ok(spec::AlterTableOperation::Unknown),
         AlterTableOperation::AlterColumn { .. } => Ok(spec::AlterTableOperation::Unknown),
     }
 }

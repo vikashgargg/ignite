@@ -1206,7 +1206,39 @@
       "input": "REPLACE TABLE my_tab (id bigint) SKEWED BY (id) ON (1,2,3)",
       "exception": "\n[INVALID_STATEMENT_OR_CLAUSE] The statement or clause: CREATE TABLE ... SKEWED BY is not valid. SQLSTATE: 42601\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab (id bigint) SKEWED BY (id) ON (1,2,3)\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: found SKEWED at 33:39 expected 'USING', 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
@@ -1573,7 +1605,55 @@
       "input": "REPLACE TABLE my_tab (id bigint, part string)\nUSING parquet\nSTORED AS parquet",
       "exception": "\n[INVALID_STATEMENT_OR_CLAUSE] The statement or clause: REPLACE TABLE ... USING ... STORED AS PARQUET  is not valid. SQLSTATE: 42601\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab (id bigint, part string)\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nUSING parquet\n^^^^^^^^^^^^^\nSTORED AS parquet\n^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: conflicting USING and STORED AS clauses"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "part",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
@@ -1846,70 +1926,559 @@
       "input": "REPLACE TABLE my_tab(a INT, b STRING) CLUSTER BY (a) CLUSTER BY (a)",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: CLUSTER BY. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) CLUSTER BY (a) CLUSTER BY (a)\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate CLUSTER BY clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [
+                [
+                  "a"
+                ]
+              ],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) CLUSTERED BY(b) INTO 256 BUCKETS CLUSTERED BY(b) INTO 256 BUCKETS",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: CLUSTERED BY. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) CLUSTERED BY(b) INTO 256 BUCKETS CLUSTERED BY(b) INTO 256 BUCKETS\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate CLUSTERED BY clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": {
+                "bucketColumnNames": [
+                  "b"
+                ],
+                "numBuckets": 256
+              },
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) COMMENT 'a table' COMMENT 'a table'",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: COMMENT. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) COMMENT 'a table' COMMENT 'a table'\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate COMMENT clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": "a table",
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) LOCATION '/tmp/file' LOCATION '/tmp/file'",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: LOCATION. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) LOCATION '/tmp/file' LOCATION '/tmp/file'\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate LOCATION clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": "/tmp/file",
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) PARTITIONED BY (b) PARTITIONED BY (b)",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: PARTITIONED BY. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) PARTITIONED BY (b) PARTITIONED BY (b)\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate PARTITIONED BY clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [
+                {
+                  "variant": "expression",
+                  "unresolvedAttribute": {
+                    "name": [
+                      "b"
+                    ],
+                    "planId": null,
+                    "isMetadataColumn": false
+                  }
+                }
+              ],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) PARTITIONED BY (c int) PARTITIONED BY (c int)",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: PARTITIONED BY. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) PARTITIONED BY (c int) PARTITIONED BY (c int)\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate PARTITIONED BY clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [
+                {
+                  "variant": "definition",
+                  "name": "c",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) ROW FORMAT SERDE 'serde' ROW FORMAT SERDE 'serde'",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: ROW FORMAT. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) ROW FORMAT SERDE 'serde' ROW FORMAT SERDE 'serde'\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate ROW FORMAT clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": {
+                "serde": {
+                  "name": "serde",
+                  "properties": []
+                }
+              },
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) STORED AS INPUTFORMAT 'in' OUTPUTFORMAT 'out' STORED AS INPUTFORMAT 'in' OUTPUTFORMAT 'out'",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: STORED AS/BY. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) STORED AS INPUTFORMAT 'in' OUTPUTFORMAT 'out' STORED AS INPUTFORMAT 'in' OUTPUTFORMAT 'out'\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate STORED AS clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "table": {
+                  "input_format": "in",
+                  "output_format": "out"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) STORED AS parquet STORED AS parquet",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: STORED AS/BY. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) STORED AS parquet STORED AS parquet\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate STORED AS clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(a INT, b STRING) TBLPROPERTIES('test' = 'test2') TBLPROPERTIES('test' = 'test2')",
       "exception": "\n[DUPLICATE_CLAUSES] Found duplicate clauses: TBLPROPERTIES. Please, remove one of them. SQLSTATE: 42614\n== SQL (line 1, position 1) ==\nREPLACE TABLE my_tab(a INT, b STRING) TBLPROPERTIES('test' = 'test2') TBLPROPERTIES('test' = 'test2')\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: duplicate TBLPROPERTIES clause"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "a",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "b",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": null,
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": [
+                [
+                  "test",
+                  "test2"
+                ]
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
@@ -2289,235 +2858,1043 @@
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY (), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY (INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "failure": "invalid argument: found - at 74:75 expected number"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY (INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY (START WITH -2 INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "failure": "invalid argument: found WITH at 67:71 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY (START WITH -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "failure": "invalid argument: found WITH at 67:71 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 2 INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "failure": "invalid argument: found WITH at 67:71 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "failure": "invalid argument: found WITH at 67:71 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED ALWAYS AS IDENTITY , val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 51:59 expected '('"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY (), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY (INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "failure": "invalid argument: found - at 78:79 expected number"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY (INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH -2 INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 71:75 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 71:75 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 2 INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 71:75 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 71:75 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id BIGINT GENERATED BY DEFAULT AS IDENTITY , val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 41:43 expected 'ALWAYS'"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int64",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY (), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY (INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "failure": "invalid argument: found - at 71:72 expected number"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY (INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY (START WITH -2 INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "failure": "invalid argument: found WITH at 64:68 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY (START WITH -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "failure": "invalid argument: found WITH at 64:68 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY (START WITH 2 INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "failure": "invalid argument: found WITH at 64:68 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY (START WITH 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "failure": "invalid argument: found WITH at 64:68 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED ALWAYS AS IDENTITY , val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found IDENTITY at 48:56 expected '('"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY (), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY (INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "failure": "invalid argument: found - at 75:76 expected number"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY (INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY (START WITH -2 INCREMENT BY -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 68:72 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY (START WITH -2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 68:72 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY (START WITH 2 INCREMENT BY 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 68:72 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY (START WITH 2), val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "failure": "invalid argument: found WITH at 68:72 expected 'BY'"
       }
     },
     {
       "input": "REPLACE TABLE my_tab(id INT GENERATED BY DEFAULT AS IDENTITY , val INT) USING parquet",
       "output": {
-        "failure": "invalid argument: found BY at 38:40 expected 'ALWAYS'"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "my_tab"
+              ],
+              "columns": [
+                {
+                  "name": "id",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                },
+                {
+                  "name": "val",
+                  "dataType": "int32",
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE t (c STRING) USING parquet DEFAULT COLLATION sr",
       "output": {
-        "failure": "invalid argument: found DEFAULT at 41:48 expected 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "t"
+              ],
+              "columns": [
+                {
+                  "name": "c",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE t (c STRING) USING parquet DEFAULT COLLATION sr_ci_ai",
       "output": {
-        "failure": "invalid argument: found DEFAULT at 41:48 expected 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "t"
+              ],
+              "columns": [
+                {
+                  "name": "c",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE t (c STRING) USING parquet DEFAULT COLLATION unicode",
       "output": {
-        "failure": "invalid argument: found DEFAULT at 41:48 expected 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "t"
+              ],
+              "columns": [
+                {
+                  "name": "c",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE t (c STRING) USING parquet DEFAULT COLLATION unicode_ci",
       "output": {
-        "failure": "invalid argument: found DEFAULT at 41:48 expected 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "t"
+              ],
+              "columns": [
+                {
+                  "name": "c",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE t (c STRING) USING parquet DEFAULT COLLATION unicode_ci_rtrim",
       "output": {
-        "failure": "invalid argument: found DEFAULT at 41:48 expected 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "t"
+              ],
+              "columns": [
+                {
+                  "name": "c",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE t (c STRING) USING parquet DEFAULT COLLATION utf8_binary",
       "output": {
-        "failure": "invalid argument: found DEFAULT at 41:48 expected 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "t"
+              ],
+              "columns": [
+                {
+                  "name": "c",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "REPLACE TABLE t (c STRING) USING parquet DEFAULT COLLATION utf8_lcase",
       "output": {
-        "failure": "invalid argument: found DEFAULT at 41:48 expected 'PARTITIONED', 'CLUSTERED', 'DISTRIBUTED', 'CLUSTER', 'ROW', 'STORED', 'LOCATION', 'COMMENT', 'OPTIONS', 'TBLPROPERTIES', 'AS', query, ';', or end of input"
+        "success": {
+          "command": {
+            "createTable": {
+              "table": [
+                "t"
+              ],
+              "columns": [
+                {
+                  "name": "c",
+                  "dataType": {
+                    "configuredUtf8": {
+                      "utf8Type": "configured"
+                    }
+                  },
+                  "nullable": true,
+                  "comment": null,
+                  "default": null,
+                  "generatedAlwaysAs": null
+                }
+              ],
+              "comment": null,
+              "constraints": [],
+              "location": null,
+              "fileFormat": {
+                "general": {
+                  "format": "parquet"
+                }
+              },
+              "rowFormat": null,
+              "partitionBy": [],
+              "sortBy": [],
+              "bucketBy": null,
+              "clusterBy": [],
+              "ifNotExists": false,
+              "replace": true,
+              "options": [],
+              "properties": []
+            },
+            "planId": null
+          }
+        }
       }
     }
   ]
