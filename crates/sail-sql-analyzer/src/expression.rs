@@ -108,12 +108,31 @@ pub(crate) fn from_ast_function_arguments(
                 let expr = from_ast_expression(expr)?;
                 named_arguments.push((name.value.into(), expr));
             }
-            FunctionArgument::DistinctExpr(_, expr) | FunctionArgument::Unnamed(expr) => {
+            FunctionArgument::TrimStyle(trim) => {
                 if !named_arguments.is_empty() {
                     return Err(SqlError::analysis(
                         "[UNEXPECTED_POSITIONAL_ARGUMENT] Positional argument follows a named (keyword) argument.",
                     ));
                 }
+                // TrimStyle arguments are handled by the caller (ltrim/rtrim/trim context).
+                // We flatten the trim expression into positional arguments: [trimStr, str] or [str].
+                let trim_args = match trim {
+                    TrimExpr::LeadingSpace(_, _, e) => vec![from_ast_expression(e)?],
+                    TrimExpr::Leading(_, what, _, e) => {
+                        vec![from_ast_expression(what)?, from_ast_expression(e)?]
+                    }
+                    TrimExpr::TrailingSpace(_, _, e) => vec![from_ast_expression(e)?],
+                    TrimExpr::Trailing(_, what, _, e) => {
+                        vec![from_ast_expression(what)?, from_ast_expression(e)?]
+                    }
+                    TrimExpr::BothSpace(_, _, e) => vec![from_ast_expression(e)?],
+                    TrimExpr::Both(_, what, _, e) => {
+                        vec![from_ast_expression(what)?, from_ast_expression(e)?]
+                    }
+                };
+                arguments.extend(trim_args);
+            }
+            FunctionArgument::DistinctExpr(_, expr) | FunctionArgument::Unnamed(expr) => {
                 let expr = from_ast_expression(expr)?;
                 arguments.push(expr);
             }

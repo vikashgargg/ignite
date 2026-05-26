@@ -6,13 +6,13 @@ use sail_sql_parser::ast::literal::IntegerLiteral;
 use sail_sql_parser::ast::operator::Comma;
 use sail_sql_parser::ast::query::{
     AliasClause, ClusterByClause, DistributeByClause, FromClause, GroupByClause, GroupByModifier,
-    HavingClause, IdentList, JoinCriteria, JoinOperator, LateralViewClause, LimitClause,
-    LimitValue, NamedExpr, NamedExprList, NamedQuery, NamedWindow, OffsetClause, OrderByClause,
-    PivotClause, QualifyClause, Query, QueryBody, QueryModifier, QuerySelect, QueryTerm,
-    SelectClause, SetOperator, SetQuantifier, SortByClause, TableFactor, TableFunction, TableJoin,
-    TableModifier, TableSampleClause, TableSampleMethod, TableSampleRepeatable, TableWithJoins,
-    TemporalClause, UnpivotClause, UnpivotColumns, UnpivotNulls, ValuesClause, WhereClause,
-    WindowClause, WithClause,
+    HavingClause, HiveFromBody, HiveFromTerm, IdentList, JoinCriteria, JoinOperator,
+    LateralViewClause, LimitClause, LimitValue, NamedExpr, NamedExprList, NamedQuery, NamedWindow,
+    OffsetClause, OrderByClause, PivotClause, QualifyClause, Query, QueryBody, QueryModifier,
+    QuerySelect, QueryTerm, SelectClause, SetOperator, SetQuantifier, SortByClause, TableFactor,
+    TableFunction, TableJoin, TableModifier, TableSampleClause, TableSampleMethod,
+    TableSampleRepeatable, TableWithJoins, TemporalClause, UnpivotClause, UnpivotColumns,
+    UnpivotNulls, ValuesClause, WhereClause, WindowClause, WithClause,
 };
 use sail_sql_parser::common::Sequence;
 
@@ -352,7 +352,157 @@ fn from_ast_query_term(term: QueryTerm) -> SqlResult<spec::QueryPlan> {
         QueryTerm::Table(_, name) => from_ast_query_table(name),
         QueryTerm::Values(values) => from_ast_values(values),
         QueryTerm::Nested(_, query, _) => from_ast_query(query),
+        QueryTerm::HiveFrom(term) => from_ast_hive_from(*term),
     }
+}
+
+fn from_ast_hive_from(term: HiveFromTerm) -> SqlResult<spec::QueryPlan> {
+    let HiveFromTerm {
+        from_kw: _,
+        tables,
+        lateral_views,
+        bodies,
+    } = term;
+
+    let shared_tables: Vec<TableWithJoins> = tables.into_items().collect();
+
+    if bodies.is_empty() {
+        // Bare `FROM a` → `SELECT * FROM a`
+        let plan = from_ast_tables(shared_tables)?;
+        let plan = query_plan_with_lateral_views(plan, lateral_views)?;
+        return Ok(spec::QueryPlan::new(spec::QueryNode::Project {
+            input: Some(Box::new(plan)),
+            expressions: vec![spec::Expr::UnresolvedStar {
+                target: None,
+                plan_id: None,
+                wildcard_options: spec::WildcardOptions {
+                    ilike_pattern: None,
+                    exclude_columns: None,
+                    except_columns: None,
+                    replace_columns: None,
+                    rename_columns: None,
+                },
+            }],
+        }));
+    }
+
+    // Build one plan per SELECT body, sharing the FROM tables and lateral views.
+    // Multiple bodies are union-all'd together.
+    let mut plans = Vec::with_capacity(bodies.len());
+    for HiveFromBody {
+        select:
+            SelectClause {
+                select: _,
+                quantifier,
+                projection,
+            },
+        lateral_views: body_lateral_views,
+        r#where,
+        group_by,
+        having,
+        qualify,
+    } in bodies
+    {
+        let plan = from_ast_tables(shared_tables.clone())?;
+        let all_lateral_views = lateral_views
+            .iter()
+            .cloned()
+            .chain(body_lateral_views)
+            .collect();
+        let condition =
+            r#where.map(|WhereClause { r#where: _, condition }| condition);
+        let plan = if let Some(condition) = condition {
+            query_plan_with_filter(plan, condition)?
+        } else {
+            plan
+        };
+        let plan = query_plan_with_lateral_views(plan, all_lateral_views)?;
+        let projection = projection
+            .into_items()
+            .map(from_ast_named_expression)
+            .collect::<SqlResult<_>>()?;
+        let group_by = group_by
+            .map(|x| -> SqlResult<_> {
+                let GroupByClause {
+                    group_by: _,
+                    expressions,
+                    modifier,
+                } = x;
+                let expr = expressions
+                    .into_items()
+                    .map(from_ast_grouping_expression)
+                    .collect::<SqlResult<Vec<spec::Expr>>>()?;
+                let expr = match modifier {
+                    None => expr,
+                    Some(GroupByModifier::WithRollup(_, _)) => {
+                        vec![spec::Expr::Rollup(expr)]
+                    }
+                    Some(GroupByModifier::WithCube(_, _)) => {
+                        vec![spec::Expr::Cube(expr)]
+                    }
+                    Some(GroupByModifier::GroupingSets(_, _, _, sets, _)) => {
+                        let sets = sets
+                            .into_items()
+                            .map(from_ast_grouping_set)
+                            .collect::<SqlResult<Vec<_>>>()?;
+                        vec![spec::Expr::GroupingSets(sets)]
+                    }
+                };
+                Ok(expr)
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let having = having
+            .map(|HavingClause { having: _, condition }| from_ast_expression(condition))
+            .transpose()?;
+        let plan = if group_by.is_empty() && having.is_none() {
+            spec::QueryPlan::new(spec::QueryNode::Project {
+                input: Some(Box::new(plan)),
+                expressions: projection,
+            })
+        } else {
+            spec::QueryPlan::new(spec::QueryNode::Aggregate(spec::Aggregate {
+                input: Box::new(plan),
+                grouping: group_by,
+                aggregate: projection,
+                having,
+                with_grouping_expressions: false,
+            }))
+        };
+        let plan = match quantifier {
+            None | Some(DuplicateTreatment::All(_)) => plan,
+            Some(DuplicateTreatment::Distinct(_)) => {
+                spec::QueryPlan::new(spec::QueryNode::Deduplicate(spec::Deduplicate {
+                    input: Box::new(plan),
+                    column_names: vec![],
+                    all_columns_as_keys: true,
+                    within_watermark: false,
+                }))
+            }
+        };
+        let plan = if let Some(QualifyClause { qualify: _, condition }) = qualify {
+            query_plan_with_filter(plan, condition)?
+        } else {
+            plan
+        };
+        plans.push(plan);
+    }
+
+    // Reduce multiple SELECT bodies via UNION ALL
+    let plan = plans
+        .into_iter()
+        .reduce(|left, right| {
+            spec::QueryPlan::new(spec::QueryNode::SetOperation(spec::SetOperation {
+                left: Box::new(left),
+                right: Box::new(right),
+                set_op_type: spec::SetOpType::Union,
+                is_all: true,
+                by_name: false,
+                allow_missing_columns: false,
+            }))
+        })
+        .expect("bodies non-empty");
+    Ok(plan)
 }
 
 fn from_ast_query_select(select: QuerySelect) -> SqlResult<spec::QueryPlan> {
@@ -752,6 +902,7 @@ fn from_ast_table_sample(sample: TableSampleClause) -> SqlResult<spec::TableSamp
             numerator,
             out_of: _,
             denominator,
+            on_expr: _,
         } => {
             let numerator = from_ast_bucket_count(numerator)?;
             let denominator = from_ast_bucket_count(denominator)?;
@@ -760,6 +911,10 @@ fn from_ast_table_sample(sample: TableSampleClause) -> SqlResult<spec::TableSamp
                 denominator,
             }
         }
+        // Byte-size sampling (e.g. TABLESAMPLE(300M)): approximated as 100% (return all rows).
+        TableSampleMethod::ByteSize { .. } => spec::TableSampleMethod::Percent {
+            value: spec::Expr::Literal(spec::Literal::Float64 { value: Some(100.0) }),
+        },
     };
     let seed = repeatable.map(|x| {
         let TableSampleRepeatable {

@@ -493,69 +493,490 @@
     {
       "input": "from (from a union all from b) c select *",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "tableAlias": {
+                  "input": {
+                    "setOperation": {
+                      "left": {
+                        "project": {
+                          "input": {
+                            "read": {
+                              "namedTable": {
+                                "name": [
+                                  "a"
+                                ],
+                                "temporal": null,
+                                "sample": null,
+                                "options": []
+                              },
+                              "isStreaming": false
+                            },
+                            "planId": null
+                          },
+                          "expressions": [
+                            {
+                              "unresolvedStar": {
+                                "target": null,
+                                "planId": null,
+                                "wildcardOptions": {
+                                  "ilikePattern": null,
+                                  "excludeColumns": null,
+                                  "exceptColumns": null,
+                                  "replaceColumns": null,
+                                  "renameColumns": null
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "planId": null
+                      },
+                      "right": {
+                        "project": {
+                          "input": {
+                            "read": {
+                              "namedTable": {
+                                "name": [
+                                  "b"
+                                ],
+                                "temporal": null,
+                                "sample": null,
+                                "options": []
+                              },
+                              "isStreaming": false
+                            },
+                            "planId": null
+                          },
+                          "expressions": [
+                            {
+                              "unresolvedStar": {
+                                "target": null,
+                                "planId": null,
+                                "wildcardOptions": {
+                                  "ilikePattern": null,
+                                  "excludeColumns": null,
+                                  "exceptColumns": null,
+                                  "replaceColumns": null,
+                                  "renameColumns": null
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "planId": null
+                      },
+                      "setOpType": "union",
+                      "isAll": true,
+                      "byName": false,
+                      "allowMissingColumns": false
+                    },
+                    "planId": null
+                  },
+                  "name": "c",
+                  "columns": []
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "from a",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "read": {
+                  "namedTable": {
+                    "name": [
+                      "a"
+                    ],
+                    "temporal": null,
+                    "sample": null,
+                    "options": []
+                  },
+                  "isStreaming": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "from a insert into tbl1 select * insert into tbl2 select * where s < 10",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "failure": "invalid argument: found into at 14:18 expected '(', 'NATURAL', 'INNER', 'CROSS', 'OUTER', 'SEMI', 'ANTI', 'LEFT', 'RIGHT', 'FULL', 'JOIN', ',', 'LATERAL', 'SELECT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {
       "input": "from a select * from b",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'from'. SQLSTATE: 42601 (line 1, pos 16)\n\n== SQL ==\nfrom a select * from b\n----------------^^^\n",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "failure": "invalid argument: found from at 16:20 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', 'AS', identifier, '(', ',', 'LATERAL', 'WHERE', 'GROUP', 'HAVING', 'QUALIFY', 'SELECT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {
       "input": "from a select * select * from x where a.s < 10",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'from'. SQLSTATE: 42601 (line 1, pos 25)\n\n== SQL ==\nfrom a select * select * from x where a.s < 10\n-------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "failure": "invalid argument: found from at 25:29 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', 'AS', identifier, '(', ',', 'LATERAL', 'WHERE', 'GROUP', 'HAVING', 'QUALIFY', 'SELECT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {
       "input": "from a select * select * where s < 10",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "success": {
+          "query": {
+            "setOperation": {
+              "left": {
+                "project": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "a"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "expressions": [
+                    {
+                      "unresolvedStar": {
+                        "target": null,
+                        "planId": null,
+                        "wildcardOptions": {
+                          "ilikePattern": null,
+                          "excludeColumns": null,
+                          "exceptColumns": null,
+                          "replaceColumns": null,
+                          "renameColumns": null
+                        }
+                      }
+                    }
+                  ]
+                },
+                "planId": null
+              },
+              "right": {
+                "project": {
+                  "input": {
+                    "filter": {
+                      "input": {
+                        "read": {
+                          "namedTable": {
+                            "name": [
+                              "a"
+                            ],
+                            "temporal": null,
+                            "sample": null,
+                            "options": []
+                          },
+                          "isStreaming": false
+                        },
+                        "planId": null
+                      },
+                      "condition": {
+                        "unresolvedFunction": {
+                          "functionName": [
+                            "<"
+                          ],
+                          "arguments": [
+                            {
+                              "unresolvedAttribute": {
+                                "name": [
+                                  "s"
+                                ],
+                                "planId": null,
+                                "isMetadataColumn": false
+                              }
+                            },
+                            {
+                              "literal": {
+                                "int32": {
+                                  "value": 10
+                                }
+                              }
+                            }
+                          ],
+                          "namedArguments": [],
+                          "isDistinct": false,
+                          "isUserDefinedFunction": false,
+                          "isInternal": null,
+                          "ignoreNulls": null,
+                          "filter": null,
+                          "orderBy": null
+                        }
+                      }
+                    },
+                    "planId": null
+                  },
+                  "expressions": [
+                    {
+                      "unresolvedStar": {
+                        "target": null,
+                        "planId": null,
+                        "wildcardOptions": {
+                          "ilikePattern": null,
+                          "excludeColumns": null,
+                          "exceptColumns": null,
+                          "replaceColumns": null,
+                          "renameColumns": null
+                        }
+                      }
+                    }
+                  ]
+                },
+                "planId": null
+              },
+              "setOpType": "union",
+              "isAll": true,
+              "byName": false,
+              "allowMissingColumns": false
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "from a select b, c",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "read": {
+                  "namedTable": {
+                    "name": [
+                      "a"
+                    ],
+                    "temporal": null,
+                    "sample": null,
+                    "options": []
+                  },
+                  "isStreaming": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedAttribute": {
+                    "name": [
+                      "b"
+                    ],
+                    "planId": null,
+                    "isMetadataColumn": false
+                  }
+                },
+                {
+                  "unresolvedAttribute": {
+                    "name": [
+                      "c"
+                    ],
+                    "planId": null,
+                    "isMetadataColumn": false
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "from a select distinct b, c",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "success": {
+          "query": {
+            "deduplicate": {
+              "input": {
+                "project": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "a"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "expressions": [
+                    {
+                      "unresolvedAttribute": {
+                        "name": [
+                          "b"
+                        ],
+                        "planId": null,
+                        "isMetadataColumn": false
+                      }
+                    },
+                    {
+                      "unresolvedAttribute": {
+                        "name": [
+                          "c"
+                        ],
+                        "planId": null,
+                        "isMetadataColumn": false
+                      }
+                    }
+                  ]
+                },
+                "planId": null
+              },
+              "columnNames": [],
+              "allColumnsAsKeys": true,
+              "withinWatermark": false
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "from db.a select b, c where d < 1",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "filter": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "db",
+                          "a"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "condition": {
+                    "unresolvedFunction": {
+                      "functionName": [
+                        "<"
+                      ],
+                      "arguments": [
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "d"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        },
+                        {
+                          "literal": {
+                            "int32": {
+                              "value": 1
+                            }
+                          }
+                        }
+                      ],
+                      "namedArguments": [],
+                      "isDistinct": false,
+                      "isUserDefinedFunction": false,
+                      "isInternal": null,
+                      "ignoreNulls": null,
+                      "filter": null,
+                      "orderBy": null
+                    }
+                  }
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedAttribute": {
+                    "name": [
+                      "b"
+                    ],
+                    "planId": null,
+                    "isMetadataColumn": false
+                  }
+                },
+                {
+                  "unresolvedAttribute": {
+                    "name": [
+                      "c"
+                    ],
+                    "planId": null,
+                    "isMetadataColumn": false
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "from t insert into s select * limit 1 insert into u select * where x > 5",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "failure": "invalid argument: found into at 14:18 expected '(', 'NATURAL', 'INNER', 'CROSS', 'OUTER', 'SEMI', 'ANTI', 'LEFT', 'RIGHT', 'FULL', 'JOIN', ',', 'LATERAL', 'SELECT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {
       "input": "from t1\nlateral view explode(x) expl as x\ninsert into t2\nselect *\nlateral view json_tuple(x, y) jtup q, z\ninsert into t3\nselect *\nwhere s < 10\n      ",
       "output": {
-        "failure": "invalid argument: found from at 0:4 expected something else, ';', statement, or end of input"
+        "failure": "invalid argument: found insert at 42:48 expected ',', 'LATERAL', 'SELECT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {

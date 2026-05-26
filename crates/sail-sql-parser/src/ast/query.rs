@@ -167,6 +167,39 @@ pub enum QueryTerm {
         #[parser(function = |(q, _, _), _| q)] Query,
         RightParenthesis,
     ),
+    // HiveQL FROM-first syntax: FROM <tables> SELECT ... (equivalent to SELECT ... FROM <tables>)
+    HiveFrom(#[parser(function = |(q, e, t), o| boxed(compose((q, e, t), o)))] Box<HiveFromTerm>),
+}
+
+/// HiveQL FROM-first query: `FROM <tables> [LATERAL VIEW ...] (SELECT ... [WHERE ...] ...)*`
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "(Query, Expr, TableWithJoins)")]
+pub struct HiveFromTerm {
+    pub from_kw: From,
+    #[parser(function = |(_, _, t), o| sequence(t, unit(o)))]
+    pub tables: Sequence<TableWithJoins, Comma>,
+    #[parser(function = |(_, e, _), o| compose(e, o))]
+    pub lateral_views: Vec<LateralViewClause>,
+    #[parser(function = |(_, e, _), o| compose(e, o))]
+    pub bodies: Vec<HiveFromBody>,
+}
+
+/// A single SELECT body inside a HiveQL FROM-first query.
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
+pub struct HiveFromBody {
+    #[parser(function = |e, o| compose(e, o))]
+    pub select: SelectClause,
+    #[parser(function = |e, o| compose(e, o))]
+    pub lateral_views: Vec<LateralViewClause>,
+    #[parser(function = |e, o| compose(e, o))]
+    pub r#where: Option<WhereClause>,
+    #[parser(function = |e, o| compose(e, o))]
+    pub group_by: Option<GroupByClause>,
+    #[parser(function = |e, o| compose(e, o))]
+    pub having: Option<HavingClause>,
+    #[parser(function = |e, o| compose(e, o))]
+    pub qualify: Option<QualifyClause>,
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
@@ -360,6 +393,15 @@ pub enum TableSampleMethod {
         numerator: IntegerLiteral,
         out_of: (Out, Of),
         denominator: IntegerLiteral,
+        #[parser(function = |e, o| unit(o).then(e).or_not())]
+        on_expr: Option<(On, Expr)>,
+    },
+    // Size-based: TABLESAMPLE(300M), TABLESAMPLE(1G), etc.
+    ByteSize {
+        #[parser(function = |e, _| e)]
+        value: Expr,
+        // M, K, G, T, P, B — parsed as an identifier since they are not keywords
+        unit: Ident,
     },
 }
 

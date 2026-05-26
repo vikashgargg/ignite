@@ -395,6 +395,8 @@ pub enum FunctionArgument {
     ),
     // Allow `DISTINCT expr` in individual arguments for dialects like count(DISTINCT a, DISTINCT b)
     DistinctExpr(Distinct, #[parser(function = |e, _| e)] Expr),
+    // Allow ltrim/rtrim/btrim(BOTH/LEADING/TRAILING trimStr FROM str) — Spark TRIM syntax
+    TrimStyle(#[parser(function = |e, o| compose(e, o))] TrimExpr),
     Unnamed(#[parser(function = |e, _| e)] Expr),
 }
 
