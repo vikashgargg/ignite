@@ -104,7 +104,7 @@ pub(crate) fn from_ast_function_arguments(
     let mut named_arguments = vec![];
     for arg in args {
         match arg {
-            FunctionArgument::Named(name, _, expr) => {
+            FunctionArgument::Named(name, _, expr, _modifiers) => {
                 let expr = from_ast_expression(expr)?;
                 named_arguments.push((name.value.into(), expr));
             }

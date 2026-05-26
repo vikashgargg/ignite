@@ -3448,25 +3448,233 @@
       "input": "select * from my_tvf(arg1 => table(1) partition by col1 with single partition)",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'partition'. SQLSTATE: 42601 (line 1, pos 38)\n\n== SQL ==\nselect * from my_tvf(arg1 => table(1) partition by col1 with single partition)\n--------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found partition at 38:47 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', ',', or ')'"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "read": {
+                  "udtf": {
+                    "name": [
+                      "my_tvf"
+                    ],
+                    "arguments": [],
+                    "namedArguments": [
+                      [
+                        "arg1",
+                        {
+                          "table": {
+                            "expr": {
+                              "unresolvedAttribute": {
+                                "name": [
+                                  "1"
+                                ],
+                                "planId": null,
+                                "isMetadataColumn": false
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    ],
+                    "options": []
+                  },
+                  "isStreaming": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "select * from my_tvf(arg1 => table(v1) distribute by col1)",
       "output": {
-        "failure": "invalid argument: found distribute at 39:49 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', ',', or ')'"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "read": {
+                  "udtf": {
+                    "name": [
+                      "my_tvf"
+                    ],
+                    "arguments": [],
+                    "namedArguments": [
+                      [
+                        "arg1",
+                        {
+                          "table": {
+                            "expr": {
+                              "unresolvedAttribute": {
+                                "name": [
+                                  "v1"
+                                ],
+                                "planId": null,
+                                "isMetadataColumn": false
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    ],
+                    "options": []
+                  },
+                  "isStreaming": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "select * from my_tvf(arg1 => table(v1) partition by col1)",
       "output": {
-        "failure": "invalid argument: found partition at 39:48 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', ',', or ')'"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "read": {
+                  "udtf": {
+                    "name": [
+                      "my_tvf"
+                    ],
+                    "arguments": [],
+                    "namedArguments": [
+                      [
+                        "arg1",
+                        {
+                          "table": {
+                            "expr": {
+                              "unresolvedAttribute": {
+                                "name": [
+                                  "v1"
+                                ],
+                                "planId": null,
+                                "isMetadataColumn": false
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    ],
+                    "options": []
+                  },
+                  "isStreaming": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "select * from my_tvf(arg1 => table(v1) with single partition)",
       "output": {
-        "failure": "invalid argument: found with at 39:43 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', ',', or ')'"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "read": {
+                  "udtf": {
+                    "name": [
+                      "my_tvf"
+                    ],
+                    "arguments": [],
+                    "namedArguments": [
+                      [
+                        "arg1",
+                        {
+                          "table": {
+                            "expr": {
+                              "unresolvedAttribute": {
+                                "name": [
+                                  "v1"
+                                ],
+                                "planId": null,
+                                "isMetadataColumn": false
+                              }
+                            }
+                          }
+                        }
+                      ]
+                    ],
+                    "options": []
+                  },
+                  "isStreaming": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {

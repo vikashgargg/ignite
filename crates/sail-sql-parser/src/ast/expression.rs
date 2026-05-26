@@ -15,10 +15,10 @@ use crate::ast::keywords::{
     Extract, False, Filter, First, Following, For, From, Group, Grouping, Groups, Hour, Hours, Identifier,
     Ignore, Ilike, In, Interval, Is, Last, Leading, Like, Microsecond, Microseconds, Millisecond,
     Milliseconds, Minute, Minutes, Month, Months, Not, Null, Nulls, Or, Order, Over, Overlay,
-    Placing, Position, Preceding, Range, Regexp, Respect, Rlike, Rollup, Row, Rows, Second,
-    Seconds, Sets, Similar, Struct, Substr, Substring, Table, Then, Time, Timestamp, TimestampLtz,
-    TimestampNtz, To, Trailing, Trim, True, TryCast, Unbounded, Unknown, Week, Weeks, When, Where,
-    Within, Year, Years,
+    Distribute, Partition, Placing, Position, Preceding, Range, Regexp, Respect, Rlike, Rollup,
+    Row, Rows, Second, Seconds, Sets, Similar, Single, Sort, Struct, Substr, Substring, Table,
+    Then, Time, Timestamp, TimestampLtz, TimestampNtz, To, Trailing, Trim, True, TryCast,
+    Unbounded, Unknown, Week, Weeks, When, Where, With, Within, Year, Years,
 };
 use crate::ast::literal::{NumberLiteral, StringLiteral};
 use crate::ast::operator;
@@ -390,10 +390,49 @@ pub enum FunctionArgument {
         Ident,
         operator::FatArrow,
         #[parser(function = |e, _| e)] Expr,
+        // Optional TVF table-argument modifiers (PARTITION BY, ORDER BY, etc.) — no-op in single-node
+        #[parser(function = |e, o| compose(e, o).or_not())] Option<TableArgModifiers>,
     ),
     // Allow `DISTINCT expr` in individual arguments for dialects like count(DISTINCT a, DISTINCT b)
     DistinctExpr(Distinct, #[parser(function = |e, _| e)] Expr),
     Unnamed(#[parser(function = |e, _| e)] Expr),
+}
+
+/// TVF table-argument modifiers: PARTITION BY / DISTRIBUTE BY / ORDER BY / SORT BY / WITH SINGLE PARTITION
+/// These are no-ops in single-node mode but are parsed so valid SQL is accepted.
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
+pub struct TableArgModifiers {
+    #[parser(function = |e, o| compose(e, o).or_not())]
+    pub partition: Option<TableArgPartition>,
+    #[parser(function = |e, o| compose(e, o).or_not())]
+    pub ordering: Option<TableArgOrdering>,
+    pub single_partition: Option<(With, Single, Partition)>,
+}
+
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
+pub enum TableArgPartition {
+    PartitionBy(Partition, By, #[parser(function = |e, o| compose(e, o))] TableArgExprList),
+    DistributeBy(Distribute, By, #[parser(function = |e, o| compose(e, o))] TableArgExprList),
+}
+
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
+pub enum TableArgExprList {
+    Parenthesized(
+        LeftParenthesis,
+        #[parser(function = |e, o| sequence(e, unit(o)))] Sequence<Expr, Comma>,
+        RightParenthesis,
+    ),
+    Bare(#[parser(function = |e, o| sequence(e, unit(o)))] Sequence<Expr, Comma>),
+}
+
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
+pub enum TableArgOrdering {
+    OrderBy(#[parser(function = |e, o| compose(e, o))] OrderByClause),
+    SortBy(#[parser(function = |e, o| compose(e, o))] SortByClause),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
