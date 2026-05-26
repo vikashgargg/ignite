@@ -458,20 +458,47 @@ pub enum UnpivotColumns {
         name: Ident,
         r#in: In,
         left: LeftParenthesis,
+        // Allow empty IN list ()
         #[expect(clippy::type_complexity)]
-        columns: Sequence<(Ident, Option<(Option<As>, Ident)>), Comma>,
+        columns: Option<Sequence<(Ident, Option<(Option<As>, Ident)>), Comma>>,
         right: RightParenthesis,
     },
     MultiValue {
-        values: IdentList,
+        // Allow empty value tuple () or (v1, v2, ...)
+        values: UnpivotValueSpec,
         r#for: For,
         name: Ident,
         r#in: In,
         left: LeftParenthesis,
-        #[expect(clippy::type_complexity)]
-        columns: Sequence<(IdentList, Option<(Option<As>, Ident)>), Comma>,
+        // Allow empty IN list ()
+        columns: Option<Sequence<UnpivotColumnGroup, Comma>>,
         right: RightParenthesis,
     },
+}
+
+/// The value specification for multi-column UNPIVOT: `()` or `(val1, val2, ...)`.
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+pub enum UnpivotValueSpec {
+    Empty(LeftParenthesis, RightParenthesis),
+    NonEmpty(IdentList),
+}
+
+/// A column group in the UNPIVOT IN list: `(col1, col2 AS alias, ...)` with optional outer alias.
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+pub struct UnpivotColumnGroup {
+    pub left: LeftParenthesis,
+    // Allow empty for (())
+    pub names: Option<Sequence<UnpivotColumnItem, Comma>>,
+    pub right: RightParenthesis,
+    #[expect(clippy::type_complexity)]
+    pub alias: Option<(Option<As>, Ident)>,
+}
+
+/// A column reference inside an UNPIVOT group, with optional alias: `col_name [AS alias]`.
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+pub struct UnpivotColumnItem {
+    pub name: Ident,
+    pub alias: Option<(Option<As>, Ident)>,
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]

@@ -4,28 +4,363 @@
       "input": "SELECT * FROM t UNPIVOT (() FOR col in ((a, b), (c, d)))",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near ')'. SQLSTATE: 42601 (line 1, pos 26)\n\n== SQL ==\nSELECT * FROM t UNPIVOT (() FOR col in ((a, b), (c, d)))\n--------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found ) at 26:27 expected identifier"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "unpivot": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "t"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "ids": null,
+                  "values": [
+                    {
+                      "columns": [
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "a"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        },
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "b"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        }
+                      ],
+                      "alias": null
+                    },
+                    {
+                      "columns": [
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "c"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        },
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "d"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        }
+                      ],
+                      "alias": null
+                    }
+                  ],
+                  "variableColumnName": "col",
+                  "valueColumnNames": [],
+                  "includeNulls": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "SELECT * FROM t UNPIVOT ((val1, val2) FOR col in (()))",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near ')'. SQLSTATE: 42601 (line 1, pos 51)\n\n== SQL ==\nSELECT * FROM t UNPIVOT ((val1, val2) FOR col in (()))\n---------------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found ) at 51:52 expected identifier"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "unpivot": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "t"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "ids": null,
+                  "values": [
+                    {
+                      "columns": [],
+                      "alias": null
+                    }
+                  ],
+                  "variableColumnName": "col",
+                  "valueColumnNames": [
+                    "val1",
+                    "val2"
+                  ],
+                  "includeNulls": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "SELECT * FROM t UNPIVOT ((val1, val2) FOR col in ((a A, b), (c, d)))",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'A': extra input 'A'. SQLSTATE: 42601 (line 1, pos 53)\n\n== SQL ==\nSELECT * FROM t UNPIVOT ((val1, val2) FOR col in ((a A, b), (c, d)))\n-----------------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found A at 53:54 expected ',', or ')'"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "unpivot": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "t"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "ids": null,
+                  "values": [
+                    {
+                      "columns": [
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "a"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        },
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "b"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        }
+                      ],
+                      "alias": null
+                    },
+                    {
+                      "columns": [
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "c"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        },
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "d"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        }
+                      ],
+                      "alias": null
+                    }
+                  ],
+                  "variableColumnName": "col",
+                  "valueColumnNames": [
+                    "val1",
+                    "val2"
+                  ],
+                  "includeNulls": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "SELECT * FROM t UNPIVOT ((val1, val2) FOR col in ((a AS A, b), (c, d)))",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'AS'. SQLSTATE: 42601 (line 1, pos 53)\n\n== SQL ==\nSELECT * FROM t UNPIVOT ((val1, val2) FOR col in ((a AS A, b), (c, d)))\n-----------------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found AS at 53:55 expected ',', or ')'"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "unpivot": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "t"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "ids": null,
+                  "values": [
+                    {
+                      "columns": [
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "a"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        },
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "b"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        }
+                      ],
+                      "alias": null
+                    },
+                    {
+                      "columns": [
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "c"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        },
+                        {
+                          "unresolvedAttribute": {
+                            "name": [
+                              "d"
+                            ],
+                            "planId": null,
+                            "isMetadataColumn": false
+                          }
+                        }
+                      ],
+                      "alias": null
+                    }
+                  ],
+                  "variableColumnName": "col",
+                  "valueColumnNames": [
+                    "val1",
+                    "val2"
+                  ],
+                  "includeNulls": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
@@ -335,14 +670,109 @@
       "input": "SELECT * FROM t UNPIVOT ((val1, val2) FOR col in ())",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near ')'. SQLSTATE: 42601 (line 1, pos 50)\n\n== SQL ==\nSELECT * FROM t UNPIVOT ((val1, val2) FOR col in ())\n--------------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found ) at 50:51 expected '('"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "unpivot": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "t"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "ids": null,
+                  "values": [],
+                  "variableColumnName": "col",
+                  "valueColumnNames": [
+                    "val1",
+                    "val2"
+                  ],
+                  "includeNulls": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "SELECT * FROM t UNPIVOT (val FOR col in ())",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near ')'. SQLSTATE: 42601 (line 1, pos 41)\n\n== SQL ==\nSELECT * FROM t UNPIVOT (val FOR col in ())\n-----------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found ) at 41:42 expected identifier"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "unpivot": {
+                  "input": {
+                    "read": {
+                      "namedTable": {
+                        "name": [
+                          "t"
+                        ],
+                        "temporal": null,
+                        "sample": null,
+                        "options": []
+                      },
+                      "isStreaming": false
+                    },
+                    "planId": null
+                  },
+                  "ids": null,
+                  "values": [],
+                  "variableColumnName": "col",
+                  "valueColumnNames": [
+                    "val"
+                  ],
+                  "includeNulls": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {

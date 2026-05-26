@@ -11,8 +11,9 @@ use sail_sql_parser::ast::query::{
     OffsetClause, OrderByClause, PivotClause, QualifyClause, Query, QueryBody, QueryModifier,
     QuerySelect, QueryTerm, SelectClause, SetOperator, SetQuantifier, SortByClause, TableFactor,
     TableFunction, TableJoin, TableModifier, TableSampleClause, TableSampleMethod,
-    TableSampleRepeatable, TableWithJoins, TemporalClause, UnpivotClause, UnpivotColumns,
-    UnpivotNulls, ValuesClause, WhereClause, WindowClause, WithClause,
+    TableSampleRepeatable, TableWithJoins, TemporalClause, UnpivotClause, UnpivotColumnGroup,
+    UnpivotColumns, UnpivotNulls, UnpivotValueSpec, ValuesClause, WhereClause, WindowClause,
+    WithClause,
 };
 use sail_sql_parser::common::Sequence;
 
@@ -1032,18 +1033,18 @@ fn query_plan_with_table_modifier(
                     right: _,
                 } => {
                     let columns = columns
-                        .into_items()
-                        .map(|(item, alias)| (vec![item], alias.map(|(_, alias)| alias)))
-                        .collect::<Vec<_>>();
+                        .map(|seq| {
+                            seq.into_items()
+                                .map(|(item, alias)| {
+                                    (vec![item], alias.map(|(_, alias)| alias))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
                     (vec![values], name, columns)
                 }
                 UnpivotColumns::MultiValue {
-                    values:
-                        IdentList {
-                            left: _,
-                            names: values,
-                            right: _,
-                        },
+                    values,
                     r#for: _,
                     name,
                     r#in: _,
@@ -1051,18 +1052,35 @@ fn query_plan_with_table_modifier(
                     columns,
                     right: _,
                 } => {
-                    let values = values.into_items().collect();
+                    let values: Vec<_> = match values {
+                        UnpivotValueSpec::Empty(_, _) => vec![],
+                        UnpivotValueSpec::NonEmpty(IdentList {
+                            left: _,
+                            names,
+                            right: _,
+                        }) => names.into_items().collect(),
+                    };
                     let columns = columns
-                        .into_items()
-                        .map(|(item, alias)| {
-                            let IdentList {
-                                left: _,
-                                names: items,
-                                right: _,
-                            } = item;
-                            (items.into_items().collect(), alias.map(|(_, alias)| alias))
+                        .map(|seq| {
+                            seq.into_items()
+                                .map(|UnpivotColumnGroup {
+                                    left: _,
+                                    names,
+                                    right: _,
+                                    alias,
+                                }| {
+                                    let items = names
+                                        .map(|seq| {
+                                            seq.into_items()
+                                                .map(|item| item.name)
+                                                .collect::<Vec<_>>()
+                                        })
+                                        .unwrap_or_default();
+                                    (items, alias.map(|(_, alias)| alias))
+                                })
+                                .collect::<Vec<_>>()
                         })
-                        .collect::<Vec<_>>();
+                        .unwrap_or_default();
                     (values, name, columns)
                 }
             };
