@@ -13,11 +13,11 @@ use crate::ast::expression::{
 use crate::ast::identifier::{column_ident, object_name, table_ident, Ident, ObjectName};
 use crate::ast::keywords::{
     All, Anti, As, Bucket, By, Cluster, Cross, Cube, Distinct, Distribute, Except, Exclude, For,
-    From, Full, Group, Grouping, Having, Identifier, In, Include, Inner, Intersect, Join, Lateral,
-    Left, Limit, Minus, Name, Natural, Nulls, Of, Offset, On, Order, Out, Outer, Partition,
-    Percent, Pivot, Qualify, Recursive, Repeatable, Right, Rollup, Rows, Select, Semi, Sets, Sort,
-    SystemTime, SystemVersion, Table, Tablesample, Timestamp, Union, Unpivot, Using, Values,
-    Version, View, Where, Window, With,
+    From, Full, Group, Grouping, Having, Identifier, In, Include, Inner, Insert, Intersect,
+    Into as IntoKeyword, Join, Lateral, Left, Limit, Minus, Name, Natural, Nulls, Of, Offset, On,
+    Order, Out, Outer, Overwrite, Partition, Percent, Pivot, Qualify, Recursive, Repeatable, Right,
+    Rollup, Rows, Select, Semi, Sets, Sort, SystemTime, SystemVersion, Table, Tablesample,
+    Timestamp, Union, Unpivot, Using, Values, Version, View, Where, Window, With,
 };
 use crate::ast::literal::IntegerLiteral;
 use crate::ast::operator::{Comma, LeftParenthesis, RightParenthesis};
@@ -184,22 +184,45 @@ pub struct HiveFromTerm {
     pub bodies: Vec<HiveFromBody>,
 }
 
-/// A single SELECT body inside a HiveQL FROM-first query.
+/// A single body inside a HiveQL FROM-first query (SELECT or INSERT INTO ... SELECT).
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
 #[parser(dependency = "Expr")]
-pub struct HiveFromBody {
-    #[parser(function = |e, o| compose(e, o))]
-    pub select: SelectClause,
-    #[parser(function = |e, o| compose(e, o))]
-    pub lateral_views: Vec<LateralViewClause>,
-    #[parser(function = |e, o| compose(e, o))]
-    pub r#where: Option<WhereClause>,
-    #[parser(function = |e, o| compose(e, o))]
-    pub group_by: Option<GroupByClause>,
-    #[parser(function = |e, o| compose(e, o))]
-    pub having: Option<HavingClause>,
-    #[parser(function = |e, o| compose(e, o))]
-    pub qualify: Option<QualifyClause>,
+pub enum HiveFromBody {
+    Select {
+        #[parser(function = |e, o| compose(e, o))]
+        select: SelectClause,
+        #[parser(function = |e, o| compose(e, o))]
+        lateral_views: Vec<LateralViewClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        r#where: Option<WhereClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        group_by: Option<GroupByClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        having: Option<HavingClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        qualify: Option<QualifyClause>,
+    },
+    Insert {
+        insert: Insert,
+        into: IntoKeyword,
+        table: Option<Table>,
+        #[parser(function = |_, o| object_name(table_ident(o), o))]
+        name: ObjectName,
+        #[parser(function = |e, o| compose(e, o))]
+        select: SelectClause,
+        #[parser(function = |e, o| compose(e, o))]
+        lateral_views: Vec<LateralViewClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        r#where: Option<WhereClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        group_by: Option<GroupByClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        having: Option<HavingClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        qualify: Option<QualifyClause>,
+        #[parser(function = |e, o| compose(e, o))]
+        limit: Option<LimitClause>,
+    },
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]

@@ -387,23 +387,36 @@ fn from_ast_hive_from(term: HiveFromTerm) -> SqlResult<spec::QueryPlan> {
         }));
     }
 
-    // Build one plan per SELECT body, sharing the FROM tables and lateral views.
+    // Build one plan per body, sharing the FROM tables and lateral views.
     // Multiple bodies are union-all'd together.
     let mut plans = Vec::with_capacity(bodies.len());
-    for HiveFromBody {
-        select:
-            SelectClause {
-                select: _,
-                quantifier,
-                projection,
-            },
-        lateral_views: body_lateral_views,
-        r#where,
-        group_by,
-        having,
-        qualify,
-    } in bodies
-    {
+    for body in bodies {
+        // Extract the SELECT clause parts (INSERT bodies are treated as SELECT for plan purposes)
+        let (quantifier, projection, body_lateral_views, r#where, group_by, having, qualify, limit) =
+            match body {
+                HiveFromBody::Select {
+                    select: SelectClause { select: _, quantifier, projection },
+                    lateral_views,
+                    r#where,
+                    group_by,
+                    having,
+                    qualify,
+                } => (quantifier, projection, lateral_views, r#where, group_by, having, qualify, None),
+                HiveFromBody::Insert {
+                    insert: _,
+                    into: _,
+                    table: _,
+                    name: _,
+                    select: SelectClause { select: _, quantifier, projection },
+                    lateral_views,
+                    r#where,
+                    group_by,
+                    having,
+                    qualify,
+                    limit,
+                } => (quantifier, projection, lateral_views, r#where, group_by, having, qualify, limit),
+            };
+        {
         let plan = from_ast_tables(shared_tables.clone())?;
         let all_lateral_views = lateral_views
             .iter()
@@ -486,10 +499,21 @@ fn from_ast_hive_from(term: HiveFromTerm) -> SqlResult<spec::QueryPlan> {
         } else {
             plan
         };
+        let plan = match limit {
+            None | Some(LimitClause { limit: _, value: LimitValue::All(_) }) => plan,
+            Some(LimitClause { limit: _, value: LimitValue::Value(v) }) => {
+                spec::QueryPlan::new(spec::QueryNode::Limit {
+                    input: Box::new(plan),
+                    skip: None,
+                    limit: Some(from_ast_expression(*v)?),
+                })
+            }
+        };
         plans.push(plan);
+        } // close the inner block opened after body destructuring
     }
 
-    // Reduce multiple SELECT bodies via UNION ALL
+    // Reduce multiple SELECT/INSERT bodies via UNION ALL
     let plan = plans
         .into_iter()
         .reduce(|left, right| {

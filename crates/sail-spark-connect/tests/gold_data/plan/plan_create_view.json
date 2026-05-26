@@ -4,7 +4,7 @@
       "input": "CREATE VIEW testView AS FROM jt\nINSERT INTO tbl1 SELECT * WHERE jt.id < 5\nINSERT INTO tbl2 SELECT * WHERE jt.id > 4",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'INSERT'. SQLSTATE: 42601 (line 2, pos 0)\n\n== SQL ==\nCREATE VIEW testView AS FROM jt\nINSERT INTO tbl1 SELECT * WHERE jt.id < 5\n^^^\nINSERT INTO tbl2 SELECT * WHERE jt.id > 4\n",
       "output": {
-        "failure": "invalid argument: found INTO at 39:43 expected '(', 'NATURAL', 'INNER', 'CROSS', 'OUTER', 'SEMI', 'ANTI', 'LEFT', 'RIGHT', 'FULL', 'JOIN', ',', 'LATERAL', 'SELECT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
+        "failure": "invalid argument: found INTO at 39:43 expected '(', 'NATURAL', 'INNER', 'CROSS', 'OUTER', 'SEMI', 'ANTI', 'LEFT', 'RIGHT', 'FULL', 'JOIN', ',', 'LATERAL', 'SELECT', 'INSERT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {
