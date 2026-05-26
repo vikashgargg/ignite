@@ -31,11 +31,9 @@ fn array_sort(input: ScalarFunctionInput) -> PlanResult<datafusion_expr::Expr> {
     let (array, rest) = input.arguments.at_least_one()?;
 
     // Lambda comparator case is handled by the HOF resolver before this point.
-    // Here we only handle the no-lambda case.
-    if !rest.is_empty() {
-        return Err(crate::error::PlanError::todo(
-            "array_sort with non-lambda second argument",
-        ));
+    // Here we handle no-lambda: array_sort(arr) or array_sort(arr, asc_bool_literal).
+    if let Some(asc) = rest.into_iter().next() {
+        return array_sort_spark(array, asc);
     }
 
     // array_sort(array) without lambda - sorts in ascending order with NULLs last (Spark behavior)

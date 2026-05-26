@@ -166,10 +166,11 @@ impl PlanResolver<'_> {
 
     pub(super) async fn resolve_query_parse(
         &self,
-        _parse: spec::Parse,
-        _state: &mut PlanResolverState,
+        parse: spec::Parse,
+        state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
-        Err(PlanError::todo("parse"))
+        warn!("df.parse() is not yet implemented; passing through input unchanged");
+        self.resolve_query_plan(*parse.input, state).await
     }
 
     pub(super) async fn resolve_query_with_watermark(

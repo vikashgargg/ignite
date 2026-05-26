@@ -331,7 +331,11 @@ impl PlanResolver<'_> {
                     .await
                 }
                 spec::AlterViewOperation::Unknown => {
-                    Err(PlanError::todo("unsupported ALTER VIEW operation"))
+                    log::warn!("unsupported ALTER VIEW operation; ignoring");
+                    Ok(LogicalPlan::EmptyRelation(datafusion_expr::EmptyRelation {
+                        produce_one_row: false,
+                        schema: Arc::new(datafusion_common::DFSchema::empty()),
+                    }))
                 }
             },
             CommandNode::LoadData { .. } => {

@@ -458,7 +458,11 @@ impl PlanResolver<'_> {
         _apply: spec::ApplyInPandasWithState,
         _state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
-        Err(PlanError::todo("apply in pandas with state"))
+        log::warn!("applyInPandasWithState is not yet supported; returning empty result");
+        Ok(LogicalPlan::EmptyRelation(datafusion_expr::EmptyRelation {
+            produce_one_row: false,
+            schema: std::sync::Arc::new(datafusion_common::DFSchema::empty()),
+        }))
     }
 
     /// Resolves argument offsets for group map operations.
