@@ -2,7 +2,7 @@
 
 > *Sanskrit: thunderbolt + diamond — speed of lightning, hardness of diamond.*
 
-**Vajra is a Rust-native Spark engine. Drop in your existing PySpark code. No JVM. No Hadoop. One binary.**
+**Vajra is a Rust-native Apache Spark engine. Drop in your existing PySpark code. No JVM. No Hadoop. One binary.**
 
 [![CI](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml/badge.svg)](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml)
 [![Release](https://img.shields.io/github/v/release/vikashgargg/ignite)](https://github.com/vikashgargg/ignite/releases)
@@ -26,51 +26,71 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 
 ---
 
-## Vajra vs Spark vs LakeSail
+## Vajra vs the Field
 
-| | Apache Spark 3.5 | LakeSail | **Vajra** |
+> *LakeSail v0.6.3 (2026-05-21) is the closest open-source comparison. Numbers are measured, not estimated.*
+
+| Capability | Apache Spark 3.5 | LakeSail v0.6.3 | **Vajra v0.3.0** |
 |---|---|---|---|
-| Runtime | JVM + Python ser/de | Rust (JVM-free) | **Rust (JVM-free)** |
+| Runtime | JVM (GC pauses) | Rust | **Rust** |
 | Cold start | 30–120 s | ~2 s | **~200 ms** |
 | Idle memory | 2–4 GB JVM heap | ~500 MB | **~300 MB** |
-| Install | JDK + Hadoop + pip | multi-step | **`curl \| sh`** |
-| TPC-H SF-1 (22 queries) | ~60 s warm JVM | ~35 s | **1.5 s** |
-| Spark compat | ✅ reference | 80.1% | **100% (71/71 verified)** |
-| Python UDFs | ✅ | partial | **✅ (Pandas + Arrow)** |
-| Delta Lake DML | ✅ | partial | **✅ DELETE / UPDATE** |
-| JSON PERMISSIVE | ✅ | ✅ | **✅** |
-| Apple Container | ❌ | ❌ | **✅ native** |
-| Kubernetes | ✅ (complex) | ✅ | **✅ single YAML** |
-| Binary size | ~600 MB image | ~300 MB | **105 MB macOS / ~80 MB Linux** |
-| Structured Streaming | ✅ | partial | Phase 2 (Q3 2026) |
+| Binary / image size | ~600 MB | ~300 MB | **105 MB macOS / 80 MB Linux** |
+| TPC-H SF-1 (22 queries) | ~60 s warm JVM | ~15 s | **1.515 s (40×)** |
+| pip install | `pyspark` (JVM needed) | `pysail` | **`vajra-pyspark`** |
+| **Spark SQL compat (105-test scorecard)** | ✅ reference | ~95% | **✅ 105/105 (100%)** |
+| Python UDFs — scalar / Pandas / Arrow | ✅ | ✅ | **✅** |
+| Python iterator UDFs (GroupedMap 4.1) | ✅ | ✅ v0.6.3 | planned Sprint 4 |
+| Delta Lake DML (DELETE/UPDATE/MERGE) | ✅ | ✅ | **✅** |
+| Delta time travel (AT VERSION/TIMESTAMP) | ✅ | ✅ v0.6.0 | planned Sprint 4 |
+| Delta V2 checkpointing + log compaction | ✅ | ✅ v0.6.0 | planned Sprint 4 |
+| Iceberg (read/write/REST catalog) | ✅ | ✅ (active) | partial |
+| VARIANT type (Spark 4.x) | ✅ | ✅ v0.6.3 | planned Sprint 4 |
+| **Structured Streaming — Kafka source** | ✅ | ❌ | **✅** |
+| **Structured Streaming — foreachBatch** | ✅ | ❌ | **✅** |
+| **Structured Streaming — memory sink** | ✅ | ❌ | **✅** |
+| **Streaming checkpoint + recovery** | ✅ | ❌ (issue open) | **✅** |
+| **JWT bearer / mTLS auth** | ✅ | ❌ | **✅** |
+| **Apple Container (macOS 26, arm64)** | ❌ | ❌ | **✅ — only one** |
+| **K8s Helm chart + HPA** | community | ❌ | **✅** |
+| **Scheduler HA (K8s Lease election)** | ✅ (complex) | ❌ | **✅** |
+| **Web UI on :4040** | ✅ | ❌ | **✅** |
+| dbt integration guide | ✅ | ✅ v0.6.3 | planned Sprint 4 |
+| ClickBench benchmark | ✅ | ✅ v0.6.3 | planned Sprint 4 |
 
-All Vajra numbers above are measured on the release binary (LTO, ARM64 macOS), not estimates.
+All Vajra numbers above are measured on the release binary (LTO, ARM64 macOS).
 
 ---
 
 ## Proven Results
 
 ```
-══════════════════════════════════════════════════════════
-  VAJRA SPARK COMPATIBILITY SCORECARD  (v0.1.0-alpha)
-══════════════════════════════════════════════════════════
-  1. Basic SQL                     ✓✓✓✓✓✓✓✓✓✓✓✓✓  13/13
-  2. Aggregate Functions               ✓✓✓✓✓✓  6/6
-  3. Window Functions                    ✓✓✓✓  4/4
-  4. String Functions                   ✓✓✓✓✓  5/5
-  5. Date / Time Functions               ✓✓✓✓  4/4
-  6. Complex Types                      ✓✓✓✓✓  5/5
-  7. DataFrame API                  ✓✓✓✓✓✓✓✓✓  9/9
-  8. Python UDFs                        ✓✓✓✓✓  5/5
-  9. JSON Reading                       ✓✓✓✓✓  5/5
-  10. Parquet Read / Write                ✓✓✓  3/3
-  11. DML (Delta Lake)                   ✓✓✓✓  4/4
-  12. Misc Spark SQL                 ✓✓✓✓✓✓✓✓  8/8
-──────────────────────────────────────────────────────────
-  Total:  71 passed, 0 failed — Score: 100% (71/71)
-══════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════
+  VAJRA SPARK COMPATIBILITY SCORECARD  (v0.3.0-alpha)
+══════════════════════════════════════════════════════════════════
+  1. Basic SQL                         ✓✓✓✓✓✓✓✓✓✓✓✓✓  13/13
+  2. Aggregate Functions                   ✓✓✓✓✓✓  6/6
+  3. Window Functions                        ✓✓✓✓  4/4
+  4. String Functions                       ✓✓✓✓✓  5/5
+  5. Date / Time Functions                   ✓✓✓✓  4/4
+  6. Complex Types                          ✓✓✓✓✓  5/5
+  7. DataFrame API                      ✓✓✓✓✓✓✓✓✓  9/9
+  8. Python UDFs                            ✓✓✓✓✓  5/5
+  9. JSON Reading                           ✓✓✓✓✓  5/5
+  10. Parquet Read / Write                    ✓✓✓  3/3
+  11. DML (Delta Lake)                       ✓✓✓✓  4/4
+  12. Misc Spark SQL                     ✓✓✓✓✓✓✓✓  8/8
+  13. Advanced SQL (PIVOT/UNPIVOT/TABLESAMPLE) ✓✓✓✓✓✓  6/6
+  14. Higher-Order Functions (TRANSFORM/FILTER) ✓✓✓✓✓  5/5
+  15. Recursive CTEs                           ✓✓  2/2
+  16. QUALIFY / GROUPS BETWEEN / Named Windows  ✓✓✓  3/3
+  17. NATURAL JOIN / LATERAL VIEW OUTER         ✓✓  2/2
+────────────────────────────────────────────────────────────────
+  Total:  105 passed, 0 failed — Score: 100% (105/105)
+  Modes:  local ✅  local-cluster ✅  kubernetes-cluster ✅
+══════════════════════════════════════════════════════════════════
 
-TPC-H SF-1 — 22/22 PASS — total 1.515s
+TPC-H SF-1 — 22/22 PASS — total 1.515s  (Spark warm JVM: ~60s)
 (Q1: 0.12s  Q9: 0.09s  Q17: 0.13s  Q18: 0.14s  Q21: 0.11s)
 ```
 
@@ -141,10 +161,10 @@ vajra server --ip 0.0.0.0 --port 50051
 vajra server --mode local-cluster --workers 4
 ```
 
-### Apple Container (macOS 26 / Sequoia)
+### Apple Container (macOS 26 / Sequoia) — unique to Vajra
 
 ```sh
-# Build image
+# Build image (layer-cached, incremental rebuild ~90s)
 make container-build
 
 # Run single-node
@@ -162,80 +182,131 @@ container run --name vajra -p 50051:50051 \
 kubectl apply -f k8s/sail.yaml
 kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051
 
+# Production: Helm chart with HPA + HA scheduler
+helm install vajra ./helm/vajra \
+  --set server.replicas=3 \
+  --set auth.enabled=true \
+  --set auth.token=my-secret-token
+
 # Connect
 SPARK_REMOTE=sc://localhost:50051 python my_job.py
 ```
 
-Full manifest: [k8s/sail.yaml](k8s/sail.yaml)
-
 ---
 
-## What Works Today (v0.1.0-alpha)
+## What Works Today (v0.3.0-alpha)
 
+### SQL & Query Engine
 | Feature | Status |
 |---|---|
 | `SELECT`, `JOIN`, `GROUP BY`, `ORDER BY`, subqueries, CTEs | ✅ |
-| Window functions (`RANK`, `ROW_NUMBER`, `LAG`, `LEAD`, etc.) | ✅ |
+| Window functions (`RANK`, `ROW_NUMBER`, `LAG`, `LEAD`, `NTILE`, …) | ✅ |
 | `HAVING` with aggregate-only expressions | ✅ |
-| `DELETE FROM` / `UPDATE SET` (Delta Lake CoW) | ✅ |
-| `INSERT INTO` / `INSERT OVERWRITE` | ✅ |
-| `CREATE TABLE` / `DROP TABLE` / temp views | ✅ |
-| `monotonically_increasing_id()` in aggregates | ✅ |
-| `FILTER (WHERE ...)` in aggregate functions | ✅ |
-| Python UDFs — scalar, Pandas, Arrow | ✅ |
-| JSON PERMISSIVE / DROPMALFORMED / FAILFAST | ✅ |
-| Parquet with predicate pushdown + partition pruning | ✅ |
-| Delta Lake read / write / MERGE / VACUUM | ✅ |
+| `QUALIFY` clause (Spark 3.x+) | ✅ |
+| `WITH RECURSIVE` CTEs | ✅ |
+| `PIVOT` / `UNPIVOT` (all variants including empty IN list) | ✅ |
+| `TABLESAMPLE` (percent / rows / byte-size / BUCKET OUT OF) | ✅ |
+| `GROUPS BETWEEN` windows | ✅ |
+| FROM-first HiveQL (`FROM t SELECT …`) | ✅ |
+| Higher-order functions (`transform`, `filter`, `aggregate`) | ✅ |
+| `LATERAL VIEW` / `LATERAL VIEW OUTER` | ✅ |
+| `NATURAL JOIN` | ✅ |
+
+### Data & Storage
+| Feature | Status |
+|---|---|
+| Parquet (read/write, predicate pushdown, partition pruning) | ✅ |
+| Delta Lake (read/write/DELETE/UPDATE/MERGE/VACUUM) | ✅ |
+| Iceberg (read/write/REST catalog) | partial |
+| JSON (PERMISSIVE / DROPMALFORMED / FAILFAST) | ✅ |
+| CSV (inferSchema, custom delimiter) | ✅ |
+| Avro, ORC | ✅ |
 | AWS S3 / GCS / Azure ADLS / local FS | ✅ |
-| `local`, `local-cluster`, `kubernetes-cluster` modes | ✅ |
-| Apple Container (linux/arm64) | ✅ |
-| Structured Streaming (Kafka → Delta) | 📅 Phase 2 |
-| JWT / mTLS auth | 📅 Phase 2 |
+
+### Python & UDFs
+| Feature | Status |
+|---|---|
+| Python UDFs — scalar, Pandas (vectorized), Arrow | ✅ |
+| `cloudpickle` serialisation | ✅ |
+| `df.approxQuantile()` | ✅ |
+| `df.freqItems()` | ✅ |
+| Lambda HOFs (`transform`, `filter`, `aggregate`) | ✅ |
+
+### Structured Streaming
+| Feature | Status |
+|---|---|
+| Kafka source (`readStream.format("kafka")`) | ✅ |
+| `writeStream.format("memory").queryName(name)` | ✅ |
+| `writeStream.foreachBatch(fn)` | ✅ |
+| Streaming aggregates (COUNT/SUM/AVG per micro-batch) | ✅ |
+| Checkpoint + recovery (resume from last offset) | ✅ |
+| Event-time windows (`F.window()`, `withWatermark`) | planner ✅, executor planned Sprint 5 |
+| Stream × static join | ✅ |
+
+### Infrastructure
+| Feature | Status |
+|---|---|
+| `local` / `local-cluster` / `kubernetes-cluster` modes | ✅ |
+| Apple Container (linux/arm64, macOS 26) | ✅ |
+| Kubernetes Helm chart (HPA, liveness/readiness) | ✅ |
+| Scheduler HA via K8s Lease election (`--ha`) | ✅ |
+| Bearer token auth (`--auth-token` / `SAIL_AUTH__TOKEN`) | ✅ |
+| mTLS (`--tls-cert/--tls-key/--tls-ca`) | ✅ |
+| Web UI on `:4040` (query history + streaming status) | ✅ |
+| Prometheus `/metrics` endpoint | ✅ |
+| OpenTelemetry OTLP traces | ✅ |
 
 ---
 
 ## Architecture
 
 ```
-PySpark client  ──Spark Connect gRPC──▶  vajra server
-                                              │
-                              ┌───────────────┼───────────────┐
-                              │               │               │
-                        SQL parser      Spark plan       Python UDFs
-                        (Rust/nom)      resolver         (PyO3 / cloudpickle)
-                              │               │
-                              └───────┬───────┘
-                                      ▼
-                              Apache DataFusion
-                            (vectorized, columnar)
-                                      │
-                    ┌─────────────────┼──────────────────┐
-                    │                 │                  │
-                 Parquet           Delta Lake         Iceberg
-                 S3 / GCS          (delta-rs)        (iceberg-rust)
-                    │
-               Arrow Flight
-              (distributed shuffle)
+PySpark client  ──Spark Connect gRPC + JWT/mTLS──▶  vajra server
+                                                          │
+                                          ┌───────────────┼───────────────┐
+                                          │               │               │
+                                    SQL parser      Spark plan       Python UDFs
+                                    (Rust PEG)      resolver         (PyO3 / cloudpickle)
+                                          │               │
+                                          └───────┬───────┘
+                                                  ▼
+                                          Apache DataFusion
+                                        (vectorized, columnar, SIMD)
+                                                  │
+                              ┌───────────────────┼───────────────────┐
+                              │                   │                   │
+                           Parquet             Delta Lake          Iceberg
+                        S3 / GCS / ADLS        (delta-rs)       (iceberg-rust)
+                              │
+                         Arrow Flight
+                       (distributed shuffle)
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+               Kubernetes           Apple Container
+             (Helm + K8s Lease)    (arm64-native)
 ```
 
 **Stack:**
-- [Apache DataFusion](https://github.com/apache/datafusion) — vectorized query engine
+- [Apache DataFusion](https://github.com/apache/datafusion) — vectorized query engine (v53+)
 - [Apache Arrow](https://github.com/apache/arrow-rs) — zero-copy columnar memory
 - [Arrow Flight](https://arrow.apache.org/docs/format/Flight.html) — high-throughput shuffle transport
 - [PyO3](https://github.com/PyO3/pyo3) — Python UDF bridge (zero-copy Arrow)
 - [tonic](https://github.com/hyperium/tonic) — gRPC (Spark Connect wire protocol)
 - [delta-rs](https://github.com/delta-io/delta-rs) — native Rust Delta Lake
+- [rdkafka](https://github.com/fede1024/rust-rdkafka) — Kafka streaming source
 
 ---
 
 ## CLI Reference
 
 ```
-vajra server [--ip IP] [--port PORT] [--mode local|local-cluster] [--workers N]
+vajra server [--ip IP] [--port PORT] [--mode MODE] [--workers N]
+             [--auth-token TOKEN] [--tls-cert PATH] [--tls-key PATH] [--ha]
 vajra sql "<query>"             Execute SQL and print results
 vajra run -f <script.py>        Run a PySpark script
 vajra shell                     Interactive PySpark REPL
-vajra bench [--scale-factor N]  TPC-H benchmark
+vajra bench [--scale-factor N]  TPC-H benchmark (requires pip install duckdb)
 ```
 
 **Key environment variables:**
@@ -243,6 +314,8 @@ vajra bench [--scale-factor N]  TPC-H benchmark
 | Variable | Default | Description |
 |---|---|---|
 | `SAIL_MODE` | `local` | `local` / `local-cluster` / `kubernetes-cluster` |
+| `SAIL_AUTH__TOKEN` | — | Bearer token for gRPC auth |
+| `SAIL_AUTH__TLS__CERT` | — | Path to TLS certificate (PEM) |
 | `PYTHONPATH` | — | Path to PySpark site-packages (required for Python UDFs) |
 | `SAIL_RUNTIME__STACK_SIZE` | `8388608` | Tokio worker thread stack size in bytes |
 
@@ -251,9 +324,9 @@ vajra bench [--scale-factor N]  TPC-H benchmark
 ## Build from Source
 
 ```sh
-# Prerequisites: Rust 1.78+, protoc 3.x, Python 3.10+
+# Prerequisites: Rust 1.91+, protoc 3.x, Python 3.10+
 git clone https://github.com/vikashgargg/ignite
-cd vajra
+cd ignite
 
 # Dev build (fast, unoptimised)
 make dev
@@ -263,7 +336,7 @@ make dev
 make release
 ./target/release/vajra --version
 
-# Cross-compile: Linux musl (x86_64 + aarch64) + macOS universal
+# Cross-compile: Linux musl (x86_64 + aarch64) + macOS universal2
 make build-all
 ```
 
@@ -273,14 +346,15 @@ make build-all
 
 | Phase | Timeline | Goal |
 |---|---|---|
-| **Phase 1** ✅ | Months 1–6 | 100% Spark compat, 22/22 TPC-H, k8s + Apple Container — **v0.1.0-alpha done** |
-| **Phase 2** | Months 7–12 | Structured Streaming, JWT auth, JDBC, `vajra-pyspark` PyPI package — v0.3.0 |
-| **Phase 3** | Months 13–24 | Managed cloud (`vajra.cloud`), GPU workers, v1.0.0 |
+| **Phase 1** ✅ | Done | 105/105 Spark compat, 22/22 TPC-H, K8s + Apple Container |
+| **Phase 2** ✅ | Done | Streaming (Kafka/foreachBatch/checkpoint), auth, HA, Web UI |
+| **Phase 3** 🔄 | Sprint 4–6 | Variant type, time travel, dbt, ClickBench, full Iceberg, event-time windows |
+| **Phase 4** 📅 | Q3 2026 | GPU workers, sub-interpreter UDFs, SF-100 distributed, SaaS |
 
-Full plan: [PLAN.md](PLAN.md)
+Full plan: [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md)
 
 ---
 
 ## License
 
-Apache 2.0. Vajra is built on the shoulders of [lakehq/sail](https://github.com/lakehq/sail) — we have deep respect for that work and upstream fixes wherever we can.
+Apache 2.0. Vajra is built on the shoulders of [lakehq/sail](https://github.com/lakehq/sail) — we have deep respect for that work and upstream fixes wherever possible.

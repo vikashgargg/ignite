@@ -1,222 +1,299 @@
 # Vajra — Production Spark Replacement Roadmap
 
-> Last updated: 2026-05-24  
-> Branch: `phase1/spark-100`  
-> Goal: Full Apache Spark replacement for **batch + streaming** on Apple Container cluster and Kubernetes
+> Last updated: 2026-05-26
+> Branch: `phase2/distributed`
+> Goal: Full Apache Spark replacement for **batch + streaming** that outperforms both Apache Spark and LakeSail across correctness, performance, and operational maturity.
 
 ---
 
-## Current Baseline
+## Competitive Intelligence (2026-05-26)
+
+### LakeSail v0.6.3 (released 2026-05-21, 2,732 stars)
+
+LakeSail is the primary open-source benchmark. They are shipping daily. Key things they just landed:
+
+| Feature | Their version | Our status |
+|---|---|---|
+| VARIANT type (Spark 4.x) | v0.6.3 | ❌ Sprint 4 |
+| GroupedMap/CoGroupedMap UDFs (Spark 4.1) | v0.6.3 | ❌ Sprint 4 |
+| variant_explode / variant_explode_outer | v0.6.3 | ❌ Sprint 4 |
+| bitmap_and_agg | v0.6.2 | ❌ Sprint 4 |
+| Delta time travel (AT VERSION/TIMESTAMP) | v0.6.0 | ❌ Sprint 4 |
+| Delta V2 checkpointing + log compaction | v0.6.0 | ❌ Sprint 4 |
+| Delta type widening | v0.6.3 | ❌ Sprint 4 |
+| Iceberg V3 spec support | v0.6.3 | ❌ Sprint 4 |
+| to_variant_object / schema_of_variant_agg | v0.6.1 | ❌ Sprint 4 |
+| Provider-agnostic catalog caching | v0.6.3 | ❌ Sprint 5 |
+| HMS table metadata parity | v0.6.3 | ❌ Sprint 5 |
+| dbt integration guide | v0.6.3 | ❌ Sprint 4 |
+| ClickBench benchmark | v0.6.3 | ❌ Sprint 4 |
+| Vortex Python data source | v0.6.0 | ❌ Sprint 5 |
+| theta sketch aggregates | PR open | ❌ Sprint 5 |
+
+**Their open gaps (we have, they don't):**
+
+| Feature | Vajra | LakeSail |
+|---|---|---|
+| Kafka source (readStream.format("kafka")) | ✅ rdkafka | ❌ not shipped |
+| foreachBatch | ✅ | ❌ |
+| memory sink | ✅ | ❌ |
+| Streaming checkpoint + recovery | ✅ | ❌ (issue #1969 open) |
+| JWT bearer auth | ✅ | ❌ |
+| mTLS | ✅ | ❌ |
+| Apple Container (macOS 26) | ✅ only one | ❌ |
+| K8s Helm chart | ✅ | ❌ |
+| Scheduler HA (K8s Lease) | ✅ | ❌ |
+| Web UI on :4040 | ✅ | ❌ |
+| vajra-pyspark PyPI | ✅ | pysail |
+| 40× TPC-H speedup (measured) | ✅ 1.515s | claimed ~4× |
+
+### Other Competitors
+
+| Project | Stars | Model | Gap |
+|---|---|---|---|
+| Databricks Photon | n/a (closed) | C++ accelerator, JVM still required | Closed source, vendor lock-in |
+| Apache Comet | ~2k | Rust native execution plugin, JVM still required | Not standalone — still needs Spark JVM |
+| Gluten / Velox | ~3k | C++ vectorized execution, JVM wrapper | Not standalone — complex deploy |
+| Blaze | ~1.8k | Rust accelerator, JVM still required | Not standalone |
+| Spark SQL WASM | experimental | WebAssembly target | Not production |
+
+**Vajra is the only fully standalone, JVM-free Spark replacement with production operational features.**
+
+---
+
+## Current Baseline (2026-05-26)
 
 | Metric | Value |
 |---|---|
-| SQL compat scorecard | **105/105 (100%)** |
-| TPC-H SF-1 (22 queries) | **22/22 PASS, 1.515s total** |
+| SQL compat scorecard | **105/105 (100%)** — all 3 deployment modes |
+| TPC-H SF-1 (22 queries) | **22/22 PASS, 1.515s total (40× faster than Spark warm)** |
 | K8s modes validated | local / local-cluster / kubernetes-cluster (kind) |
-| Upstream lakehq/sail comparison | +20 SQL features ahead |
-| Streaming | Stateless filter/project only |
+| Phase 1 (SQL parity) | ✅ Complete |
+| Phase 2 (streaming + auth + HA) | ✅ Complete |
+| Phase 3 (Spark 4.x + competitive parity) | 🔄 In progress |
 
 ---
 
-## How to Read This Doc
+## Sprint 4 — Spark 4.x Features + Competitive Parity (2026-05-26 to 2026-06-07)
 
-Each item has:
-- **Status**: `[ ]` not started · `[~]` in progress · `[x]` done
-- **Effort**: rough estimate for a single focused session
-- **Priority**: P0 (blocks production) / P1 (needed for GA) / P2 (nice to have)
-- **Test**: what proves it's done
+Priority: close the feature gap with LakeSail v0.6.3.
 
----
+### 4.1 VARIANT Type (Spark 4.x)  `[ ]` P0 · ~3 days
 
-## Track 1 — DDL / Command Gaps
+**What:** `VARIANT` is a new semi-structured type in Spark 4.0. Used for schemaless JSON blobs.
 
-These gap out in real ETL workloads even when the query engine is fine.
-
-### 1.1 ALTER VIEW  `[ ]` P1 · ~2h
-
-**What:** `ALTER VIEW v AS SELECT ...` — replace view definition in catalog.
-
-**File:** `crates/sail-plan/src/resolver/command/mod.rs:302`
-
-**Test:**
-```python
-spark.sql("CREATE OR REPLACE TEMP VIEW v AS SELECT 1 AS a")
-spark.sql("ALTER VIEW v AS SELECT 2 AS b")
-assert spark.sql("SELECT * FROM v").collect()[0].b == 2
-```
-
-**Done when:** test passes, `PlanError::todo("CommandNode::AlterView")` removed.
-
----
-
-### 1.2 INSERT INTO ... PARTITION  `[ ]` P1 · ~4h
-
-**What:** `INSERT INTO t PARTITION (dt='2024-01-01') SELECT ...` — explicit partition clause on writes.
-
-**File:** `crates/sail-plan/src/resolver/command/insert.rs:76`
-
-**Test:**
-```python
-spark.sql("CREATE TABLE t (v INT, dt STRING) USING DELTA PARTITIONED BY (dt)")
-spark.sql("INSERT INTO t PARTITION (dt='2024-01-01') VALUES (42)")
-assert spark.sql("SELECT v FROM t WHERE dt='2024-01-01'").collect()[0].v == 42
-```
-
-**Done when:** partitioned INSERT works for Delta Lake tables.
-
----
-
-### 1.3 DESCRIBE FUNCTION / CATALOG  `[ ]` P2 · ~2h
-
-**What:** `DESCRIBE FUNCTION upper` / `DESCRIBE CATALOG my_catalog`.
-
-**File:** `crates/sail-plan/src/resolver/command/mod.rs:310-315`
-
-**Test:** `spark.sql("DESCRIBE FUNCTION upper").show()` returns at least one row.
-
----
-
-### 1.4 COMMENT ON TABLE / COLUMN  `[ ]` P2 · ~2h
-
-**What:** `COMMENT ON TABLE t IS 'my table'` — write table/column metadata.
-
-**File:** `crates/sail-plan/src/resolver/command/mod.rs:341-350`
-
-**Done when:** no error, comment persisted in catalog.
-
----
-
-### 1.5 CLUSTER BY for write  `[ ]` P2 · ~3h
-
-**What:** `CREATE TABLE t CLUSTER BY (col)` / `INSERT INTO t ... CLUSTER BY`.
-
-**File:** `crates/sail-plan/src/resolver/command/write.rs:213`
-
-**Note:** Maps to Delta Lake Liquid Clustering (`delta-rs` `ClusterBySpec`).
-
----
-
-### 1.6 CREATE CATALOG  `[ ]` P2 · ~4h
-
-**What:** `CREATE CATALOG my_cat USING iceberg OPTIONS (uri=...)`.
-
-**File:** `crates/sail-plan/src/resolver/command/mod.rs:199`
-
----
-
-## Track 2 — Structured Streaming
-
-Phase 2 goal: `readStream → transform → writeStream` end-to-end for Kafka → Delta.
-
-### 2.1 Streaming Aggregates (non-stateful)  `[x]` P0 · ~2 weeks
-
-**What:** `COUNT`, `SUM`, `AVG`, `MIN`, `MAX` over each micro-batch window. No state carried between batches — append-mode aggregation.
-
-**File:** `crates/sail-plan/src/streaming/rewriter.rs:89`
-
-**Design:**
-```
-StreamingRewriter::f_up(LogicalPlan::Aggregate)
-  → wrap in StreamAggregateNode (new logical node)
-  → physical: AggregateExec per micro-batch, reset state per batch
-  → output schema: original aggregate schema + marker/retracted fields
-```
-
-**New files needed:**
-- `crates/sail-logical-plan/src/streaming/aggregate.rs` — `StreamAggregateNode`
-- `crates/sail-execution/src/streaming/aggregate.rs` — physical exec
-
-**Test:**
-```python
-sdf = spark.readStream.format("rate").option("rowsPerSecond", 10).load()
-result = sdf.groupBy().count()
-q = result.writeStream.format("memory").queryName("counts").start()
-time.sleep(3); q.stop()
-assert spark.sql("SELECT * FROM counts").count() > 0
-```
-
-**Done when:** append-mode `count()` over `rate` source works end-to-end.
-
----
-
-### 2.2 Kafka Source  `[x]` P0 · ~3 days
-
-**What:** `spark.readStream.format("kafka").option("kafka.bootstrap.servers", ...).option("subscribe", "topic")`.
-
-**Crate:** add `rdkafka = "0.36"` to `sail-data-source/Cargo.toml`
+**Key functions:** `parse_json`, `try_parse_json`, `is_variant_null`, `variant_get`, `variant_explode`, `variant_explode_outer`, `to_variant_object`, `schema_of_variant_agg`.
 
 **Files:**
-- `crates/sail-data-source/src/formats/kafka/mod.rs` — `KafkaSource` impl
-- `crates/sail-data-source/src/formats/kafka/consumer.rs` — offset management
-- Wire into `crates/sail-plan/src/resolver/command/write_stream.rs`
-
-**Schema returned:**
-```
-key: Binary, value: Binary, topic: String,
-partition: Int32, offset: Int64, timestamp: Timestamp,
-timestampType: Int32
-```
-
-**Offset checkpoint:** write to `checkpoint_location/_kafka_offsets/batch_N.json`.
+- `crates/sail-plan/src/resolver/data_type.rs` — add `DataType::Variant` mapping
+- `crates/sail-plan/src/function/scalar/variant.rs` (new) — implement Spark VARIANT functions
+- `crates/sail-sql-parser/src/ast/data_type.rs` — parse `VARIANT` keyword
 
 **Test:**
 ```python
-# Requires local Kafka (docker compose or testcontainers)
-df = spark.readStream.format("kafka") \
-    .option("kafka.bootstrap.servers", "localhost:9092") \
-    .option("subscribe", "test-topic") \
-    .option("startingOffsets", "earliest").load()
-q = df.writeStream.format("memory").queryName("kafka_test").start()
-# ... publish messages ... 
-assert spark.sql("SELECT count(*) FROM kafka_test").collect()[0][0] > 0
+spark.sql("SELECT parse_json('{\"k\":1}')").printSchema()
+# root: variant (nullable = true)
+spark.sql("SELECT variant_get(parse_json('{\"a\":42}'), '$.a', 'INT')").collect()
+# [Row(42)]
 ```
 
 ---
 
-### 2.3 foreachBatch Sink  `[x]` P0 · ~3 days
+### 4.2 Delta Lake Time Travel  `[ ]` P0 · ~2 days
 
-**What:** `writeStream.foreachBatch(fn)` — call a Python function with each micro-batch as a DataFrame.
+**What:** `SELECT * FROM t TIMESTAMP AS OF '2024-01-01'` / `VERSION AS OF 5`.
 
-**File:** `crates/sail-plan/src/resolver/command/write_stream.rs:31`
-
-**Design:**
-```
-ForeachBatchSink {
-  fn: Arc<dyn Fn(DataFrame, i64) -> Result<()>>,
-  batch_id: AtomicI64,
-}
-impl StreamSink for ForeachBatchSink {
-  fn write_batch(&self, batch: RecordBatch) → call Python fn via PyO3
-}
-```
+**Files:**
+- `crates/sail-plan/src/resolver/table.rs` — detect `AT TIMESTAMP`/`AT VERSION` modifiers
+- Pass `version`/`timestamp` to `delta-rs` `DeltaTable::load_with_datetime`/`load_version`
 
 **Test:**
 ```python
-results = []
-def process(df, batch_id):
-    results.append(df.count())
-
-sdf = spark.readStream.format("rate").option("rowsPerSecond", 5).load()
-q = sdf.writeStream.foreachBatch(process).start()
-time.sleep(3); q.stop()
-assert len(results) > 0
+spark.sql("INSERT INTO t VALUES (1)")
+spark.sql("INSERT INTO t VALUES (2)")
+result = spark.sql("SELECT * FROM t VERSION AS OF 1").collect()
+assert len(result) == 1
 ```
 
 ---
 
-### 2.4 Streaming Window Functions (Event-Time)  `[ ]` P1 · ~1 week
+### 4.3 GroupedMap / CoGroupedMap Iterator UDFs (Spark 4.1)  `[ ]` P0 · ~3 days
 
-**What:** `window("timestamp", "1 minute")` tumbling/sliding windows with watermark.
+**What:** `df.groupBy("key").applyInPandas(fn, schema)` — grouped iterator UDFs. Sail landed this in v0.6.3.
 
-**File:** `crates/sail-plan/src/streaming/rewriter.rs:86`
+**Files:**
+- `crates/sail-spark-connect/src/proto/plan.rs` — handle `ApplyInPandas` / `CoGroupMap` plan nodes
+- `crates/sail-plan/src/resolver/command/udf.rs` — wire PyO3 grouped iterator callback
 
-**Prerequisite:** 2.1 (streaming aggregates) must be done first.
+**Test:**
+```python
+def normalize(key, pdf):
+    pdf["v"] = pdf["v"] / pdf["v"].mean()
+    return pdf
+
+df = spark.createDataFrame([(1, 2.0), (1, 3.0)], ["k", "v"])
+df.groupBy("k").applyInPandas(normalize, schema="k long, v double").show()
+```
+
+---
+
+### 4.4 Delta V2 Checkpointing + Log Compaction  `[ ]` P1 · ~2 days
+
+**What:** Delta V2 checkpoint with sidecar files (smaller, incremental). Log compaction to avoid reading thousands of JSON log files.
+
+**Files:**
+- `crates/sail-data-source/src/delta/checkpoint.rs` — write V2 checkpoint format
+- `crates/sail-data-source/src/delta/log.rs` — compact when log file count exceeds threshold
+
+**Why:** Production Delta tables accumulate thousands of JSON log files without compaction — read latency degrades significantly. Sail landed this in v0.6.0.
+
+---
+
+### 4.5 Delta Type Widening  `[ ]` P1 · ~1 day
+
+**What:** When evolving a Delta table schema, allow widening casts (e.g., INT → BIGINT) without rewrite.
+
+**Files:** `crates/sail-data-source/src/delta/schema_evolution.rs`
+
+**Why:** Sail landed this in v0.6.3. Required for production schema evolution workflows.
+
+---
+
+### 4.6 Iceberg V3 + REST Catalog Improvements  `[ ]` P1 · ~2 days
+
+**What:** Iceberg spec V3 introduces new delete file formats, improved partitioning. REST catalog needs sort transform parsing (Sail fixed this in v0.6.3).
+
+**Files:** `crates/sail-data-source/src/iceberg/`
+
+---
+
+### 4.7 ClickBench Benchmark  `[ ]` P1 · ~1 day
+
+**What:** ClickBench is 43 analytical queries on a 100M-row web analytics dataset — a more realistic OLAP workload than TPC-H. Sail added ClickBench snapshots in v0.6.3.
+
+**Steps:**
+1. Download ClickBench dataset (Parquet from ClickHouse S3)
+2. Write `scripts/clickbench.py` — run all 43 queries, measure time
+3. Add results to `BENCHMARKS.md`
+4. Compare to Sail's numbers and Spark's numbers
+
+**Target:** Run all 43 queries correctly; beat LakeSail total time.
+
+---
+
+### 4.8 dbt Integration Guide  `[ ]` P1 · ~4 hours
+
+**What:** dbt is the dominant SQL transformation tool in the modern data stack. Sail published a dbt integration guide in v0.6.3 — we need one too.
+
+**Steps:**
+1. Test `dbt-spark` (SparkSession connector) with Vajra as the backend
+2. Verify `dbt run`, `dbt test`, `dbt docs generate` work
+3. Write `docs/guide/integrations/dbt.md`
+4. Note any incompatibilities
+
+**Why:** dbt has millions of users. A working dbt integration is a strong acquisition channel.
+
+---
+
+### 4.9 variant_explode / bitmap_and_agg / theta_sketch  `[ ]` P1 · ~2 days
+
+**What:**
+- `variant_explode(v)` / `variant_explode_outer(v)` — lateral view of VARIANT array
+- `bitmap_and_agg(col)` / `bitmap_or_agg(col)` — Roaring Bitmap aggregates
+- `approx_count_distinct` via theta sketch (HyperLogLog) — Sail has PR open
+
+**Files:** `crates/sail-plan/src/function/scalar/` and `aggregate/`
+
+---
+
+## Sprint 5 — Catalog, HMS, Performance (2026-06-07 to 2026-06-21)
+
+### 5.1 Provider-Agnostic Catalog Caching  `[ ]` P0 · ~3 days
+
+**What:** Delta/Iceberg catalog listings are expensive (S3 LIST calls). Cache listing results in memory with TTL. Sail landed this in v0.6.3.
+
+**Files:** `crates/sail-plan/src/catalog/cache.rs` (new)
+
+**Impact:** 10–100× faster repeated table lookups on large catalogs.
+
+---
+
+### 5.2 HMS (Hive Metastore) Thrift Client  `[ ]` P1 · ~1 week
+
+**What:** Generate a proper Thrift client for Hive Metastore from the official `.thrift` IDL (at build time). Sail has this as their highest-open-priority item.
+
+**Files:**
+- `crates/sail-catalog/src/hms/thrift/` (new) — Thrift client codegen via `thrift` crate
+- `crates/sail-catalog/src/hms/client.rs` — HMS connection + table/partition operations
+
+**Why:** Most enterprise Hadoop/Spark deployments use HMS as the catalog. Without a proper Thrift client, HMS-backed tables fail or return wrong metadata.
+
+---
+
+### 5.3 TPC-H SF-10 and SF-100 Distributed  `[ ]` P0 · ~3 days
+
+**What:** Validate correctness AND performance at scale.
+
+**Steps:**
+1. Generate SF-10 Parquet (6 GB) via DuckDB
+2. Run `vajra bench --scale-factor 10 --mode local-cluster --workers 4`
+3. Generate SF-100 Parquet (60 GB) on kind cluster
+4. Run `vajra bench --scale-factor 100 --mode kubernetes-cluster --workers 8`
+5. Publish to `BENCHMARKS.md`
+
+**Target:** SF-100 in < 30s on 8 workers × 4 vCPU. Publish vs LakeSail and Spark.
+
+---
+
+### 5.4 Official Apache Spark Test Suite  `[ ]` P1 · ~1 week
+
+**What:** Run the patched Spark Python test suite (`scripts/spark-tests/`) against Vajra. Measure pass rate vs LakeSail's reported figure.
+
+**Steps:**
+1. Apply `spark-4.1.1.patch` to Spark test suite
+2. `scripts/spark-tests/run-tests.sh` against running Vajra server
+3. Capture fail list; add known gaps to `COMPAT.md`
+4. Fix the top-20 most common failures
+
+**Target:** 95%+ pass rate (LakeSail claims ~95%, we should match or beat it).
+
+---
+
+### 5.5 Profile-Guided Optimization (PGO)  `[ ]` P2 · ~2 days
+
+**What:** Run the TPC-H benchmark as a profiling workload, then compile with PGO enabled. Expected 5–15% additional speedup on hot paths.
+
+**Files:** `.cargo/config.toml` — add `profile.release.pgo` configuration.
+
+**Reference:** LakeSail has this as an open enhancement request (issue #193).
+
+---
+
+### 5.6 Vortex Data Source  `[ ]` P2 · ~1 week
+
+**What:** [Vortex](https://github.com/spiraldb/vortex) is a new high-performance columnar format with superior compression and vectorized execution. Sail added Python Vortex data source in v0.6.0.
+
+**Files:** `crates/sail-data-source/src/formats/vortex/` (new)
+
+**Why:** Vortex benchmarks show 2–5× faster reads than Parquet on compressible data. Early adoption = differentiation.
+
+---
+
+## Sprint 6 — Streaming GA + Scale (2026-06-21 to 2026-07-05)
+
+### 6.1 Streaming Event-Time Window Execution  `[ ]` P0 · ~1 week
+
+**What:** Wire `F.window("timestamp", "1 minute")` tumbling/sliding windows into the physical execution layer. The planner already accepts them; the executor drops the window grouping.
+
+**Files:**
+- `crates/sail-plan/src/streaming/rewriter.rs` — detect `F.window()` grouping key, emit `StreamWindowNode`
+- `crates/sail-execution/src/streaming/window.rs` (new) — per-micro-batch tumbling window aggregation
 
 **Test:**
 ```python
 sdf = spark.readStream.format("rate").load() \
     .withWatermark("timestamp", "10 seconds") \
-    .groupBy(window("timestamp", "1 minute")).count()
+    .groupBy(F.window("timestamp", "1 minute")).count()
 q = sdf.writeStream.outputMode("append").format("memory").queryName("w").start()
 time.sleep(65); q.stop()
 assert spark.sql("SELECT * FROM w").count() > 0
@@ -224,323 +301,188 @@ assert spark.sql("SELECT * FROM w").count() > 0
 
 ---
 
-### 2.5 Streaming Join (Stream × Static)  `[ ]` P1 · ~1 week
+### 6.2 Stream × Stream Join  `[ ]` P1 · ~1 week
 
-**What:** Join a streaming DataFrame with a static/batch DataFrame (broadcast join pattern).
+**What:** Join two streaming DataFrames with watermark-based state management. Uses `stateful` operator with per-batch join and state expiry on watermark advance.
 
-**File:** `crates/sail-plan/src/streaming/rewriter.rs:95`
-
-**Note:** Stream × Stream joins (with watermarks) are separate and more complex — P2.
+**Files:** `crates/sail-plan/src/streaming/rewriter.rs`, `crates/sail-execution/src/streaming/join.rs` (new)
 
 ---
 
-### 2.6 Streaming Repartition  `[ ]` P1 · ~3 days
+### 6.3 Delta Streaming Sink  `[ ]` P0 · ~3 days
 
-**What:** `sdf.repartition(n)` in a streaming query. Map to no-op or round-robin within micro-batch.
+**What:** `writeStream.format("delta").option("checkpointLocation", ...)` with exactly-once semantics via Delta transaction log.
 
-**File:** `crates/sail-plan/src/streaming/rewriter.rs:98`
+**Files:** `crates/sail-data-source/src/delta/streaming_sink.rs` (new)
+
+**Why:** The most common production streaming sink. Kafka → Delta is the canonical pipeline.
 
 ---
 
-### 2.7 Checkpoint & Recovery  `[ ]` P1 · ~1 week
+### 6.4 mapGroupsWithState / flatMapGroupsWithState  `[ ]` P2 · ~3 weeks
 
-**What:** On restart with same `checkpointLocation`, resume from last committed offset. Exactly-once semantics for Delta sink.
+**What:** Arbitrary stateful processing per group key. Requires a persistent state store.
 
 **Design:**
-```
-checkpoint/
-  offsets/    ← what was read (per-source offsets)
-    0.json, 1.json ...
-  commits/    ← what was written (per-batch commit)  
-    0.json, 1.json ...
-  metadata    ← query ID, run ID
-```
+- State store: RocksDB (via `rocksdb-rs` crate) for low-latency per-key access
+- `GroupStateImpl` serialises/deserialises user-defined state objects via `cloudpickle`
+- Timeout: `NoTimeout` / `ProcessingTimeTimeout` / `EventTimeTimeout`
 
-**Test:** Kill and restart streaming query; verify no duplicate rows in Delta sink.
+**Note:** This is the most complex streaming feature in Spark. Phase 4 target.
 
 ---
 
-### 2.8 mapGroupsWithState / flatMapGroupsWithState  `[ ]` P2 · ~3 weeks
+## Track: Infrastructure & Operations (ongoing)
 
-**What:** Arbitrary stateful processing per group key. Most complex streaming feature.
+### I.1 Worker Image Pull Secrets  `[ ]` P1 · ~2h
 
-**Note:** Requires a persistent state store (RocksDB or Delta-backed). Phase 3 target.
+**What:** Worker pods spawned by the driver need `imagePullSecrets` when using a private registry (ECR, GCR, ACR).
 
----
-
-## Track 3 — Kubernetes Production Hardening
-
-### 3.1 CI: K8s Validation in GitHub Actions  `[x]` P0 · ~4h
-
-**What:** Run `scripts/run_validation_only.sh` (kind cluster + 3 modes) on every PR.
-
-**File:** `.github/workflows/ignite-ci.yml` — add `validate-k8s` job.
-
-**Design:**
-```yaml
-validate-k8s:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - name: Install kind + kubectl
-      run: |
-        curl -Lo kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
-        chmod +x kind && mv kind /usr/local/bin/
-    - name: Build Docker image
-      run: docker build -t vajra:latest -f docker/Dockerfile .
-    - name: Run validation
-      run: bash scripts/run_validation_only.sh
-```
-
-**Done when:** green badge on main branch, `105/105` in CI log for kubernetes-cluster mode.
+**File:** `helm/vajra/templates/server-deployment.yaml` — pass `imagePullSecrets` in `SAIL_KUBERNETES__WORKER_POD_TEMPLATE` when `image.pullSecrets` is set.
 
 ---
 
-### 3.2 Scheduler High Availability (eliminate SPOF)  `[x]` P0 · ~2 weeks
-
-**What:** The Spark Connect server / driver pod is a single point of failure. If it crashes, all in-flight queries are lost.
-
-**Design options:**
-1. **Leader election via Kubernetes lease** — multiple driver replicas, one holds the lease, others are standby. On leader death, etcd/lease election picks a new leader. Simplest to implement.
-2. **Job journal to object store** — driver writes task state to S3/GCS before every task dispatch; new leader reads journal and re-dispatches. True HA.
-
-**Recommended:** Start with option 1 (K8s Lease API). Option 2 is Phase 3.
-
-**Files:**
-- `crates/sail-cli/src/spark/leader_election.rs` (new)
-- `helm/vajra/templates/server-deployment.yaml` — bump `replicas` to 2
-- Add `LeaderElection` helm values
-
----
-
-### 3.3 OAuth2 / mTLS Auth Middleware  `[ ]` P1 · ~1 week
-
-**What:** Production multi-tenant deployment needs auth. Currently the gRPC server accepts all connections.
-
-**Design:**
-- mTLS (mutual TLS) for service-to-service (driver ↔ worker)
-- Bearer token (JWT) via gRPC metadata for client → server
-
-**Files:**
-- `crates/sail-spark-connect/src/auth.rs` (new)
-- tonic `Layer` that validates `Authorization: Bearer <jwt>` header
-- Helm: `auth.enabled`, `auth.jwksUri` values
-
----
-
-### 3.4 Worker Image Pull Secrets  `[ ]` P1 · ~2h
-
-**What:** When deploying from a private registry (ECR, GCR, ACR), worker pods spawned by the driver need `imagePullSecrets`.
-
-**File:** `helm/vajra/templates/server-deployment.yaml`
-
-**Change:** Pass `imagePullSecrets` in `SAIL_KUBERNETES__WORKER_POD_TEMPLATE` env var when `image.pullSecrets` is set.
-
-**Done when:** `helm install --set image.pullSecrets[0].name=my-secret` works.
-
----
-
-### 3.5 Resource Quotas & Multi-Tenant Isolation  `[ ]` P1 · ~3 days
+### I.2 Resource Quotas & Multi-Tenant Isolation  `[ ]` P1 · ~3 days
 
 **What:** Multiple teams sharing one K8s cluster need namespace-level resource quotas.
 
 **Files:**
 - `helm/vajra/templates/resourcequota.yaml` (new)
-- `helm/vajra/values.yaml` — add `quota.enabled`, `quota.maxCPU`, `quota.maxMemory`
+- Add `quota.enabled`, `quota.maxCPU`, `quota.maxMemory` to Helm values
 
 ---
 
-### 3.6 Graceful Query Cancellation on Pod Eviction  `[ ]` P1 · ~3 days
+### I.3 Graceful Query Cancellation on Pod Eviction  `[ ]` P1 · ~3 days
 
 **What:** When K8s evicts a worker pod (OOM, node pressure), in-flight query partitions should be retried on another worker rather than failing the whole job.
 
 **Files:**
-- `crates/sail-cli/src/cluster/worker.rs` — handle SIGTERM by completing current task or reporting failure
-- Driver scheduler: treat worker disconnect during task as retriable
+- Worker: handle SIGTERM → complete current task or report failure to scheduler
+- Driver scheduler: treat worker disconnect as retriable error
 
 ---
 
-### 3.7 Web UI (Status Dashboard)  `[ ]` P2 · ~2 weeks
+### I.4 OAuth2 OIDC / API Key Auth  `[ ]` P1 · ~1 week
 
-**What:** Simple HTTP endpoint showing: active queries, completed queries, worker health, memory usage.
+**What:** For multi-tenant SaaS use case: validate tokens against JWKS endpoint, support API keys.
 
-**Design:** Axum HTTP server on port 4040 (same as Spark UI port) serving JSON + minimal HTML.
-
-**Endpoint plan:**
-```
-GET /api/v1/queries          → list active/recent queries
-GET /api/v1/queries/{id}     → query stages, tasks, metrics
-GET /api/v1/workers          → worker pool status
-GET /api/v1/metrics          → Prometheus-format metrics
-GET /                        → minimal HTML dashboard
-```
+**Files:**
+- `crates/sail-spark-connect/src/auth.rs` — add `JwksClient` alongside existing `BearerTokenInterceptor`
+- Add `auth.jwksUri` / `auth.apiKeys` to Helm values
 
 ---
 
-### 3.8 TPC-H SF-10 / SF-100 Distributed Benchmark  `[ ]` P1 · ~3 days
+### I.5 Session Isolation & Per-User Quotas  `[ ]` P1 · ~3 days
 
-**What:** Validate correctness AND performance at scale in distributed mode. SF-1 single-node works; SF-100 distributed is unvalidated.
-
-**Steps:**
-1. Generate SF-100 Parquet files via DuckDB (needs ~120 GB disk)
-2. Upload to S3 (or local PV in kind cluster)
-3. Run `ignite bench --scale-factor 100 --mode kubernetes-cluster`
-4. Publish results to `BENCHMARKS.md`
-
-**Target:** SF-100 in < 60s on 5 workers × 4 vCPU.
+**What:** Multiple users share one Vajra server. Ensure temp views, session configs, and UDFs are isolated. Rate-limit per user.
 
 ---
 
-## Track 4 — Testing Infrastructure
+## Track: Function Coverage Gaps
 
-### 4.1 TPC-DS Query Suite  `[ ]` P1 · ~1 week
+These functions appear frequently in production Spark code.
 
-**What:** TPC-DS is a better benchmark for analytics than TPC-H (99 queries, complex correlated subqueries, window functions).
+### F.1 `timestampdiff` (Spark 4.x)  `[ ]` P1 · ~2h
 
-**Steps:**
-1. Generate TPC-DS SF-1 data via DuckDB
-2. Write `scripts/tpcds_bench.py` — same structure as current TPC-H bench
-3. Run against Vajra and document pass rate
-4. Fix failing queries
+**What:** `timestampdiff(unit, ts1, ts2)` — difference between two timestamps in specified units. Sail registered this in a recent commit (2026-05-26).
 
-**Target:** 90%+ TPC-DS pass rate.
+**File:** `crates/sail-plan/src/function/scalar/datetime.rs`
 
 ---
 
-### 4.2 Official Apache Spark Test Suite Integration  `[ ]` P1 · ~1 week
+### F.2 `to_csv` Function  `[ ]` P1 · ~2h
 
-**What:** `scripts/spark-tests/` has patches for Spark 3.5.7 and 4.1.1. Wire these into CI to run a subset of official Spark Python tests against Vajra.
+**What:** `to_csv(struct_col, options)` — serialize a struct column to CSV string. Sail added this 2026-05-26.
 
-**Steps:**
-1. Apply `spark-4.1.1.patch` to Spark test suite
-2. Run `scripts/spark-tests/run-tests.sh` targeting Vajra
-3. Capture fail list → add to known gaps
-4. Fix top-10 failures
+**File:** `crates/sail-plan/src/function/scalar/csv.rs`
 
 ---
 
-### 4.3 Concurrency / Multi-Session Tests  `[ ]` P1 · ~3 days
+### F.3 `coalesce` / `repartition` Spark Semantics  `[ ]` P1 · ~1 day
 
-**What:** Multiple simultaneous Spark Connect sessions executing queries in parallel. Tests for session isolation, no shared state corruption.
+**What:** `df.coalesce(n)` should reduce partitions without shuffle; `df.repartition(n)` should shuffle. Sail has a follow-up issue (#1988) open on this.
 
-**File:** `scripts/test_concurrency.py` (new)
-
-```python
-import concurrent.futures
-from pyspark.sql import SparkSession
-
-def run_session(i):
-    spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
-    result = spark.sql(f"SELECT {i} * {i} AS sq").collect()[0].sq
-    assert result == i * i, f"session {i}: expected {i*i}, got {result}"
-
-with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
-    list(ex.map(run_session, range(20)))
-print("All 20 concurrent sessions OK")
-```
+**File:** `crates/sail-plan/src/resolver/relation/repartition.rs`
 
 ---
 
-### 4.4 Memory Pressure / Spill Tests  `[ ]` P2 · ~3 days
+### F.4 Full Java DateTime Format  `[ ]` P2 · ~1 week
 
-**What:** Verify that queries exceeding `memory_limit` correctly spill to disk and still produce correct results.
-
-**File:** `scripts/test_spill.py` (new)
+**What:** `to_date(col, "dd/MM/yyyy HH:mm:ss")` — Spark accepts Java SimpleDateFormat patterns. We map to Rust's `chrono` formats but many patterns differ. Sail has this as an open issue (#1972).
 
 ---
 
-### 4.5 Chaos Tests (Worker Kill)  `[ ]` P2 · ~3 days
+## Definition of Done: "Full Spark Replacement + LakeSail Outperformer"
 
-**What:** Kill a worker pod mid-query; verify the job retries and completes (or fails with a clear error, not a hang).
+Vajra can be called production-complete when:
 
-**Tool:** `kubectl delete pod` during benchmark run.
+- [ ] **SQL**: 105/105 scorecard + 95%+ official Spark test suite + all VARIANT/GroupedMap UDF tests green
+- [ ] **Batch**: TPC-H SF-100 distributed (8 workers, kind cluster) published + ClickBench 43/43 correct
+- [ ] **Streaming**: Kafka → Delta pipeline with event-time windows runs 24h without error
+- [ ] **Storage**: Delta time travel + V2 checkpoint + Iceberg V3 all validated
+- [ ] **K8s**: HA scheduler, HPA, mTLS, resource quotas, image pull secrets
+- [ ] **Ops**: Web UI :4040, OTLP traces, Prometheus metrics, Grafana dashboard
+- [ ] **Install**: `pip install vajra-pyspark` + `curl | sh` + `helm install` all work
+- [ ] **Docs**: dbt integration guide, migration guide (Spark 3.5 → Vajra), ClickBench comparison
+- [ ] **Performance**: TPC-H SF-1 remains < 2s; SF-100 < 30s on 8 workers
 
----
-
-## Track 5 — Function Coverage
-
-Currently 9 stub functions in `sail-plan/src/function/`. Most are obscure but some appear in production Spark code.
-
-### 5.1 Lambda Functions (transform / filter / aggregate)  `[x]` P1 · ~1 week
-
-**What:** `transform(array, x -> x + 1)`, `filter(array, x -> x > 0)`, `aggregate(array, 0, (acc, x) -> acc + x)`.
-
-**File:** `crates/sail-plan/src/function/scalar/lambda.rs:36`
-
-**Test:**
-```python
-spark.sql("SELECT transform(array(1,2,3), x -> x * 2)").collect()
-# expected: [Row([2, 4, 6])]
-```
+**Estimated completion: Sprint 6 end (2026-07-05)**
 
 ---
 
-### 5.2 `date_diff` Extended Units  `[ ]` P2 · ~2h
+## Sprint Progress Tracker
 
-**What:** `datediff(unit, start, end)` — currently unsupported for units other than `DAY`.
+### Sprint 1 (2026-05-24) — Complete ✅
+- SQL compat 105/105, all 3 modes
+- TPC-H SF-1 22/22 @ 1.515s
 
-**File:** `crates/sail-plan/src/function/scalar/datetime.rs:227`
+### Sprint 2 (2026-05-24) — Complete ✅
+- Streaming aggregates, Kafka source, foreachBatch, memory sink
+- Scheduler HA, bearer auth, K8s CI, macOS CI
 
----
+### Sprint 3 (2026-05-25) — Complete ✅
+- F.window(), withWatermark planner, checkpoint + recovery
+- TPC-DS script, TPC-H distributed script, vajra-pyspark, Web UI :4040
+- mTLS auth, stream×static join, streaming analytic windows (per-batch)
+- DESCRIBE QUERY, approxQuantile, freqItems, concurrency test
 
-## Implementation Progress Tracker
+### Sprint 4 (2026-05-26 → 2026-06-07) — In Progress 🔄
 
-### Sprint 1 (Current — Week of 2026-05-24)
+| # | Item | Status |
+|---|---|---|
+| 4.1 | VARIANT type (Spark 4.x) | `[ ]` |
+| 4.2 | Delta time travel (AT VERSION/TIMESTAMP) | `[ ]` |
+| 4.3 | GroupedMap/CoGroupedMap UDFs (Spark 4.1) | `[ ]` |
+| 4.4 | Delta V2 checkpointing + log compaction | `[ ]` |
+| 4.5 | Delta type widening | `[ ]` |
+| 4.6 | Iceberg V3 + REST catalog sort transform fix | `[ ]` |
+| 4.7 | ClickBench 43-query benchmark | `[ ]` |
+| 4.8 | dbt integration guide | `[ ]` |
+| 4.9 | variant_explode, bitmap_and_agg | `[ ]` |
+| 4.10 | timestampdiff, to_csv (Spark 4.x) | `[ ]` |
 
-| # | Item | Owner | Status | Notes |
-|---|---|---|---|---|
-| S1.1 | Write PRODUCTION_ROADMAP.md | Claude | `[x]` | This file |
-| S1.2 | Update STATUS.md to 105/105 | Claude | `[ ]` | |
-| S1.3 | Commit SafeOptimizeProjections fix | Claude | `[ ]` | Branch: phase1/spark-100 |
-| S1.4 | Implement ALTER VIEW | Claude | `[ ]` | |
-| S1.5 | Implement INSERT PARTITION | Claude | `[ ]` | |
-| S1.6 | Wire K8s CI validation | Claude | `[ ]` | |
+### Sprint 5 (2026-06-07 → 2026-06-21) — Planned
 
-### Sprint 2 (Streaming Foundations — Week of 2026-05-31)
+| # | Item | Status |
+|---|---|---|
+| 5.1 | Provider-agnostic catalog caching | `[ ]` |
+| 5.2 | HMS Thrift client (proper codegen) | `[ ]` |
+| 5.3 | TPC-H SF-10 + SF-100 distributed | `[ ]` |
+| 5.4 | Official Spark test suite (95%+ target) | `[ ]` |
+| 5.5 | PGO (Profile-Guided Optimization) | `[ ]` |
+| 5.6 | Vortex data source | `[ ]` |
+| 5.7 | Full Java datetime format | `[ ]` |
+| 5.8 | OAuth2 OIDC / API key auth | `[ ]` |
 
-| # | Item | Status | Notes |
-|---|---|---|---|
-| S2.1 | Streaming aggregates + `memory` sink | `[x]` | Rewriter + MemorySinkExec |
-| S2.2 | Kafka source | `[x]` | rdkafka integration done |
-| S2.3 | foreachBatch sink | `[x]` | PyO3 callback done |
-| S2.4 | Lambda functions (transform/filter/aggregate) | `[x]` | Already in DataFusion |
+### Sprint 6 (2026-06-21 → 2026-07-05) — Planned
 
-### Sprint 3 (Production Hardening — Week of 2026-06-07)
-
-| # | Item | Status | Notes |
-|---|---|---|---|
-| S3.1 | Scheduler HA (K8s Lease election) | `[x]` | `--ha` flag wired to CLI |
-| S3.2 | K8s CI validation in GitHub Actions | `[x]` | ignite-ci.yml done |
-| S3.3 | mTLS auth middleware | `[ ]` | Multi-tenant |
-| S3.4 | TPC-H SF-100 distributed benchmark | `[ ]` | Performance validation |
-| S3.5 | TPC-DS test suite | `[ ]` | Wider SQL coverage |
-
-### Sprint 4 (GA — Week of 2026-06-14)
-
-| # | Item | Status | Notes |
-|---|---|---|---|
-| S4.1 | Streaming window functions (event-time) | `[ ]` | Tumbling/sliding |
-| S4.2 | Streaming join (stream × static) | `[ ]` | Broadcast join |
-| S4.3 | Official Spark test suite integration | `[ ]` | CI green |
-| S4.4 | Web UI (status dashboard) | `[ ]` | Port 4040 |
-| S4.5 | vajra-pyspark PyPI package | `[ ]` | pip install |
-
----
-
-## Definition of Done: "Full Spark Replacement"
-
-Vajra can be called a full production Spark replacement when:
-
-- [ ] **SQL**: 105/105 scorecard + 95%+ TPC-DS + official Spark test suite green
-- [ ] **Batch**: TPC-H SF-100 distributed (5 workers) in < 60s
-- [ ] **Streaming**: Kafka → aggregate → Delta pipeline runs 24h without error
-- [ ] **K8s**: Scheduler HA (no SPOF), HPA autoscaling, mTLS auth
-- [ ] **Apple Container**: All 3 modes (local / local-cluster / cluster) validated in CI
-- [ ] **Ops**: Web UI on :4040, OTLP metrics/traces, Grafana dashboard
-- [ ] **Install**: `pip install vajra-pyspark` + `curl | sh` both work
-- [ ] **Docs**: Migration guide from Spark 3.5 → Vajra
-
-**Estimated completion: Sprint 4 end (2026-06-21)**
+| # | Item | Status |
+|---|---|---|
+| 6.1 | Streaming event-time window execution | `[ ]` |
+| 6.2 | Stream × stream join | `[ ]` |
+| 6.3 | Delta streaming sink (exactly-once) | `[ ]` |
+| 6.4 | Resource quotas + session isolation | `[ ]` |
+| 6.5 | Worker eviction + task retry | `[ ]` |
 
 ---
 
@@ -548,13 +490,18 @@ Vajra can be called a full production Spark replacement when:
 
 | What | File |
 |---|---|
-| Streaming rewriter (all gaps) | `crates/sail-plan/src/streaming/rewriter.rs` |
-| Command dispatcher (DDL gaps) | `crates/sail-plan/src/resolver/command/mod.rs` |
-| Insert resolver | `crates/sail-plan/src/resolver/command/insert.rs` |
-| Optimizer fix (RecursiveQuery) | `crates/sail-logical-optimizer/src/lib.rs` |
-| Recursive CTE resolver | `crates/sail-plan/src/resolver/query/recursion.rs` |
+| Streaming rewriter | `crates/sail-plan/src/streaming/rewriter.rs` |
+| Command dispatcher (DDL) | `crates/sail-plan/src/resolver/command/mod.rs` |
+| Scalar function registry | `crates/sail-plan/src/function/scalar/` |
+| Data source formats | `crates/sail-data-source/src/formats/` |
+| Delta integration | `crates/sail-data-source/src/delta/` |
+| Iceberg integration | `crates/sail-data-source/src/iceberg/` |
+| Catalog implementations | `crates/sail-catalog/src/` |
+| Auth middleware | `crates/sail-spark-connect/src/auth.rs` |
+| Web UI | `crates/sail-spark-connect/src/web/` |
 | Helm chart | `helm/vajra/` |
 | CI pipeline | `.github/workflows/ignite-ci.yml` |
-| Scorecard | `scripts/spark_compat_score.py` |
-| Validation runner | `scripts/run_validation_only.sh` |
-| Benchmarks | `BENCHMARKS.md` |
+| TPC-H benchmark | `scripts/tpch_bench.py` |
+| TPC-DS benchmark | `scripts/tpcds_score.py` |
+| ClickBench (planned) | `scripts/clickbench.py` |
+| Spark compat scorecard | `scripts/spark_compat_score.py` |

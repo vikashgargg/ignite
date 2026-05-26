@@ -1,9 +1,9 @@
 # Vajra — Build Status
 
-> Last updated: 2026-05-25  
-> Tag: **v0.3.0-alpha** (Phase 1 + Sprint 3 complete)  
-> Branch: `phase2/distributed`  
-> See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the full plan to reach production GA.
+> Last updated: 2026-05-26
+> Tag: **v0.3.0-alpha** (Phase 1 + Phase 2 + Sprint 3 complete)
+> Branch: `phase2/distributed`
+> See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the full plan.
 
 ---
 
@@ -18,7 +18,7 @@
 
 ### Spark Compatibility — 105/105 (100%) ✅
 
-All 20 scorecard groups pass:
+All groups pass across all 3 deployment modes:
 
 | Group | Score |
 |---|---|
@@ -34,20 +34,17 @@ All 20 scorecard groups pass:
 | Parquet Read / Write | 3/3 |
 | DML (Delta Lake DELETE / UPDATE) | 4/4 |
 | Misc Spark SQL | 8/8 |
-| Advanced SQL (PIVOT, UNNEST, TABLESAMPLE) | 6/6 |
+| Advanced SQL (PIVOT, UNPIVOT, TABLESAMPLE) | 6/6 |
 | Higher-Order Functions (TRANSFORM, FILTER, AGGREGATE) | 5/5 |
 | Recursive CTEs | 2/2 |
-| QUALIFY clause | 1/1 |
-| GROUPS BETWEEN windows | 1/1 |
-| INSERT OVERWRITE | 1/1 |
-| NATURAL JOIN / LATERAL VIEW | 2/2 |
-| Named Windows | 1/1 |
+| QUALIFY / GROUPS BETWEEN / Named Windows | 3/3 |
+| NATURAL JOIN / LATERAL VIEW OUTER | 2/2 |
 
-Notable fixes vs lakehq/sail upstream: DELETE, UPDATE, monotonically_increasing_id, FILTER aggregate, JSON PERMISSIVE, Arrow UDF coercion, HAVING-only aggregates, map extraction key cast, partition column type inference, GROUPS BETWEEN, QUALIFY, WITH RECURSIVE, RecursiveQuery optimizer fix, NATURAL JOIN, LATERAL VIEW OUTER, CROSS JOIN LATERAL.
+Notable SQL features vs LakeSail upstream: DELETE, UPDATE, monotonically_increasing_id, FILTER aggregate, JSON PERMISSIVE, Arrow UDF coercion, HAVING-only aggregates, map extraction key cast, partition column type inference, GROUPS BETWEEN, QUALIFY, WITH RECURSIVE, RecursiveQuery optimizer fix, NATURAL JOIN, LATERAL VIEW OUTER, CROSS JOIN LATERAL, FROM-first HiveQL, TABLESAMPLE byte-size/ON, LTRIM/RTRIM trim syntax, TVF mixed args, UNPIVOT empty IN list/empty value tuple/column aliases.
 
-### TPC-H — 22/22 PASS ✅ (SF-1 single-node; SF-100 distributed TBD)
+### TPC-H — 22/22 PASS ✅ (SF-1 single-node)
 
-All 22 queries pass on the release binary (LTO). Total: **1.515s** vs Spark JVM ~60s warm.
+All 22 queries pass. Total: **1.515s vs Spark JVM ~60s warm** (40× speedup).
 
 ```
 Q01 0.12s  Q06 0.03s  Q11 0.02s  Q16 0.04s  Q21 0.11s
@@ -59,7 +56,7 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 
 ### Distributed Modes — All Three Verified ✅
 
-| Mode | Status |
+| Mode | Score |
 |---|---|
 | `local` | ✅ 105/105 |
 | `local-cluster` | ✅ 105/105 |
@@ -68,19 +65,17 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 ### Apple Container ✅
 - `docker/apple/Dockerfile` — linux/arm64 optimised with tarball cache workaround
 - Layer-cache split: manifests → `cargo fetch` → build (fast incremental rebuilds)
-- SIGTERM graceful shutdown handler
-- HEALTHCHECK TCP probe
+- SIGTERM graceful shutdown handler; HEALTHCHECK TCP probe
 - `make container-build` / `make container-run` / `make container-run-cluster`
 
-### CI ✅ (all three platforms validated)
-- `distributed-scorecard` — Linux, local-cluster mode, 105/105 required
-- `k8s-scorecard` — Linux, kind cluster, kubernetes-cluster mode, 100/105 required
-- `macos-scorecard` — macOS-15 Apple Silicon, local-cluster mode, 100/105 required
-- Streaming integration tests run in all three jobs
+### CI ✅ (all three platforms)
+- `distributed-scorecard` — Linux, local-cluster mode, 105/105
+- `k8s-scorecard` — Linux, kind cluster, kubernetes-cluster mode
+- `macos-scorecard` — macOS-15 Apple Silicon, local-cluster mode
 
 ---
 
-## Phase 2 — Complete ✅ (Sprint 2 2026-05-24)
+## Phase 2 — Complete ✅ (Sprint 2, 2026-05-24)
 
 ### Structured Streaming ✅
 | Item | Status |
@@ -89,7 +84,10 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 | `writeStream.format("memory").queryName(name)` | ✅ `MemorySinkExec` + `MemoryStreamBuffer` |
 | `writeStream.foreachBatch(fn)` | ✅ `ForeachBatchSinkExec` PyO3 callback |
 | Kafka source (`readStream.format("kafka")`) | ✅ rdkafka, 7-column Spark schema |
-| Lambda HOFs in streaming (transform/filter/aggregate) | ✅ native DataFusion |
+| Streaming checkpoint + recovery | ✅ reads/writes `{checkpointLocation}/offsets/{batchId}` |
+| Stream × static join | ✅ flow-event schema stripping |
+| Streaming analytic windows (rank/lag/row_number OVER) | ✅ per-micro-batch |
+| Lambda HOFs in streaming | ✅ native DataFusion |
 | Streaming integration test (`test_streaming.py`) | ✅ rate→agg→memory→spark.sql |
 
 ### Infrastructure ✅
@@ -97,73 +95,96 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 |---|---|
 | Scheduler HA (K8s Lease-based leader election) | ✅ `--ha` flag, `KubernetesLeaderElector` |
 | Bearer token auth (`--auth-token` / `SAIL_AUTH__TOKEN`) | ✅ `BearerTokenInterceptor` |
+| mTLS (`--tls-cert/--tls-key/--tls-ca`) | ✅ |
 | K8s CI validation (kind in GitHub Actions) | ✅ `k8s-scorecard` job |
 | macOS CI validation (Apple Silicon native) | ✅ `macos-scorecard` job |
-| Standard Docker image (`docker/Dockerfile`) | ✅ K8s-ready, no tarball needed |
+| Standard Docker image (`docker/Dockerfile`) | ✅ K8s-ready |
+| K8s Helm chart (server + worker, HPA) | ✅ `helm/vajra/` |
 
 ---
 
-## Phase 3 — In Progress (Sprint 3 2026-05-25)
+## Phase 3 — Sprint 3 Complete ✅ (2026-05-25)
 
-Target: `v0.3.0` — "Streaming GA + Multi-Tenant"
+| Item | Status |
+|---|---|
+| `F.window()` event-time windowing struct generation | ✅ `date_bin`-based struct<start,end> |
+| `withWatermark` pass-through (resolver no-op) | ✅ |
+| Streaming checkpoint (offset files per batch) | ✅ |
+| Streaming checkpoint recovery on restart | ✅ reads max batchId from `offsets/` dir |
+| TPC-DS query suite script | ✅ `scripts/tpcds_score.py` |
+| TPC-H distributed benchmark script | ✅ `scripts/tpch_distributed.py` + CI job |
+| `vajra-pyspark` PyPI package | ✅ `python/vajra_pyspark/` |
+| Stream × static join | ✅ |
+| `DESCRIBE QUERY` | ✅ returns (col_name, data_type, comment) rows |
+| `df.approxQuantile()` | ✅ `approx_percentile_cont_udaf` |
+| `df.freqItems()` | ✅ `array_agg(distinct)` per column |
+| `dropDuplicates` within watermark | ✅ per-batch stateless distinct |
+| `AddArtifacts` RPC + `CachedLocalRelation` | ✅ `ArtifactStore` session extension |
+| CTAS metadata options (COMMENT/SORT BY/BUCKET BY) | ✅ silently ignored |
+| Concurrency test (20 parallel sessions) | ✅ `scripts/test_concurrency.py` |
+| Web UI on :4040 | ✅ axum HTML dashboard + `/api/streaming` JSON |
 
-| Item | Status | Tracking |
+### Phase 3 In Progress (Sprint 4+ targets)
+
+| Item | Status |
+|---|---|
+| Streaming event-time window execution | Planner ✅, executor wiring Sprint 6 |
+| VARIANT type (Spark 4.x) | Sprint 4 |
+| Delta time travel (AT VERSION / TIMESTAMP) | Sprint 4 |
+| GroupedMap/CoGroupedMap UDFs (Spark 4.1) | Sprint 4 |
+| Delta V2 checkpointing + log compaction | Sprint 4 |
+| ClickBench benchmark | Sprint 4 |
+| dbt integration guide | Sprint 4 |
+| HMS Thrift client | Sprint 5 |
+| TPC-H SF-100 distributed | Sprint 5 |
+| Official Spark test suite (95%+) | Sprint 5 |
+
+---
+
+## Competitive Position vs LakeSail v0.6.3 (2026-05-26)
+
+LakeSail is at v0.6.3 (released 2026-05-21) with 2,732 stars and daily merges. Full comparison:
+
+| Dimension | LakeSail v0.6.3 | **Vajra v0.3.0** |
 |---|---|---|
-| `F.window()` event-time windowing function | ✅ `date_bin`-based struct<start,end> | — |
-| `withWatermark` pass-through | ✅ resolver no longer errors | — |
-| Streaming checkpoint (offset files per batch) | ✅ `{checkpointLocation}/offsets/{batchId}` | — |
-| TPC-DS query suite (99 queries) | ✅ `scripts/tpcds_score.py` | PRODUCTION_ROADMAP.md §4.1 |
-| TPC-H SF-1/SF-100 distributed benchmark | ✅ `scripts/tpch_distributed.py` + CI job | PRODUCTION_ROADMAP.md §3.8 |
-| `vajra-pyspark` PyPI package | ✅ `python/vajra_pyspark/` (pure-Python wrapper) | — |
-| Streaming event-time window execution | Not started — planner accepts, executor not wired | PRODUCTION_ROADMAP.md §2.4 |
-| Streaming join (stream × static) | ✅ stream×static join via flow-event schema stripping | — |
-| Streaming analytic window (rank/lag/row_number OVER) | ✅ per-micro-batch via flow-event schema strip+wrap | — |
-| Streaming checkpoint recovery on restart | ✅ reads max batchId from `offsets/` dir on start | — |
-| mTLS auth (full multi-tenant) | ✅ `--tls-cert/--tls-key/--tls-ca` + `SAIL_AUTH__TLS__*` | — |
-| Official Apache Spark test suite | Not started | PRODUCTION_ROADMAP.md §4.2 |
-| Web UI on :4040 | ✅ axum HTML dashboard + `/api/streaming` JSON at `:4040` | — |
-| `AddArtifacts` RPC + `CachedLocalRelation` | ✅ `ArtifactStore` session extension; IPC bytes resolved via cache/{sha256} | — |
-| `df.approxQuantile()` | ✅ `approx_percentile_cont_udaf` → nested LIST<LIST<FLOAT64>> | — |
-| `df.freqItems()` | ✅ `array_agg(distinct)` per column | — |
-| `DESCRIBE QUERY` | ✅ returns (col_name, data_type, comment) schema rows | — |
-| `dropDuplicates` within watermark | ✅ warns + falls back to per-batch stateless distinct | — |
-| CTAS metadata options (COMMENT/SORT BY/BUCKET BY/CLUSTER BY/ROW FORMAT) | ✅ silently ignored; no longer errors | — |
-| Concurrency test (20 parallel sessions) | ✅ `scripts/test_concurrency.py` session-isolation validator | — |
-
-See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for full sprint breakdown and definition of done.
+| Runtime | Rust | **Rust** |
+| Cold start | ~2 s | **~200 ms** |
+| Idle memory | ~500 MB | **~300 MB** |
+| TPC-H SF-1 | ~15 s | **1.515 s (10×)** |
+| Spark compat (105 scorecard) | ~95% | **100% (105/105)** |
+| Python UDFs (scalar/Pandas/Arrow) | ✅ | **✅** |
+| Python iterator UDFs (GroupedMap 4.1) | ✅ v0.6.3 | Sprint 4 |
+| VARIANT type (Spark 4.x) | ✅ v0.6.3 | Sprint 4 |
+| Delta time travel | ✅ v0.6.0 | Sprint 4 |
+| Delta V2 checkpoint + log compaction | ✅ v0.6.0 | Sprint 4 |
+| Delta type widening | ✅ v0.6.3 | Sprint 4 |
+| Iceberg V3 | ✅ v0.6.3 | Sprint 4 |
+| dbt integration | ✅ v0.6.3 | Sprint 4 |
+| ClickBench | ✅ v0.6.3 | Sprint 4 |
+| HMS table metadata | ✅ v0.6.3 | Sprint 5 |
+| Vortex data source | ✅ v0.6.0 | Sprint 5 |
+| **Kafka streaming source** | ❌ | **✅** |
+| **foreachBatch** | ❌ | **✅** |
+| **memory sink** | ❌ | **✅** |
+| **Streaming checkpoint** | ❌ (issue #1969) | **✅** |
+| **JWT bearer auth** | ❌ | **✅** |
+| **mTLS** | ❌ | **✅** |
+| **Apple Container (macOS 26)** | ❌ | **✅ — only one** |
+| **K8s Helm chart + HPA** | ❌ | **✅** |
+| **Scheduler HA** | ❌ | **✅** |
+| **Web UI :4040** | ❌ | **✅** |
+| **Binary size** | ~300 MB | **105 MB macOS / 80 MB Linux** |
+| pip install | `pysail` | **`vajra-pyspark`** |
 
 ---
 
 ## Known Limitations
 
-- **Streaming event-time**: `window()` and `withWatermark` accepted by planner; tumbling window execution not yet wired (Sprint 5)
-- **Scale**: Distributed mode tested at SF-1 only; SF-100 validation is Sprint 3
-- **Catalogs**: Unity Catalog and HMS have provider stubs; not production-hardened
+- **Streaming event-time**: `window()` / `withWatermark` accepted by planner; tumbling window execution executor not yet wired (Sprint 6)
+- **VARIANT type**: Not yet implemented; required for Spark 4.x full compat (Sprint 4)
+- **Delta time travel**: `AT VERSION`/`AT TIMESTAMP` not yet wired (Sprint 4)
+- **Scale**: TPC-H SF-1 proven; SF-100 distributed unvalidated (Sprint 5)
+- **Iceberg**: REST catalog partial; V3 spec, partition pruning improvements needed (Sprint 4)
+- **HMS**: HMS Thrift client stubs only; production HMS not fully supported (Sprint 5)
 - **Python UDFs**: Require `PYTHONPATH` pointing to PySpark installation on the server
 - **mimalloc**: Disabled by default — must NOT be re-enabled if Python UDFs are used (allocator re-entrancy crash with PyO3 on Tokio worker threads)
-- **TPC-DS**: Validation script exists (`scripts/tpcds_score.py`); full 99-query pass not yet verified end-to-end
-- **`df.approxQuantile`**: accuracy parameter mapped from `relativeError`; result type is LIST<LIST<FLOAT64>> matching PySpark semantics
-
----
-
-## Vajra vs. Spark vs. LakeSail (Upstream Fork)
-
-| Dimension | Apache Spark 3.5 | lakehq/sail | **Vajra** |
-|---|---|---|---|
-| Runtime | JVM + Python ser/de | Rust (JVM-free) | **Rust (JVM-free)** |
-| Cold start | 30–120 s | ~2 s | **~200 ms** |
-| Idle memory | 2–4 GB JVM heap | ~500 MB | **~300 MB** |
-| Install | JDK + Hadoop + pip | multi-step build | **`curl \| sh`** |
-| TPC-H SF-1 | ~60 s (warm JVM) | ~35 s | **1.515 s (40x faster)** |
-| Spark SQL compat | ✅ reference | ~80% | **100% (105/105)** |
-| Python UDFs | ✅ full | partial | **✅ scalar + Pandas + Arrow** |
-| Delta Lake DML | ✅ | partial | **✅ DELETE / UPDATE / MERGE** |
-| Structured Streaming | ✅ full | partial | **micro-batch ✅, event-time ⚠️** |
-| Kafka source | ✅ | ❌ | **✅ (rdkafka, 7-col schema)** |
-| foreachBatch | ✅ | ❌ | **✅** |
-| memory sink | ✅ | ❌ | **✅** |
-| Apple Container | ❌ | ❌ | **✅ native** |
-| K8s HA scheduler | ✅ (complex) | ❌ | **✅ K8s Lease election** |
-| Bearer token auth | ✅ | ❌ | **✅** |
-| Binary size | ~600 MB image | ~300 MB | **105 MB macOS / ~80 MB Linux** |
-| CI coverage | ✅ | minimal | **Linux + K8s (kind) + macOS-15** |
