@@ -1126,7 +1126,7 @@
       "input": "ALTER TABLE t1 ALTER COLUMN a.b.c DROP DEFAULT SET DEFAULT 42",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'SET'. SQLSTATE: 42601 (line 1, pos 47)\n\n== SQL ==\nALTER TABLE t1 ALTER COLUMN a.b.c DROP DEFAULT SET DEFAULT 42\n-----------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found SET at 47:50 expected ';', or end of input"
+        "failure": "invalid argument: found SET at 47:50 expected ',', ';', or end of input"
       }
     },
     {
@@ -1532,7 +1532,18 @@
     {
       "input": "ALTER TABLE table_name ALTER COLUMN\n a.b.c SET NOT NULL,\n d.e.f COMMENT 'new comment',\n x TYPE INT,\n y FIRST",
       "output": {
-        "failure": "invalid argument: found , at 55:56 expected ';', or end of input"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": "unknown"
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
@@ -1606,21 +1617,61 @@
       "input": "ALTER TABLE table_name ALTER COLUMN a.b.c TYPE bigint COMMENT 'new comment'",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'COMMENT'. SQLSTATE: 42601 (line 1, pos 54)\n\n== SQL ==\nALTER TABLE table_name ALTER COLUMN a.b.c TYPE bigint COMMENT 'new comment'\n------------------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found COMMENT at 54:61 expected ';', or end of input"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "alterColumnType": {
+                  "name": [
+                    "a",
+                    "b",
+                    "c"
+                  ],
+                  "data_type": "int64"
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "ALTER TABLE table_name ALTER COLUMN a.b.c TYPE bigint COMMENT 'new comment' AFTER d",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'COMMENT'. SQLSTATE: 42601 (line 1, pos 54)\n\n== SQL ==\nALTER TABLE table_name ALTER COLUMN a.b.c TYPE bigint COMMENT 'new comment' AFTER d\n------------------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found COMMENT at 54:61 expected ';', or end of input"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "alterColumnType": {
+                  "name": [
+                    "a",
+                    "b",
+                    "c"
+                  ],
+                  "data_type": "int64"
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "ALTER TABLE table_name ALTER COLUMN a.b.c TYPE bigint COMMENT AFTER d",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'COMMENT'. SQLSTATE: 42601 (line 1, pos 54)\n\n== SQL ==\nALTER TABLE table_name ALTER COLUMN a.b.c TYPE bigint COMMENT AFTER d\n------------------------------------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found COMMENT at 54:61 expected ';', or end of input"
+        "failure": "invalid argument: found AFTER at 62:67 expected string"
       }
     },
     {
@@ -1800,14 +1851,64 @@
       "input": "ALTER TABLE table_name PARTITION (a='1') CHANGE COLUMN a.b.c c INT",
       "exception": "\n[INVALID_STATEMENT_OR_CLAUSE] The statement or clause: ALTER TABLE ... PARTITION ... CHANGE COLUMN is not valid. SQLSTATE: 42601\n== SQL (line 1, position 1) ==\nALTER TABLE table_name PARTITION (a='1') CHANGE COLUMN a.b.c c INT\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: found CHANGE at 41:47 expected 'RENAME', or 'SET'"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "renameColumn": {
+                  "old": [
+                    "a",
+                    "b",
+                    "c"
+                  ],
+                  "new": [
+                    "c"
+                  ]
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
       "input": "ALTER TABLE table_name PARTITION (a='1') REPLACE COLUMNS (x string)",
       "exception": "\n[INVALID_STATEMENT_OR_CLAUSE] The statement or clause: ALTER TABLE ... PARTITION ... REPLACE COLUMNS is not valid. SQLSTATE: 42601\n== SQL (line 1, position 1) ==\nALTER TABLE table_name PARTITION (a='1') REPLACE COLUMNS (x string)\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
       "output": {
-        "failure": "invalid argument: found REPLACE at 41:48 expected 'RENAME', or 'SET'"
+        "success": {
+          "command": {
+            "alterTable": {
+              "table": [
+                "table_name"
+              ],
+              "ifExists": false,
+              "operation": {
+                "addColumns": {
+                  "columns": [
+                    {
+                      "name": [
+                        "x"
+                      ],
+                      "dataType": {
+                        "configuredUtf8": {
+                          "utf8Type": "configured"
+                        }
+                      },
+                      "nullable": true,
+                      "comment": null
+                    }
+                  ]
+                }
+              }
+            },
+            "planId": null
+          }
+        }
       }
     },
     {

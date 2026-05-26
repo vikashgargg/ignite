@@ -8,9 +8,10 @@ use sail_sql_parser::ast::literal::{IntegerLiteral, NumberLiteral, StringLiteral
 use sail_sql_parser::ast::operator::{Minus, Plus};
 use sail_sql_parser::ast::query::{IdentList, WhereClause};
 use sail_sql_parser::ast::statement::{
-    AlterColumnOperation, AlterTableOperation, AlterViewOperation, AnalyzeTableModifier,
-    AsQueryClause, Assignment, AssignmentList, ColumnAlteration, ColumnAlterationList,
-    ColumnAlterationOption, ColumnDefinition, ColumnDefinitionList, ColumnDefinitionOption, ColumnDropList,
+    AlterColumnItem, AlterColumnOperation, AlterTableOperation, AlterViewOperation,
+    AnalyzeTableModifier, AsQueryClause, Assignment, AssignmentList, ColumnAlteration,
+    ColumnAlterationList, ColumnAlterationOption, ColumnDefinition, ColumnDefinitionList,
+    ColumnDefinitionOption, ColumnDropList,
     ColumnPosition, ColumnTypeDefinition, CommentValue, CreateDatabaseClause, CreateTableClause,
     CreateViewClause, DeleteTableAlias, DescribeItem, ExplainFormat, FileFormat,
     InsertDirectoryDestination, MergeMatchClause, MergeMatchedAction,
@@ -1625,7 +1626,8 @@ impl TryFrom<Vec<CreateTableClause>> for CreateTableClauses {
                     output.properties.replace(properties);
                 }
                 CreateTableClause::DefaultCollation(_, _, _)
-                | CreateTableClause::SkewedBy(..) => {
+                | CreateTableClause::SkewedBy(..)
+                | CreateTableClause::StoredBy(..) => {
                     // Spark metadata hints — silently ignored
                 }
             }
@@ -1915,27 +1917,34 @@ fn from_ast_alter_table_operation(
                 if_exists: if_exists.is_some(),
             })
         }
-        AlterTableOperation::AlterColumn {
-            name,
-            operation: AlterColumnOperation::Type(_, data_type),
-            ..
-        } => Ok(spec::AlterTableOperation::AlterColumnType {
-            name: from_ast_object_name(name)?,
-            data_type: from_ast_data_type(data_type)?,
-        }),
-        AlterTableOperation::AlterColumn {
-            name,
-            operation: AlterColumnOperation::RenameWithChange { new_name, .. },
-            ..
-        } => {
-            // CHANGE COLUMN old new type — treat as rename (type change not yet supported here)
-            Ok(spec::AlterTableOperation::RenameColumn {
-                old: from_ast_object_name(name)?,
-                new: from_ast_object_name(new_name)?,
-            })
+        AlterTableOperation::AlterColumn { items, .. }
+        | AlterTableOperation::ChangeColumnAfterPartition { items, .. } => {
+            let mut items = items.into_items();
+            let first = items.next();
+            // Only handle single-column ALTER COLUMN with meaningful semantics
+            match first {
+                Some(AlterColumnItem {
+                    name,
+                    operation: AlterColumnOperation::Type(_, data_type, _),
+                }) if items.next().is_none() => {
+                    Ok(spec::AlterTableOperation::AlterColumnType {
+                        name: from_ast_object_name(name)?,
+                        data_type: from_ast_data_type(data_type)?,
+                    })
+                }
+                Some(AlterColumnItem {
+                    name,
+                    operation: AlterColumnOperation::RenameWithChange { new_name, .. },
+                }) if items.next().is_none() => Ok(spec::AlterTableOperation::RenameColumn {
+                    old: from_ast_object_name(name)?,
+                    new: from_ast_object_name(new_name)?,
+                }),
+                _ => Ok(spec::AlterTableOperation::Unknown),
+            }
         }
         AlterTableOperation::AddColumns { items, .. }
-        | AlterTableOperation::ReplaceColumns { items, .. } => {
+        | AlterTableOperation::ReplaceColumns { items, .. }
+        | AlterTableOperation::ReplaceColumnsAfterPartition { items, .. } => {
             let columns = from_ast_column_alteration_list(items)?;
             Ok(spec::AlterTableOperation::AddColumns { columns })
         }
@@ -1973,7 +1982,6 @@ fn from_ast_alter_table_operation(
         | AlterTableOperation::SetLocation { .. }
         | AlterTableOperation::RecoverPartitions { .. }
         | AlterTableOperation::DefaultCollation(..) => Ok(spec::AlterTableOperation::Unknown),
-        AlterTableOperation::AlterColumn { .. } => Ok(spec::AlterTableOperation::Unknown),
     }
 }
 
