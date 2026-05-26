@@ -8,16 +8,16 @@ use either::Either;
 use sail_sql_macro::{TreeParser, TreeSyntax, TreeText};
 
 use crate::ast::expression::{
-    DuplicateTreatment, Expr, FunctionArgument, GroupingExpr, OrderByExpr, WindowSpec,
+    DuplicateTreatment, Expr, FunctionArgument, GroupingExpr, GroupingSet, OrderByExpr, WindowSpec,
 };
 use crate::ast::identifier::{column_ident, object_name, table_ident, Ident, ObjectName};
 use crate::ast::keywords::{
     All, Anti, As, Bucket, By, Cluster, Cross, Cube, Distinct, Distribute, Except, Exclude, For,
-    From, Full, Group, Having, Identifier, In, Include, Inner, Intersect, Join, Lateral, Left,
-    Limit, Minus, Name, Natural, Nulls, Of, Offset, On, Order, Out, Outer, Partition, Percent,
-    Pivot, Qualify, Recursive, Repeatable, Right, Rollup, Rows, Select, Semi, Sort, SystemTime,
-    SystemVersion, Table, Tablesample, Timestamp, Union, Unpivot, Using, Values, Version, View,
-    Where, Window, With,
+    From, Full, Group, Grouping, Having, Identifier, In, Include, Inner, Intersect, Join, Lateral,
+    Left, Limit, Minus, Name, Natural, Nulls, Of, Offset, On, Order, Out, Outer, Partition,
+    Percent, Pivot, Qualify, Recursive, Repeatable, Right, Rollup, Rows, Select, Semi, Sets, Sort,
+    SystemTime, SystemVersion, Table, Tablesample, Timestamp, Union, Unpivot, Using, Values,
+    Version, View, Where, Window, With,
 };
 use crate::ast::literal::IntegerLiteral;
 use crate::ast::operator::{Comma, LeftParenthesis, RightParenthesis};
@@ -515,13 +515,24 @@ pub struct GroupByClause {
     pub group_by: (Group, By),
     #[parser(function = |e, o| sequence(compose(e, o), unit(o)))]
     pub expressions: Sequence<GroupingExpr, Comma>,
+    #[parser(function = |e, o| compose(e, o).or_not())]
     pub modifier: Option<GroupByModifier>,
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
 pub enum GroupByModifier {
     WithRollup(With, Rollup),
     WithCube(With, Cube),
+    // GROUPING SETS (...) as a trailing modifier after GROUP BY a, b
+    GroupingSets(
+        Grouping,
+        Sets,
+        LeftParenthesis,
+        #[parser(function = |e, o| sequence(compose(e, o), unit(o)))]
+        Sequence<GroupingSet, Comma>,
+        RightParenthesis,
+    ),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]

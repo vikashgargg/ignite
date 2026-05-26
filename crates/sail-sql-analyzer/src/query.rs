@@ -1,6 +1,6 @@
 use either::Either;
 use sail_common::spec;
-use sail_sql_parser::ast::expression::{AtomExpr, DuplicateTreatment, Expr, OrderByExpr};
+use sail_sql_parser::ast::expression::{AtomExpr, DuplicateTreatment, Expr, GroupingSet, OrderByExpr};
 use sail_sql_parser::ast::identifier::{Ident, ObjectName};
 use sail_sql_parser::ast::literal::IntegerLiteral;
 use sail_sql_parser::ast::operator::Comma;
@@ -19,7 +19,8 @@ use sail_sql_parser::common::Sequence;
 use crate::error::{SqlError, SqlResult};
 use crate::expression::{
     from_ast_expression, from_ast_function_arguments, from_ast_grouping_expression,
-    from_ast_identifier_list, from_ast_object_name, from_ast_order_by, from_ast_window_spec,
+    from_ast_grouping_set, from_ast_identifier_list, from_ast_object_name, from_ast_order_by,
+    from_ast_window_spec,
 };
 
 #[derive(Default)]
@@ -409,6 +410,13 @@ fn from_ast_query_select(select: QuerySelect) -> SqlResult<spec::QueryPlan> {
                 None => expr,
                 Some(GroupByModifier::WithRollup(_, _)) => vec![spec::Expr::Rollup(expr)],
                 Some(GroupByModifier::WithCube(_, _)) => vec![spec::Expr::Cube(expr)],
+                Some(GroupByModifier::GroupingSets(_, _, _, sets, _)) => {
+                    let sets = sets
+                        .into_items()
+                        .map(from_ast_grouping_set)
+                        .collect::<SqlResult<Vec<_>>>()?;
+                    vec![spec::Expr::GroupingSets(sets)]
+                }
             };
             Ok(expr)
         })

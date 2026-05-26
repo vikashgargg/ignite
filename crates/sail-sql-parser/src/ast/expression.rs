@@ -391,6 +391,8 @@ pub enum FunctionArgument {
         operator::FatArrow,
         #[parser(function = |e, _| e)] Expr,
     ),
+    // Allow `DISTINCT expr` in individual arguments for dialects like count(DISTINCT a, DISTINCT b)
+    DistinctExpr(Distinct, #[parser(function = |e, _| e)] Expr),
     Unnamed(#[parser(function = |e, _| e)] Expr),
 }
 

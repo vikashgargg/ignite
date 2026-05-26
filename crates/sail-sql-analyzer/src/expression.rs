@@ -108,7 +108,7 @@ pub(crate) fn from_ast_function_arguments(
                 let expr = from_ast_expression(expr)?;
                 named_arguments.push((name.value.into(), expr));
             }
-            FunctionArgument::Unnamed(expr) => {
+            FunctionArgument::DistinctExpr(_, expr) | FunctionArgument::Unnamed(expr) => {
                 if !named_arguments.is_empty() {
                     return Err(SqlError::analysis(
                         "[UNEXPECTED_POSITIONAL_ARGUMENT] Positional argument follows a named (keyword) argument.",
@@ -995,7 +995,7 @@ pub(crate) fn from_ast_grouping_expression(expr: GroupingExpr) -> SqlResult<spec
     }
 }
 
-fn from_ast_grouping_set(grouping: GroupingSet) -> SqlResult<Vec<spec::Expr>> {
+pub(crate) fn from_ast_grouping_set(grouping: GroupingSet) -> SqlResult<Vec<spec::Expr>> {
     let GroupingSet {
         left: _,
         expressions,
