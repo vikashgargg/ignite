@@ -1,9 +1,34 @@
 # Vajra (वज्र) Benchmark Results
 
-> Measured 2026-05-23 on Apple M-series (macOS 26, ARM64)  
-> Release build with LTO (`lto = true, codegen-units = 1`)  
-> Runtime: Vajra server (`./target/release/vajra server --port 50055`)  
-> Data: TPC-H tables as Parquet files, read lazily via Spark Connect gRPC  
+> Last updated: 2026-05-27
+> Tag: **v0.4.0-alpha** (Phase 3 / Sprint 4 — VARIANT + ClickBench complete)
+> Machine: macOS Apple Silicon (ARM64)
+> Build: release (`lto = true, codegen-units = 1`) unless otherwise noted
+> Mode: `local` (`SPARK_REMOTE=sc://localhost:50051`)
+
+---
+
+## ClickBench — 43/43 PASS
+
+Official [ClickBench](https://benchmark.clickhouse.com/) 43 OLAP queries on the `hits` web-analytics
+dataset. Smoke run: 1 of 100 Parquet shards (1 M rows, 116 MB), **dev build**.
+
+```
+Q01 ✓ 0.041s   Q02 ✓ 0.063s   Q03 ✓ 0.150s   Q04 ✓ 0.089s   Q05 ✓ 0.150s
+Q06 ✓ 0.158s   Q07 ✓ 0.048s   Q08 ✓ 0.068s   Q09 ✓ 0.223s   Q10 ✓ 0.336s
+Q11 ✓ 0.110s   Q12 ✓ 0.119s   Q13 ✓ 0.139s   Q14 ✓ 0.172s   Q15 ✓ 0.165s
+Q16 ✓ 0.162s   Q17 ✓ 0.243s   Q18 ✓ 0.236s   Q19 ✓ 4.959s   Q20 ✓ 0.071s
+Q21 ✓ 0.697s   Q22 ✓ 0.728s   Q23 ✓ 1.436s   Q24 ✓ 2.970s   Q25 ✓ 0.578s
+Q26 ✓ 0.103s   Q27 ✓ 0.588s   Q28 ✓ 0.671s   Q29 ✓ 1.846s   Q30 ✓ 2.333s
+Q31 ✓ 0.205s   Q32 ✓ 0.235s   Q33 ✓ 0.404s   Q34 ✓ 0.888s   Q35 ✓ 0.894s
+Q36 ✓ 0.259s   Q37 ✓ 2.387s   Q38 ✓ 2.091s   Q39 ✓ 2.093s   Q40 ✓ 3.145s
+Q41 ✓ 1.898s   Q42 ✓ 1.800s   Q43 ✓ 4.684s
+
+Total: 40.6s (dev build, 1M rows — release build on full 100M rows pending)
+```
+
+Run: `SPARK_REMOTE=sc://localhost:50051 python scripts/clickbench.py`
+Full 100M-row run: `CLICKBENCH_FULL=1 SPARK_REMOTE=sc://localhost:50051 python scripts/clickbench.py`
 
 ---
 
@@ -60,14 +85,11 @@
 
 ---
 
-## Spark Compatibility
+## Spark Compatibility — 105/105 (100%)
 
-> Tested against the Spark compat scorecard (`scripts/spark_compat_score.py`),  
-> which covers 71 key Spark features: SQL, DataFrames, UDFs, DML,  
-> JSON/Parquet, complex types, aggregation, window functions.
->
-> Binary: `./target/release/vajra server --port 50055`  
-> Client: PySpark 4.0.0 on Python 3.12  
+> Tested against the Spark compat scorecard (`scripts/spark_compat_score.py`).
+> Binary: `./target/debug/vajra server`  
+> Client: PySpark 4.0.2 on Python 3.9  
 > Platform: macOS 26 ARM64  
 
 ```
@@ -86,20 +108,31 @@
   10. Parquet Read / Write                      ✓✓✓  3/3
   11. DML (Delta Lake)                         ✓✓✓✓  4/4
   12. Misc Spark SQL                       ✓✓✓✓✓✓✓✓  8/8
+  13. Lambda / Higher-Order Functions     ✓✓✓✓✓✓✓✓✓  9/9
+  14. PIVOT                                      ✓✓  2/2
+  15. Named Windows                              ✓✓  2/2
+  16. Cache / Catalog                            ✓✓  2/2
+  17. _metadata Column                           ✓✓  2/2
+  18. Advanced SQL                         ✓✓✓✓✓✓✓✓  8/8
+  19. Window Frames & Joins                   ✓✓✓✓✓  5/5
+  20. QUALIFY & Recursive CTEs                 ✓✓✓✓  4/4
 ───────────────────────────────────────────────────────
-  Total:  71 passed, 0 failed, 0 skipped
-  Score:  100% (71/71 executed)
+  Total:  105 passed, 0 failed, 0 skipped
+  Score:  100% (105/105 executed)
 ═══════════════════════════════════════════════════════
 ```
 
 ### Compatibility Summary
 
-| Metric                    | Vajra      | LakeSail (baseline) |
-|---------------------------|------------|---------------------|
-| Spark compat score        | **100%**   | 80.1%               |
-| UDF support               | ✓ (5/5)    | ✓ partial           |
-| DML (DELETE/UPDATE)       | ✓ (4/4)    | partial             |
-| JSON PERMISSIVE           | ✓          | ✓                   |
+| Metric                    | Vajra v0.4.0 | LakeSail v0.6.3 |
+|---------------------------|--------------|-----------------|
+| Spark compat score        | **100% (105/105)** | ~95% |
+| UDF support               | ✓ (5/5)      | ✓ partial       |
+| DML (DELETE/UPDATE)       | ✓ (4/4)      | ✓               |
+| JSON PERMISSIVE           | ✓            | ✓               |
+| VARIANT type (Spark 4.x)  | ✓            | ✓               |
+| Delta time travel         | ✓            | ✓               |
+| ClickBench 43/43          | ✓            | partial         |
 
 ### Notes
 

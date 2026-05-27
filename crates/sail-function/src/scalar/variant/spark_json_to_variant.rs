@@ -17,16 +17,26 @@ use parquet_variant_json::JsonToVariant as JsonToVariantExt;
 use crate::error::{invalid_arg_count_exec_err, unsupported_data_type_exec_err};
 use crate::scalar::variant::utils::helper::{try_field_as_string, try_parse_string_scalar};
 
-/// Returns a Variant from a JSON string
+/// Returns a Variant from a JSON string (`parse_json`) or NULL on invalid JSON (`try_parse_json`).
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct SparkJsonToVariantUdf {
     signature: Signature,
+    /// When true, return NULL instead of raising an error for invalid JSON.
+    lenient: bool,
 }
 
 impl SparkJsonToVariantUdf {
     pub fn new() -> Self {
         Self {
             signature: Signature::user_defined(Volatility::Immutable),
+            lenient: false,
+        }
+    }
+
+    pub fn try_new() -> Self {
+        Self {
+            signature: Signature::user_defined(Volatility::Immutable),
+            lenient: true,
         }
     }
 }
@@ -43,7 +53,11 @@ impl ScalarUDFImpl for SparkJsonToVariantUdf {
     }
 
     fn name(&self) -> &str {
-        "parse_json"
+        if self.lenient {
+            "try_parse_json"
+        } else {
+            "parse_json"
+        }
     }
 
     fn signature(&self) -> &Signature {
@@ -89,6 +103,7 @@ impl ScalarUDFImpl for SparkJsonToVariantUdf {
             .first()
             .ok_or_else(|| exec_datafusion_err!("empty argument, expected 1 argument"))?;
 
+        let lenient = self.lenient;
         let out = match arg {
             ColumnarValue::Scalar(scalar_value) => {
                 let json_str = try_parse_string_scalar(scalar_value)?;
@@ -96,7 +111,14 @@ impl ScalarUDFImpl for SparkJsonToVariantUdf {
                 let mut builder = VariantArrayBuilder::new(1);
 
                 match json_str {
-                    Some(json_str) => builder.append_json(json_str.as_str())?,
+                    Some(json_str) => {
+                        let result = builder.append_json(json_str.as_str());
+                        if lenient && result.is_err() {
+                            builder.append_null();
+                        } else {
+                            result?;
+                        }
+                    }
                     // When input is NULL, return SQL NULL (not a Variant)
                     None => builder.append_null(),
                 }
@@ -106,7 +128,11 @@ impl ScalarUDFImpl for SparkJsonToVariantUdf {
                 ColumnarValue::Scalar(ScalarValue::Struct(Arc::new(struct_array)))
             }
             ColumnarValue::Array(arr) => match arr.data_type() {
-                DataType::Utf8View => ColumnarValue::Array(from_utf8view_arr(arr)?),
+                DataType::Utf8View => ColumnarValue::Array(if lenient {
+                    from_utf8view_arr_lenient(arr)?
+                } else {
+                    from_utf8view_arr(arr)?
+                }),
                 DataType::Null => {
                     // All-NULL input: produce a Variant struct array of all NULLs
                     let mut builder = VariantArrayBuilder::new(arr.len());
@@ -185,6 +211,35 @@ macro_rules! define_from_string_array {
 }
 
 define_from_string_array!(from_utf8view_arr, StringViewArray);
+
+/// Lenient variant of [`from_utf8view_arr`]: appends NULL for invalid JSON instead of failing.
+pub(crate) fn from_utf8view_arr_lenient(arr: &ArrayRef) -> Result<ArrayRef> {
+    let typed_arr = arr
+        .as_any()
+        .downcast_ref::<StringViewArray>()
+        .ok_or_else(|| {
+            exec_datafusion_err!(
+                "Unable to downcast array of type {} to StringViewArray",
+                arr.data_type()
+            )
+        })?;
+
+    let mut builder = VariantArrayBuilder::new(typed_arr.len());
+    for v in typed_arr {
+        match v {
+            Some(json_str) => {
+                if builder.append_json(json_str).is_err() {
+                    builder.append_null();
+                }
+            }
+            None => builder.append_null(),
+        }
+    }
+
+    let variant_array: StructArray = builder.build().into();
+    let variant_array = convert_binaryview_to_binary(variant_array)?;
+    Ok(Arc::new(variant_array) as ArrayRef)
+}
 
 /// Converts a StructArray with BinaryView fields to Binary fields for PySpark compatibility
 pub(crate) fn convert_binaryview_to_binary(struct_array: StructArray) -> Result<StructArray> {
