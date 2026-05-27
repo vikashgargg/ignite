@@ -342,7 +342,7 @@ fn operation_for_sink_mode(
         PhysicalSinkMode::OverwritePartitions => Some(DeltaOperation::Write {
             mode: SaveMode::Overwrite,
             partition_by,
-            predicate: Some(format!("__unsupported_overwrite_partitions_at={table_url}")),
+            predicate: None,
         }),
     }
 }

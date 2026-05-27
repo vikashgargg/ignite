@@ -64,7 +64,9 @@ async fn build_standard_plan(
     sort_order: Option<LexRequirement>,
 ) -> Result<Arc<dyn ExecutionPlan>> {
     match sink_mode {
-        PhysicalSinkMode::Overwrite => build_full_overwrite_plan(ctx, input, sort_order).await,
+        PhysicalSinkMode::Overwrite | PhysicalSinkMode::OverwritePartitions => {
+            build_full_overwrite_plan(ctx, input, sort_order).await
+        }
         other => {
             let input_schema = input.schema();
             build_standard_write_layers(ctx, input, &other, sort_order, input_schema)

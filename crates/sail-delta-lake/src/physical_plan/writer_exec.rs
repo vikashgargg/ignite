@@ -537,6 +537,7 @@ impl DeltaWriterExec {
             match &sink_mode {
                 PhysicalSinkMode::Append
                 | PhysicalSinkMode::Overwrite
+                | PhysicalSinkMode::OverwritePartitions
                 | PhysicalSinkMode::OverwriteIf { .. } => {}
                 PhysicalSinkMode::ErrorIfExists => {
                     if table_exists {
@@ -553,11 +554,6 @@ impl DeltaWriterExec {
                         output_bytes.add(0);
                         return encode_actions(vec![], Some(ExecCommitMeta::default()));
                     }
-                }
-                PhysicalSinkMode::OverwritePartitions => {
-                    return Err(DataFusionError::NotImplemented(
-                        "OverwritePartitions mode not implemented".to_string(),
-                    ));
                 }
             }
 

@@ -174,9 +174,6 @@ impl TableFormat for DeltaTableFormat {
                     input.schema(),
                 )));
             }
-            PhysicalSinkMode::OverwritePartitions => {
-                return not_impl_err!("unsupported sink mode for Delta: {mode:?}")
-            }
             _ => {}
         }
 
