@@ -1,8 +1,8 @@
 # Vajra — Build Status
 
-> Last updated: 2026-05-26
-> Tag: **v0.3.0-alpha** (Phase 1 + Phase 2 + Sprint 3 complete)
-> Branch: `phase2/distributed`
+> Last updated: 2026-05-27
+> Tag: **v0.4.0-alpha** (Phase 1 + Phase 2 + Sprint 3 + PR #1950 nullability batch complete)
+> Branch: `phase3/true-parity`
 > See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the full plan.
 
 ---
@@ -124,28 +124,45 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 | Concurrency test (20 parallel sessions) | ✅ `scripts/test_concurrency.py` |
 | Web UI on :4040 | ✅ axum HTML dashboard + `/api/streaming` JSON |
 
-### Phase 3 In Progress (Sprint 4+ targets)
+### Phase 3 — Sprint 4 (branch: `phase3/true-parity`, target 2026-06-07)
 
 | Item | Status |
 |---|---|
-| Streaming event-time window execution | Planner ✅, executor wiring Sprint 6 |
-| VARIANT type (Spark 4.x) | Sprint 4 |
-| Delta time travel (AT VERSION / TIMESTAMP) | Sprint 4 |
-| GroupedMap/CoGroupedMap UDFs (Spark 4.1) | Sprint 4 |
-| Delta V2 checkpointing + log compaction | Sprint 4 |
-| ClickBench benchmark | Sprint 4 |
-| dbt integration guide | Sprint 4 |
-| HMS Thrift client | Sprint 5 |
-| TPC-H SF-100 distributed | Sprint 5 |
-| Official Spark test suite (95%+) | Sprint 5 |
+| VARIANT type (Spark 4.x) + variant_explode | Sprint 4 — P0 |
+| Delta time travel (AT VERSION / TIMESTAMP) | Sprint 4 — P0 |
+| GroupedMap / applyInPandas UDFs (Spark 4.1) | Sprint 4 — P0 |
+| Delta V2 checkpointing + log compaction | Sprint 4 — P1 |
+| Iceberg V3 spec + OverwriteIf | Sprint 4 — P1 |
+| ClickBench 43-query benchmark | Sprint 4 — P1 |
+| bitmap_and_agg / to_csv improvements | Sprint 4 — P1 |
+| dbt integration guide | Sprint 4 — P2 |
+
+### Phase 3 — Sprint 5 (target 2026-06-21)
+
+| Item | Status |
+|---|---|
+| Official Apache Spark test suite ≥ 95% | Sprint 5 — P0 |
+| TPC-H SF-100 distributed (10-node K8s) | Sprint 5 — P0 |
+| Kafka → Delta 24h endurance test | Sprint 5 — P1 |
+| HMS Thrift client | Sprint 5 — P1 |
+| Provider-agnostic catalog caching | Sprint 5 — P2 |
+
+### Phase 3 — Sprint 6 (target 2026-07-05)
+
+| Item | Status |
+|---|---|
+| Streaming event-time window execution | Planner ✅, executor Sprint 6 — P0 |
+| Streaming stateful deduplication | Sprint 6 — P1 |
+| Theta sketch aggregates | Sprint 6 — P2 |
+| Vortex data source | Sprint 6 — P2 |
 
 ---
 
-## Competitive Position vs LakeSail v0.6.3 (2026-05-26)
+## Competitive Position vs LakeSail v0.6.3 (2026-05-27)
 
 LakeSail is at v0.6.3 (released 2026-05-21) with 2,732 stars and daily merges. Full comparison:
 
-| Dimension | LakeSail v0.6.3 | **Vajra v0.3.0** |
+| Dimension | LakeSail v0.6.3 | **Vajra v0.4.0** |
 |---|---|---|
 | Runtime | Rust | **Rust** |
 | Cold start | ~2 s | **~200 ms** |
