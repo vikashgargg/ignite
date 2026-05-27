@@ -4,6 +4,7 @@ pub mod debug;
 pub mod error;
 pub mod object;
 pub mod runtime;
+pub mod spark;
 pub mod spec;
 pub mod string;
 pub mod tests;

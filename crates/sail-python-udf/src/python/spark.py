@@ -740,11 +740,14 @@ class PySparkGroupMapUdf:
         udf: Callable[..., Any],
         input_names: Sequence[str],
         is_pandas: bool,  # noqa: FBT001
+        is_iter: bool,  # noqa: FBT001
         config,
     ):
         self._udf = udf
         self._input_names = input_names
         self.is_pandas = is_pandas
+        self.is_iter = is_iter
+        self._max_records_per_batch = config.arrow_max_records_per_batch
         self._serializer = ArrowStreamPandasUDFSerializer(
             timezone=config.session_timezone,
             safecheck=config.arrow_convert_safely,
@@ -756,13 +759,34 @@ class PySparkGroupMapUdf:
         )
 
     def __call__(self, args: list[pa.Array]) -> pa.Array:
+        m = self._max_records_per_batch
         if self.is_pandas:
             inputs = _named_arrays_to_pandas(args, self._input_names, self._serializer)
+            if self.is_iter:
+                n = len(inputs[0]) if inputs else 0
+
+                def pandas_batch_iter():
+                    if n == 0:
+                        yield [s.iloc[0:0] for s in inputs]
+                    else:
+                        for start in range(0, n, m):
+                            yield [s.iloc[start : start + m] for s in inputs]
+
+                [(output, output_type)] = list(self._udf(None, (pandas_batch_iter(),)))
+                struct_arrays = [_pandas_to_arrow_array(df, output_type, self._serializer) for df in output]
+                if not struct_arrays:
+                    return pa.array([], type=output_type)
+                return pa.concat_arrays(struct_arrays)
             [[(output, output_type)]] = list(self._udf(None, (inputs,)))
             return _pandas_to_arrow_array(output, output_type, self._serializer)
 
-        inputs = [pa.RecordBatch.from_arrays(args, self._input_names)]
-        [(output, output_type)] = list(self._udf(None, (inputs,)))
+        rb = pa.RecordBatch.from_arrays(args, self._input_names)
+        if self.is_iter:
+            n = len(rb)
+            batches = [rb] if n == 0 else [rb.slice(i, min(m, n - i)) for i in range(0, n, m)]
+        else:
+            batches = [rb]
+        [(output, output_type)] = list(self._udf(None, (batches,)))
         return _arrow_array_to_output_type(output, output_type)
 
 
