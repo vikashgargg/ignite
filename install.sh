@@ -4,6 +4,7 @@ set -e
 
 REPO="vikashgargg/ignite"
 INSTALL_DIR="${VAJRA_INSTALL_DIR:-${IGNITE_INSTALL_DIR:-$HOME/.local/bin}}"
+VENV_DIR="${VAJRA_VENV_DIR:-$HOME/.local/lib/vajra/venv}"
 BINARY="vajra"
 
 info()  { printf "\033[32m[vajra]\033[0m %s\n" "$*"; }
@@ -50,29 +51,43 @@ TMP_BIN="$TMP_DIR/vajra"
 
 info "Downloading from $DOWNLOAD_URL"
 if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN"; then
-  error "Download failed (404 or network error).
-  Available releases: https://github.com/$REPO/releases
-  To build from source:
-    git clone https://github.com/$REPO && cd ignite
-    cargo build --release -p sail-cli
-    cp target/release/vajra ~/.local/bin/"
+  error "Download failed. Check https://github.com/$REPO/releases for available binaries."
 fi
 
 chmod +x "$TMP_BIN"
 
 mkdir -p "$INSTALL_DIR"
-mv "$TMP_BIN" "$INSTALL_DIR/$BINARY"
+# Real binary lives at vajra-bin; the vajra wrapper sets PYTHONPATH
+mv "$TMP_BIN" "$INSTALL_DIR/${BINARY}-bin"
 rm -rf "$TMP_DIR"
+
+# Set up isolated Python venv with pyspark (avoids system pip restrictions)
+info "Setting up Python environment with pyspark..."
+if ! command -v python3 >/dev/null 2>&1; then
+  error "python3 not found. Install Python 3.10+ (brew install python) and re-run."
+fi
+
+python3 -m venv "$VENV_DIR"
+"$VENV_DIR/bin/pip" install pyspark --quiet --disable-pip-version-check \
+  || error "pyspark install failed. Try: $VENV_DIR/bin/pip install pyspark"
+
+PYSPARK_SITE="$("$VENV_DIR/bin/python3" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+
+# Create wrapper that prepends the venv's site-packages to PYTHONPATH
+# Uses %s so $PYSPARK_SITE and $INSTALL_DIR expand now; ${PYTHONPATH} is literal in the script
+printf '#!/usr/bin/env sh\nexport PYTHONPATH="%s${PYTHONPATH:+:${PYTHONPATH}}"\nexec "%s" "$@"\n' \
+  "$PYSPARK_SITE" "$INSTALL_DIR/${BINARY}-bin" > "$INSTALL_DIR/$BINARY"
+chmod +x "$INSTALL_DIR/$BINARY"
 
 info "Installed to $INSTALL_DIR/$BINARY"
 
-# Verify the binary works
+# Verify
 if "$INSTALL_DIR/$BINARY" --version >/dev/null 2>&1; then
-  VERSION="$("$INSTALL_DIR/$BINARY" --version 2>/dev/null || echo $LATEST)"
+  VERSION="$("$INSTALL_DIR/$BINARY" --version 2>/dev/null || echo "$LATEST")"
   info "Vajra $VERSION installed successfully"
 fi
 
-# Add to PATH advice if needed
+# PATH advice
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
   *)
@@ -82,5 +97,6 @@ case ":$PATH:" in
     ;;
 esac
 
-info "Done! Run: vajra --version"
-info "Quick test: vajra sql \"SELECT 1\""
+info "Done! Run:"
+info "  vajra --version"
+info "  vajra sql \"SELECT 1\""
