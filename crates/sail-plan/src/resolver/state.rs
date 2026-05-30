@@ -59,6 +59,9 @@ pub(super) enum AggregateState {
         projections: Vec<NamedExpr>,
         grouping: Vec<NamedExpr>,
     },
+    /// The SELECT expressions are being resolved with pre-resolved GROUP BY available.
+    /// This allows SELECT to reference GROUP BY struct columns (e.g. window.start).
+    SelectWithGrouping { grouping: Vec<NamedExpr> },
     /// There is no aggregate being resolved.
     #[default]
     None,
@@ -85,6 +88,9 @@ pub(super) struct PlanResolverState {
     /// Positional parameter values available for IDENTIFIER clause evaluation.
     /// Set alongside `param_values` when resolving a `WithParameters` query node.
     positional_param_values: Vec<ScalarValue>,
+    /// Lateral column aliases accumulated while resolving SELECT expressions.
+    /// Allows a later expression in the same SELECT to reference an alias defined earlier.
+    lateral_aliases: Vec<NamedExpr>,
 }
 
 impl Default for PlanResolverState {
@@ -105,6 +111,7 @@ impl PlanResolverState {
             config: PlanResolverStateConfig::default(),
             param_values: HashMap::new(),
             positional_param_values: Vec::new(),
+            lateral_aliases: Vec::new(),
         }
     }
 
@@ -225,6 +232,25 @@ impl PlanResolverState {
         }
     }
 
+    pub fn get_grouping_for_select(&self) -> &[NamedExpr] {
+        match &self.aggregate_state {
+            AggregateState::SelectWithGrouping { grouping } => grouping.as_ref(),
+            _ => &[],
+        }
+    }
+
+    pub fn get_lateral_aliases(&self) -> &[NamedExpr] {
+        &self.lateral_aliases
+    }
+
+    pub fn push_lateral_alias(&mut self, named_expr: NamedExpr) {
+        self.lateral_aliases.push(named_expr);
+    }
+
+    pub fn enter_lateral_alias_scope(&mut self) -> LateralAliasScope<'_> {
+        LateralAliasScope::new(self)
+    }
+
     pub fn enter_query_scope(&mut self, schema: DFSchemaRef) -> QueryScope<'_> {
         QueryScope::new(self, schema)
     }
@@ -302,6 +328,32 @@ impl PlanResolverState {
         positional: Vec<ScalarValue>,
     ) -> ParamValuesScope<'_> {
         ParamValuesScope::new(self, named, positional)
+    }
+}
+
+/// Scope for lateral column aliases accumulated while resolving SELECT expressions.
+pub(crate) struct LateralAliasScope<'a> {
+    state: &'a mut PlanResolverState,
+    previous_len: usize,
+}
+
+impl<'a> LateralAliasScope<'a> {
+    fn new(state: &'a mut PlanResolverState) -> Self {
+        let previous_len = state.lateral_aliases.len();
+        Self {
+            state,
+            previous_len,
+        }
+    }
+
+    pub(crate) fn state(&mut self) -> &mut PlanResolverState {
+        self.state
+    }
+}
+
+impl Drop for LateralAliasScope<'_> {
+    fn drop(&mut self) {
+        self.state.lateral_aliases.truncate(self.previous_len);
     }
 }
 

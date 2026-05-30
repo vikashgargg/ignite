@@ -356,6 +356,28 @@ impl PlanResolver<'_> {
         Ok(results)
     }
 
+    /// Resolves named expressions with lateral alias support.
+    /// Each resolved expression is added as a lateral alias so later expressions
+    /// in the same list can reference aliases defined earlier.
+    pub(super) async fn resolve_named_expressions_lateral(
+        &self,
+        expressions: Vec<spec::Expr>,
+        schema: &DFSchemaRef,
+        state: &mut PlanResolverState,
+    ) -> PlanResult<Vec<NamedExpr>> {
+        let mut scope = state.enter_lateral_alias_scope();
+        let state = scope.state();
+        let mut results: Vec<NamedExpr> = Vec::with_capacity(expressions.len());
+        for expression in expressions {
+            let named_expr = self
+                .resolve_named_expression(expression, schema, state)
+                .await?;
+            state.push_lateral_alias(named_expr.clone());
+            results.push(named_expr);
+        }
+        Ok(results)
+    }
+
     pub(super) async fn resolve_expression(
         &self,
         expressions: spec::Expr,

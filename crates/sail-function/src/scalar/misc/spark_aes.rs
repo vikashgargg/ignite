@@ -3,7 +3,7 @@ use std::fmt;
 
 use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::consts::U12;
-use aes::cipher::{BlockEncryptMut, KeyIvInit};
+use aes::cipher::{BlockDecrypt, BlockEncrypt, BlockEncryptMut, KeyInit as BlockKeyInit, KeyIvInit};
 use aes::{Aes128, Aes192, Aes256};
 use aes_gcm::aead::rand_core::{OsRng, RngCore};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
@@ -19,13 +19,11 @@ use datafusion_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signatur
 
 pub type Aes192Gcm = AesGcm<Aes192, U12>;
 
-/// ECB mode is not supported because it is insecure.
-/// We swap ECB for CBC because CBC builds on the foundational block encryption operation that ECB uses
-/// and adds important security improvements through its chaining mechanism.
 pub fn encryption_name_to_mode(mode: &str) -> Result<EncryptionMode> {
     match mode.trim().to_uppercase().as_str() {
         "" | "GCM" => Ok(EncryptionMode::GCM),
-        "CBC" | "ECB" => Ok(EncryptionMode::CBC),
+        "CBC" => Ok(EncryptionMode::CBC),
+        "ECB" => Ok(EncryptionMode::ECB),
         other => Err(DataFusionError::Plan(format!(
             "Invalid encryption mode, must be one of 'GCM', 'CBC', or 'ECB'. Got {other}"
         ))),
@@ -44,7 +42,92 @@ pub fn generate_iv(mode: &EncryptionMode) -> Vec<u8> {
             OsRng.fill_bytes(&mut iv);
             iv.to_vec()
         }
+        EncryptionMode::ECB => vec![],
     }
+}
+
+fn ecb_decrypt_pkcs7(ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+    use aes::cipher::generic_array::GenericArray;
+    if ciphertext.len() % 16 != 0 || ciphertext.is_empty() {
+        return exec_err!("Spark `aes_decrypt`: ECB ciphertext length must be a multiple of 16");
+    }
+    let mut buf = ciphertext.to_vec();
+    match key.len() {
+        16 => {
+            let cipher = <Aes128 as BlockKeyInit>::new_from_slice(key)
+                .map_err(|e| exec_datafusion_err!("Spark `aes_decrypt`: ECB key error: {e}"))?;
+            for block in buf.chunks_mut(16) {
+                cipher.decrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+        24 => {
+            let cipher = <Aes192 as BlockKeyInit>::new_from_slice(key)
+                .map_err(|e| exec_datafusion_err!("Spark `aes_decrypt`: ECB key error: {e}"))?;
+            for block in buf.chunks_mut(16) {
+                cipher.decrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+        32 => {
+            let cipher = <Aes256 as BlockKeyInit>::new_from_slice(key)
+                .map_err(|e| exec_datafusion_err!("Spark `aes_decrypt`: ECB key error: {e}"))?;
+            for block in buf.chunks_mut(16) {
+                cipher.decrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+        other => {
+            return exec_err!(
+                "Spark `aes_decrypt`: Key length must be 16, 24, or 32 bytes, got {other}"
+            )
+        }
+    }
+    // Remove PKCS7 padding
+    let pad_len = *buf.last().ok_or_else(|| {
+        exec_datafusion_err!("Spark `aes_decrypt`: ECB empty plaintext after decrypt")
+    })? as usize;
+    if pad_len == 0 || pad_len > 16 {
+        return exec_err!("Spark `aes_decrypt`: ECB invalid PKCS7 padding byte: {pad_len}");
+    }
+    let new_len = buf.len().checked_sub(pad_len).ok_or_else(|| {
+        exec_datafusion_err!("Spark `aes_decrypt`: ECB padding exceeds buffer length")
+    })?;
+    buf.truncate(new_len);
+    Ok(buf)
+}
+
+fn ecb_encrypt_pkcs7(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+    use aes::cipher::generic_array::GenericArray;
+    let pad_len = 16 - (plaintext.len() % 16);
+    let mut buf = plaintext.to_vec();
+    buf.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+    match key.len() {
+        16 => {
+            let cipher = <Aes128 as BlockKeyInit>::new_from_slice(key)
+                .map_err(|e| exec_datafusion_err!("Spark `aes_encrypt`: ECB key error: {e}"))?;
+            for block in buf.chunks_mut(16) {
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+        24 => {
+            let cipher = <Aes192 as BlockKeyInit>::new_from_slice(key)
+                .map_err(|e| exec_datafusion_err!("Spark `aes_encrypt`: ECB key error: {e}"))?;
+            for block in buf.chunks_mut(16) {
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+        32 => {
+            let cipher = <Aes256 as BlockKeyInit>::new_from_slice(key)
+                .map_err(|e| exec_datafusion_err!("Spark `aes_encrypt`: ECB key error: {e}"))?;
+            for block in buf.chunks_mut(16) {
+                cipher.encrypt_block(GenericArray::from_mut_slice(block));
+            }
+        }
+        other => {
+            return exec_err!(
+                "Spark `aes_encrypt`: Key length must be 16, 24, or 32 bytes, got {other}"
+            )
+        }
+    }
+    Ok(buf)
 }
 
 #[expect(clippy::upper_case_acronyms)]
@@ -52,6 +135,7 @@ pub fn generate_iv(mode: &EncryptionMode) -> Vec<u8> {
 pub enum EncryptionMode {
     GCM,
     CBC,
+    ECB,
 }
 
 impl fmt::Display for EncryptionMode {
@@ -59,6 +143,7 @@ impl fmt::Display for EncryptionMode {
         match self {
             EncryptionMode::GCM => write!(f, "GCM"),
             EncryptionMode::CBC => write!(f, "CBC"),
+            EncryptionMode::ECB => write!(f, "ECB"),
         }
     }
 }
@@ -375,6 +460,7 @@ impl ScalarUDFImpl for SparkAESEncrypt {
                         Ok(Some(iv.to_vec()))
                     }
                 }
+                EncryptionMode::ECB => Ok(None),
             }
         } else {
             Ok(Some(generate_iv(&mode)))
@@ -533,6 +619,7 @@ impl ScalarUDFImpl for SparkAESEncrypt {
                 ciphertext.extend_from_slice(&result);
                 Ok(ciphertext)
             }
+            EncryptionMode::ECB => Ok(ecb_encrypt_pkcs7(expr, key)?),
         }?;
 
         Ok(ColumnarValue::Scalar(ScalarValue::Binary(Some(ciphertext))))
@@ -919,6 +1006,9 @@ impl ScalarUDFImpl for SparkAESDecrypt {
                     ),
                 }?;
                 Ok(decrypted)
+            }
+            EncryptionMode::ECB => {
+                Ok(ecb_decrypt_pkcs7(expr, key)?)
             }
         }?;
 

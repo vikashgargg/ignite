@@ -382,7 +382,6 @@ impl Keyword {
             Self::Analyze
                 | Self::Cluster
                 | Self::Distribute
-                | Self::End
                 | Self::Except
                 | Self::Explain
                 | Self::Fetch

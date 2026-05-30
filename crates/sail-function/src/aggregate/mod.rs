@@ -85,6 +85,7 @@ pub mod percentile_disc;
 pub mod percentile_disc_groups;
 pub mod product;
 pub mod schema_of_variant_agg;
+pub mod sketch;
 pub mod skewness;
 pub mod try_avg;
 pub mod utils;

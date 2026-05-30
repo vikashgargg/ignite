@@ -74,7 +74,76 @@ fn build_like_expr(input: ScalarFunctionInput, case_insensitive: bool) -> PlanRe
     }
 }
 
+/// Translate Java-style regex escapes to Rust-compatible ones.
+/// Java allows `\U`, `\L`, `\Q...\E`, etc. that Rust's regex crate rejects.
+fn normalize_java_regex(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut result = String::with_capacity(pattern.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            let next = chars[i + 1];
+            if next == 'Q' {
+                // \Q...\E: quote the enclosed text as literal
+                i += 2;
+                while i < chars.len() {
+                    if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1] == 'E' {
+                        i += 2;
+                        break;
+                    }
+                    if r"\.[]{}()+*?|^$".contains(chars[i]) {
+                        result.push('\\');
+                    }
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                continue;
+            }
+            // Rust regex valid escape chars (besides metacharacters and hex/unicode)
+            let valid = matches!(
+                next,
+                'a' | 'b' | 'f' | 'n' | 'r' | 't'
+                    | 'd' | 'D' | 'h' | 'H' | 's' | 'S' | 'v' | 'V' | 'w' | 'W'
+                    | 'p' | 'P'
+                    | 'x' | 'u'
+                    | 'A' | 'z' | 'Z'
+                    | 'G' // some engines support \G
+                    | '0'..='9'
+                    | '\\' | '.' | '+' | '*' | '?' | '[' | ']' | '{' | '}' | '(' | ')' | '|'
+                    | '^' | '$' | '-' | '!'
+            );
+            if valid {
+                result.push('\\');
+                result.push(next);
+            } else {
+                // Strip backslash; keep literal char (Java behavior for unrecognized escapes)
+                result.push(next);
+            }
+            i += 2;
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+    result
+}
+
+fn normalize_regex_pattern(pattern: expr::Expr) -> expr::Expr {
+    match pattern {
+        expr::Expr::Literal(ScalarValue::Utf8(Some(ref s)), _) => {
+            let normalized = normalize_java_regex(s);
+            if normalized == *s {
+                pattern
+            } else {
+                lit(normalized)
+            }
+        }
+        other => other,
+    }
+}
+
 fn rlike(expr: expr::Expr, pattern: expr::Expr) -> expr::Expr {
+    let pattern = normalize_regex_pattern(pattern);
     expr::Expr::SimilarTo(expr::Like {
         negated: false,
         expr: Box::new(expr),

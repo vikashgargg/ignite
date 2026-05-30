@@ -12,8 +12,8 @@ use sail_sql_parser::ast::query::{
     QuerySelect, QueryTerm, SelectClause, SetOperator, SetQuantifier, SortByClause, TableFactor,
     TableFunction, TableJoin, TableModifier, TableSampleClause, TableSampleMethod,
     TableSampleRepeatable, TableWithJoins, TemporalClause, UnpivotClause, UnpivotColumnGroup,
-    UnpivotColumns, UnpivotNulls, UnpivotValueSpec, ValuesClause, WhereClause, WindowClause,
-    WithClause,
+    UnpivotColumns, UnpivotNulls, UnpivotValueSpec, ValuesClause, WatermarkModifier, WhereClause,
+    WindowClause, WithClause,
 };
 use sail_sql_parser::common::Sequence;
 
@@ -1033,6 +1033,29 @@ fn query_plan_with_table_modifier(
                 columns,
                 values,
             })))
+        }
+        TableModifier::Watermark(wm) => {
+            use sail_sql_parser::tree::TreeText;
+            let WatermarkModifier {
+                watermark: _,
+                event_time,
+                event_time_alias,
+                delay: _,
+                of: _,
+                interval_expr,
+            } = wm;
+            let event_time_str = match event_time_alias {
+                Some((_, alias)) => alias.value.into(),
+                None => event_time.text().trim().to_string(),
+            };
+            let delay_threshold = interval_expr.text().trim().to_string();
+            Ok(spec::QueryPlan::new(spec::QueryNode::WithWatermark(
+                spec::WithWatermark {
+                    input: Box::new(plan),
+                    event_time: event_time_str,
+                    delay_threshold,
+                },
+            )))
         }
         TableModifier::Unpivot(unpivot) => {
             let UnpivotClause {

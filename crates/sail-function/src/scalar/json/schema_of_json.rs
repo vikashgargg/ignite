@@ -159,11 +159,57 @@ fn schema_of_json_inner(args: &[ArrayRef]) -> Result<ArrayRef> {
 
 fn infer_json_schema_type(
     json_string: &str,
-    _options: &SparkSchemaOfJsonOptions,
+    options: &SparkSchemaOfJsonOptions,
 ) -> Result<String> {
-    let value = serde_json::from_str::<serde_json::Value>(json_string)
+    let json = if options.allow_numeric_leading_zeros {
+        strip_leading_zeros_from_numbers(json_string)
+    } else {
+        json_string.to_string()
+    };
+    let value = serde_json::from_str::<serde_json::Value>(&json)
         .map_err(|e| DataFusionError::Execution(e.to_string()))?;
     value_to_ddl_type(&value)
+}
+
+/// Strip leading zeros from integer numbers in a JSON string so serde_json can parse them.
+/// e.g., `{"col":01}` → `{"col":1}`
+fn strip_leading_zeros_from_numbers(json: &str) -> String {
+    let mut result = String::with_capacity(json.len());
+    let bytes = json.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Skip string literals to avoid modifying their content
+        if bytes[i] == b'"' {
+            result.push(bytes[i] as char);
+            i += 1;
+            while i < bytes.len() {
+                result.push(bytes[i] as char);
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 1;
+                    result.push(bytes[i] as char);
+                } else if bytes[i] == b'"' {
+                    break;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        // Detect numbers with leading zeros: 0 followed by a digit
+        if bytes[i] == b'0'
+            && i + 1 < bytes.len()
+            && bytes[i + 1].is_ascii_digit()
+        {
+            // Skip leading zeros but keep at least one digit
+            while i < bytes.len() && bytes[i] == b'0' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+                i += 1;
+            }
+            continue;
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
 }
 
 fn value_to_ddl_type(value: &Value) -> Result<String> {
@@ -221,7 +267,7 @@ impl ModeOptions {
 #[derive(Debug, Default)]
 struct SparkSchemaOfJsonOptions {
     mode: ModeOptions,
-    _allow_numeric_leading_zeros: bool,
+    allow_numeric_leading_zeros: bool,
 }
 
 impl SparkSchemaOfJsonOptions {
@@ -235,11 +281,7 @@ impl SparkSchemaOfJsonOptions {
             match key {
                 "mode" => self.mode = ModeOptions::from_str(value.to_string())?,
                 "allowNumericLeadingZeros" => {
-                    // TODO: extend serde/serde_json5 to support leading 0s
-                    return Err(DataFusionError::NotImplemented(format!(
-                        "`{}` currently doesn't support option allowNumericLeadingZeros",
-                        SparkSchemaOfJson::SCHEMA_OF_JSON_NAME,
-                    )));
+                    self.allow_numeric_leading_zeros = value.eq_ignore_ascii_case("true");
                 }
                 other => {
                     return plan_err!("Found unsupported option type when parsing options: {other}")

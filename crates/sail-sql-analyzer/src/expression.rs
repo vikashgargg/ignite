@@ -571,6 +571,7 @@ pub fn from_ast_expression(expr: Expr) -> SqlResult<spec::Expr> {
                 case_insensitive: false,
             })
         }
+        Expr::Collate(expr, _, _) => from_ast_expression(*expr),
     }
 }
 
@@ -864,6 +865,19 @@ fn from_ast_atom_expression(atom: AtomExpr) -> SqlResult<spec::Expr> {
                 order_by: None,
             }))
         }
+        AtomExpr::CurrentTime(_, _) => {
+            Ok(spec::Expr::UnresolvedFunction(spec::UnresolvedFunction {
+                function_name: spec::ObjectName::bare("current_time"),
+                arguments: vec![],
+                named_arguments: vec![],
+                is_distinct: false,
+                is_user_defined_function: false,
+                is_internal: None,
+                ignore_nulls: None,
+                filter: None,
+                order_by: None,
+            }))
+        }
         AtomExpr::TimestampLiteral(_, value) => Ok(spec::Expr::UnresolvedTimestamp {
             value: from_ast_string(value)?,
             timestamp_type: spec::TimestampType::Configured,
@@ -899,6 +913,23 @@ fn from_ast_atom_expression(atom: AtomExpr) -> SqlResult<spec::Expr> {
                 right: _,
             } = arguments;
             let function_name = from_ast_object_name(name)?;
+            // Special case: COLLATION(expr COLLATE name) → return "SYSTEM.BUILTIN.{name}" literal
+            if function_name.parts().len() == 1
+                && function_name.parts()[0].as_ref().eq_ignore_ascii_case("collation")
+            {
+                if let Some(seq) = &arguments {
+                    let items = seq.clone().into_items().collect::<Vec<_>>();
+                    if items.len() == 1 {
+                        if let FunctionArgument::Unnamed(Expr::Collate(_, _, ident)) = &items[0] {
+                            let collation_name =
+                                format!("SYSTEM.BUILTIN.{}", ident.value.to_uppercase());
+                            return Ok(spec::Expr::Literal(spec::Literal::Utf8 {
+                                value: Some(collation_name),
+                            }));
+                        }
+                    }
+                }
+            }
             let (arguments, named_arguments) = arguments
                 .map(|x| from_ast_function_arguments(x.into_items()))
                 .transpose()?

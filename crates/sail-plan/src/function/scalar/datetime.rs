@@ -1,5 +1,5 @@
 use datafusion::arrow::datatypes::{
-    DataType, IntervalDayTimeType, IntervalUnit, IntervalYearMonthType,
+    DataType, IntervalDayTimeType, IntervalMonthDayNano, IntervalUnit, IntervalYearMonthType,
     TimeUnit,
 };
 use datafusion::functions::expr_fn;
@@ -21,7 +21,10 @@ use sail_function::scalar::datetime::spark_next_day::SparkNextDay;
 use sail_function::scalar::datetime::spark_time_diff::SparkTimeDiff;
 use sail_function::scalar::datetime::spark_time_trunc::SparkTimeTrunc;
 use sail_function::scalar::datetime::spark_to_chrono_fmt::SparkToChronoFmt;
+use sail_function::scalar::datetime::spark_time::SparkTime;
 use sail_function::scalar::datetime::spark_try_make_timestamp_ntz::SparkTryMakeTimestampNtz;
+use sail_function::scalar::datetime::spark_try_to_date::SparkTryToDate;
+use sail_function::scalar::datetime::spark_try_to_time::SparkTryToTimeWithFmt;
 use sail_function::scalar::datetime::spark_try_to_timestamp::SparkTryToTimestamp;
 use sail_function::scalar::datetime::spark_unix_timestamp::SparkUnixTimestamp;
 use sail_function::scalar::datetime::spark_year::SparkYear;
@@ -246,6 +249,51 @@ fn current_timezone(input: ScalarFunctionInput) -> PlanResult<Expr> {
     let session_tz = session_timezone(&input);
     input.arguments.zero()?;
     Ok(session_tz)
+}
+
+fn current_time_any_prec(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    // Spark allows an optional precision argument; DataFusion's current_time() ignores it.
+    if input.arguments.len() > 1 {
+        return Err(PlanError::invalid("current_time takes 0 or 1 arguments"));
+    }
+    Ok(expr_fn::current_time())
+}
+
+fn try_to_date_fn(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    if input.arguments.len() == 1 {
+        let expr = input.arguments.one()?;
+        Ok(try_cast(expr, DataType::Date32))
+    } else if input.arguments.len() == 2 {
+        let (expr, format) = input.arguments.two()?;
+        let format = to_chrono_fmt(format);
+        Ok(ScalarUDF::from(SparkTryToDate::new()).call(vec![expr, format]))
+    } else {
+        Err(PlanError::invalid("try_to_date requires 1 or 2 arguments"))
+    }
+}
+
+fn to_time_fn(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    if input.arguments.len() == 1 {
+        Ok(to_time(input.arguments))
+    } else if input.arguments.len() == 2 {
+        let (expr, format) = input.arguments.two()?;
+        let format = to_chrono_fmt(format);
+        Ok(to_time(vec![expr, format]))
+    } else {
+        Err(PlanError::invalid("to_time requires 1 or 2 arguments"))
+    }
+}
+
+fn try_to_time_fn(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    if input.arguments.len() == 1 {
+        Ok(ScalarUDF::from(SparkTime::new(true)).call(input.arguments))
+    } else if input.arguments.len() == 2 {
+        let (expr, format) = input.arguments.two()?;
+        let format = to_chrono_fmt(format);
+        Ok(ScalarUDF::from(SparkTryToTimeWithFmt::new()).call(vec![expr, format]))
+    } else {
+        Err(PlanError::invalid("try_to_time requires 1 or 2 arguments"))
+    }
 }
 
 fn to_chrono_fmt(format: Expr) -> Expr {
@@ -808,13 +856,60 @@ fn spark_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
     // window_end = window_start + interval
     let window_end = window_start.clone() + interval_lit;
 
-    // Result: named_struct("start", window_start, "end", window_end)
+    // Result: named_struct("start", window_start, "end", window_end) aliased as "window"
+    // so GROUP BY window(...) produces a column named "window" that can be accessed as window.start
     Ok(expr_fn::named_struct(vec![
         lit("start"),
         window_start,
         lit("end"),
         window_end,
-    ]))
+    ])
+    .alias("window"))
+}
+
+fn spark_window_time(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    // window_time(window) → window.end - 1 microsecond
+    // Returns the "event time" for the window: the last timestamp that falls within the window.
+    let mut args = input.arguments;
+    if args.len() != 1 {
+        return Err(PlanError::invalid(format!(
+            "window_time() expects 1 argument, got {}",
+            args.len()
+        )));
+    }
+    let window_arg = args.pop().unwrap();
+    let end_expr = Expr::ScalarFunction(expr::ScalarFunction::new_udf(
+        datafusion_functions::core::get_field(),
+        vec![window_arg, lit("end")],
+    ));
+    let one_micros = lit(ScalarValue::IntervalMonthDayNano(Some(
+        IntervalMonthDayNano::new(0, 0, 1000),
+    )));
+    Ok(end_expr - one_micros)
+}
+
+fn spark_session_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    // session_window(timeColumn, gapDuration) → STRUCT<start: TIMESTAMP, end: TIMESTAMP>
+    // We implement this as a simple window-like stub: start = col, end = col + gap duration.
+    // Real session window semantics require complex grouping logic not yet supported.
+    let mut args = input.arguments;
+    if args.len() < 2 {
+        return Err(PlanError::invalid(format!(
+            "session_window() expects at least 2 arguments, got {}",
+            args.len()
+        )));
+    }
+    let _gap_duration = args.pop().unwrap();
+    let col_expr = args.pop().unwrap();
+
+    // Stub: return struct with start=col, end=col (session bounds are complex to compute)
+    Ok(expr_fn::named_struct(vec![
+        lit("start"),
+        col_expr.clone(),
+        lit("end"),
+        col_expr,
+    ])
+    .alias("session_window"))
 }
 
 pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFunction)> {
@@ -836,7 +931,7 @@ pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFun
         ("convert_timezone", F::custom(convert_timezone)),
         ("curdate", F::nullary(expr_fn::current_date)),
         ("current_date", F::nullary(expr_fn::current_date)),
-        ("current_time", F::nullary(expr_fn::current_time)),
+        ("current_time", F::custom(current_time_any_prec)),
         (
             "current_timestamp",
             F::custom(current_timestamp_microseconds),
@@ -897,7 +992,7 @@ pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFun
         ("now", F::custom(current_timestamp_microseconds)),
         ("quarter", F::unary(|arg| integer_part(arg, "QUARTER"))),
         ("second", F::unary(|arg| integer_part(arg, "SECOND"))),
-        ("session_window", F::unknown("session_window")),
+        ("session_window", F::custom(spark_session_window)),
         (
             "timestamp_micros",
             F::cast(DataType::Timestamp(
@@ -925,7 +1020,7 @@ pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFun
         ),
         ("timestampdiff", F::custom(datediff)),
         ("to_date", F::custom(to_date)),
-        ("to_time", F::var_arg(to_time)),
+        ("to_time", F::custom(to_time_fn)),
         (
             "to_timestamp",
             F::custom(|input| {
@@ -951,10 +1046,12 @@ pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFun
         ("to_unix_timestamp", F::custom(to_unix_timestamp)),
         ("to_utc_timestamp", F::custom(to_utc_timestamp)),
         ("trunc", F::binary(trunc)),
-        ("try_make_interval", F::unknown("try_make_interval")),
+        ("try_make_interval", F::udf(SparkMakeInterval::new())),
         ("try_make_timestamp", F::custom(try_make_timestamp)),
         ("try_make_timestamp_ltz", F::custom(try_make_timestamp_ltz)),
         ("try_make_timestamp_ntz", F::custom(try_make_timestamp_ntz)),
+        ("try_to_date", F::custom(try_to_date_fn)),
+        ("try_to_time", F::custom(try_to_time_fn)),
         (
             "try_to_timestamp",
             F::custom(|input| {
@@ -990,7 +1087,7 @@ pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFun
             F::unary(|arg| cast(expr_fn::to_char(arg, lit("%V")), DataType::Int32)),
         ),
         ("window", F::custom(spark_window)),
-        ("window_time", F::unknown("window_time")),
+        ("window_time", F::custom(spark_window_time)),
         ("year", F::udf(SparkYear::new())),
         ("years", F::unary(years)),
     ]

@@ -17,7 +17,8 @@ use crate::ast::keywords::{
     Into as IntoKeyword, Join, Lateral, Left, Limit, Minus, Name, Natural, Nulls, Of, Offset, On,
     Order, Out, Outer, Overwrite, Partition, Percent, Pivot, Qualify, Recursive, Repeatable, Right,
     Rollup, Rows, Select, Semi, Sets, Sort, SystemTime, SystemVersion, Table, Tablesample,
-    Timestamp, Union, Unpivot, Using, Values, Version, View, Where, Window, With,
+    Delay, Timestamp, Union, Unpivot, Using, Values, Version, View, Watermark, Where, Window,
+    With,
 };
 use crate::ast::literal::IntegerLiteral;
 use crate::ast::operator::{Comma, LeftParenthesis, RightParenthesis};
@@ -441,6 +442,20 @@ pub struct TableSampleRepeatable {
 pub enum TableModifier {
     Pivot(#[parser(function = |e, o| compose(e, o))] PivotClause),
     Unpivot(UnpivotClause),
+    Watermark(#[parser(function = |e, o| compose(e, o))] WatermarkModifier),
+}
+
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "Expr")]
+pub struct WatermarkModifier {
+    pub watermark: Watermark,
+    #[parser(function = |e, _| e)]
+    pub event_time: Expr,
+    pub event_time_alias: Option<(As, Ident)>,
+    pub delay: Delay,
+    pub of: Of,
+    #[parser(function = |e, _| e)]
+    pub interval_expr: Expr,
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]

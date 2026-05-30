@@ -106,7 +106,12 @@ where
     E::Error: LabelError<'a, I, TokenLabel>,
 {
     fn matcher(keyword: &Option<Keyword>) -> bool {
-        !keyword.is_some_and(|k| k.is_reserved_in_ansi_mode() || k.is_reserved_for_column_alias())
+        !keyword.is_some_and(|k| {
+            // Allow END as column alias (e.g. "window.end as end") even though it's ANSI reserved.
+            // END is safe to allow here because aliases follow "AS" or appear at end of SELECT items.
+            let is_ansi_reserved = k.is_reserved_in_ansi_mode() && k != Keyword::End;
+            is_ansi_reserved || k.is_reserved_for_column_alias()
+        })
     }
 
     custom(move |input| parse_identifier(input, matcher, options))

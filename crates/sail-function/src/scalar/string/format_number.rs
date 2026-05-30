@@ -226,7 +226,7 @@ fn format_with_per_row_pattern(
 }
 
 /// Extracts an f64 value from a ScalarValue.
-fn scalar_to_f64(scalar: &ScalarValue) -> Result<Option<f64>> {
+pub fn scalar_to_f64(scalar: &ScalarValue) -> Result<Option<f64>> {
     match scalar {
         ScalarValue::Float64(v) => Ok(*v),
         ScalarValue::Float32(v) => Ok(v.map(|x| x as f64)),
@@ -259,7 +259,7 @@ fn scalar_to_f64(scalar: &ScalarValue) -> Result<Option<f64>> {
 }
 
 /// Casts an Arrow array to Float64Array using Arrow's cast kernel.
-fn cast_arrow_array_to_f64(arr: &ArrayRef) -> Result<Float64Array> {
+pub fn cast_arrow_array_to_f64(arr: &ArrayRef) -> Result<Float64Array> {
     let casted = datafusion::arrow::compute::cast(arr, &DataType::Float64)?;
     let f64_arr = as_float64_array(&casted)?;
     Ok(f64_arr.clone())

@@ -10,8 +10,8 @@ use sail_sql_macro::{TreeParser, TreeSyntax, TreeText};
 use crate::ast::data_type::{DataType, IntervalDayTimeUnit, IntervalYearMonthUnit};
 use crate::ast::identifier::{Ident, ObjectName, Variable};
 use crate::ast::keywords::{
-    All, And, Any, As, Asc, Between, Both, By, Case, Cast, Cube, Current, CurrentDate,
-    CurrentTimestamp, CurrentUser, Date, Day, Days, Desc, Distinct, Div, Else, End, Escape, Exists,
+    All, And, Any, As, Asc, Between, Both, By, Case, Cast, Collate, Cube, Current, CurrentDate,
+    CurrentTime, CurrentTimestamp, CurrentUser, Date, Day, Days, Desc, Distinct, Div, Else, End, Escape, Exists,
     Extract, False, Filter, First, Following, For, From, Group, Grouping, Groups, Hour, Hours, Identifier,
     Ignore, Ilike, In, Interval, Is, Last, Leading, Like, Microsecond, Microseconds, Millisecond,
     Milliseconds, Minute, Minutes, Month, Months, Not, Null, Nulls, Or, Order, Over, Overlay,
@@ -20,7 +20,7 @@ use crate::ast::keywords::{
     Then, Time, Timestamp, TimestampLtz, TimestampNtz, To, Trailing, Trim, True, TryCast,
     Unbounded, Unknown, Week, Weeks, When, Where, With, Within, Year, Years,
 };
-use crate::ast::literal::{NumberLiteral, StringLiteral};
+use crate::ast::literal::{IntegerLiteral, NumberLiteral, StringLiteral};
 use crate::ast::operator;
 use crate::ast::operator::{
     Comma, DoubleColon, LeftBracket, LeftParenthesis, Period, RightBracket, RightParenthesis,
@@ -94,6 +94,7 @@ pub enum Expr {
         Box<Expr>,
         Option<PatternEscape>,
     ),
+    Collate(Box<Expr>, Collate, Ident),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
@@ -217,6 +218,15 @@ pub enum AtomExpr {
         Option<(LeftParenthesis, RightParenthesis)>,
     ),
     CurrentDate(CurrentDate, Option<(LeftParenthesis, RightParenthesis)>),
+    CurrentTime(
+        CurrentTime,
+        #[parser(function = |(e, _, _), o|
+            unit(o).then(boxed(e).or_not()).then(unit(o))
+                .map(|((l, expr), r)| (l, expr, r))
+                .or_not()
+        )]
+        Option<(LeftParenthesis, Option<Box<Expr>>, RightParenthesis)>,
+    ),
     IdentifierClause(
         Identifier,
         LeftParenthesis,
@@ -692,6 +702,7 @@ enum ExprModifier {
         RightBracket,
     ),
     Cast(DoubleColon, #[parser(function = |(_, d), _| d)] DataType),
+    Collate(Collate, Ident),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
@@ -807,6 +818,7 @@ where
                         Ok(Expr::Subscript(Box::new(expr), x1, Box::new(x2), x3))
                     }
                     ExprModifier::Cast(x1, x2) => Ok(Expr::Cast(Box::new(expr), x1, x2)),
+                    ExprModifier::Collate(x1, x2) => Ok(Expr::Collate(Box::new(expr), x1, x2)),
                 }
             }
             ExprFragment::PostfixPredicate { expr, predicate } => {

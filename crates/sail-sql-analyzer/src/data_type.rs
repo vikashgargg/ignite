@@ -177,7 +177,7 @@ pub fn from_ast_data_type(sql_type: DataType) -> SqlResult<spec::DataType> {
                 timestamp_type: spec::TimestampType::WithLocalTimeZone,
             })
         }
-        DataType::Time(_, precision) => {
+        DataType::Time(_, precision, _) => {
             let time_unit = from_ast_time_precision(precision)?;
             match time_unit {
                 spec::TimeUnit::Second | spec::TimeUnit::Millisecond => {

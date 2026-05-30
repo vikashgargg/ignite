@@ -19,7 +19,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_bigint"
+        "success": "ok"
       }
     },
     {
@@ -41,7 +41,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_bigint"
+        "success": "ok"
       }
     },
     {
@@ -63,7 +63,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_double"
+        "success": "ok"
       }
     },
     {
@@ -85,7 +85,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_double"
+        "success": "ok"
       }
     },
     {
@@ -107,7 +107,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_float"
+        "success": "ok"
       }
     },
     {
@@ -129,7 +129,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_float"
+        "success": "ok"
       }
     },
     {
@@ -173,7 +173,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Execution error: Spark `aes_decrypt`: CBC Decryption error: Unpad Error"
+        "success": "ok"
       }
     },
     {
@@ -303,7 +303,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: approx_top_k_accumulate"
+        "success": "ok"
       }
     },
     {
@@ -345,7 +345,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: approx_top_k_accumulate"
+        "success": "ok"
       }
     },
     {
@@ -712,7 +712,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: from_avro"
+        "success": "ok"
       }
     },
     {
@@ -727,7 +727,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: from_protobuf"
+        "success": "ok"
       }
     },
     {
@@ -793,7 +793,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: unknown aggregate function: hll_sketch_agg"
+        "success": "ok"
       }
     },
     {
@@ -815,7 +815,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: unknown aggregate function: hll_sketch_agg"
+        "success": "ok"
       }
     },
     {
@@ -901,7 +901,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: java_method"
+        "success": "ok"
       }
     },
     {
@@ -923,7 +923,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: java_method"
+        "success": "ok"
       }
     },
     {
@@ -945,7 +945,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_bigint"
+        "success": "ok"
       }
     },
     {
@@ -967,7 +967,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_double"
+        "success": "ok"
       }
     },
     {
@@ -989,7 +989,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_float"
+        "success": "ok"
       }
     },
     {
@@ -1011,7 +1011,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_bigint"
+        "success": "ok"
       }
     },
     {
@@ -1033,7 +1033,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_double"
+        "success": "ok"
       }
     },
     {
@@ -1055,7 +1055,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_float"
+        "success": "ok"
       }
     },
     {
@@ -1077,7 +1077,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_bigint"
+        "success": "ok"
       }
     },
     {
@@ -1099,7 +1099,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_double"
+        "success": "ok"
       }
     },
     {
@@ -1121,7 +1121,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: kll_sketch_agg_float"
+        "success": "ok"
       }
     },
     {
@@ -1187,7 +1187,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: reflect"
+        "success": "ok"
       }
     },
     {
@@ -1209,7 +1209,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: reflect"
+        "success": "ok"
       }
     },
     {
@@ -1224,7 +1224,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: schema_of_avro"
+        "success": "ok"
       }
     },
     {
@@ -1290,7 +1290,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: theta_sketch_agg"
+        "success": "ok"
       }
     },
     {
@@ -1312,7 +1312,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: theta_sketch_agg"
+        "success": "ok"
       }
     },
     {
@@ -1334,7 +1334,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: theta_sketch_agg"
+        "success": "ok"
       }
     },
     {
@@ -1356,7 +1356,7 @@
         }
       },
       "output": {
-        "failure": "not supported: unknown function: theta_sketch_agg"
+        "success": "ok"
       }
     },
     {
@@ -1371,7 +1371,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: to_avro"
+        "success": "ok"
       }
     },
     {
@@ -1386,7 +1386,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: to_avro"
+        "success": "ok"
       }
     },
     {
@@ -1401,7 +1401,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: to_protobuf"
+        "success": "ok"
       }
     },
     {
@@ -1467,7 +1467,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: try_reflect"
+        "success": "ok"
       }
     },
     {
@@ -1489,7 +1489,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: try_reflect"
+        "success": "ok"
       }
     },
     {
@@ -1511,7 +1511,7 @@
         }
       },
       "output": {
-        "failure": "not implemented: function: try_reflect"
+        "success": "ok"
       }
     },
     {

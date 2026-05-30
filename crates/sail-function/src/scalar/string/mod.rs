@@ -1,5 +1,6 @@
 pub mod decimal_format;
 pub mod format_number;
+pub mod spark_binary_pad;
 pub mod levenshtein;
 pub mod make_valid_utf8;
 pub mod randstr;
@@ -13,4 +14,5 @@ pub mod spark_regexp_extract_all;
 pub mod spark_sentences;
 pub mod spark_split;
 pub mod spark_to_binary;
+pub mod spark_to_char;
 pub mod spark_to_number;

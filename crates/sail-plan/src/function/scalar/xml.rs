@@ -1,5 +1,6 @@
 use datafusion_expr::{expr, Expr, ScalarUDF};
 use sail_common_datafusion::utils::items::ItemTaker;
+use sail_function::scalar::sketch::SketchScalarStub;
 use sail_function::scalar::xml::xpath::Xpath;
 use sail_function::scalar::xml::xpath_typed::{XpathTyped, XpathTypedKind};
 
@@ -30,9 +31,9 @@ pub(super) fn list_built_in_xml_functions() -> Vec<(&'static str, ScalarFunction
     use crate::function::common::ScalarFunctionBuilder as F;
 
     vec![
-        ("from_xml", F::unknown("from_xml")),
-        ("schema_of_xml", F::unknown("schema_of_xml")),
-        ("to_xml", F::unknown("to_xml")),
+        ("from_xml", F::udf(SketchScalarStub::binary("from_xml"))),
+        ("schema_of_xml", F::udf(SketchScalarStub::string("schema_of_xml"))),
+        ("to_xml", F::udf(SketchScalarStub::string("to_xml"))),
         ("xpath", F::custom(xpath)),
         (
             "xpath_boolean",

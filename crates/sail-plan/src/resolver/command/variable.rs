@@ -1,5 +1,5 @@
 #[expect(clippy::disallowed_types)]
-use datafusion_expr::{LogicalPlan, SetVariable, Statement};
+use datafusion_expr::{EmptyRelation, LogicalPlan, SetVariable, Statement};
 
 use crate::error::PlanResult;
 use crate::resolver::PlanResolver;
@@ -17,6 +17,14 @@ impl PlanResolver<'_> {
         } else {
             variable
         };
+        // For spark.* keys, DataFusion's config system would error on unknown namespaces.
+        // We silently accept and ignore these (Spark stores them for user-level access).
+        if variable.starts_with("spark.") {
+            return Ok(LogicalPlan::EmptyRelation(EmptyRelation {
+                produce_one_row: false,
+                schema: std::sync::Arc::new(datafusion_common::DFSchema::empty()),
+            }));
+        }
         let statement = Statement::SetVariable(SetVariable { variable, value });
 
         Ok(LogicalPlan::Statement(statement))

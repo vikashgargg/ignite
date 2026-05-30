@@ -4,7 +4,7 @@ use datafusion::functions::regex::expr_fn as regex_fn;
 use datafusion::functions::regex::regexpcount::RegexpCountFunc;
 use datafusion::functions::regex::regexpinstr::RegexpInstrFunc;
 use datafusion_common::{DFSchema, ScalarValue};
-use datafusion_expr::{cast, expr, lit, try_cast, when, ExprSchemable};
+use datafusion_expr::{cast, expr, lit, try_cast, when, BinaryExpr, ExprSchemable, Operator};
 use datafusion_functions_nested::expr_fn::array_element;
 use datafusion_spark::function::string::elt::SparkElt;
 use datafusion_spark::function::string::expr_fn as string_fn;
@@ -23,8 +23,13 @@ use sail_function::scalar::string::spark_quote::SparkQuote;
 use sail_function::scalar::string::spark_regexp_extract_all::SparkRegexpExtractAll;
 use sail_function::scalar::string::spark_sentences::SparkSentences;
 use sail_function::scalar::string::spark_split::SparkSplit;
+use sail_function::scalar::string::spark_binary_pad::{SparkBinaryLpad, SparkBinaryRpad};
 use sail_function::scalar::string::spark_to_binary::{SparkToBinary, SparkTryToBinary};
+use sail_function::scalar::string::spark_to_char::SparkToCharNumber;
 use sail_function::scalar::string::spark_to_number::SparkToNumber;
+use datafusion_expr::ScalarUDF;
+use datafusion_spark::function::math::hex::SparkHex;
+use sail_function::scalar::datetime::spark_to_chrono_fmt::SparkToChronoFmt;
 
 use crate::error::{PlanError, PlanResult};
 use crate::function::common::{ScalarFunction, ScalarFunctionInput};
@@ -255,6 +260,193 @@ fn rev_args(
     move |args: Vec<expr::Expr>| func(args.into_iter().rev().collect())
 }
 
+// Oracle-style DECODE(expr, s1, r1 [, s2, r2 ...] [, default])
+// Uses NULL-safe equality (IS NOT DISTINCT FROM) so NULL matches NULL.
+// Falls back to charset decode (binary, charset) when called with exactly 2 args.
+fn decode_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::ScalarFunctionBuilder as F;
+    let ScalarFunctionInput {
+        arguments,
+        function_context,
+    } = input;
+    if arguments.len() == 2 {
+        // charset decode(binary, charset)
+        let udf = F::udf(SparkDecode::new());
+        return udf(ScalarFunctionInput {
+            arguments,
+            function_context,
+        });
+    }
+    if arguments.len() < 3 {
+        return Err(PlanError::invalid(
+            "decode requires at least 3 arguments for Oracle-style DECODE",
+        ));
+    }
+    let mut iter = arguments.into_iter();
+    let subject = iter.next().unwrap();
+    let remaining: Vec<expr::Expr> = iter.collect();
+    // Even total remaining → odd pairs → last is default; odd total → even pairs → NULL default
+    let has_default = remaining.len() % 2 == 1;
+    let pairs_end = if has_default {
+        remaining.len() - 1
+    } else {
+        remaining.len()
+    };
+    let default_expr = if has_default {
+        remaining[remaining.len() - 1].clone()
+    } else {
+        lit(ScalarValue::Null)
+    };
+    let pairs: Vec<_> = remaining[..pairs_end].chunks(2).collect();
+    if pairs.is_empty() {
+        return Ok(default_expr);
+    }
+    let mut builder = {
+        let search = pairs[0][0].clone();
+        let result = pairs[0][1].clone();
+        let cond = expr::Expr::BinaryExpr(BinaryExpr {
+            left: Box::new(subject.clone()),
+            op: Operator::IsNotDistinctFrom,
+            right: Box::new(search),
+        });
+        when(cond, result)
+    };
+    for chunk in &pairs[1..] {
+        let search = chunk[0].clone();
+        let result = chunk[1].clone();
+        let cond = expr::Expr::BinaryExpr(BinaryExpr {
+            left: Box::new(subject.clone()),
+            op: Operator::IsNotDistinctFrom,
+            right: Box::new(search),
+        });
+        builder = builder.when(cond, result);
+    }
+    builder
+        .otherwise(default_expr)
+        .map_err(|e| PlanError::internal(e.to_string()))
+}
+
+fn is_binary_type(t: &DataType) -> bool {
+    matches!(
+        t,
+        DataType::Binary | DataType::LargeBinary | DataType::BinaryView | DataType::FixedSizeBinary(_)
+    )
+}
+
+// lpad dispatch: binary first arg → SparkBinaryLpad, string first arg → DataFusion lpad.
+fn lpad_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::ScalarFunctionBuilder as F;
+    let first_type = input
+        .arguments
+        .first()
+        .and_then(|e| e.get_type(input.function_context.schema).ok());
+    if first_type.as_ref().map(is_binary_type).unwrap_or(false) {
+        F::udf(SparkBinaryLpad::new())(input)
+    } else {
+        F::var_arg(expr_fn::lpad)(input)
+    }
+}
+
+// rpad dispatch: binary first arg → SparkBinaryRpad, string first arg → DataFusion rpad.
+fn rpad_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::ScalarFunctionBuilder as F;
+    let first_type = input
+        .arguments
+        .first()
+        .and_then(|e| e.get_type(input.function_context.schema).ok());
+    if first_type.as_ref().map(is_binary_type).unwrap_or(false) {
+        F::udf(SparkBinaryRpad::new())(input)
+    } else {
+        F::var_arg(expr_fn::rpad)(input)
+    }
+}
+
+fn is_numeric_type(t: &DataType) -> bool {
+    matches!(
+        t,
+        DataType::Int8
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::UInt8
+            | DataType::UInt16
+            | DataType::UInt32
+            | DataType::UInt64
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Decimal128(_, _)
+            | DataType::Decimal256(_, _)
+    )
+}
+
+// to_char / to_varchar dispatch:
+// - binary arg → base64/hex/decode based on format literal
+// - numeric arg → Oracle number formatting via SparkToCharNumber
+// - date/timestamp/other → DataFusion to_char with Spark-to-chrono format conversion
+fn to_char_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::ScalarFunctionBuilder as F;
+    let schema = input.function_context.schema;
+    let first_type = input
+        .arguments
+        .first()
+        .and_then(|e| e.get_type(schema).ok());
+
+    if first_type.as_ref().map(is_binary_type).unwrap_or(false) {
+        if input.arguments.len() != 2 {
+            return Err(PlanError::invalid("to_char requires 2 arguments for binary input"));
+        }
+        let (bytes, format) = input.arguments.two()?;
+        let fmt_lower = match &format {
+            expr::Expr::Literal(ScalarValue::Utf8(Some(s)), _) => Some(s.to_lowercase()),
+            _ => None,
+        };
+        return match fmt_lower.as_deref() {
+            Some("base64") => Ok(ScalarUDF::from(SparkBase64::new()).call(vec![bytes])),
+            Some("hex") => {
+                let hex_expr = expr::Expr::ScalarFunction(expr::ScalarFunction {
+                    func: std::sync::Arc::new(ScalarUDF::from(SparkHex::new())),
+                    args: vec![bytes],
+                });
+                Ok(hex_expr)
+            }
+            _ => Ok(ScalarUDF::from(SparkDecode::new()).call(vec![bytes, format])),
+        };
+    }
+
+    if first_type.as_ref().map(is_numeric_type).unwrap_or(false) {
+        return F::udf(SparkToCharNumber::new())(input);
+    }
+
+    // Date/timestamp/string: use DataFusion's to_char with Spark format → chrono conversion
+    if input.arguments.len() != 2 {
+        return Err(PlanError::invalid("to_char requires 2 arguments"));
+    }
+    let (val_expr, format) = input.arguments.two()?;
+    let chrono_fmt = ScalarUDF::from(SparkToChronoFmt::new()).call(vec![format]);
+    Ok(expr_fn::to_char(val_expr, chrono_fmt))
+}
+
+// btrim dispatch: cast binary args to Utf8 before applying string btrim.
+fn btrim_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::ScalarFunctionBuilder as F;
+    let schema = input.function_context.schema;
+    let args: Vec<expr::Expr> = input
+        .arguments
+        .into_iter()
+        .map(|e| {
+            if e.get_type(schema).ok().as_ref().map(is_binary_type).unwrap_or(false) {
+                cast(e, DataType::Utf8)
+            } else {
+                e
+            }
+        })
+        .collect();
+    F::var_arg(expr_fn::btrim)(ScalarFunctionInput {
+        arguments: args,
+        function_context: input.function_context,
+    })
+}
+
 pub(super) fn list_built_in_string_functions() -> Vec<(&'static str, ScalarFunction)> {
     use crate::function::common::ScalarFunctionBuilder as F;
 
@@ -262,16 +454,15 @@ pub(super) fn list_built_in_string_functions() -> Vec<(&'static str, ScalarFunct
         ("ascii", F::custom(ascii)),
         ("base64", F::udf(SparkBase64::new())),
         ("bit_length", F::custom(bit_length)),
-        ("btrim", F::var_arg(expr_fn::btrim)),
+        ("btrim", F::custom(btrim_dispatch)),
         ("char", F::unary(expr_fn::chr)),
         ("char_length", F::unary(expr_fn::char_length)),
         ("character_length", F::unary(expr_fn::char_length)),
         ("chr", F::unary(expr_fn::chr)),
         ("collate", F::unknown("collate")),
-        ("collation", F::unknown("collation")),
         ("concat_ws", F::udf(SparkConcatWs::new())),
         ("contains", F::custom(contains)),
-        ("decode", F::udf(SparkDecode::new())),
+        ("decode", F::custom(decode_dispatch)),
         ("elt", F::udf(SparkElt::new())),
         ("encode", F::udf(SparkEncode::new())),
         ("endswith", F::custom(endswith)),
@@ -288,7 +479,7 @@ pub(super) fn list_built_in_string_functions() -> Vec<(&'static str, ScalarFunct
         ("levenshtein", F::udf(Levenshtein::new())),
         ("locate", F::custom(position)),
         ("lower", F::custom(lower)),
-        ("lpad", F::var_arg(expr_fn::lpad)),
+        ("lpad", F::custom(lpad_dispatch)),
         ("ltrim", F::var_arg(rev_args(expr_fn::ltrim))),
         ("luhn_check", F::unary(string_fn::luhn_check)),
         ("make_valid_utf8", F::udf(MakeValidUtf8::new())),
@@ -308,7 +499,7 @@ pub(super) fn list_built_in_string_functions() -> Vec<(&'static str, ScalarFunct
         ("repeat", F::binary(expr_fn::repeat)),
         ("replace", F::var_arg(replace)),
         ("right", F::binary(expr_fn::right)),
-        ("rpad", F::var_arg(expr_fn::rpad)),
+        ("rpad", F::custom(rpad_dispatch)),
         ("rtrim", F::var_arg(rev_args(expr_fn::rtrim))),
         ("sentences", F::udf(SparkSentences::new())),
         ("soundex", F::udf(Soundex::new())),
@@ -320,9 +511,9 @@ pub(super) fn list_built_in_string_functions() -> Vec<(&'static str, ScalarFunct
         ("substring", F::custom(substr)),
         ("substring_index", F::ternary(expr_fn::substr_index)),
         ("to_binary", F::udf(SparkToBinary::new())),
-        ("to_char", F::unknown("to_char")),
+        ("to_char", F::custom(to_char_dispatch)),
         ("to_number", F::udf(SparkToNumber::new(false))),
-        ("to_varchar", F::unknown("to_varchar")),
+        ("to_varchar", F::custom(to_char_dispatch)),
         ("translate", F::ternary(expr_fn::translate)),
         ("trim", F::var_arg(rev_args(expr_fn::trim))),
         ("try_to_binary", F::udf(SparkTryToBinary::new())),

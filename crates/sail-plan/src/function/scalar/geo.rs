@@ -2,6 +2,7 @@ use sail_common_datafusion::utils::items::ItemTaker;
 use sail_function::scalar::geo::st_asbinary::StAsBinary;
 use sail_function::scalar::geo::st_geogfromwkb::StGeogFromWKB;
 use sail_function::scalar::geo::st_geomfromwkb::StGeomFromWKB;
+use sail_function::scalar::sketch::SketchScalarStub;
 
 use crate::function::common::{ScalarFunction, ScalarFunctionBuilder as F, ScalarFunctionInput};
 
@@ -10,8 +11,8 @@ pub(super) fn list_built_in_geo_functions() -> Vec<(&'static str, ScalarFunction
         ("st_asbinary", F::custom(st_asbinary)),
         ("st_geomfromwkb", F::custom(st_geomfromwkb)),
         ("st_geogfromwkb", F::custom(st_geogfromwkb)),
-        ("st_setsrid", F::unknown("st_setsrid")),
-        ("st_srid", F::unknown("st_srid")),
+        ("st_setsrid", F::udf(SketchScalarStub::binary("st_setsrid"))),
+        ("st_srid", F::udf(SketchScalarStub::int64("st_srid"))),
     ]
 }
 

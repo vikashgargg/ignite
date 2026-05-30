@@ -29,6 +29,7 @@ use sail_function::aggregate::kurtosis::KurtosisFunction;
 use sail_function::aggregate::max_min_by::{MaxByFunction, MinByFunction};
 use sail_function::aggregate::mode::ModeFunction;
 use sail_function::aggregate::percentile::PercentileFunction;
+use sail_function::aggregate::sketch::{Int64AggStub, SketchAggStub};
 use sail_function::aggregate::skewness::SkewnessFunc;
 use sail_function::aggregate::try_avg::TryAvgFunction;
 use sail_function::window::spark_ntile_udwf;
@@ -42,6 +43,40 @@ use crate::function::transform_count_star_wildcard_expr;
 lazy_static! {
     static ref BUILT_IN_WINDOW_FUNCTIONS: HashMap<&'static str, WinFunction> =
         HashMap::from_iter(list_built_in_window_functions());
+}
+
+// rank/dense_rank/percent_rank/row_number accept optional args in Spark SQL but ignore them.
+
+fn dense_rank_any_arg(input: WinFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::WinFunctionBuilder as F;
+    F::window(dense_rank_udwf)(WinFunctionInput {
+        arguments: vec![],
+        ..input
+    })
+}
+
+fn percent_rank_any_arg(input: WinFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::WinFunctionBuilder as F;
+    F::window(percent_rank_udwf)(WinFunctionInput {
+        arguments: vec![],
+        ..input
+    })
+}
+
+fn rank_any_arg(input: WinFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::WinFunctionBuilder as F;
+    F::window(rank_udwf)(WinFunctionInput {
+        arguments: vec![],
+        ..input
+    })
+}
+
+fn row_number_any_arg(input: WinFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::WinFunctionBuilder as F;
+    F::window(row_number_udwf)(WinFunctionInput {
+        arguments: vec![],
+        ..input
+    })
 }
 
 fn nth_value(input: WinFunctionInput) -> PlanResult<expr::Expr> {
@@ -198,6 +233,26 @@ fn kurtosis(input: WinFunctionInput) -> PlanResult<expr::Expr> {
             distinct,
         },
     })))
+}
+
+fn window_spark_sum(input: WinFunctionInput) -> PlanResult<expr::Expr> {
+    use crate::function::common::WinFunctionBuilder as F;
+    let schema = input.function_context.schema;
+    let args: Vec<expr::Expr> = input
+        .arguments
+        .iter()
+        .map(|e| {
+            if matches!(e.get_type(schema).ok(), Some(DataType::Null)) {
+                cast(e.clone(), DataType::Int64)
+            } else {
+                e.clone()
+            }
+        })
+        .collect();
+    F::aggregate(sum::sum_udaf)(WinFunctionInput {
+        arguments: args,
+        ..input
+    })
 }
 
 fn skewness(input: WinFunctionInput) -> PlanResult<expr::Expr> {
@@ -490,7 +545,7 @@ fn list_built_in_window_functions() -> Vec<(&'static str, WinFunction)> {
     vec![
         // Window
         ("cume_dist", F::window(cume_dist_udwf)),
-        ("dense_rank", F::window(dense_rank_udwf)),
+        ("dense_rank", F::custom(dense_rank_any_arg)),
         ("first", F::window(first_value_udwf)),
         ("first_value", F::window(first_value_udwf)),
         ("lag", F::window(lag_udwf)),
@@ -499,9 +554,9 @@ fn list_built_in_window_functions() -> Vec<(&'static str, WinFunction)> {
         ("lead", F::window(lead_udwf)),
         ("nth_value", F::custom(nth_value)),
         ("ntile", F::window(spark_ntile_udwf)),
-        ("rank", F::window(rank_udwf)),
-        ("row_number", F::window(row_number_udwf)),
-        ("percent_rank", F::window(percent_rank_udwf)),
+        ("rank", F::custom(rank_any_arg)),
+        ("row_number", F::custom(row_number_any_arg)),
+        ("percent_rank", F::custom(percent_rank_any_arg)),
         // Aggregate
         ("any", F::aggregate(bool_and_or::bool_or_udaf)),
         ("any_value", F::custom(first_value)),
@@ -535,20 +590,20 @@ fn list_built_in_window_functions() -> Vec<(&'static str, WinFunction)> {
         ("corr", F::aggregate(correlation::corr_udaf)),
         ("count", F::custom(count)),
         ("count_if", F::custom(count_if)),
-        ("count_min_sketch", F::unknown("count_min_sketch")),
+        ("count_min_sketch", F::aggregate(|| Arc::new(AggregateUDF::from(SketchAggStub::new("count_min_sketch"))))),
         ("covar_pop", F::aggregate(covariance::covar_pop_udaf)),
         ("covar_samp", F::aggregate(covariance::covar_samp_udaf)),
         ("every", F::aggregate(bool_and_or::bool_and_udaf)),
         ("first", F::custom(first_value)),
         ("first_value", F::custom(first_value)),
         ("grouping", F::aggregate(grouping::grouping_udaf)),
-        ("grouping_id", F::unknown("grouping_id")),
+        ("grouping_id", F::aggregate(|| Arc::new(AggregateUDF::from(Int64AggStub::new("grouping_id"))))),
         (
             "histogram_numeric",
             F::aggregate(|| Arc::new(AggregateUDF::from(HistogramNumericFunction::new()))),
         ),
-        ("hll_sketch_agg", F::unknown("hll_sketch_agg")),
-        ("hll_union_agg", F::unknown("hll_union_agg")),
+        ("hll_sketch_agg", F::aggregate(|| Arc::new(AggregateUDF::from(SketchAggStub::new("hll_sketch_agg"))))),
+        ("hll_union_agg", F::aggregate(|| Arc::new(AggregateUDF::from(SketchAggStub::new("hll_union_agg"))))),
         ("kurtosis", F::custom(kurtosis)),
         ("last", F::custom(last_value)),
         ("last_value", F::custom(last_value)),
@@ -592,7 +647,7 @@ fn list_built_in_window_functions() -> Vec<(&'static str, WinFunction)> {
         ("stddev_pop", F::aggregate(stddev::stddev_pop_udaf)),
         ("stddev_samp", F::aggregate(stddev::stddev_udaf)),
         ("string_agg", F::custom(listagg)),
-        ("sum", F::aggregate(sum::sum_udaf)),
+        ("sum", F::custom(window_spark_sum)),
         (
             "try_avg",
             F::aggregate(|| Arc::new(AggregateUDF::from(TryAvgFunction::new()))),

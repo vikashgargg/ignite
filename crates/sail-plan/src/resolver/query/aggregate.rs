@@ -79,9 +79,23 @@ impl PlanResolver<'_> {
             .resolve_query_plan_with_hidden_fields(*input, state)
             .await?;
         let schema = input.schema();
-        let projections = self
-            .resolve_named_expressions(projections, schema, state)
-            .await?;
+
+        // Pre-resolve GROUP BY expressions (without aggregate scope) so that SELECT can
+        // reference GROUP BY struct columns such as `window.start` where `window` is
+        // the alias of the `window(ts, '5 minutes')` GROUP BY function call.
+        let pre_grouping = self
+            .resolve_named_expressions(grouping.clone(), schema, state)
+            .await
+            .unwrap_or_default();
+
+        let projections = {
+            let mut scope = state.enter_aggregate_scope(AggregateState::SelectWithGrouping {
+                grouping: pre_grouping,
+            });
+            let state = scope.state();
+            self.resolve_named_expressions_lateral(projections, schema, state)
+                .await?
+        };
 
         // Spark CheckAnalysis: reject non-deterministic expressions in aggregate context
         for proj in &projections {

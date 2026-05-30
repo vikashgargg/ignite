@@ -87,6 +87,7 @@ pub enum DataType {
     Time(
         Time,
         Option<(LeftParenthesis, IntegerLiteral, RightParenthesis)>,
+        Option<TimezoneType>,
     ),
     Interval(IntervalType),
     Array(

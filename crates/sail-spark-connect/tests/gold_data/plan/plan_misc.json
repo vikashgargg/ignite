@@ -450,7 +450,42 @@
     {
       "input": "-- single comment\\\nwith line continuity\nSELECT * FROM a",
       "output": {
-        "failure": "invalid argument: found continuity at 29:39 expected '(', or 'AS'"
+        "success": {
+          "query": {
+            "project": {
+              "input": {
+                "read": {
+                  "namedTable": {
+                    "name": [
+                      "a"
+                    ],
+                    "temporal": null,
+                    "sample": null,
+                    "options": []
+                  },
+                  "isStreaming": false
+                },
+                "planId": null
+              },
+              "expressions": [
+                {
+                  "unresolvedStar": {
+                    "target": null,
+                    "planId": null,
+                    "wildcardOptions": {
+                      "ilikePattern": null,
+                      "excludeColumns": null,
+                      "exceptColumns": null,
+                      "replaceColumns": null,
+                      "renameColumns": null
+                    }
+                  }
+                }
+              ]
+            },
+            "planId": null
+          }
+        }
       }
     },
     {
@@ -652,14 +687,14 @@
       "input": "from a select * from b",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'from'. SQLSTATE: 42601 (line 1, pos 16)\n\n== SQL ==\nfrom a select * from b\n----------------^^^\n",
       "output": {
-        "failure": "invalid argument: found from at 16:20 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', 'AS', identifier, '(', ',', 'LATERAL', 'WHERE', 'GROUP', 'HAVING', 'QUALIFY', 'SELECT', 'INSERT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
+        "failure": "invalid argument: found from at 16:20 expected '.', '[', '::', 'COLLATE', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', 'AS', identifier, '(', ',', 'LATERAL', 'WHERE', 'GROUP', 'HAVING', 'QUALIFY', 'SELECT', 'INSERT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {
       "input": "from a select * select * from x where a.s < 10",
       "exception": "\n[PARSE_SYNTAX_ERROR] Syntax error at or near 'from'. SQLSTATE: 42601 (line 1, pos 25)\n\n== SQL ==\nfrom a select * select * from x where a.s < 10\n-------------------------^^^\n",
       "output": {
-        "failure": "invalid argument: found from at 25:29 expected '.', '[', '::', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', 'AS', identifier, '(', ',', 'LATERAL', 'WHERE', 'GROUP', 'HAVING', 'QUALIFY', 'SELECT', 'INSERT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
+        "failure": "invalid argument: found from at 25:29 expected '.', '[', '::', 'COLLATE', 'ESCAPE', 'IS', 'NOT', 'IN', '*', '/', '%', 'DIV', '+', '-', '||', '>>>', '>>', '<<', '&', '^', '|', '!=', '!>', '!<', '==', '=', '>=', '>', '<=>', '<=', '<>', '<', 'BETWEEN', 'LIKE', 'ILIKE', 'RLIKE', 'REGEXP', 'SIMILAR', 'AND', 'OR', 'AS', identifier, '(', ',', 'LATERAL', 'WHERE', 'GROUP', 'HAVING', 'QUALIFY', 'SELECT', 'INSERT', 'INTERSECT', 'UNION', 'EXCEPT', 'MINUS', 'WINDOW', 'ORDER', 'SORT', 'CLUSTER', 'DISTRIBUTE', 'LIMIT', 'OFFSET', ';', or end of input"
       }
     },
     {

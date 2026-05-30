@@ -11,7 +11,8 @@ use crate::ast::keywords::{
     Compute, Cost, Create, Data, Database, Databases, Dbproperties, Default, Defined, Delete,
     Delimited, Desc, Describe, Directory, Distributed, Drop, Escaped, Evolution, Exists, Explain,
     Extended, External, Fields, Fileformat, First, For, Format, Formatted, From, Function,
-    Functions, Generated, Global, If, In, Inpath, Inputformat, Insert, Into, Is, Items, Keys, Lazy,
+    Functions, Generated, Global, If, In, Index, Inpath, Inputformat, Insert, Into, Is, Items, Keys,
+    Lazy,
     Like, Lines, Load, Local, Location, Logical, Map, Matched, Merge, Name, Namespace, Namespaces,
     Noscan, Not, Null, On, Options, Or, Outputformat, Overwrite, Partition, Partitioned, Partitions,
     Properties, Purge, Recover, Refresh, Rename, Replace, Restrict, Row, Schema, Schemas, Serde,
@@ -200,6 +201,26 @@ pub enum Statement {
         if_exists: Option<(If, Exists)>,
         name: ObjectName,
     },
+    CreateIndex {
+        create: Create,
+        index: Index,
+        if_not_exists: Option<(If, Not, Exists)>,
+        name: Ident,
+        on: On,
+        table: Option<Table>,
+        target: ObjectName,
+        using: Option<(Using, Ident)>,
+        columns: Option<IndexColumnList>,
+        options: Option<(Options, PropertyList)>,
+    },
+    DropIndex {
+        drop: Drop,
+        index: Index,
+        if_exists: Option<(If, Exists)>,
+        name: Ident,
+        on: On,
+        target: ObjectName,
+    },
     ShowFunctions {
         show: Show,
         functions: Functions,
@@ -370,6 +391,19 @@ pub struct PropertyList {
     pub left: LeftParenthesis,
     pub properties: Sequence<PropertyKeyValue, Comma>,
     pub right: RightParenthesis,
+}
+
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+pub struct IndexColumnList {
+    pub left: LeftParenthesis,
+    pub columns: Sequence<IndexColumnSpec, Comma>,
+    pub right: RightParenthesis,
+}
+
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+pub struct IndexColumnSpec {
+    pub name: Ident,
+    pub options: Option<(Options, PropertyList)>,
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]

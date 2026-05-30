@@ -477,6 +477,40 @@ pub fn from_ast_statement(statement: Statement) -> SqlResult<spec::Plan> {
             };
             Ok(spec::Plan::Command(spec::CommandPlan::new(node)))
         }
+        Statement::CreateIndex {
+            create: _,
+            index: _,
+            if_not_exists: _,
+            name: _,
+            on: _,
+            table: _,
+            target,
+            using: _,
+            columns: _,
+            options: _,
+        } => {
+            let node = spec::CommandNode::AlterTable {
+                table: from_ast_object_name(target)?,
+                if_exists: false,
+                operation: spec::AlterTableOperation::Unknown,
+            };
+            Ok(spec::Plan::Command(spec::CommandPlan::new(node)))
+        }
+        Statement::DropIndex {
+            drop: _,
+            index: _,
+            if_exists: _,
+            name: _,
+            on: _,
+            target,
+        } => {
+            let node = spec::CommandNode::AlterTable {
+                table: from_ast_object_name(target)?,
+                if_exists: false,
+                operation: spec::AlterTableOperation::Unknown,
+            };
+            Ok(spec::Plan::Command(spec::CommandPlan::new(node)))
+        }
         Statement::ShowFunctions { .. } => {
             let node = spec::CommandNode::ListFunctions {
                 database: None,

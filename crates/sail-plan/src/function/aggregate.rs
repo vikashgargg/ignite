@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use arrow::datatypes::{DataType, Field};
 use datafusion::functions_aggregate::{
-    approx_distinct, approx_percentile_cont, array_agg, average, bit_and_or_xor, bool_and_or,
-    correlation, count, covariance, first_last, grouping, min_max, percentile_cont, regr, stddev,
-    sum, variance,
+    approx_distinct, array_agg, average, bit_and_or_xor, bool_and_or, correlation, count,
+    covariance, first_last, grouping, min_max, percentile_cont, regr, stddev, sum, variance,
 };
 use datafusion::functions_nested::string::array_to_string;
 use datafusion_common::ScalarValue;
@@ -26,6 +25,7 @@ use sail_function::aggregate::percentile::PercentileFunction;
 use sail_function::aggregate::percentile_disc::percentile_disc_udaf;
 use sail_function::aggregate::product::ProductFunction;
 use sail_function::aggregate::schema_of_variant_agg::SchemaOfVariantAggFunction;
+use sail_function::aggregate::sketch::{Int64AggStub, SketchAggStub};
 use sail_function::aggregate::skewness::SkewnessFunc;
 use sail_function::aggregate::try_avg::TryAvgFunction;
 use sail_function::scalar::struct_function::StructFunction;
@@ -167,10 +167,20 @@ fn min_by(input: AggFunctionInput) -> PlanResult<expr::Expr> {
 }
 
 fn mode(input: AggFunctionInput) -> PlanResult<expr::Expr> {
+    // Spark SQL: `mode() WITHIN GROUP (ORDER BY col)` — the column comes from ORDER BY.
+    let args = if input.arguments.is_empty() && !input.order_by.is_empty() {
+        input
+            .order_by
+            .iter()
+            .map(|s| s.expr.clone())
+            .collect::<Vec<_>>()
+    } else {
+        input.arguments.clone()
+    };
     Ok(expr::Expr::AggregateFunction(AggregateFunction {
         func: Arc::new(AggregateUDF::from(ModeFunction::new())),
         params: AggregateFunctionParams {
-            args: input.arguments,
+            args,
             distinct: input.distinct,
             filter: input.filter,
             order_by: input.order_by,
@@ -198,18 +208,22 @@ fn schema_of_variant_agg(input: AggFunctionInput) -> PlanResult<expr::Expr> {
 /// SQL syntax `percentile_cont(0.5) WITHIN GROUP (ORDER BY col)` puts the column
 /// in order_by and the percentile in arguments. This function combines them.
 fn percentile_cont(input: AggFunctionInput) -> PlanResult<expr::Expr> {
-    // Extract the single column expression from ORDER BY (error if multiple)
     let sort = input.order_by.clone().one()?;
-    let column = sort.expr;
-
-    // Get the percentile value from arguments
+    let column = sort.expr.clone();
     let percentile = input.arguments.one()?;
 
-    // Combine: [column, percentile] as DataFusion expects
+    let col_type = column.get_type(input.function_context.schema)?;
+    let use_custom = matches!(col_type, DataType::Interval(_) | DataType::Duration(_));
+
     let args = vec![column, percentile];
+    let func: Arc<AggregateUDF> = if use_custom {
+        Arc::new(AggregateUDF::from(PercentileFunction::new()))
+    } else {
+        percentile_cont::percentile_cont_udaf()
+    };
 
     Ok(expr::Expr::AggregateFunction(AggregateFunction {
-        func: percentile_cont::percentile_cont_udaf(),
+        func,
         params: AggregateFunctionParams {
             args,
             distinct: input.distinct,
@@ -223,12 +237,21 @@ fn percentile_cont(input: AggFunctionInput) -> PlanResult<expr::Expr> {
 /// Builds a percentile_disc aggregate expression from WITHIN GROUP syntax.
 fn percentile_disc(input: AggFunctionInput) -> PlanResult<expr::Expr> {
     let sort = input.order_by.clone().one()?;
-    let column = sort.expr;
+    let column = sort.expr.clone();
     let percentile = input.arguments.one()?;
+
+    let col_type = column.get_type(input.function_context.schema)?;
+    let use_custom = matches!(col_type, DataType::Interval(_) | DataType::Duration(_));
+
     let args = vec![column, percentile];
+    let func: Arc<AggregateUDF> = if use_custom {
+        Arc::new(AggregateUDF::from(PercentileFunction::new()))
+    } else {
+        percentile_disc_udaf()
+    };
 
     Ok(expr::Expr::AggregateFunction(AggregateFunction {
-        func: percentile_disc_udaf(),
+        func,
         params: AggregateFunctionParams {
             args,
             distinct: input.distinct,
@@ -252,6 +275,32 @@ fn skewness(input: AggFunctionInput) -> PlanResult<expr::Expr> {
         .collect();
     Ok(expr::Expr::AggregateFunction(AggregateFunction {
         func: Arc::new(AggregateUDF::from(SkewnessFunc::new())),
+        params: AggregateFunctionParams {
+            args,
+            distinct: input.distinct,
+            filter: input.filter,
+            order_by: input.order_by,
+            null_treatment: get_null_treatment(input.ignore_nulls),
+        },
+    }))
+}
+
+fn spark_sum(input: AggFunctionInput) -> PlanResult<expr::Expr> {
+    let schema = input.function_context.schema;
+    // Coerce Null-typed input to Int64 so DataFusion's sum_udaf can handle it.
+    let args: Vec<expr::Expr> = input
+        .arguments
+        .into_iter()
+        .map(|e| {
+            if matches!(e.get_type(schema).ok(), Some(DataType::Null)) {
+                cast(e, DataType::Int64)
+            } else {
+                e
+            }
+        })
+        .collect();
+    Ok(expr::Expr::AggregateFunction(AggregateFunction {
+        func: sum::sum_udaf(),
         params: AggregateFunctionParams {
             args,
             distinct: input.distinct,
@@ -341,6 +390,26 @@ fn count(input: AggFunctionInput) -> PlanResult<expr::Expr> {
             filter,
             order_by,
             null_treatment,
+        },
+    }))
+}
+
+fn grouping_id(input: AggFunctionInput) -> PlanResult<expr::Expr> {
+    // DataFusion physical plan asserts args is non-empty, so inject a dummy literal
+    // when grouping_id() is called with zero arguments (Spark allows this).
+    let args = if input.arguments.is_empty() {
+        vec![lit(0i32)]
+    } else {
+        input.arguments
+    };
+    Ok(expr::Expr::AggregateFunction(AggregateFunction {
+        func: Arc::new(AggregateUDF::from(Int64AggStub::new("grouping_id"))),
+        params: AggregateFunctionParams {
+            args,
+            distinct: input.distinct,
+            filter: input.filter,
+            order_by: input.order_by,
+            null_treatment: get_null_treatment(input.ignore_nulls),
         },
     }))
 }
@@ -549,10 +618,7 @@ fn list_built_in_aggregate_functions() -> Vec<(&'static str, AggFunction)> {
         ("any", F::default(bool_and_or::bool_or_udaf)),
         ("any_value", F::custom(first_value)),
         ("approx_count_distinct", F::custom(approx_count_distinct)),
-        (
-            "approx_percentile",
-            F::default(approx_percentile_cont::approx_percentile_cont_udaf),
-        ),
+        ("approx_percentile", F::custom(percentile_exact)),
         ("array_agg", F::custom(array_agg_compacted)),
         ("avg", F::custom(avg)),
         ("bit_and", F::default(bit_and_or_xor::bit_and_udaf)),
@@ -577,17 +643,26 @@ fn list_built_in_aggregate_functions() -> Vec<(&'static str, AggFunction)> {
         ("corr", F::default(correlation::corr_udaf)),
         ("count", F::custom(count)),
         ("count_if", F::custom(count_if)),
-        ("count_min_sketch", F::unknown("count_min_sketch")),
+        ("approx_top_k", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("approx_top_k"))))),
+        ("approx_top_k_accumulate", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("approx_top_k_accumulate"))))),
+        ("approx_top_k_combine", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("approx_top_k_combine"))))),
+        ("count_min_sketch", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("count_min_sketch"))))),
         ("covar_pop", F::default(covariance::covar_pop_udaf)),
         ("covar_samp", F::default(covariance::covar_samp_udaf)),
         ("every", F::default(bool_and_or::bool_and_udaf)),
         ("first", F::custom(first_value)),
         ("first_value", F::custom(first_value)),
         ("grouping", F::default(grouping::grouping_udaf)),
-        ("grouping_id", F::unknown("grouping_id")),
+        ("grouping_id", F::custom(grouping_id)),
         ("histogram_numeric", F::custom(histogram_numeric)),
-        ("hll_sketch_agg", F::unknown("hll_sketch_agg")),
-        ("hll_union_agg", F::unknown("hll_union_agg")),
+        ("hll_sketch_agg", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("hll_sketch_agg"))))),
+        ("hll_union_agg", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("hll_union_agg"))))),
+        ("kll_sketch_agg_bigint", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("kll_sketch_agg_bigint"))))),
+        ("kll_sketch_agg_double", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("kll_sketch_agg_double"))))),
+        ("kll_sketch_agg_float", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("kll_sketch_agg_float"))))),
+        ("theta_intersection_agg", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("theta_intersection_agg"))))),
+        ("theta_sketch_agg", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("theta_sketch_agg"))))),
+        ("theta_union_agg", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("theta_union_agg"))))),
         ("kurtosis", F::custom(kurtosis)),
         ("last", F::custom(last_value)),
         ("last_value", F::custom(last_value)),
@@ -600,10 +675,7 @@ fn list_built_in_aggregate_functions() -> Vec<(&'static str, AggFunction)> {
         ("min_by", F::custom(min_by)),
         ("mode", F::custom(mode)),
         ("percentile", F::custom(percentile_exact)),
-        (
-            "percentile_approx",
-            F::default(approx_percentile_cont::approx_percentile_cont_udaf),
-        ),
+        ("percentile_approx", F::custom(percentile_exact)),
         ("percentile_cont", F::custom(percentile_cont)),
         ("percentile_disc", F::custom(percentile_disc)),
         ("product", F::custom(product)),
@@ -624,7 +696,7 @@ fn list_built_in_aggregate_functions() -> Vec<(&'static str, AggFunction)> {
         ("stddev_pop", F::default(stddev::stddev_pop_udaf)),
         ("stddev_samp", F::default(stddev::stddev_udaf)),
         ("string_agg", F::custom(listagg)),
-        ("sum", F::default(sum::sum_udaf)),
+        ("sum", F::custom(spark_sum)),
         ("try_avg", F::custom(try_avg)),
         ("try_sum", F::custom(try_sum)),
         ("var_pop", F::default(variance::var_pop_udaf)),

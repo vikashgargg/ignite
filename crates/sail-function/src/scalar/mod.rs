@@ -13,6 +13,7 @@ pub mod math;
 pub mod misc;
 pub mod multi_expr;
 pub mod predicate;
+pub mod sketch;
 pub mod spark_to_string;
 pub mod string;
 pub mod struct_function;

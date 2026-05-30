@@ -1,7 +1,7 @@
 use arrow::datatypes::{DataType, Field, Fields, TimeUnit};
 use datafusion_common::scalar::ScalarStructBuilder;
 use datafusion_common::{Column, DFSchemaRef, TableReference};
-use datafusion_expr::expr::ScalarFunction;
+use datafusion_expr::expr::{Alias, ScalarFunction};
 use datafusion_expr::{col, expr, lit};
 use datafusion_functions::core::get_field;
 use sail_common::spec;
@@ -55,6 +55,16 @@ impl PlanResolver<'_> {
         }
         if let Some((name, expr)) =
             self.resolve_aggregate_field(&name, state.get_projections_for_grouping())?
+        {
+            return Ok(NamedExpr::new(vec![name], expr));
+        }
+        if let Some((name, expr)) =
+            self.resolve_aggregate_alias_field(&name, state.get_grouping_for_select())?
+        {
+            return Ok(NamedExpr::new(vec![name], expr));
+        }
+        if let Some((name, expr)) =
+            self.resolve_lateral_alias_field(&name, state.get_lateral_aliases())?
         {
             return Ok(NamedExpr::new(vec![name], expr));
         }
@@ -168,6 +178,91 @@ impl PlanResolver<'_> {
         if candidates.len() > 1 {
             return Err(PlanError::AnalysisError(format!(
                 "ambiguous aggregate expression: {name:?}"
+            )));
+        }
+        Ok(candidates.pop())
+    }
+
+    /// Resolves a name against pre-resolved GROUP BY expressions by matching the expression's
+    /// alias. Handles both single-part names (e.g. `window`) and multi-part names for struct
+    /// field access (e.g. `window.start`). Used when SELECT is resolved with GROUP BY in scope.
+    fn resolve_aggregate_alias_field(
+        &self,
+        name: &spec::ObjectName,
+        expressions: &[NamedExpr],
+    ) -> PlanResult<Option<(String, expr::Expr)>> {
+        let parts = name.parts();
+        if parts.is_empty() || expressions.is_empty() {
+            return Ok(None);
+        }
+        let first = parts[0].as_ref();
+        let mut candidates = expressions
+            .iter()
+            .filter_map(|named| {
+                let alias_name = match &named.expr {
+                    expr::Expr::Alias(Alias { name, .. }) => name.as_str(),
+                    _ => return None,
+                };
+                if alias_name.eq_ignore_ascii_case(first) {
+                    Some(named.expr.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() > 1 {
+            return Err(PlanError::AnalysisError(format!(
+                "ambiguous group-by expression: {name:?}"
+            )));
+        }
+        let Some(base_expr) = candidates.pop() else {
+            return Ok(None);
+        };
+        if parts.len() == 1 {
+            return Ok(Some((first.to_string(), base_expr)));
+        }
+        let mut result_expr = base_expr;
+        for field in &parts[1..] {
+            result_expr = expr::Expr::ScalarFunction(ScalarFunction::new_udf(
+                get_field(),
+                vec![result_expr, lit(field.as_ref().to_string())],
+            ));
+        }
+        let output_name = parts
+            .last()
+            .map(|x| x.as_ref().to_string())
+            .unwrap_or_default();
+        Ok(Some((output_name, result_expr)))
+    }
+
+    /// Resolves a single-part name against lateral column aliases accumulated in the current SELECT.
+    /// Allows later expressions in the same SELECT to reference aliases defined earlier.
+    fn resolve_lateral_alias_field(
+        &self,
+        name: &spec::ObjectName,
+        aliases: &[NamedExpr],
+    ) -> PlanResult<Option<(String, expr::Expr)>> {
+        let [attr_name] = name.parts() else {
+            return Ok(None);
+        };
+        if aliases.is_empty() {
+            return Ok(None);
+        }
+        let mut candidates = aliases
+            .iter()
+            .filter_map(|named| {
+                if named.name.len() == 1
+                    && named.name[0].eq_ignore_ascii_case(attr_name.as_ref())
+                {
+                    Some((attr_name.as_ref().to_string(), named.expr.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() > 1 {
+            return Err(PlanError::AnalysisError(format!(
+                "ambiguous lateral alias: {attr_name:?}"
             )));
         }
         Ok(candidates.pop())

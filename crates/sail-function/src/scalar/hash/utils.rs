@@ -1,6 +1,13 @@
 use std::sync::Arc;
 
-use datafusion::arrow::array::*;
+use datafusion::arrow::array::{
+    Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal128Array,
+    DictionaryArray, FixedSizeBinaryArray, Float32Array, Float64Array,
+    Int16Array, Int32Array, Int64Array, Int8Array, LargeBinaryArray,
+    LargeListArray, LargeStringArray, ListArray, StringArray, TimestampMicrosecondArray,
+    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
+    UInt16Array, UInt32Array, UInt64Array, UInt8Array, BinaryArray,
+};
 use datafusion::arrow::compute::take;
 use datafusion::arrow::datatypes::{
     ArrowDictionaryKeyType, ArrowNativeType, ArrowNativeTypeOp, DataType, Int16Type, Int32Type,
@@ -280,7 +287,7 @@ fn create_xxhash64_hashes_dictionary<K: ArrowDictionaryKeyType>(
 /// `hash_method` is the hash function to use.
 /// `create_dictionary_hash_method` is the function to create hashes for dictionary arrays input.
 macro_rules! create_hashes_internal {
-    ($arrays: ident, $hashes_buffer: ident, $hash_method: ident, $create_dictionary_hash_method: ident) => {
+    ($arrays: ident, $hashes_buffer: ident, $hash_method: ident, $create_dictionary_hash_method: ident, $create_element_hash_fn: ident) => {
         for (i, col) in $arrays.iter().enumerate() {
             let first_col = i == 0;
             match col.data_type() {
@@ -439,6 +446,31 @@ macro_rules! create_hashes_internal {
                         )))
                     }
                 },
+                DataType::List(_) | DataType::LargeList(_) => {
+                    // Hash each element sequentially, chaining seeds.
+                    // Mirrors Spark's Array hashing: elements are folded over the running hash.
+                    for (i, hash) in $hashes_buffer.iter_mut().enumerate() {
+                        if col.is_null(i) {
+                            continue;
+                        }
+                        let row_values: Arc<dyn Array> = match col.data_type() {
+                            DataType::List(_) => {
+                                col.as_any().downcast_ref::<ListArray>().unwrap().value(i)
+                            }
+                            DataType::LargeList(_) => {
+                                col.as_any().downcast_ref::<LargeListArray>().unwrap().value(i)
+                            }
+                            _ => unreachable!(),
+                        };
+                        for j in 0..row_values.len() {
+                            let element = row_values.slice(j, 1);
+                            let mut elem_hash = vec![*hash];
+                            // Use the appropriate hash function based on which macro call we're in.
+                            $create_element_hash_fn(&[element], &mut elem_hash)?;
+                            *hash = elem_hash[0];
+                        }
+                    }
+                }
                 _ => {
                     // This is internal because we should have caught this before.
                     return Err(DataFusionError::Internal(format!(
@@ -464,7 +496,8 @@ pub fn create_murmur3_hashes<'a>(
         arrays,
         hashes_buffer,
         spark_compatible_murmur3_hash,
-        create_hashes_dictionary
+        create_hashes_dictionary,
+        create_murmur3_hashes
     );
     Ok(hashes_buffer)
 }
@@ -482,7 +515,8 @@ pub fn create_xxhash64_hashes<'a>(
         arrays,
         hashes_buffer,
         spark_compatible_xxhash64,
-        create_xxhash64_hashes_dictionary
+        create_xxhash64_hashes_dictionary,
+        create_xxhash64_hashes
     );
     Ok(hashes_buffer)
 }
