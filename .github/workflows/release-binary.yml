@@ -58,44 +58,33 @@ jobs:
           retention-days: 1
 
   build-macos:
-    name: Build macOS universal
+    name: Build macOS (Apple Silicon)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
+          targets: aarch64-apple-darwin
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: macos-cargo-universal-${{ hashFiles('**/Cargo.lock') }}
+          key: macos-cargo-aarch64-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
         run: brew install protobuf
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install cargo-zigbuild
-        run: pip install cargo-zigbuild || cargo install cargo-zigbuild
-      - name: Install zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: "0.14.0"
-      - name: Build x86_64 (cross)
-        run: cargo zigbuild --release -p sail-cli --target x86_64-apple-darwin
-      - name: Build aarch64 (native)
+      - name: Build aarch64 (Apple Silicon)
         run: cargo build --release -p sail-cli --target aarch64-apple-darwin
-      - name: Create universal binary
-        run: |
-          lipo -create -output vajra-universal2-apple-darwin \
-            target/x86_64-apple-darwin/release/vajra \
-            target/aarch64-apple-darwin/release/vajra
+      - name: Rename binary
+        run: cp target/aarch64-apple-darwin/release/vajra vajra-aarch64-apple-darwin
       - uses: actions/upload-artifact@v4
         with:
-          name: vajra-universal2-apple-darwin
-          path: vajra-universal2-apple-darwin
+          name: vajra-aarch64-apple-darwin
+          path: vajra-aarch64-apple-darwin
           retention-days: 1
 
   release:

@@ -19,14 +19,17 @@ case "$OS" in
     case "$ARCH" in
       x86_64)  TARGET="x86_64-unknown-linux-musl" ;;
       aarch64) TARGET="aarch64-unknown-linux-musl" ;;
-      *)       error "Unsupported architecture: $ARCH" ;;
+      *)       error "Unsupported Linux architecture: $ARCH. Build from source: https://github.com/$REPO" ;;
     esac
     ;;
   Darwin*)
-    TARGET="universal2-apple-darwin"
+    case "$ARCH" in
+      arm64)  TARGET="aarch64-apple-darwin" ;;
+      *)      error "Vajra requires Apple Silicon (arm64). Intel Macs are not supported. Build from source: https://github.com/$REPO" ;;
+    esac
     ;;
   *)
-    error "Unsupported OS: $OS. Please build from source: https://github.com/$REPO"
+    error "Unsupported OS: $OS. Build from source: https://github.com/$REPO"
     ;;
 esac
 
@@ -36,7 +39,7 @@ LATEST=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
   | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
 
 if [ -z "$LATEST" ]; then
-  error "Could not determine latest release. Check https://github.com/$REPO/releases"
+  error "Could not fetch release info. Check https://github.com/$REPO/releases"
 fi
 
 info "Installing Vajra $LATEST for $TARGET"
@@ -46,8 +49,14 @@ TMP_DIR="$(mktemp -d)"
 TMP_BIN="$TMP_DIR/vajra"
 
 info "Downloading from $DOWNLOAD_URL"
-curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN" \
-  || error "Download failed. Check https://github.com/$REPO/releases for available binaries."
+if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN"; then
+  error "Download failed (404 or network error).
+  Available releases: https://github.com/$REPO/releases
+  To build from source:
+    git clone https://github.com/$REPO && cd ignite
+    cargo build --release -p sail-cli
+    cp target/release/vajra ~/.local/bin/"
+fi
 
 chmod +x "$TMP_BIN"
 
@@ -56,6 +65,12 @@ mv "$TMP_BIN" "$INSTALL_DIR/$BINARY"
 rm -rf "$TMP_DIR"
 
 info "Installed to $INSTALL_DIR/$BINARY"
+
+# Verify the binary works
+if "$INSTALL_DIR/$BINARY" --version >/dev/null 2>&1; then
+  VERSION="$("$INSTALL_DIR/$BINARY" --version 2>/dev/null || echo $LATEST)"
+  info "Vajra $VERSION installed successfully"
+fi
 
 # Add to PATH advice if needed
 case ":$PATH:" in
@@ -68,3 +83,4 @@ case ":$PATH:" in
 esac
 
 info "Done! Run: vajra --version"
+info "Quick test: vajra sql \"SELECT 1\""

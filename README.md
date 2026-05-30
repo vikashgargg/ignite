@@ -55,7 +55,7 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | **Theta sketch aggregates (KMV)** | ✅ | partial | **✅** |
 | **Vortex data source (skeleton)** | ✅ | ✅ v0.6.0 | **✅ skeleton** |
 | **JWT bearer / mTLS auth** | ✅ | ❌ | **✅** |
-| **Apple Container (macOS 26, arm64)** | ❌ | ❌ | **✅ — only one** |
+| **Apple Container (macOS 26, Apple Silicon)** | ❌ | ❌ | **✅ — only one** |
 | **K8s Helm chart + HPA** | community | ❌ | **✅** |
 | **Scheduler HA (K8s Lease election)** | ✅ (complex) | ❌ | **✅** |
 | **Web UI on :4040** | ✅ | ❌ | **✅** |
@@ -105,7 +105,7 @@ TPC-H SF-1 — 22/22 PASS — total 1.515s  (Spark warm JVM: ~60s)
 ### Install
 
 ```sh
-# Linux / macOS (x86_64 or arm64)
+# macOS Apple Silicon (M1/M2/M3/M4) or Linux (x86_64 / aarch64)
 curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
 ```
 

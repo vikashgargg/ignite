@@ -62,16 +62,19 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 | `local-cluster` | ✅ 105/105 |
 | `kubernetes-cluster` (kind) | ✅ 105/105 |
 
-### Apple Container ✅
-- `docker/apple/Dockerfile` — linux/arm64 optimised with tarball cache workaround
+### Apple Container ✅ — Apple Silicon only (arm64)
+- **Requires Apple Silicon Mac (M1/M2/M3/M4).** Intel Macs are not supported.
+- `docker/apple/Dockerfile` — linux/arm64 optimised, native arm64 binary, no Rosetta
 - Layer-cache split: manifests → `cargo fetch` → build (fast incremental rebuilds)
 - SIGTERM graceful shutdown handler; HEALTHCHECK TCP probe
 - `make container-build` / `make container-run` / `make container-run-cluster`
+- Binary: `vajra-aarch64-apple-darwin` (~105 MB, statically linked)
 
-### CI ✅ (all three platforms)
-- `distributed-scorecard` — Linux, local-cluster mode, 105/105
-- `k8s-scorecard` — Linux, kind cluster, kubernetes-cluster mode
-- `macos-scorecard` — macOS-15 Apple Silicon, local-cluster mode
+### CI ✅ (all platforms)
+- `distributed-scorecard` — Linux x86_64, local-cluster mode, 105/105
+- `k8s-scorecard` — Linux x86_64, kind cluster, kubernetes-cluster mode *(K8s supports both x86_64 and arm64 Linux workers)*
+- `macos-scorecard` — macOS Apple Silicon (arm64), local-cluster mode
+- **Note**: Apple Container is Apple Silicon only. K8s works on any Linux arch.
 
 ---
 
@@ -196,7 +199,7 @@ LakeSail is at v0.6.3 (released 2026-05-21). As of Sprint 4–6 completion, Vajr
 | **Theta sketch aggregates** | ❌ | **✅ Sprint 6** | **✅ unique** |
 | **JWT bearer auth** | ❌ | **✅** | **✅ unique** |
 | **mTLS** | ❌ | **✅** | **✅ unique** |
-| **Apple Container (macOS 26)** | ❌ | **✅ — only one** | **✅ unique** |
+| **Apple Container (macOS 26, arm64 only)** | ❌ | **✅ — only one** | **✅ unique** |
 | **K8s Helm chart + HPA** | ❌ | **✅** | **✅ unique** |
 | **Scheduler HA** | ❌ | **✅** | **✅ unique** |
 | **Web UI :4040** | ❌ | **✅** | **✅ unique** |
@@ -208,6 +211,7 @@ LakeSail is at v0.6.3 (released 2026-05-21). As of Sprint 4–6 completion, Vajr
 
 ## Known Limitations
 
+- **macOS: Apple Silicon only** — `vajra-aarch64-apple-darwin` binary and Apple Container require arm64 (M1/M2/M3/M4). Intel Macs are not supported.
 - **Vortex reads/writes**: `sail-vortex` registered as format skeleton; actual I/O pending `vortex-datafusion` DataFusion 53.x compat
 - **TPC-H SF-100**: Code ready; hardware run needed (10-node K8s cluster)
 - **Kafka → Delta 24h endurance**: Code ready; dedicated infra needed
