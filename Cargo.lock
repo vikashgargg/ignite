@@ -7721,6 +7721,7 @@ dependencies = [
  "sail-server",
  "sail-sql-analyzer",
  "sail-telemetry",
+ "sail-vortex",
  "secrecy",
  "thiserror 2.0.18",
  "tokio",
@@ -7846,6 +7847,17 @@ dependencies = [
  "tokio",
  "tonic",
  "tower",
+]
+
+[[package]]
+name = "sail-vortex"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "datafusion",
+ "datafusion-common",
+ "sail-common-datafusion",
+ "sail-data-source",
 ]
 
 [[package]]

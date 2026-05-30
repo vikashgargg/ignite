@@ -267,13 +267,13 @@ Currently only stateless per-batch distinct is supported.
 
 ---
 
-### 6.3 Theta Sketch Aggregates  `[ ]` P2 · ~2 days
+### 6.3 Theta Sketch Aggregates  `[x]` P2 · ~2 days
 
 `approx_count_distinct` via Apache DataSketches theta sketch. More accurate than HLL at high cardinalities.
 
 ---
 
-### 6.4 Vortex Data Source  `[ ]` P2 · ~3 days
+### 6.4 Vortex Data Source  `[x]` P2 · ~3 days
 
 Vortex columnar format with aggressive encoding (often 10× smaller than Parquet). LakeSail shipped in v0.6.0.
 
