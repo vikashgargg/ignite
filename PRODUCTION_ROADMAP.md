@@ -16,7 +16,7 @@ A user can `pip install vajra-pyspark`, point their existing PySpark code at Vaj
 - [x] Delta time travel (AT VERSION / AT TIMESTAMP)
 - [x] Delta V2 checkpointing — production tables compact correctly
 - [x] Iceberg V3 spec + REST catalog
-- [ ] Official Apache Spark test suite ≥ 95% pass rate
+- [x] Official Apache Spark test suite ≥ 95% pass rate
 - [ ] TPC-H SF-100 distributed < 60s (10-node K8s cluster)
 - [ ] Kafka → Delta pipeline runs 24 h without OOM or restart
 - [ ] Apple Container cluster: `make container-run-cluster` → same score as K8s
@@ -182,7 +182,7 @@ Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log
 
 ---
 
-### 4.8 dbt Integration Guide  `[ ]` P2 · ~4 hours
+### 4.8 dbt Integration Guide  `[x]` P2 · ~4 hours
 
 Test `dbt-spark` connector against Vajra. Write `docs/integrations/dbt.md`.
 
@@ -192,7 +192,7 @@ LakeSail has this — it's an important adoption channel.
 
 ## Sprint 5 — Scale + Officiality (2026-06-07 → 2026-06-21)
 
-### 5.1 Official Apache Spark Test Suite  `[ ]` P0 · ~5 days
+### 5.1 Official Apache Spark Test Suite  `[x]` P0 · ~5 days
 
 Run the official Spark SQL test suite against Vajra. Target ≥ 95% pass rate.
 
@@ -228,7 +228,7 @@ Write `scripts/test_endurance.py`.
 
 ---
 
-### 5.4 HMS Thrift Client  `[ ]` P1 · ~3 days
+### 5.4 HMS Thrift Client  `[x]` P1 · ~3 days
 
 Hive Metastore Thrift client for reading catalog tables from existing Hive/Glue deployments.
 
@@ -236,7 +236,7 @@ Hive Metastore Thrift client for reading catalog tables from existing Hive/Glue 
 
 ---
 
-### 5.5 Provider-Agnostic Catalog Caching  `[ ]` P2 · ~2 days
+### 5.5 Provider-Agnostic Catalog Caching  `[x]` P2 · ~2 days
 
 Cache table metadata (schema, stats) in memory to avoid repeated remote catalog calls. Required for < 100ms query latency on catalog-heavy workloads.
 
