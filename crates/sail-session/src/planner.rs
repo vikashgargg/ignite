@@ -39,6 +39,8 @@ use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::streaming::limit::StreamLimitNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
+use sail_logical_plan::streaming::watermark::WatermarkNode;
+use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 use sail_physical_plan::barrier::BarrierExec;
 use sail_physical_plan::catalog_command::CatalogCommandExec;
 use sail_physical_plan::file_delete::create_file_delete_physical_plan;
@@ -54,6 +56,7 @@ use sail_physical_plan::streaming::collector::StreamCollectorExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
+use sail_physical_plan::streaming::window_accum::WindowAccumExec;
 use crate::foreach_batch_exec::ForeachBatchSinkExec;
 use crate::memory_sink_exec::MemorySinkExec;
 use sail_plan::catalog::CatalogCommandNode;
@@ -314,6 +317,54 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 return internal_err!("StreamCollectorExec requires exactly one physical input");
             };
             Arc::new(StreamCollectorExec::try_new(input.clone())?)
+        } else if node.as_any().is::<WatermarkNode>() {
+            // WatermarkNode is a logical passthrough — its physical form is just the input.
+            let [input] = physical_inputs else {
+                return internal_err!("WatermarkNode requires exactly one physical input");
+            };
+            input.clone()
+        } else if let Some(node) = node.as_any().downcast_ref::<WindowAccumNode>() {
+            let [input] = physical_inputs else {
+                return internal_err!("WindowAccumExec requires exactly one physical input");
+            };
+            let [logical_input] = logical_inputs else {
+                return internal_err!("WindowAccumExec requires exactly one logical input");
+            };
+            let data_schema = logical_input.schema().inner().clone();
+            // Build physical group expressions.
+            let group_exprs: Vec<(Arc<dyn datafusion_physical_expr::PhysicalExpr>, String)> = node
+                .group_exprs
+                .iter()
+                .map(|e| {
+                    let phys = planner.create_physical_expr(e, logical_input.schema(), session_state)?;
+                    let name = e.name_for_alias().unwrap_or_else(|_| "__group".to_string());
+                    Ok((phys, name))
+                })
+                .collect::<datafusion_common::Result<_>>()?;
+            let physical_group_by = datafusion::physical_plan::aggregates::PhysicalGroupBy::new_single(group_exprs);
+            // Build physical aggregate function expressions.
+            let aggr_exprs: Vec<Arc<datafusion::physical_expr::aggregate::AggregateFunctionExpr>> =
+                node.aggr_exprs
+                    .iter()
+                    .map(|e| {
+                        let (agg_expr, _filter, _order_bys) =
+                            datafusion::physical_planner::create_aggregate_expr_and_maybe_filter(
+                                e,
+                                logical_input.schema(),
+                                &data_schema,
+                                session_state.execution_props(),
+                            )?;
+                        Ok(agg_expr)
+                    })
+                    .collect::<datafusion_common::Result<_>>()?;
+            Arc::new(WindowAccumExec::try_new(
+                input.clone(),
+                physical_group_by,
+                aggr_exprs,
+                data_schema,
+                node.event_time_col.clone(),
+                node.delay_micros,
+            )?)
         } else if let Some(node) = node.as_any().downcast_ref::<CatalogCommandNode>() {
             let schema = node.schema().inner().clone();
             Arc::new(CatalogCommandExec::new(node.command().clone(), schema))

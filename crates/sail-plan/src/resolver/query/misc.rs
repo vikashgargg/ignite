@@ -4,6 +4,7 @@ use std::sync::Arc;
 use datafusion::catalog::MemTable;
 use datafusion_common::{DFSchema, DFSchemaRef, ParamValues};
 use datafusion_expr::{EmptyRelation, Extension, LogicalPlan, UNNAMED_TABLE};
+use sail_logical_plan::streaming::watermark::WatermarkNode;
 use log::warn;
 use sail_common::spec;
 use sail_common_datafusion::array::record_batch::{
@@ -180,9 +181,30 @@ impl PlanResolver<'_> {
         watermark: spec::WithWatermark,
         state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
-        // Pass through the child plan unchanged — watermark metadata is informational
-        // for event-time eviction (not yet implemented). Micro-batch streaming works
-        // without it; rejecting the plan would break any pipeline that calls withWatermark.
-        self.resolve_query_plan(*watermark.input, state).await
+        let input = self.resolve_query_plan(*watermark.input, state).await?;
+        let delay_micros = parse_spark_duration_to_micros(&watermark.delay_threshold)
+            .unwrap_or(0);
+        Ok(LogicalPlan::Extension(Extension {
+            node: Arc::new(WatermarkNode::new(input, watermark.event_time, delay_micros)),
+        }))
     }
+}
+
+/// Parse a Spark duration string like "10 minutes", "30 seconds" into microseconds.
+pub(crate) fn parse_spark_duration_to_micros(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let (num_str, rest) = s.split_once(char::is_whitespace)?;
+    let n: i64 = num_str.parse().ok()?;
+    let unit = rest.trim().trim_end_matches('s');
+    let micros = match unit {
+        "microsecond" => n,
+        "millisecond" => n * 1_000,
+        "second" => n * 1_000_000,
+        "minute" => n * 60_000_000,
+        "hour" => n * 3_600_000_000,
+        "day" => n * 86_400_000_000,
+        "week" => n * 7 * 86_400_000_000,
+        _ => return None,
+    };
+    Some(micros)
 }

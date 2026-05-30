@@ -26,6 +26,8 @@ use sail_logical_plan::streaming::filter::StreamFilterNode;
 use sail_logical_plan::streaming::limit::StreamLimitNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
+use sail_logical_plan::streaming::watermark::WatermarkNode;
+use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 
 /// A logical plan rewriter that rewrites a batch logical plan
 /// into a streaming logical plan. All the nodes (except the sink) in the plan
@@ -57,6 +59,10 @@ impl StreamingRewriter {
             Ok(Transformed::no(LogicalPlan::Extension(extension)))
         } else if node.as_any().is::<BarrierNode>() {
             // TODO: support BarrierNode for streaming properly.
+            Ok(Transformed::no(LogicalPlan::Extension(extension)))
+        } else if node.as_any().is::<WatermarkNode>() {
+            // WatermarkNode is a transparent passthrough; it is consumed by the
+            // parent Aggregate handler for event-time window detection.
             Ok(Transformed::no(LogicalPlan::Extension(extension)))
         } else {
             plan_err!("unsupported extension node for streaming: {node:?}")
@@ -125,25 +131,15 @@ impl TreeNodeRewriter for StreamingRewriter {
                 )?)))
             }
             LogicalPlan::Aggregate(agg) => {
-                // Stateless per-micro-batch aggregation (append-mode):
-                //
-                // 1. Filter out retracted rows from the flow-event input.
-                // 2. Project to data-only schema (drop _marker / _retracted).
-                // 3. Apply the original aggregate expressions on data columns.
-                // 4. Wrap aggregate output back in flow-event schema
-                //    (_marker = null, _retracted = false) so the parent node
-                //    can consume it as a regular flow-event stream.
                 let streaming_input = agg.input.clone();
                 let data_schema =
                     try_from_flow_event_schema(streaming_input.schema().inner())?;
 
-                // Step 1: filter out retracted rows.
+                // Build the data-only pipeline (filter retracted + project columns).
                 let filter = LogicalPlan::Filter(Filter::try_new(
                     col(RETRACTED_FIELD_NAME).eq(lit(false)),
                     Arc::clone(&streaming_input),
                 )?);
-
-                // Step 2: project to data-only (strip _marker and _retracted).
                 let data_cols: Vec<_> = data_schema
                     .fields()
                     .iter()
@@ -154,14 +150,56 @@ impl TreeNodeRewriter for StreamingRewriter {
                     Arc::new(filter),
                 )?);
 
-                // Step 3: apply the original aggregate.
+                // Detect event-time window aggregation.
+                // Criteria: (1) group_by contains a window() alias ("window" or "session_window"),
+                // AND (2) there is a WatermarkNode somewhere in the input subtree.
+                let is_window_group = has_event_time_window_group(&agg.group_expr);
+                let watermark_info = if is_window_group {
+                    find_watermark_info(&streaming_input)
+                } else {
+                    None
+                };
+
+                if let Some((event_time_col, delay_micros)) = watermark_info {
+                    // Stateful event-time window aggregation via WindowAccumNode.
+                    // The physical planner will map this to WindowAccumExec.
+                    let data_schema_ref = Arc::new(datafusion_common::DFSchema::try_from(
+                        data_schema.clone()
+                    )?);
+                    // Compute what the aggregate output schema would be.
+                    let agg_output_schema = {
+                        let trial = Aggregate::try_new(
+                            Arc::new(data_only.clone()),
+                            agg.group_expr.clone(),
+                            agg.aggr_expr.clone(),
+                        )?;
+                        trial.schema.clone()
+                    };
+                    return Ok(Transformed::yes(LogicalPlan::Extension(Extension {
+                        node: Arc::new(WindowAccumNode::new(
+                            data_only,
+                            agg.group_expr.clone(),
+                            agg.aggr_expr.clone(),
+                            event_time_col,
+                            delay_micros,
+                            Arc::new(datafusion_common::DFSchema::try_from(
+                                std::sync::Arc::new(
+                                    sail_common_datafusion::streaming::event::schema::to_flow_event_schema(
+                                        &agg_output_schema.as_arrow()
+                                    )
+                                )
+                            )?),
+                            agg_output_schema,
+                        )),
+                    })));
+                }
+
+                // Stateless per-micro-batch aggregation (append-mode).
                 let new_agg = LogicalPlan::Aggregate(Aggregate::try_new(
                     Arc::new(data_only),
                     agg.group_expr.clone(),
                     agg.aggr_expr.clone(),
                 )?);
-
-                // Step 4: re-add flow-event columns.
                 let mut out_exprs: Vec<_> = new_agg
                     .schema()
                     .columns()
@@ -173,7 +211,6 @@ impl TreeNodeRewriter for StreamingRewriter {
                         .alias(MARKER_FIELD_NAME),
                 );
                 out_exprs.push(lit(false).alias(RETRACTED_FIELD_NAME));
-
                 Ok(Transformed::yes(LogicalPlan::Projection(
                     Projection::try_new(out_exprs, Arc::new(new_agg))?,
                 )))
@@ -409,4 +446,30 @@ pub fn rewrite_streaming_plan(plan: LogicalPlan) -> Result<LogicalPlan> {
     } else {
         Ok(plan)
     }
+}
+
+/// Returns true if any group_by expression is an `Alias` named "window" or "session_window",
+/// indicating an event-time window grouping produced by `spark_window()` or `spark_session_window()`.
+fn has_event_time_window_group(group_expr: &[datafusion_expr::Expr]) -> bool {
+    use datafusion_expr::Expr;
+    group_expr.iter().any(|e| match e {
+        Expr::Alias(alias) => matches!(alias.name.as_str(), "window" | "session_window"),
+        _ => false,
+    })
+}
+
+/// Searches the plan subtree for a `WatermarkNode` and returns `(event_time_col, delay_micros)`.
+fn find_watermark_info(plan: &LogicalPlan) -> Option<(String, i64)> {
+    use datafusion_common::tree_node::TreeNodeRecursion;
+    let mut result: Option<(String, i64)> = None;
+    let _ = plan.apply(|p| {
+        if let LogicalPlan::Extension(ext) = p {
+            if let Some(wm) = ext.node.as_any().downcast_ref::<WatermarkNode>() {
+                result = Some((wm.event_time_col.clone(), wm.delay_micros));
+                return Ok(TreeNodeRecursion::Stop);
+            }
+        }
+        Ok(TreeNodeRecursion::Continue)
+    });
+    result
 }
