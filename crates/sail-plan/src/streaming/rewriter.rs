@@ -6,8 +6,8 @@ use datafusion::logical_expr::{Extension, LogicalPlan};
 use datafusion_common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion_common::{internal_err, not_impl_err, plan_err, Result};
 use datafusion_expr::{
-    col, lit, or, Aggregate, Explain, FetchType, Filter, Join, Projection, SkipType,
-    SubqueryAlias, TableScan, Union, UserDefinedLogicalNode, Window,
+    col, lit, or, Aggregate, Distinct, DistinctOn, Explain, Expr, FetchType, Filter, Join,
+    Projection, SkipType, SubqueryAlias, TableScan, Union, UserDefinedLogicalNode, Window,
 };
 use sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema;
 use sail_common_datafusion::rename::table_provider::RenameTableProvider;
@@ -26,6 +26,7 @@ use sail_logical_plan::streaming::filter::StreamFilterNode;
 use sail_logical_plan::streaming::limit::StreamLimitNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
+use sail_logical_plan::streaming::dedup::StreamDeduplicateNode;
 use sail_logical_plan::streaming::watermark::WatermarkNode;
 use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 
@@ -346,8 +347,37 @@ impl TreeNodeRewriter for StreamingRewriter {
             LogicalPlan::RecursiveQuery(_) => {
                 not_impl_err!("recursive streaming query: {plan:?}")
             }
-            LogicalPlan::Subquery(_) | LogicalPlan::Distinct(_) => {
+            LogicalPlan::Subquery(_) => {
                 internal_err!("not rewritten before streaming rewriter: {plan:?}")
+            }
+            LogicalPlan::Distinct(distinct) => {
+                // Convert to stateful streaming deduplication.
+                // Bottom-up rewriting means `input` already has the flow-event schema.
+                let (input, key_cols) = match distinct {
+                    Distinct::All(input) => {
+                        let data_schema =
+                            try_from_flow_event_schema(input.schema().inner())?;
+                        let key_cols = data_schema
+                            .fields()
+                            .iter()
+                            .map(|f| f.name().clone())
+                            .collect();
+                        (input, key_cols)
+                    }
+                    Distinct::On(DistinctOn { on_expr, input, .. }) => {
+                        let key_cols = on_expr
+                            .iter()
+                            .filter_map(|e| match e {
+                                Expr::Column(c) => Some(c.name.clone()),
+                                _ => None,
+                            })
+                            .collect();
+                        (input, key_cols)
+                    }
+                };
+                Ok(Transformed::yes(LogicalPlan::Extension(Extension {
+                    node: Arc::new(StreamDeduplicateNode::new(input, key_cols)),
+                })))
             }
             LogicalPlan::Explain(explain) => {
                 let input = LogicalPlan::Extension(Extension {

@@ -244,7 +244,7 @@ Cache table metadata (schema, stats) in memory to avoid repeated remote catalog 
 
 ## Sprint 6 — Streaming Completion + Advanced (2026-06-21 → 2026-07-05)
 
-### 6.1 Streaming Event-Time Window Execution  `[ ]` P0 · ~3 days
+### 6.1 Streaming Event-Time Window Execution  `[x]` P0 · ~3 days
 
 `withWatermark` + `window()` → tumbling/sliding windows computed per micro-batch.
 

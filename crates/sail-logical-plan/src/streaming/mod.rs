@@ -1,4 +1,5 @@
 pub mod collector;
+pub mod dedup;
 pub mod filter;
 pub mod foreach_batch;
 pub mod limit;
