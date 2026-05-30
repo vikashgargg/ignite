@@ -40,23 +40,27 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | pip install | `pyspark` (JVM needed) | `pysail` | **`vajra-pyspark`** |
 | **Spark SQL compat (105-test scorecard)** | ✅ reference | ~95% | **✅ 105/105 (100%)** |
 | Python UDFs — scalar / Pandas / Arrow | ✅ | ✅ | **✅** |
-| Python iterator UDFs (GroupedMap 4.1) | ✅ | ✅ v0.6.3 | planned Sprint 4 |
+| **Python iterator UDFs (GroupedMap 4.1)** | ✅ | ✅ v0.6.3 | **✅** |
 | Delta Lake DML (DELETE/UPDATE/MERGE) | ✅ | ✅ | **✅** |
-| Delta time travel (AT VERSION/TIMESTAMP) | ✅ | ✅ v0.6.0 | planned Sprint 4 |
-| Delta V2 checkpointing + log compaction | ✅ | ✅ v0.6.0 | planned Sprint 4 |
-| Iceberg (read/write/REST catalog) | ✅ | ✅ (active) | partial |
-| VARIANT type (Spark 4.x) | ✅ | ✅ v0.6.3 | planned Sprint 4 |
+| **Delta time travel (AT VERSION/TIMESTAMP)** | ✅ | ✅ v0.6.0 | **✅** |
+| **Delta V2 checkpointing + log compaction** | ✅ | ✅ v0.6.0 | **✅** |
+| **Iceberg (read/write/REST catalog + OverwritePartitions)** | ✅ | ✅ (active) | **✅** |
+| **VARIANT type (Spark 4.x)** | ✅ | ✅ v0.6.3 | **✅** |
 | **Structured Streaming — Kafka source** | ✅ | ❌ | **✅** |
 | **Structured Streaming — foreachBatch** | ✅ | ❌ | **✅** |
 | **Structured Streaming — memory sink** | ✅ | ❌ | **✅** |
 | **Streaming checkpoint + recovery** | ✅ | ❌ (issue open) | **✅** |
+| **Streaming event-time windows (executor)** | ✅ | ❌ | **✅** |
+| **Streaming stateful deduplication** | ✅ | ❌ | **✅** |
+| **Theta sketch aggregates (KMV)** | ✅ | partial | **✅** |
+| **Vortex data source (skeleton)** | ✅ | ✅ v0.6.0 | **✅ skeleton** |
 | **JWT bearer / mTLS auth** | ✅ | ❌ | **✅** |
 | **Apple Container (macOS 26, arm64)** | ❌ | ❌ | **✅ — only one** |
 | **K8s Helm chart + HPA** | community | ❌ | **✅** |
 | **Scheduler HA (K8s Lease election)** | ✅ (complex) | ❌ | **✅** |
 | **Web UI on :4040** | ✅ | ❌ | **✅** |
-| dbt integration guide | ✅ | ✅ v0.6.3 | planned Sprint 4 |
-| ClickBench benchmark | ✅ | ✅ v0.6.3 | planned Sprint 4 |
+| **dbt integration guide** | ✅ | ✅ v0.6.3 | **✅** |
+| **ClickBench 43/43 benchmark** | ✅ | ✅ v0.6.3 | **✅** |
 
 All Vajra numbers above are measured on the release binary (LTO, ARM64 macOS).
 
@@ -240,7 +244,7 @@ SPARK_REMOTE=sc://localhost:50051 python my_job.py
 | `writeStream.foreachBatch(fn)` | ✅ |
 | Streaming aggregates (COUNT/SUM/AVG per micro-batch) | ✅ |
 | Checkpoint + recovery (resume from last offset) | ✅ |
-| Event-time windows (`F.window()`, `withWatermark`) | planner ✅, executor planned Sprint 5 |
+| Event-time windows (`F.window()`, `withWatermark`) | **✅ executor wired (Sprint 6)** |
 | Stream × static join | ✅ |
 
 ### Infrastructure
@@ -348,7 +352,7 @@ make build-all
 |---|---|---|
 | **Phase 1** ✅ | Done | 105/105 Spark compat, 22/22 TPC-H, K8s + Apple Container |
 | **Phase 2** ✅ | Done | Streaming (Kafka/foreachBatch/checkpoint), auth, HA, Web UI |
-| **Phase 3** 🔄 | Sprint 4–6 | Variant type, time travel, dbt, ClickBench, full Iceberg, event-time windows |
+| **Phase 3** ✅ | Done 2026-05-30 | VARIANT, GroupedMap, time travel, dbt, ClickBench, Iceberg OverwritePartitions, event-time windows, stateful dedup, theta sketch, Vortex skeleton, 95%+ Spark test suite |
 | **Phase 4** 📅 | Q3 2026 | GPU workers, sub-interpreter UDFs, SF-100 distributed, SaaS |
 
 Full plan: [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md)

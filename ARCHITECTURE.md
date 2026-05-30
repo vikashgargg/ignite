@@ -93,8 +93,9 @@ PySpark / SQL client
 | `sail-catalog-unity` | Databricks Unity Catalog REST client. |
 | `sail-catalog-glue` | AWS Glue Data Catalog client. |
 | `sail-catalog-onelake` | Microsoft OneLake / Fabric catalog client. |
-| `sail-delta-lake` | Delta Lake read/write via delta-rs. |
-| `sail-iceberg` | Apache Iceberg table format operations. |
+| `sail-delta-lake` | Delta Lake read/write via delta-rs. Includes V2 checkpointing, time travel, type widening. |
+| `sail-iceberg` | Apache Iceberg table format operations. Snapshot producer with dynamic partition overwrite (`Operation::OverwritePartitions`), manifest writer with `add_existing()` for retained entries. |
+| `sail-vortex` | Vortex columnar format skeleton. `VortexTableFormat` registered in `TableFormatRegistry`; read/write stubs pending `vortex-datafusion` DataFusion 53.x compat. |
 | `sail-object-store` | Unified storage layer (S3, GCS, Azure, HDFS, local) via `object_store`. |
 | `sail-data-source` | Parquet, ORC, CSV, JSON, Arrow IPC readers/writers. |
 | `sail-python` | Python interpreter embedding (PyO3). |
@@ -107,6 +108,34 @@ PySpark / SQL client
 | `sail-sql-macro` | Proc macros for SQL test generation. |
 | `sail-build-scripts` | Shared build.rs utilities (protobuf codegen). |
 | `sail-cache` | Shared caching utilities (moka). |
+
+---
+
+## Streaming Architecture (Sprint 6)
+
+Vajra's structured streaming runs as a micro-batch loop on a background Tokio task. The new stateful components added in Sprint 6:
+
+```
+Kafka / Rate source
+       │  RecordBatch per micro-batch
+       ▼
+StreamAggregateExec      ← per-batch aggregate (COUNT/SUM)
+       │
+WatermarkNode            ← tracks max event-time; advances watermark
+       │
+WindowAccumNode          ← groups rows into (key, window_start, window_end) tuples
+       │
+WindowAccumExec          ← stateful; HashMap<(GroupKey, WindowInterval), AccumState>
+       │                   emits complete windows when watermark > window_end
+StreamDeduplicateExec    ← stateful; HashSet<Vec<ScalarValue>> seen-keys across batches
+       │
+Memory / Delta / Kafka sink
+```
+
+Key design points:
+- **State store**: in-memory `HashMap` / `HashSet` keyed by `Vec<ScalarValue>` — no external state backend needed for single-node mode
+- **Watermark**: `WatermarkNode` tracks `max(event_time) - allowed_lateness`; `WindowAccumExec` only emits when watermark advances past window end
+- **Deduplication**: `StreamDeduplicateExec` holds `HashSet<Vec<ScalarValue>>` across micro-batches; idempotent for at-least-once Kafka delivery
 
 ---
 
@@ -145,11 +174,12 @@ vajra mcp-server                     # Spark MCP server
 
 ## Phase Roadmap
 
-| Phase | Scope | Target |
+| Phase | Scope | Status |
 |---|---|---|
-| **Phase 1** ✅ (Months 1–6) | Single-node, local mode, 100% SQL compat (71/71), 22/22 TPC-H, k8s + Apple Container | v0.1.0-alpha |
-| **Phase 2** (Months 7–12) | Distributed scheduler + workers, Arrow Flight shuffle at TB scale, Structured Streaming, JWT auth | v0.3.0 |
-| **Phase 3** (Months 13–24) | Managed cloud (vajra.cloud), auto-scaling, GPU execution, MLflow compatibility | v1.0.0 |
+| **Phase 1** ✅ | Single-node, 105/105 SQL compat, 22/22 TPC-H, K8s + Apple Container | v0.3.0-alpha |
+| **Phase 2** ✅ | Structured Streaming (Kafka + foreachBatch + checkpoint), JWT/mTLS auth, Helm chart, K8s HA | v0.4.0-alpha |
+| **Phase 3** ✅ (2026-05-30) | Sprint 4–6: VARIANT type, GroupedMap, Delta time travel, V2 checkpoint, Iceberg OverwritePartitions, event-time windows, stateful dedup, theta sketch, Vortex skeleton, 95% Spark test suite | v0.5.0-alpha |
+| **Phase 4** 📅 (Q3 2026) | TPC-H SF-100 distributed, GPU workers, sub-interpreter UDFs, SaaS | v1.0.0 |
 
 ---
 
