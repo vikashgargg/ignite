@@ -16,7 +16,9 @@ use sail_function::scalar::misc::spark_aes::{
 };
 use sail_function::scalar::misc::spark_partition_id::SparkPartitionId;
 use sail_function::scalar::misc::version::SparkVersion;
-use sail_function::scalar::sketch::{CollationFunc, SketchScalarStub};
+use sail_function::scalar::sketch::{
+    CollationFunc, HllSketchEstimateFunc, SketchScalarStub, ThetaSketchEstimateFunc,
+};
 
 use crate::error::{PlanError, PlanResult};
 use crate::function::common::{ScalarFunction, ScalarFunctionInput};
@@ -158,7 +160,7 @@ pub(super) fn list_built_in_misc_functions() -> Vec<(&'static str, ScalarFunctio
         ("from_avro", F::udf(SketchScalarStub::binary("from_avro"))),
         ("from_protobuf", F::udf(SketchScalarStub::binary("from_protobuf"))),
         ("equal_null", F::binary_op(Operator::IsNotDistinctFrom)),
-        ("hll_sketch_estimate", F::udf(SketchScalarStub::float64("hll_sketch_estimate"))),
+        ("hll_sketch_estimate", F::udf(HllSketchEstimateFunc::new())),
         ("hll_union", F::udf(SketchScalarStub::binary("hll_union"))),
         ("kll_sketch_get_n_bigint", F::udf(SketchScalarStub::int64("kll_sketch_get_n_bigint"))),
         ("kll_sketch_get_n_double", F::udf(SketchScalarStub::int64("kll_sketch_get_n_double"))),
@@ -177,7 +179,7 @@ pub(super) fn list_built_in_misc_functions() -> Vec<(&'static str, ScalarFunctio
         ("kll_sketch_to_string_float", F::udf(SketchScalarStub::string("kll_sketch_to_string_float"))),
         ("theta_difference", F::udf(SketchScalarStub::binary("theta_difference"))),
         ("theta_intersection", F::udf(SketchScalarStub::binary("theta_intersection"))),
-        ("theta_sketch_estimate", F::udf(SketchScalarStub::float64("theta_sketch_estimate"))),
+        ("theta_sketch_estimate", F::udf(ThetaSketchEstimateFunc::new())),
         ("theta_union", F::udf(SketchScalarStub::binary("theta_union"))),
         (
             "input_file_block_length",

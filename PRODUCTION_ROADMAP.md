@@ -259,7 +259,7 @@ Planner already accepts it (Sprint 3). Need to wire the executor:
 
 ---
 
-### 6.2 Streaming Stateful Deduplication  `[ ]` P1 · ~2 days
+### 6.2 Streaming Stateful Deduplication  `[x]` P1 · ~2 days
 
 `df.dropDuplicates(["id"])` across micro-batches (needs state to track seen keys).
 
