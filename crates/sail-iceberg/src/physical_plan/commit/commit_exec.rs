@@ -11,6 +11,7 @@
 // limitations under the License.
 
 use std::any::Any;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -316,7 +317,11 @@ impl ExecutionPlan for IcebergCommitExec {
 
             if latest_meta_res.is_err()
                 && (matches!(commit_info.operation, crate::spec::Operation::Overwrite)
-                    || matches!(commit_info.operation, crate::spec::Operation::Append))
+                    || matches!(commit_info.operation, crate::spec::Operation::Append)
+                    || matches!(
+                        commit_info.operation,
+                        crate::spec::Operation::OverwritePartitions
+                    ))
             {
                 Self::validate_requirements(None, &commit_info.requirements)?;
                 // Bootstrap a new table using the unified bootstrap helper
@@ -375,7 +380,11 @@ impl ExecutionPlan for IcebergCommitExec {
                 // (per user preference to keep external SQL catalogs in sync).
                 if maybe_snapshot.is_none()
                     && (matches!(commit_info.operation, crate::spec::Operation::Overwrite)
-                        || matches!(commit_info.operation, crate::spec::Operation::Append))
+                        || matches!(commit_info.operation, crate::spec::Operation::Append)
+                        || matches!(
+                            commit_info.operation,
+                            crate::spec::Operation::OverwritePartitions
+                        ))
                 {
                     bootstrap_first_snapshot(
                         &table_url,
@@ -452,6 +461,34 @@ impl ExecutionPlan for IcebergCommitExec {
                         }
                         producer
                             .commit(LocalOverwriteOperation)
+                            .await
+                            .map_err(DataFusionError::Execution)?
+                    }
+                    crate::spec::Operation::OverwritePartitions => {
+                        // Dynamic partition overwrite: replace only the partitions present in
+                        // the new data; leave all other partitions untouched.
+                        let partition_filter: HashSet<Vec<Option<crate::spec::types::Literal>>> =
+                            commit_info
+                                .data_files
+                                .iter()
+                                .map(|df| df.partition.clone())
+                                .collect();
+                        let producer = crate::operations::SnapshotProducer::new(
+                            &tx,
+                            commit_info.data_files.clone(),
+                            Some(store_ctx.clone()),
+                            Some(manifest_meta),
+                        )
+                        .with_partition_filter(partition_filter)
+                        .with_row_lineage_start_row_id(row_lineage_start_row_id);
+                        struct LocalPartitionOverwriteOperation;
+                        impl SnapshotProduceOperation for LocalPartitionOverwriteOperation {
+                            fn operation(&self) -> &'static str {
+                                "overwrite"
+                            }
+                        }
+                        producer
+                            .commit(LocalPartitionOverwriteOperation)
                             .await
                             .map_err(DataFusionError::Execution)?
                     }

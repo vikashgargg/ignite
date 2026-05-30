@@ -11,11 +11,11 @@
 A user can `pip install vajra-pyspark`, point their existing PySpark code at Vajra, and it works. Specifically:
 
 - [ ] 105/105 scorecard on all three deployment modes (already done ✅)
-- [ ] VARIANT / parse_json / variant_get (Spark 4.x semi-structured type)
-- [ ] GroupedMap / CoGroupedMap / applyInPandas UDFs (Spark 4.1)
-- [ ] Delta time travel (AT VERSION / AT TIMESTAMP)
-- [ ] Delta V2 checkpointing — production tables compact correctly
-- [ ] Iceberg V3 spec + REST catalog
+- [x] VARIANT / parse_json / variant_get (Spark 4.x semi-structured type)
+- [x] GroupedMap / CoGroupedMap / applyInPandas UDFs (Spark 4.1)
+- [x] Delta time travel (AT VERSION / AT TIMESTAMP)
+- [x] Delta V2 checkpointing — production tables compact correctly
+- [x] Iceberg V3 spec + REST catalog
 - [ ] Official Apache Spark test suite ≥ 95% pass rate
 - [ ] TPC-H SF-100 distributed < 60s (10-node K8s cluster)
 - [ ] Kafka → Delta pipeline runs 24 h without OOM or restart
@@ -81,7 +81,7 @@ A user can `pip install vajra-pyspark`, point their existing PySpark code at Vaj
 
 ## Sprint 4 — Spark 4.x Feature Parity (2026-05-27 → 2026-06-07)
 
-### 4.1 VARIANT Type  `[ ]` P0 · ~3 days
+### 4.1 VARIANT Type  `[x]` P0 · ~3 days
 
 The `VARIANT` semi-structured type is Spark 4.0's biggest new type. Required for any Spark 4.x workload.
 
@@ -101,7 +101,7 @@ spark.sql("SELECT variant_get(parse_json('{\"a\":42}'), '$.a', 'INT')").collect(
 
 ---
 
-### 4.2 Delta Time Travel  `[ ]` P0 · ~2 days
+### 4.2 Delta Time Travel  `[x]` P0 · ~2 days
 
 `SELECT * FROM t VERSION AS OF 5` and `TIMESTAMP AS OF '2024-01-01'`.
 
@@ -119,7 +119,7 @@ assert spark.sql("SELECT * FROM t VERSION AS OF 0").collect() == [Row(v=1)]
 
 ---
 
-### 4.3 GroupedMap / applyInPandas (Spark 4.1)  `[ ]` P0 · ~3 days
+### 4.3 GroupedMap / applyInPandas (Spark 4.1)  `[x]` P0 · ~3 days
 
 `df.groupBy("k").applyInPandas(fn, schema)` — each group lands as a Pandas DataFrame in Python.
 
@@ -139,7 +139,7 @@ df.groupBy("k").applyInPandas(normalize, schema="k long, v double").show()
 
 ---
 
-### 4.4 Delta V2 Checkpointing  `[ ]` P1 · ~2 days
+### 4.4 Delta V2 Checkpointing  `[x]` P1 · ~2 days
 
 Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log files from accumulating. Critical for production tables.
 
@@ -150,7 +150,7 @@ Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log
 
 ---
 
-### 4.5 Iceberg V3 + OverwriteIf  `[ ]` P1 · ~2 days
+### 4.5 Iceberg V3 + OverwriteIf  `[x]` P1 · ~2 days
 
 **V3 spec:** position delete files, new stats encoding, improved row-level deletes.
 
@@ -163,7 +163,7 @@ Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log
 
 ---
 
-### 4.6 ClickBench Benchmark  `[ ]` P1 · ~1 day
+### 4.6 ClickBench Benchmark  `[x]` P1 · ~1 day
 
 43 OLAP queries on a 100M-row web analytics dataset. LakeSail shipped results in v0.6.3.
 
@@ -174,7 +174,7 @@ Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log
 
 ---
 
-### 4.7 bitmap_and_agg + variant_explode + to_csv improvements  `[ ]` P1 · ~1 day
+### 4.7 bitmap_and_agg + variant_explode + to_csv improvements  `[x]` P1 · ~1 day
 
 - `bitmap_and_agg` / `bitmap_or_agg` / `bitmap_count` — Apache DataSketches HLL-compatible
 - `variant_explode` / `variant_explode_outer` — depend on 4.1 VARIANT type

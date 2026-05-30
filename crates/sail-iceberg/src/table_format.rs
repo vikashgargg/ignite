@@ -115,8 +115,8 @@ impl TableFormat for IcebergTableFormat {
             PhysicalSinkMode::IgnoreIfExists if table_exists => {
                 return Ok(Arc::new(EmptyExec::new(input.schema())));
             }
-            PhysicalSinkMode::OverwriteIf { .. } | PhysicalSinkMode::OverwritePartitions => {
-                return not_impl_err!("predicate or partition overwrite for Iceberg");
+            PhysicalSinkMode::OverwriteIf { .. } => {
+                return not_impl_err!("predicate (replaceWhere) overwrite for Iceberg");
             }
             _ => {}
         }

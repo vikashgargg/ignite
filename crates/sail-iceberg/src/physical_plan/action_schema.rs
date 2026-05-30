@@ -207,6 +207,7 @@ fn parse_operation(s: &str) -> Result<Operation> {
         "replace" => Ok(Operation::Replace),
         "overwrite" => Ok(Operation::Overwrite),
         "delete" => Ok(Operation::Delete),
+        "partition_overwrite" => Ok(Operation::OverwritePartitions),
         other => Err(DataFusionError::Plan(format!(
             "unknown iceberg operation '{other}'"
         ))),

@@ -325,9 +325,10 @@ impl ExecutionPlan for IcebergWriterExec {
                 }
                 PhysicalSinkMode::Append => {}
                 PhysicalSinkMode::Overwrite => {}
-                PhysicalSinkMode::OverwriteIf { .. } | PhysicalSinkMode::OverwritePartitions => {
+                PhysicalSinkMode::OverwritePartitions => {}
+                PhysicalSinkMode::OverwriteIf { .. } => {
                     return Err(DataFusionError::NotImplemented(
-                        "predicate or partition overwrite not implemented for Iceberg".to_string(),
+                        "predicate (replaceWhere) overwrite not implemented for Iceberg".to_string(),
                     ));
                 }
             }
@@ -538,10 +539,12 @@ impl ExecutionPlan for IcebergWriterExec {
             let commit_meta = CommitMeta {
                 table_uri: table_url.to_string(),
                 row_count: total_rows,
-                operation: if matches!(sink_mode, PhysicalSinkMode::Overwrite) {
-                    crate::spec::Operation::Overwrite
-                } else {
-                    crate::spec::Operation::Append
+                operation: match sink_mode {
+                    PhysicalSinkMode::Overwrite => crate::spec::Operation::Overwrite,
+                    PhysicalSinkMode::OverwritePartitions => {
+                        crate::spec::Operation::OverwritePartitions
+                    }
+                    _ => crate::spec::Operation::Append,
                 },
                 requirements: commit_requirements,
                 table_properties: options.table_properties,

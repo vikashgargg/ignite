@@ -10,13 +10,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use bytes::Bytes;
 use object_store::ObjectStoreExt;
 
 use super::{ActionCommit, Transaction};
 use crate::io::StoreContext;
-use crate::spec::manifest::ManifestWriterBuilder;
+use crate::spec::manifest::{Manifest, ManifestEntry, ManifestStatus, ManifestWriterBuilder};
 use crate::spec::manifest_list::ManifestListWriter;
+use crate::spec::types::Literal;
 use crate::spec::{
     DataFile, FormatVersion, ManifestContentType, Operation, PartitionSpec, Schema,
     SnapshotBuilder, SnapshotReference, SnapshotRetention, TableRequirement, TableUpdate,
@@ -37,6 +40,9 @@ pub struct SnapshotProducer<'a> {
     /// If true, create a snapshot with no parent (for bootstrap scenarios)
     pub is_bootstrap: bool,
     pub row_lineage_start_row_id: Option<i64>,
+    /// When set, only parent files whose partition values are in this set are removed.
+    /// Files with other partition values are kept (dynamic partition overwrite semantics).
+    pub partition_filter: Option<HashSet<Vec<Option<Literal>>>>,
 }
 
 impl<'a> SnapshotProducer<'a> {
@@ -54,7 +60,16 @@ impl<'a> SnapshotProducer<'a> {
             write_path_mode: crate::utils::WritePathMode::Absolute,
             is_bootstrap: false,
             row_lineage_start_row_id: None,
+            partition_filter: None,
         }
+    }
+
+    pub fn with_partition_filter(
+        mut self,
+        filter: HashSet<Vec<Option<Literal>>>,
+    ) -> Self {
+        self.partition_filter = Some(filter);
+        self
     }
 
     pub fn with_write_path_mode(mut self, mode: crate::utils::WritePathMode) -> Self {
@@ -126,8 +141,13 @@ impl<'a> SnapshotProducer<'a> {
         let parent_snapshot = self.tx.snapshot();
         let parent_manifest_list_path_str = parent_snapshot.manifest_list();
         let mut parent_manifest_entries = Vec::new();
+        let is_partition_overwrite = self.partition_filter.is_some();
 
-        if !self.is_bootstrap && !is_overwrite && !parent_manifest_list_path_str.is_empty() {
+        let load_parent = !self.is_bootstrap
+            && (!is_overwrite || is_partition_overwrite)
+            && !parent_manifest_list_path_str.is_empty();
+
+        if load_parent {
             let (store_ref, manifest_list_path) = store_ctx
                 .resolve(parent_manifest_list_path_str)
                 .map_err(|e| format!("{}", e))?;
@@ -149,7 +169,83 @@ impl<'a> SnapshotProducer<'a> {
                 "snapshot producer: found parent manifest files: {}",
                 parent_manifest_list.entries().len()
             );
-            parent_manifest_entries.extend(parent_manifest_list.entries().iter().cloned());
+
+            if let Some(filter) = &self.partition_filter {
+                // Partition overwrite: load each manifest, filter out data files in affected
+                // partitions, retain everything else.
+                for mf in parent_manifest_list.entries() {
+                    // Only process data manifests — keep delete manifests as-is.
+                    if !matches!(mf.content, ManifestContentType::Data) {
+                        parent_manifest_entries.push(mf.clone());
+                        continue;
+                    }
+                    let (mf_store, mf_path) = store_ctx
+                        .resolve(&mf.manifest_path)
+                        .map_err(|e| format!("resolve manifest path: {e}"))?;
+                    let mf_bytes = mf_store
+                        .get(&mf_path)
+                        .await
+                        .map_err(|e| format!("read manifest: {e}"))?
+                        .bytes()
+                        .await
+                        .map_err(|e| format!("read manifest bytes: {e}"))?;
+                    let manifest = Manifest::parse_avro(&mf_bytes)
+                        .map_err(|e| format!("parse manifest: {e}"))?;
+
+                    let total = manifest.entries().len();
+                    let retained: Vec<ManifestEntry> = manifest
+                        .entries()
+                        .iter()
+                        .filter(|entry| !filter.contains(&entry.data_file.partition))
+                        .map(|e| (**e).clone())
+                        .collect();
+
+                    if retained.len() == total {
+                        // Nothing removed — reuse the original manifest file reference.
+                        parent_manifest_entries.push(mf.clone());
+                    } else if !retained.is_empty() {
+                        // Partial removal — write a new manifest with retained entries.
+                        let (_, manifest_meta) = manifest.into_parts();
+                        let mut writer = ManifestWriterBuilder::new(None, None, manifest_meta).build();
+                        for entry in retained {
+                            writer.add_existing(entry.data_file);
+                        }
+                        let new_manifest = writer.finish();
+                        let new_manifest_bytes = new_manifest
+                            .to_avro_bytes_v2()
+                            .map_err(|e| format!("serialize retained manifest: {e}"))?;
+                        let new_rel = format!("metadata/manifest-retained-{}.avro", uuid::Uuid::new_v4());
+                        let new_path = object_store::path::Path::from(new_rel.as_str());
+                        store_ctx
+                            .prefixed
+                            .put(
+                                &new_path,
+                                object_store::PutPayload::from(bytes::Bytes::from(new_manifest_bytes.clone())),
+                            )
+                            .await
+                            .map_err(|e| format!("write retained manifest: {e}"))?;
+                        let retained_manifest_file = crate::spec::manifest_list::ManifestFile::builder()
+                            .with_manifest_path(join_table_uri(
+                                self.tx.table_uri(),
+                                &new_rel,
+                                &self.write_path_mode,
+                            ))
+                            .with_manifest_length(new_manifest_bytes.len() as i64)
+                            .with_partition_spec_id(mf.partition_spec_id)
+                            .with_content(ManifestContentType::Data)
+                            .with_sequence_number(mf.sequence_number)
+                            .with_min_sequence_number(mf.min_sequence_number)
+                            .with_added_snapshot_id(mf.added_snapshot_id)
+                            .with_file_counts(0, new_manifest.entries().len() as i32, 0)
+                            .build()
+                            .map_err(|e| format!("build retained manifest file: {e}"))?;
+                        parent_manifest_entries.push(retained_manifest_file);
+                    }
+                    // else: all entries removed — drop this manifest entirely.
+                }
+            } else {
+                parent_manifest_entries.extend(parent_manifest_list.entries().iter().cloned());
+            }
         }
 
         let new_added_rows: i64 = self

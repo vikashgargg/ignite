@@ -46,6 +46,10 @@ pub enum Operation {
     Overwrite,
     /// Data files were removed and their contents logically deleted and/or delete files were added to delete rows.
     Delete,
+    /// Dynamic partition overwrite: only partitions present in the new data are replaced.
+    /// Internal variant — maps to "overwrite" in the Iceberg snapshot summary.
+    #[serde(rename = "partition_overwrite")]
+    OverwritePartitions,
 }
 
 impl Operation {
@@ -56,6 +60,7 @@ impl Operation {
             Operation::Replace => "replace",
             Operation::Overwrite => "overwrite",
             Operation::Delete => "delete",
+            Operation::OverwritePartitions => "partition_overwrite",
         }
     }
 }

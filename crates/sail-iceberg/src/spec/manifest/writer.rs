@@ -79,6 +79,11 @@ impl ManifestWriter {
         self.entries.push(Arc::new(entry));
     }
 
+    pub fn add_existing(&mut self, file: DataFile) {
+        let entry = ManifestEntry::new(ManifestStatus::Existing, self.snapshot_id, None, None, file);
+        self.entries.push(Arc::new(entry));
+    }
+
     pub fn finish(self) -> Manifest {
         Manifest::new(
             self.metadata,
