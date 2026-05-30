@@ -153,52 +153,162 @@ vajra bench --scale-factor 10   # requires: pip install duckdb
 
 ## Deployment
 
-### Local (development / small workloads)
+> **Platform support:** macOS requires **Apple Silicon (M1/M2/M3/M4)**. Linux works on x86_64 and aarch64. Intel Macs are not supported.
+
+---
+
+### Mode 1 — Local (single process, no setup)
+
+Best for: development, notebooks, quick queries.
 
 ```sh
-vajra server --ip 0.0.0.0 --port 50051
-```
+# Install
+curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
 
-### Local-cluster (multi-worker, single machine)
+# Start server
+vajra server
+# Listening on sc://127.0.0.1:50051 [mode: local]
 
-```sh
-vajra server --mode local-cluster --workers 4
-```
-
-### Apple Container (macOS 26 / Sequoia) — unique to Vajra
-
-```sh
-# Build image (layer-cached, incremental rebuild ~90s)
-make container-build
-
-# Run single-node
-container run --name vajra -p 50051:50051 vajra:latest
-
-# Run with in-process workers
-container run --name vajra -p 50051:50051 \
-  -e SAIL_MODE=local-cluster vajra:latest
-```
-
-### Kubernetes
-
-```sh
-# Quickstart with kind
-kubectl apply -f k8s/sail.yaml
-kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051
-
-# Production: Helm chart with HPA + HA scheduler
-helm install vajra ./helm/vajra \
-  --set server.replicas=3 \
-  --set auth.enabled=true \
-  --set auth.token=my-secret-token
-
-# Connect
-SPARK_REMOTE=sc://localhost:50051 python my_job.py
+# Connect from Python (pip install pyspark)
+python3 - <<'EOF'
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
+spark.sql("SELECT 'Vajra works!' AS msg").show()
+spark.range(1000).groupBy().sum("id").show()
+EOF
 ```
 
 ---
 
-## What Works Today (v0.3.0-alpha)
+### Mode 2 — Local-cluster (multi-worker, single Apple Silicon Mac)
+
+Best for: parallel workloads on M-series Mac (uses all cores across N workers).
+
+```sh
+# Start with 4 in-process workers
+vajra server --mode local-cluster --workers 4
+# Workers: 4  |  sc://127.0.0.1:50051
+
+# Connect — same PySpark code, no changes
+python3 - <<'EOF'
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
+
+# Runs distributed across 4 workers
+df = spark.read.parquet("/tmp/data/*.parquet")
+df.groupBy("region").agg({"revenue": "sum"}).orderBy("sum(revenue)", ascending=False).show()
+EOF
+```
+
+---
+
+### Mode 3 — Apple Container (macOS 26 / Sequoia) — unique to Vajra
+
+Best for: isolated, reproducible runs on Apple Silicon Mac using Apple's native container runtime (no Docker needed).
+
+> **Requires:** macOS 26 Sequoia + Apple Container (`container` CLI). Apple Silicon only.
+
+```sh
+# One-time: build the arm64 image (~5 min first time, ~90s incremental)
+make container-build
+
+# --- Single-node local mode ---
+container run --rm --name vajra \
+  -p 50051:50051 \
+  -v /tmp/vajra-data:/tmp/data \
+  vajra:latest
+
+# --- Local-cluster mode (4 in-process workers) ---
+container run --rm --name vajra \
+  -p 50051:50051 \
+  -e SAIL_MODE=local-cluster \
+  -e SAIL_EXECUTION__TARGET_PARTITIONS=4 \
+  -v /tmp/vajra-data:/tmp/data \
+  vajra:latest
+
+# Connect from host Mac
+python3 - <<'EOF'
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
+spark.sql("SELECT count(*), avg(id) FROM range(1000000)").show()
+EOF
+
+# Stop
+container stop vajra
+```
+
+---
+
+### Mode 4 — Kubernetes (local kind cluster or production)
+
+Best for: distributed multi-node workloads. Works on Linux x86_64 / aarch64 and Apple Silicon Mac via kind.
+
+**Quickstart with kind (Mac or Linux):**
+
+```sh
+# Prerequisites: kubectl + kind installed
+# brew install kind kubectl helm  (macOS)
+
+# 1. Create a local k8s cluster
+kind create cluster --name vajra
+
+# 2. Deploy Vajra
+kubectl apply -f k8s/sail.yaml
+
+# 3. Wait for pods ready
+kubectl wait --for=condition=ready pod -l app=vajra-spark-server \
+  -n vajra --timeout=120s
+
+# 4. Forward port
+kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 &
+
+# 5. Run Spark job
+python3 - <<'EOF'
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
+spark.sql("SELECT 'Running on K8s!' AS msg").show()
+spark.range(10000000).groupBy().count().show()
+EOF
+```
+
+**Production Helm deployment (with auth + HPA):**
+
+```sh
+helm install vajra ./helm/vajra \
+  --namespace vajra --create-namespace \
+  --set server.replicas=3 \
+  --set auth.enabled=true \
+  --set auth.token=my-secret-token \
+  --set autoscaling.enabled=true \
+  --set autoscaling.maxReplicas=10
+
+# Connect with token
+python3 - <<'EOF'
+from pyspark.sql import SparkSession
+spark = (SparkSession.builder
+  .remote("sc://localhost:50051")
+  .config("spark.connect.grpc.metadata", "Authorization=Bearer my-secret-token")
+  .getOrCreate())
+spark.sql("SELECT 'HA cluster!' AS msg").show()
+EOF
+```
+
+---
+
+### Quick comparison
+
+| Mode | Command | Use case | Workers |
+|---|---|---|---|
+| `local` | `vajra server` | Dev / notebooks | 1 process |
+| `local-cluster` | `vajra server --mode local-cluster --workers 4` | Multi-core Mac | N in-process |
+| Apple Container local | `container run ... vajra:latest` | Isolated, reproducible | 1 container |
+| Apple Container cluster | `container run -e SAIL_MODE=local-cluster ...` | Isolated multi-worker | N in-container |
+| Kubernetes | `kubectl apply -f k8s/sail.yaml` | Distributed, production | K8s pods |
+
+---
+
+## What Works Today (v0.5.0-alpha)
 
 ### SQL & Query Engine
 | Feature | Status |
@@ -251,7 +361,7 @@ SPARK_REMOTE=sc://localhost:50051 python my_job.py
 | Feature | Status |
 |---|---|
 | `local` / `local-cluster` / `kubernetes-cluster` modes | ✅ |
-| Apple Container (linux/arm64, macOS 26) | ✅ |
+| Apple Container (macOS 26, **Apple Silicon only**) | ✅ |
 | Kubernetes Helm chart (HPA, liveness/readiness) | ✅ |
 | Scheduler HA via K8s Lease election (`--ha`) | ✅ |
 | Bearer token auth (`--auth-token` / `SAIL_AUTH__TOKEN`) | ✅ |
