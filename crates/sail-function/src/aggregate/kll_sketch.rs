@@ -124,7 +124,15 @@ macro_rules! kll_agg_udaf {
         impl $name {
             pub fn new() -> Self {
                 Self {
-                    signature: Signature::exact(vec![$input_type], Volatility::Immutable),
+                    // Accept (col) or (col, k) — second arg is optional capacity, ignored
+                    signature: Signature::one_of(
+                        vec![
+                            datafusion_expr::TypeSignature::Exact(vec![$input_type]),
+                            datafusion_expr::TypeSignature::Exact(vec![$input_type, DataType::Int32]),
+                            datafusion_expr::TypeSignature::Exact(vec![$input_type, DataType::Int64]),
+                        ],
+                        Volatility::Immutable,
+                    ),
                 }
             }
         }

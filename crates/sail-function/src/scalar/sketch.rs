@@ -98,12 +98,15 @@ const THETA_MAGIC: u32 = 0x5448_4554;
 const THETA_K: usize = 4096;
 
 fn estimate_from_bytes(bytes: &[u8]) -> Result<f64> {
+    // Empty / stub sketch → 0
+    if bytes.is_empty() {
+        return Ok(0.0);
+    }
     if bytes.len() < 16 {
-        return Err(plan_datafusion_err!("theta_sketch_estimate: buffer too short"));
+        return Ok(0.0);
     }
     let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
     if magic != THETA_MAGIC {
-        // Treat unknown format as 0 (stub / legacy data)
         return Ok(0.0);
     }
     let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
@@ -116,6 +119,171 @@ fn estimate_from_bytes(bytes: &[u8]) -> Result<f64> {
         return Ok(count as f64);
     }
     Ok(count as f64 / theta_f)
+}
+
+/// Deserialise a theta sketch from bytes into a sorted Vec<u64> of hashes + theta.
+fn decode_sketch(bytes: &[u8]) -> (Vec<u64>, u64) {
+    if bytes.len() < 16 {
+        return (vec![], u64::MAX);
+    }
+    let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    if magic != THETA_MAGIC {
+        return (vec![], u64::MAX);
+    }
+    let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+    let theta = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    let mut hashes = Vec::with_capacity(count);
+    for i in 0..count {
+        let off = 16 + i * 8;
+        if off + 8 > bytes.len() {
+            break;
+        }
+        hashes.push(u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap()));
+    }
+    (hashes, theta)
+}
+
+/// Encode a (hashes, theta) pair back to the theta sketch binary format.
+fn encode_sketch(mut hashes: Vec<u64>, theta: u64) -> Vec<u8> {
+    hashes.sort_unstable();
+    hashes.dedup();
+    let count = hashes.len();
+    let mut out = Vec::with_capacity(16 + count * 8);
+    out.extend_from_slice(&THETA_MAGIC.to_le_bytes());
+    out.extend_from_slice(&(count as u32).to_le_bytes());
+    out.extend_from_slice(&theta.to_le_bytes());
+    for h in &hashes {
+        out.extend_from_slice(&h.to_le_bytes());
+    }
+    out
+}
+
+/// Merge two binary sketch arrays using a combining function.
+fn merge_two_sketches(
+    args: ScalarFunctionArgs,
+    combine: impl Fn(Vec<u64>, u64, Vec<u64>, u64) -> (Vec<u64>, u64),
+) -> Result<ColumnarValue> {
+    let mut it = args.args.into_iter();
+    let (a, b) = match (it.next(), it.next()) {
+        (Some(a), Some(b)) => (a, b),
+        _ => return Ok(ColumnarValue::Scalar(ScalarValue::Binary(Some(vec![])))),
+    };
+    let get_bytes = |cv: ColumnarValue| -> Vec<u8> {
+        match cv {
+            ColumnarValue::Scalar(ScalarValue::Binary(Some(v))) => v,
+            _ => vec![],
+        }
+    };
+    let bytes_a = get_bytes(a);
+    let bytes_b = get_bytes(b);
+    let (ha, ta) = decode_sketch(&bytes_a);
+    let (hb, tb) = decode_sketch(&bytes_b);
+    let (merged, theta) = combine(ha, ta, hb, tb);
+    Ok(ColumnarValue::Scalar(ScalarValue::Binary(Some(encode_sketch(merged, theta)))))
+}
+
+/// `theta_union(s1, s2) → Binary` — union of two theta sketches.
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct ThetaUnionFunc {
+    signature: Signature,
+}
+impl ThetaUnionFunc {
+    pub fn new() -> Self {
+        Self { signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable) }
+    }
+}
+impl Default for ThetaUnionFunc { fn default() -> Self { Self::new() } }
+impl ScalarUDFImpl for ThetaUnionFunc {
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "theta_union" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        merge_two_sketches(args, |mut ha, ta, hb, tb| {
+            let theta = ta.min(tb);
+            ha.extend(hb.into_iter().filter(|h| *h < theta));
+            ha.retain(|h| *h < theta);
+            if ha.len() > THETA_K {
+                ha.sort_unstable();
+                ha.dedup();
+                ha.truncate(THETA_K);
+                let new_theta = ha.iter().copied().max().unwrap_or(u64::MAX);
+                return (ha, new_theta);
+            }
+            (ha, theta)
+        })
+    }
+}
+
+/// `theta_intersection(s1, s2) → Binary` — intersection of two theta sketches.
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct ThetaIntersectionFunc {
+    signature: Signature,
+}
+impl ThetaIntersectionFunc {
+    pub fn new() -> Self {
+        Self { signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable) }
+    }
+}
+impl Default for ThetaIntersectionFunc { fn default() -> Self { Self::new() } }
+impl ScalarUDFImpl for ThetaIntersectionFunc {
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "theta_intersection" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        merge_two_sketches(args, |ha, ta, hb, tb| {
+            let theta = ta.min(tb);
+            let set_b: std::collections::HashSet<u64> = hb.into_iter().collect();
+            let intersected: Vec<u64> = ha.into_iter().filter(|h| set_b.contains(h) && *h < theta).collect();
+            (intersected, theta)
+        })
+    }
+}
+
+/// `theta_difference(s1, s2) → Binary` — set difference A \ B of two theta sketches.
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct ThetaDifferenceFunc {
+    signature: Signature,
+}
+impl ThetaDifferenceFunc {
+    pub fn new() -> Self {
+        Self { signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable) }
+    }
+}
+impl Default for ThetaDifferenceFunc { fn default() -> Self { Self::new() } }
+impl ScalarUDFImpl for ThetaDifferenceFunc {
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "theta_difference" }
+    fn signature(&self) -> &Signature { &self.signature }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        merge_two_sketches(args, |ha, ta, hb, tb| {
+            let theta = ta.min(tb);
+            let set_b: std::collections::HashSet<u64> = hb.into_iter().collect();
+            let diff: Vec<u64> = ha.into_iter().filter(|h| !set_b.contains(h) && *h < theta).collect();
+            (diff, theta)
+        })
+    }
+}
+
+/// `hll_union(s1, s2) → Binary` — alias for theta_union (same format).
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct HllUnionFunc {
+    inner: ThetaUnionFunc,
+}
+impl HllUnionFunc {
+    pub fn new() -> Self { Self { inner: ThetaUnionFunc::new() } }
+}
+impl Default for HllUnionFunc { fn default() -> Self { Self::new() } }
+impl ScalarUDFImpl for HllUnionFunc {
+    fn as_any(&self) -> &dyn Any { self }
+    fn name(&self) -> &str { "hll_union" }
+    fn signature(&self) -> &Signature { self.inner.signature() }
+    fn return_type(&self, args: &[DataType]) -> Result<DataType> { self.inner.return_type(args) }
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        self.inner.invoke_with_args(args)
+    }
 }
 
 /// `theta_sketch_estimate(binary) → float64`

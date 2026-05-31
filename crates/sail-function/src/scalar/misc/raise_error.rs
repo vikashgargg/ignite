@@ -32,11 +32,16 @@ impl RaiseError {
     }
 }
 
+fn spark_raise(message: &str) -> datafusion::error::DataFusionError {
+    // Spark wraps user-raised errors with this error class prefix
+    DataFusionError::Execution(format!("[USER_RAISED_EXCEPTION] {message}"))
+}
+
 fn raise_from_strings<'a>(
     mut iter: impl Iterator<Item = Option<&'a str>>,
 ) -> Result<ColumnarValue> {
     if let Some(message) = iter.find_map(|v| v) {
-        Err(DataFusionError::Execution(message.to_string()))
+        Err(spark_raise(message))
     } else {
         internal_err!("raise_error expects a single UTF-8 string argument")
     }
@@ -68,7 +73,7 @@ impl ScalarUDFImpl for RaiseError {
             ColumnarValue::Scalar(ScalarValue::Utf8(Some(message)))
             | ColumnarValue::Scalar(ScalarValue::LargeUtf8(Some(message)))
             | ColumnarValue::Scalar(ScalarValue::Utf8View(Some(message))) => {
-                Err(DataFusionError::Execution(message))
+                Err(spark_raise(&message))
             }
             ColumnarValue::Array(array) => match array.data_type() {
                 DataType::Utf8 => raise_from_strings(as_string_array(array.as_ref())?.iter()),

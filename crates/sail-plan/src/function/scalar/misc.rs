@@ -20,7 +20,8 @@ use sail_function::aggregate::kll_sketch::{
     KllSketchGetQuantileBigint, KllSketchGetQuantileDouble, KllSketchGetQuantileFloat,
 };
 use sail_function::scalar::sketch::{
-    CollationFunc, HllSketchEstimateFunc, SketchScalarStub, ThetaSketchEstimateFunc,
+    CollationFunc, HllSketchEstimateFunc, HllUnionFunc, SketchScalarStub, ThetaDifferenceFunc,
+    ThetaIntersectionFunc, ThetaSketchEstimateFunc, ThetaUnionFunc,
 };
 
 use crate::error::{PlanError, PlanResult};
@@ -164,7 +165,7 @@ pub(super) fn list_built_in_misc_functions() -> Vec<(&'static str, ScalarFunctio
         ("from_protobuf", F::udf(SketchScalarStub::binary("from_protobuf"))),
         ("equal_null", F::binary_op(Operator::IsNotDistinctFrom)),
         ("hll_sketch_estimate", F::udf(HllSketchEstimateFunc::new())),
-        ("hll_union", F::udf(SketchScalarStub::binary("hll_union"))),
+        ("hll_union", F::udf(HllUnionFunc::new())),
         ("kll_sketch_get_n_bigint", F::udf(SketchScalarStub::int64("kll_sketch_get_n_bigint"))),
         ("kll_sketch_get_n_double", F::udf(SketchScalarStub::int64("kll_sketch_get_n_double"))),
         ("kll_sketch_get_n_float", F::udf(SketchScalarStub::int64("kll_sketch_get_n_float"))),
@@ -180,10 +181,10 @@ pub(super) fn list_built_in_misc_functions() -> Vec<(&'static str, ScalarFunctio
         ("kll_sketch_to_string_bigint", F::udf(SketchScalarStub::string("kll_sketch_to_string_bigint"))),
         ("kll_sketch_to_string_double", F::udf(SketchScalarStub::string("kll_sketch_to_string_double"))),
         ("kll_sketch_to_string_float", F::udf(SketchScalarStub::string("kll_sketch_to_string_float"))),
-        ("theta_difference", F::udf(SketchScalarStub::binary("theta_difference"))),
-        ("theta_intersection", F::udf(SketchScalarStub::binary("theta_intersection"))),
+        ("theta_difference", F::udf(ThetaDifferenceFunc::new())),
+        ("theta_intersection", F::udf(ThetaIntersectionFunc::new())),
         ("theta_sketch_estimate", F::udf(ThetaSketchEstimateFunc::new())),
-        ("theta_union", F::udf(SketchScalarStub::binary("theta_union"))),
+        ("theta_union", F::udf(ThetaUnionFunc::new())),
         (
             "input_file_block_length",
             F::custom(input_file_block_length),

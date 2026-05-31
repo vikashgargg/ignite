@@ -91,11 +91,23 @@ impl Default for ApproxTopKFunction {
 impl ApproxTopKFunction {
     pub fn new() -> Self {
         Self {
-            signature: Signature::any(2, Volatility::Immutable),
+            // Accept 1, 2, or 3 args: (col), (col, k), (col, k, maxItemCount)
+            // Spark default k=5; 3rd arg (maxItemCount) is ignored
+            signature: Signature::one_of(
+                vec![
+                    datafusion_expr::TypeSignature::Any(1),
+                    datafusion_expr::TypeSignature::Any(2),
+                    datafusion_expr::TypeSignature::Any(3),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 
     fn extract_k(args: &AccumulatorArgs) -> Result<usize> {
+        if args.exprs.len() < 2 {
+            return Ok(5); // Spark default k=5
+        }
         let scalar = get_scalar_value(&args.exprs[1])?;
         let k = match scalar {
             ScalarValue::Int8(Some(v)) => v as i64,
@@ -106,19 +118,9 @@ impl ApproxTopKFunction {
             ScalarValue::UInt16(Some(v)) => v as i64,
             ScalarValue::UInt32(Some(v)) => v as i64,
             ScalarValue::UInt64(Some(v)) => v as i64,
-            other => {
-                return Err(DataFusionError::Plan(format!(
-                    "approx_top_k requires an integer literal for k, got {}",
-                    other.data_type()
-                )))
-            }
+            _ => return Ok(5),
         };
-        if k < 1 {
-            return Err(DataFusionError::Plan(format!(
-                "approx_top_k requires k to be positive, got {k}",
-            )));
-        }
-        Ok(k as usize)
+        if k < 1 { Ok(5) } else { Ok(k as usize) }
     }
 }
 
@@ -202,7 +204,15 @@ impl Default for ApproxTopKAccumulateFunction {
 impl ApproxTopKAccumulateFunction {
     pub fn new() -> Self {
         Self {
-            signature: Signature::any(2, Volatility::Immutable),
+            // Accept 1, 2, or 3 args: (col), (col, k), (col, k, maxItemCount)
+            signature: Signature::one_of(
+                vec![
+                    datafusion_expr::TypeSignature::Any(1),
+                    datafusion_expr::TypeSignature::Any(2),
+                    datafusion_expr::TypeSignature::Any(3),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }

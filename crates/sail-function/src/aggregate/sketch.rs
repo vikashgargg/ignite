@@ -199,7 +199,14 @@ impl ThetaSketchUnionAgg {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
+            // Accept (sketch) or (sketch, dedup_flag: bool) — dedup flag is ignored
+            signature: Signature::one_of(
+                vec![
+                    TypeSignature::Exact(vec![DataType::Binary]),
+                    TypeSignature::Exact(vec![DataType::Binary, DataType::Boolean]),
+                ],
+                Volatility::Immutable,
+            ),
         }
     }
 }
