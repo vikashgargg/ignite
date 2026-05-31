@@ -341,7 +341,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: macos-cargo-scorecard-${{ hashFiles('**/Cargo.lock') }}
+          key: macos-cargo-scorecard-py312-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install system deps
         run: brew install protobuf
@@ -497,49 +497,34 @@ jobs:
         if: always()
         run: kill "$VAJRA_PID" 2>/dev/null || true
 
-  build-macos-universal:
-    name: Build macOS universal binary
-    runs-on: macos-latest
+  build-macos-arm64:
+    name: Build macOS binary (Apple Silicon only)
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin,aarch64-apple-darwin
+          targets: aarch64-apple-darwin
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: macos-cargo-universal-${{ hashFiles('**/Cargo.lock') }}
+          key: macos-cargo-arm64-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
         run: brew install protobuf
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install cargo-zigbuild
-        run: pip install cargo-zigbuild || cargo install cargo-zigbuild
-      - name: Install zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: "0.14.0"
-      - name: Build x86_64 (cross via zigbuild)
-        run: cargo zigbuild --release -p sail-cli --target x86_64-apple-darwin
-      - name: Build aarch64 (native)
-        run: cargo build --release -p sail-cli --target aarch64-apple-darwin
-      - name: Create universal binary with lipo
-        run: |
-          lipo -create -output target/vajra-universal2-apple-darwin \
-            target/x86_64-apple-darwin/release/vajra \
-            target/aarch64-apple-darwin/release/vajra
-      - name: Show binary sizes
-        run: |
-          ls -lh target/x86_64-apple-darwin/release/vajra
-          ls -lh target/aarch64-apple-darwin/release/vajra
-          ls -lh target/vajra-universal2-apple-darwin
-          file target/vajra-universal2-apple-darwin
+          python-version: "3.12"
+      - name: Build aarch64-apple-darwin
+        env:
+          PYO3_PYTHON: python3.12
+        run: cargo build --release -p sail-cli
+      - name: Show binary size
+        run: ls -lh target/release/vajra
       - uses: actions/upload-artifact@v4
         with:
-          name: vajra-macos-universal
-          path: target/vajra-universal2-apple-darwin
+          name: vajra-aarch64-apple-darwin-ci
+          path: target/release/vajra
           retention-days: 7
