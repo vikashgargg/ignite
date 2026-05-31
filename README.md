@@ -102,21 +102,43 @@ TPC-H SF-1 — 22/22 PASS — total 1.515s  (Spark warm JVM: ~60s)
 
 ## Quick Start
 
-### Install
+### Prerequisites
+
+| Platform | Requirement |
+|---|---|
+| macOS | Apple Silicon (M1/M2/M3/M4). Python 3.10+ (auto-installed via Homebrew if missing) |
+| Linux | x86_64 or aarch64. Python 3.10+ (`sudo apt install python3.11` / `sudo dnf install python3.11`) |
+
+### Install (one command)
 
 ```sh
-# macOS Apple Silicon (M1/M2/M3/M4) or Linux (x86_64 / aarch64)
 curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
 ```
 
-### Start the server
+The installer:
+1. Downloads the pre-built binary for your platform
+2. Creates an isolated Python venv at `~/.local/lib/vajra/venv` with pyspark 4.x + all Spark Connect deps
+3. Wraps the binary so `vajra sql` / `vajra run` just work — no manual `PYTHONPATH` setup
+
+After install, add to your PATH (shown by the installer) then test:
 
 ```sh
-vajra server
-# Vajra ready on 127.0.0.1:50051 (Spark Connect gRPC) [mode: local]
+export PATH="$HOME/.local/bin:$PATH"   # paste exact line from installer output
+vajra --version                         # vajra 0.1.0
+vajra sql "SELECT 1"                    # prints +---+ \n| 1 | \n+---+
 ```
 
-### Connect — change one line in your PySpark code
+### Run a quick smoke test
+
+```sh
+# One-shot SQL
+vajra sql "SELECT 'hello' AS msg, current_timestamp() AS ts"
+
+# TPC-H benchmark (requires: pip install duckdb)
+vajra bench --scale-factor 1
+```
+
+### Connect your existing PySpark code — change one line
 
 ```python
 from pyspark.sql import SparkSession
@@ -129,6 +151,12 @@ spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
 
 df = spark.read.parquet("s3://my-bucket/data/")
 df.groupBy("region").agg({"revenue": "sum"}).show()
+```
+
+```sh
+vajra server                             # start server on :50051
+python my_job.py                         # run job using pyspark installed in the venv
+# or: vajra run -f my_job.py            # run in-process, no separate server needed
 ```
 
 ### One-shot SQL
