@@ -2226,7 +2226,7 @@
                   },
                   "nullable": false,
                   "comment": null,
-                  "default": null,
+                  "default": "\"abc\"",
                   "generatedAlwaysAs": null
                 }
               ],
@@ -2276,7 +2276,7 @@
                   },
                   "nullable": false,
                   "comment": null,
-                  "default": null,
+                  "default": "'abc'",
                   "generatedAlwaysAs": null
                 }
               ],
@@ -2331,7 +2331,7 @@
                   },
                   "nullable": false,
                   "comment": null,
-                  "default": null,
+                  "default": "\"abc\"",
                   "generatedAlwaysAs": null
                 }
               ],
@@ -2382,7 +2382,7 @@
                   },
                   "nullable": false,
                   "comment": null,
-                  "default": null,
+                  "default": "\"abc\"",
                   "generatedAlwaysAs": null
                 }
               ],
@@ -2436,7 +2436,7 @@
                   },
                   "nullable": false,
                   "comment": null,
-                  "default": null,
+                  "default": "'abc'",
                   "generatedAlwaysAs": null
                 }
               ],
