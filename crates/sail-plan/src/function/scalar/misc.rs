@@ -16,6 +16,9 @@ use sail_function::scalar::misc::spark_aes::{
 };
 use sail_function::scalar::misc::spark_partition_id::SparkPartitionId;
 use sail_function::scalar::misc::version::SparkVersion;
+use sail_function::aggregate::kll_sketch::{
+    KllSketchGetQuantileBigint, KllSketchGetQuantileDouble, KllSketchGetQuantileFloat,
+};
 use sail_function::scalar::sketch::{
     CollationFunc, HllSketchEstimateFunc, SketchScalarStub, ThetaSketchEstimateFunc,
 };
@@ -165,9 +168,9 @@ pub(super) fn list_built_in_misc_functions() -> Vec<(&'static str, ScalarFunctio
         ("kll_sketch_get_n_bigint", F::udf(SketchScalarStub::int64("kll_sketch_get_n_bigint"))),
         ("kll_sketch_get_n_double", F::udf(SketchScalarStub::int64("kll_sketch_get_n_double"))),
         ("kll_sketch_get_n_float", F::udf(SketchScalarStub::int64("kll_sketch_get_n_float"))),
-        ("kll_sketch_get_quantile_bigint", F::udf(SketchScalarStub::int64("kll_sketch_get_quantile_bigint"))),
-        ("kll_sketch_get_quantile_double", F::udf(SketchScalarStub::float64("kll_sketch_get_quantile_double"))),
-        ("kll_sketch_get_quantile_float", F::udf(SketchScalarStub::float64("kll_sketch_get_quantile_float"))),
+        ("kll_sketch_get_quantile_bigint", F::udf(KllSketchGetQuantileBigint::new())),
+        ("kll_sketch_get_quantile_double", F::udf(KllSketchGetQuantileDouble::new())),
+        ("kll_sketch_get_quantile_float", F::udf(KllSketchGetQuantileFloat::new())),
         ("kll_sketch_get_rank_bigint", F::udf(SketchScalarStub::float64("kll_sketch_get_rank_bigint"))),
         ("kll_sketch_get_rank_double", F::udf(SketchScalarStub::float64("kll_sketch_get_rank_double"))),
         ("kll_sketch_get_rank_float", F::udf(SketchScalarStub::float64("kll_sketch_get_rank_float"))),

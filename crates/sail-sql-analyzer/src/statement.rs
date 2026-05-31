@@ -12,14 +12,15 @@ use sail_sql_parser::ast::statement::{
     AnalyzeTableModifier, AsQueryClause, Assignment, AssignmentList, ColumnAlteration,
     ColumnAlterationList, ColumnAlterationOption, ColumnDefinition, ColumnDefinitionList,
     ColumnDefinitionOption, ColumnDropList,
-    ColumnPosition, ColumnTypeDefinition, CommentValue, CreateDatabaseClause, CreateTableClause,
+    ColumnOrConstraintItem, ColumnPosition, ColumnTypeDefinition, CommentValue,
+    CreateDatabaseClause, CreateTableClause,
     CreateViewClause, DeleteTableAlias, DescribeItem, ExplainFormat, FileFormat,
     InsertDirectoryDestination, MergeMatchClause, MergeMatchedAction,
     MergeNotMatchedBySourceAction, MergeNotMatchedByTargetAction, MergeSource, PartitionByItem,
     PartitionByList, PartitionClause, PartitionValue, PartitionValueList, PropertyKey,
     PropertyKeyList, PropertyKeyValue, PropertyList, PropertyValue, RowFormat,
     RowFormatDelimitedClause, SetClause, SortColumn, SortColumnClause, SortColumnList, Statement,
-    UpdateTableAlias, ViewColumn,
+    TableConstraintAst, UpdateTableAlias, ViewColumn,
 };
 use sail_sql_parser::tree::TreeText;
 
@@ -1318,11 +1319,11 @@ fn from_ast_table_definition(
         .collect::<SqlResult<Vec<_>>>()?;
     let options = options.map(from_ast_property_list).transpose()?;
     let properties = properties.map(from_ast_property_list).transpose()?;
-    let columns = from_ast_table_columns(columns)?;
+    let (columns, constraints) = from_ast_table_definition_columns(columns)?;
     let definition = spec::TableDefinition {
         columns,
         comment: comment.map(from_ast_string).transpose()?,
-        constraints: vec![],
+        constraints,
         location: location.map(from_ast_string).transpose()?,
         file_format,
         row_format,
@@ -1341,49 +1342,100 @@ fn from_ast_table_definition(
     Ok((definition, query))
 }
 
-fn from_ast_table_columns(
+/// Parses a `ColumnDefinitionList` into column definitions and table-level constraints.
+fn from_ast_table_definition_columns(
     columns: Option<ColumnDefinitionList>,
-) -> SqlResult<Vec<spec::TableColumnDefinition>> {
-    let columns = columns.map(
+) -> SqlResult<(Vec<spec::TableColumnDefinition>, Vec<spec::TableConstraint>)> {
+    let items = columns.map(
         |ColumnDefinitionList {
              left: _,
-             columns,
+             items,
              right: _,
-         }| columns,
+         }| items,
     );
-    let mut output = Vec::with_capacity(
-        columns
+    let mut col_output = Vec::with_capacity(
+        items
             .as_ref()
             .map(|x| 1 + x.tail.len())
             .unwrap_or_default(),
     );
-    for column in columns.map(|x| x.into_items()).into_iter().flatten() {
-        let ColumnDefinition {
-            name,
-            colon: _,
-            data_type,
-            options,
-        } = column;
-        // TODO: support `default` SQL expression strings
-        let ColumnDefinitionOptions {
-            not_null,
-            default: _,
-            generated_always_as,
-            comment,
-        } = options.try_into()?;
-        let comment = comment.map(from_ast_string).transpose()?;
-        let generated_always_as = generated_always_as.map(|expr| expr.text().trim().to_string());
-        let column = spec::TableColumnDefinition {
-            name: name.value,
-            data_type: from_ast_data_type(data_type)?,
-            nullable: !not_null,
-            default: None,
-            generated_always_as,
-            comment,
-        };
-        output.push(column);
+    let mut constraint_output = Vec::new();
+    for item in items.map(|x| x.into_items()).into_iter().flatten() {
+        match item {
+            ColumnOrConstraintItem::Column(column) => {
+                let ColumnDefinition {
+                    name,
+                    colon: _,
+                    data_type,
+                    options,
+                } = column;
+                let ColumnDefinitionOptions {
+                    not_null,
+                    default,
+                    generated_always_as,
+                    comment,
+                } = options.try_into()?;
+                let comment = comment.map(from_ast_string).transpose()?;
+                let generated_always_as =
+                    generated_always_as.map(|expr| expr.text().trim().to_string());
+                let default = default.map(|expr| expr.text().trim().to_string());
+                col_output.push(spec::TableColumnDefinition {
+                    name: name.value,
+                    data_type: from_ast_data_type(data_type)?,
+                    nullable: !not_null,
+                    default,
+                    generated_always_as,
+                    comment,
+                });
+            }
+            ColumnOrConstraintItem::Constraint(constraint) => {
+                let spec_constraint = from_ast_table_constraint(constraint)?;
+                constraint_output.push(spec_constraint);
+            }
+        }
     }
-    Ok(output)
+    Ok((col_output, constraint_output))
+}
+
+fn from_ast_table_constraint(constraint: TableConstraintAst) -> SqlResult<spec::TableConstraint> {
+    match constraint {
+        TableConstraintAst::PrimaryKey {
+            constraint_name,
+            columns,
+            ..
+        } => {
+            let name = constraint_name
+                .map(|(_, n)| spec::Identifier::from(n.value))
+                .map(Some)
+                .unwrap_or(None);
+            let col_names = columns
+                .into_items()
+                .map(|i| spec::Identifier::from(i.value))
+                .collect();
+            Ok(spec::TableConstraint::PrimaryKey {
+                name,
+                columns: col_names,
+            })
+        }
+        TableConstraintAst::Unique {
+            constraint_name,
+            columns,
+            ..
+        } => {
+            let name = constraint_name
+                .map(|(_, n)| spec::Identifier::from(n.value))
+                .map(Some)
+                .unwrap_or(None);
+            let col_names = columns
+                .into_items()
+                .map(|i| spec::Identifier::from(i.value))
+                .collect();
+            Ok(spec::TableConstraint::Unique {
+                name,
+                columns: col_names,
+            })
+        }
+    }
 }
 
 fn from_ast_row_format(format: RowFormat) -> SqlResult<spec::TableRowFormat> {

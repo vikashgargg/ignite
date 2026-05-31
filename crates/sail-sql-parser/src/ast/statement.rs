@@ -8,17 +8,17 @@ use crate::ast::identifier::{table_ident, Ident, ObjectName};
 use crate::ast::keywords::{
     Add, After, All, Alter, Always, Analyze, And, As, Buckets, By, Cache, Cascade, Catalog,
     Catalogs, Change, Clear, Cluster, Clustered, Codegen, Collection, Column, Columns, Comment,
-    Compute, Cost, Create, Data, Database, Databases, Dbproperties, Default, Defined, Delete,
-    Delimited, Desc, Describe, Directory, Distributed, Drop, Escaped, Evolution, Exists, Explain,
-    Extended, External, Fields, Fileformat, First, For, Format, Formatted, From, Function,
+    Compute, Constraint, Cost, Create, Data, Database, Databases, Dbproperties, Default, Defined,
+    Delete, Delimited, Desc, Describe, Directory, Distributed, Drop, Escaped, Evolution, Exists,
+    Explain, Extended, External, Fields, Fileformat, First, For, Format, Formatted, From, Function,
     Functions, Generated, Global, If, In, Index, Inpath, Inputformat, Insert, Into, Is, Items, Keys,
     Lazy,
     Like, Lines, Load, Local, Location, Logical, Map, Matched, Merge, Name, Namespace, Namespaces,
     Noscan, Not, Null, On, Options, Or, Outputformat, Overwrite, Partition, Partitioned, Partitions,
-    Properties, Purge, Recover, Refresh, Rename, Replace, Restrict, Row, Schema, Schemas, Serde,
-    Serdeproperties, Set, Show, Skewed, Sorted, Source, Statistics, Stored, Table, Tables, Target,
-    Tblproperties, Temp, Temporary, Terminated, Then, Time, To, Type, Uncache, Unset, Update, Use,
-    Using, Values, Verbose, View, Views, When, With, Zone,
+    Primary, Properties, Purge, Recover, Refresh, Rename, Replace, Restrict, Row, Schema, Schemas,
+    Serde, Serdeproperties, Set, Show, Skewed, Sorted, Source, Statistics, Stored, Table, Tables,
+    Target, Tblproperties, Temp, Temporary, Terminated, Then, Time, To, Type, Uncache, Unique,
+    Unset, Update, Use, Using, Values, Verbose, View, Views, When, With, Zone,
 };
 use crate::ast::literal::{IntegerLiteral, NumberLiteral, StringLiteral};
 use crate::ast::operator::{
@@ -450,9 +450,25 @@ pub struct AsQueryClause {
 #[parser(dependency = "(Expr, DataType)")]
 pub struct ColumnDefinitionList {
     pub left: LeftParenthesis,
-    #[parser(function = |(e, d), o| sequence(compose((e, d), o), unit(o)))]
-    pub columns: Sequence<ColumnDefinition, Comma>,
+    /// Each item is either a column definition or a table-level constraint.
+    /// Table constraints (`PRIMARY KEY`, `UNIQUE`, `CONSTRAINT`) must be tried
+    /// first because their leading keyword is disjoint from an identifier-led
+    /// `ColumnDefinition`.
+    #[parser(function = |(e, d), o| sequence(
+        compose((e, d), o)
+            .or(compose((), o).map(ColumnOrConstraintItem::Constraint)),
+        unit(o)
+    ))]
+    pub items: Sequence<ColumnOrConstraintItem, Comma>,
     pub right: RightParenthesis,
+}
+
+/// An item inside a `ColumnDefinitionList`.
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+#[parser(dependency = "(Expr, DataType)")]
+pub enum ColumnOrConstraintItem {
+    Column(#[parser(function = |(e, d), o| compose((e, d), o))] ColumnDefinition),
+    Constraint(#[parser(function = |_, o| compose((), o))] TableConstraintAst),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
@@ -497,6 +513,37 @@ pub enum ColumnDefinitionOption {
         Option<(LeftParenthesis, Vec<(Ident, Either<By, With>, Option<Minus>, NumberLiteral)>, RightParenthesis)>,
     ),
     Comment(Comment, StringLiteral),
+}
+
+/// A table-level constraint declaration (not enforced; metadata-only in Spark 3.x/4.x).
+/// Supports:
+///   `[CONSTRAINT name] PRIMARY KEY (col, ...) [NOT ENFORCED]`
+///   `[CONSTRAINT name] UNIQUE (col, ...) [NOT ENFORCED]`
+///   `[CONSTRAINT name] CHECK (expr) [NOT ENFORCED]`
+///
+/// These appear inside the column-definition parentheses of `CREATE TABLE`.
+#[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
+pub enum TableConstraintAst {
+    PrimaryKey {
+        /// `CONSTRAINT name` prefix (optional)
+        constraint_name: Option<(Constraint, Ident)>,
+        primary: Primary,
+        /// `KEY` parsed as an identifier since KEY is not a reserved keyword here
+        key: Ident,
+        left: LeftParenthesis,
+        columns: Sequence<Ident, Comma>,
+        right: RightParenthesis,
+        /// Optional `NOT ENFORCED` suffix
+        not_enforced: Option<(Not, Ident)>,
+    },
+    Unique {
+        constraint_name: Option<(Constraint, Ident)>,
+        unique: Unique,
+        left: LeftParenthesis,
+        columns: Sequence<Ident, Comma>,
+        right: RightParenthesis,
+        not_enforced: Option<(Not, Ident)>,
+    },
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
