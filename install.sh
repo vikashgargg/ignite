@@ -68,15 +68,18 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install "pyspark>=3.4,<4.0" --quiet --disable-pip-version-check \
-  || error "pyspark install failed. Try: $VENV_DIR/bin/pip install 'pyspark>=3.4,<4.0'"
+"$VENV_DIR/bin/pip" install "pyspark>=3.5,<4.0" --quiet --disable-pip-version-check \
+  || error "pyspark install failed. Try: $VENV_DIR/bin/pip install 'pyspark>=3.5,<4.0'"
 
 PYSPARK_SITE="$("$VENV_DIR/bin/python3" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+VENV_PYTHON="$VENV_DIR/bin/python3"
 
-# Create wrapper that prepends the venv's site-packages to PYTHONPATH
-# Uses %s so $PYSPARK_SITE and $INSTALL_DIR expand now; ${PYTHONPATH} is literal in the script
-printf '#!/usr/bin/env sh\nexport PYTHONPATH="%s${PYTHONPATH:+:${PYTHONPATH}}"\nexec "%s" "$@"\n' \
-  "$PYSPARK_SITE" "$INSTALL_DIR/${BINARY}-bin" > "$INSTALL_DIR/$BINARY"
+# Create wrapper that:
+#   1. Sets PYTHONPATH so the venv's pyspark is importable
+#   2. Sets VAJRA_PYTHON so the binary spawns pyspark via the venv's Python (not embedded 3.9)
+# Uses %s so variables expand now; ${PYTHONPATH} is literal in the generated script
+printf '#!/usr/bin/env sh\nexport PYTHONPATH="%s${PYTHONPATH:+:${PYTHONPATH}}"\nexport VAJRA_PYTHON="%s"\nexec "%s" "$@"\n' \
+  "$PYSPARK_SITE" "$VENV_PYTHON" "$INSTALL_DIR/${BINARY}-bin" > "$INSTALL_DIR/$BINARY"
 chmod +x "$INSTALL_DIR/$BINARY"
 
 info "Installed to $INSTALL_DIR/$BINARY"

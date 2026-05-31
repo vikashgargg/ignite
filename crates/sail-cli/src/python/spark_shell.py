@@ -34,3 +34,7 @@ Using Python version {python_version} ({build_number}, {build_date})
 Client connected to the Sail Spark Connect server at {endpoint}
 SparkSession available as 'spark'."""
     code.interact(local=namespace, banner=banner, exitmsg="")
+
+
+if __name__ == "__main__":
+    run_pyspark_shell(int(sys.argv[1]))

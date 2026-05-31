@@ -4,7 +4,7 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 
 
-def read_script(file: str) -> tuple[str, str]:
+def read_script(file):
     if file == "-":
         return (sys.stdin.read(), "<stdin>")
 
@@ -16,9 +16,9 @@ def read_script(file: str) -> tuple[str, str]:
     return (path.read_text(), str(path))
 
 
-def run_pyspark_script(port: int, file: str):
+def run_pyspark_script(port, file):
     source, filename = read_script(file)
-    spark = SparkSession.builder.remote(f"sc://localhost:{port}").getOrCreate()
+    spark = SparkSession.builder.remote("sc://localhost:%d" % port).getOrCreate()
     scope = {
         "__name__": "__main__",
         "__file__": filename,
@@ -29,3 +29,7 @@ def run_pyspark_script(port: int, file: str):
         exec(compile(source, filename, "exec"), scope)  # noqa: S102
     finally:
         spark.stop()
+
+
+if __name__ == "__main__":
+    run_pyspark_script(int(sys.argv[1]), sys.argv[2])
