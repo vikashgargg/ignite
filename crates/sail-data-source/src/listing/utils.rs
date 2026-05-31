@@ -330,14 +330,13 @@ pub async fn rewrite_listing_partitions(
     let mut partition_values: HashMap<String, Vec<String>> = HashMap::new();
     for url in &config.table_paths {
         if let Ok(store) = ctx.runtime_env().object_store(url) {
-            let files: Vec<ObjectMeta> =
-                list_all_files(url, ctx, store.as_ref(), "", None)
-                    .await
-                    .unwrap_or_else(|_| futures::stream::empty().boxed())
-                    .take(10)
-                    .try_collect()
-                    .await
-                    .unwrap_or_default();
+            let files: Vec<ObjectMeta> = list_all_files(url, ctx, store.as_ref(), "", None)
+                .await
+                .unwrap_or_else(|_| futures::stream::empty().boxed())
+                .take(10)
+                .try_collect()
+                .await
+                .unwrap_or_default();
             for file in &files {
                 if let Some(segments) = url.strip_prefix(&file.location) {
                     // Collect all segments except the last (the file itself).
@@ -355,12 +354,18 @@ pub async fn rewrite_listing_partitions(
         }
     }
 
-    options.table_partition_cols.iter_mut().for_each(|(col, data_type)| {
-        if matches!(data_type, DataType::Dictionary(_, _)) {
-            let values = partition_values.get(col).map(|v| v.as_slice()).unwrap_or(&[]);
-            *data_type = infer_partition_col_type(values);
-        }
-    });
+    options
+        .table_partition_cols
+        .iter_mut()
+        .for_each(|(col, data_type)| {
+            if matches!(data_type, DataType::Dictionary(_, _)) {
+                let values = partition_values
+                    .get(col)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                *data_type = infer_partition_col_type(values);
+            }
+        });
     Ok(config)
 }
 
@@ -373,11 +378,10 @@ fn infer_partition_col_type(values: &[String]) -> DataType {
     if values.iter().all(|v| v.parse::<i64>().is_ok()) {
         return DataType::Int64;
     }
-    if values.iter().all(|v| {
-        v.parse::<f64>()
-            .ok()
-            .is_some_and(|f| f.is_finite())
-    }) {
+    if values
+        .iter()
+        .all(|v| v.parse::<f64>().ok().is_some_and(|f| f.is_finite()))
+    {
         return DataType::Float64;
     }
     DataType::Utf8

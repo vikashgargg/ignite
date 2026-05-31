@@ -4,7 +4,6 @@ use std::sync::Arc;
 use datafusion::catalog::MemTable;
 use datafusion_common::{DFSchema, DFSchemaRef, ParamValues};
 use datafusion_expr::{EmptyRelation, Extension, LogicalPlan, UNNAMED_TABLE};
-use sail_logical_plan::streaming::watermark::WatermarkNode;
 use log::warn;
 use sail_common::spec;
 use sail_common_datafusion::array::record_batch::{
@@ -12,6 +11,7 @@ use sail_common_datafusion::array::record_batch::{
 };
 use sail_common_datafusion::literal::LiteralEvaluator;
 use sail_logical_plan::range::RangeNode;
+use sail_logical_plan::streaming::watermark::WatermarkNode;
 
 use crate::error::{PlanError, PlanResult};
 use crate::resolver::state::PlanResolverState;
@@ -182,10 +182,13 @@ impl PlanResolver<'_> {
         state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
         let input = self.resolve_query_plan(*watermark.input, state).await?;
-        let delay_micros = parse_spark_duration_to_micros(&watermark.delay_threshold)
-            .unwrap_or(0);
+        let delay_micros = parse_spark_duration_to_micros(&watermark.delay_threshold).unwrap_or(0);
         Ok(LogicalPlan::Extension(Extension {
-            node: Arc::new(WatermarkNode::new(input, watermark.event_time, delay_micros)),
+            node: Arc::new(WatermarkNode::new(
+                input,
+                watermark.event_time,
+                delay_micros,
+            )),
         }))
     }
 }

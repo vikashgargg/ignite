@@ -450,7 +450,11 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     ctx,
                     self,
                     &DefaultPhysicalProtoConverter {},
-                    Arc::new(PermissiveJsonSource::new(table_schema, json_mode, corrupt_col_name)),
+                    Arc::new(PermissiveJsonSource::new(
+                        table_schema,
+                        json_mode,
+                        corrupt_col_name,
+                    )),
                 )?;
                 let source = FileScanConfigBuilder::from(source)
                     .with_file_compression_type(file_compression_type)
@@ -1516,7 +1520,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                         base_config,
                         path_glob_filter: binary_source.path_glob_filter().cloned(),
                     })
-                } else if let Some(pjson) = file_source.as_any().downcast_ref::<PermissiveJsonSource>() {
+                } else if let Some(pjson) =
+                    file_source.as_any().downcast_ref::<PermissiveJsonSource>()
+                {
                     let base_config = self.try_encode_message(serialize_file_scan_config(
                         file_scan,
                         self,

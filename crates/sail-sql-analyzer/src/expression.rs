@@ -915,7 +915,9 @@ fn from_ast_atom_expression(atom: AtomExpr) -> SqlResult<spec::Expr> {
             let function_name = from_ast_object_name(name)?;
             // Special case: COLLATION(expr COLLATE name) → return "SYSTEM.BUILTIN.{name}" literal
             if function_name.parts().len() == 1
-                && function_name.parts()[0].as_ref().eq_ignore_ascii_case("collation")
+                && function_name.parts()[0]
+                    .as_ref()
+                    .eq_ignore_ascii_case("collation")
             {
                 if let Some(seq) = &arguments {
                     let items = seq.clone().into_items().collect::<Vec<_>>();

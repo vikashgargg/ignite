@@ -251,4 +251,3 @@ impl<T: ArrowNumericType + Send> GroupsAccumulator for PercentileDiscGroupsAccum
             + self.group_values.capacity() * size_of::<Vec<T::Native>>()
     }
 }
-

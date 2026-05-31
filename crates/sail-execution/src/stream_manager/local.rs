@@ -254,9 +254,9 @@ impl TaskStreamSink for DiskStreamSink {
                 }
                 TaskStreamSinkState::Ok
             }
-            Err(e) => TaskStreamSinkState::Error(
-                datafusion::common::DataFusionError::External(Box::new(e)),
-            ),
+            Err(e) => TaskStreamSinkState::Error(datafusion::common::DataFusionError::External(
+                Box::new(e),
+            )),
         }
     }
 
@@ -288,7 +288,8 @@ fn read_ipc_file(path: &PathBuf) -> Result<Vec<RecordBatch>> {
         .map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?;
     let mut batches = Vec::new();
     for batch in reader {
-        batches.push(batch.map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?);
+        batches
+            .push(batch.map_err(|e| datafusion::common::DataFusionError::External(Box::new(e)))?);
     }
     Ok(batches)
 }

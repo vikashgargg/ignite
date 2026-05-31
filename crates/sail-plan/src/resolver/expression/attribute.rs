@@ -251,9 +251,7 @@ impl PlanResolver<'_> {
         let mut candidates = aliases
             .iter()
             .filter_map(|named| {
-                if named.name.len() == 1
-                    && named.name[0].eq_ignore_ascii_case(attr_name.as_ref())
-                {
+                if named.name.len() == 1 && named.name[0].eq_ignore_ascii_case(attr_name.as_ref()) {
                     Some((attr_name.as_ref().to_string(), named.expr.clone()))
                 } else {
                     None

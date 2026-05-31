@@ -200,9 +200,7 @@ impl KubernetesLeaderElector {
                 }
 
                 // Acquire or renew: patch the lease.
-                let transitions = spec
-                    .and_then(|s| s.lease_transitions)
-                    .unwrap_or(0)
+                let transitions = spec.and_then(|s| s.lease_transitions).unwrap_or(0)
                     + if we_hold_it { 0 } else { 1 };
 
                 let acquire_time_str = if we_hold_it {

@@ -25,7 +25,11 @@ pub struct StreamDeduplicateNode {
 impl StreamDeduplicateNode {
     pub fn new(input: Arc<LogicalPlan>, key_cols: Vec<String>) -> Self {
         let schema = input.schema().clone();
-        Self { input, key_cols, schema }
+        Self {
+            input,
+            key_cols,
+            schema,
+        }
     }
 
     pub fn input(&self) -> &Arc<LogicalPlan> {
@@ -54,13 +58,20 @@ impl UserDefinedLogicalNodeCore for StreamDeduplicateNode {
         write!(f, "StreamDeduplicate: keys=[{}]", self.key_cols.join(", "))
     }
 
-    fn with_exprs_and_inputs(&self, exprs: Vec<Expr>, mut inputs: Vec<LogicalPlan>) -> Result<Self> {
+    fn with_exprs_and_inputs(
+        &self,
+        exprs: Vec<Expr>,
+        mut inputs: Vec<LogicalPlan>,
+    ) -> Result<Self> {
         if !exprs.is_empty() {
             return plan_err!("{} does not take expressions", self.name());
         }
         if inputs.len() != 1 {
             return plan_err!("{} requires exactly one input", self.name());
         }
-        Ok(Self::new(Arc::new(inputs.pop().unwrap()), self.key_cols.clone()))
+        Ok(Self::new(
+            Arc::new(inputs.pop().unwrap()),
+            self.key_cols.clone(),
+        ))
     }
 }

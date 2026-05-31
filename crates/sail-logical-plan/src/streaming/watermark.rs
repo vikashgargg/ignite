@@ -22,11 +22,7 @@ pub struct WatermarkNode {
 }
 
 impl WatermarkNode {
-    pub fn new(
-        input: LogicalPlan,
-        event_time_col: String,
-        delay_micros: i64,
-    ) -> Self {
+    pub fn new(input: LogicalPlan, event_time_col: String, delay_micros: i64) -> Self {
         let schema = input.schema().clone();
         Self {
             input: Arc::new(input),
@@ -66,13 +62,21 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
         )
     }
 
-    fn with_exprs_and_inputs(&self, exprs: Vec<Expr>, mut inputs: Vec<LogicalPlan>) -> Result<Self> {
+    fn with_exprs_and_inputs(
+        &self,
+        exprs: Vec<Expr>,
+        mut inputs: Vec<LogicalPlan>,
+    ) -> Result<Self> {
         if !exprs.is_empty() {
             return plan_err!("{} does not take expressions", self.name());
         }
         if inputs.len() != 1 {
             return plan_err!("{} requires exactly one input", self.name());
         }
-        Ok(Self::new(inputs.pop().unwrap(), self.event_time_col.clone(), self.delay_micros))
+        Ok(Self::new(
+            inputs.pop().unwrap(),
+            self.event_time_col.clone(),
+            self.delay_micros,
+        ))
     }
 }

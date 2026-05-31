@@ -285,10 +285,7 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
     let operation_id = metadata.operation_id.clone();
     let reattachable = metadata.reattachable;
     let query_name = start.query_name.clone();
-    let checkpoint_location = start
-        .options
-        .get("checkpointLocation")
-        .cloned();
+    let checkpoint_location = start.options.get("checkpointLocation").cloned();
     let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
     let (plan, info) = resolve_and_execute_plan(ctx, spark.plan_config()?, plan).await?;
     let stream = service.runner().execute(ctx, plan).await?;

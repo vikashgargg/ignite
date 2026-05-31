@@ -448,7 +448,10 @@ impl PlanResolver<'_> {
             predicates,
         } = source;
         if !predicates.is_empty() {
-            log::debug!("ignoring {} data source predicates (DataFusion handles pushdown)", predicates.len());
+            log::debug!(
+                "ignoring {} data source predicates (DataFusion handles pushdown)",
+                predicates.len()
+            );
         }
         let Some(format) = format else {
             return Err(PlanError::invalid("missing data source format"));

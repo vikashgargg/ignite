@@ -4,18 +4,22 @@ use datafusion::functions::regex::expr_fn as regex_fn;
 use datafusion::functions::regex::regexpcount::RegexpCountFunc;
 use datafusion::functions::regex::regexpinstr::RegexpInstrFunc;
 use datafusion_common::{DFSchema, ScalarValue};
+use datafusion_expr::ScalarUDF;
 use datafusion_expr::{cast, expr, lit, try_cast, when, BinaryExpr, ExprSchemable, Operator};
 use datafusion_functions_nested::expr_fn::array_element;
+use datafusion_spark::function::math::hex::SparkHex;
 use datafusion_spark::function::string::elt::SparkElt;
 use datafusion_spark::function::string::expr_fn as string_fn;
 use datafusion_spark::function::string::format_string::FormatStringFunc;
 use sail_common_datafusion::utils::items::ItemTaker;
+use sail_function::scalar::datetime::spark_to_chrono_fmt::SparkToChronoFmt;
 use sail_function::scalar::string::format_number::FormatNumber;
 use sail_function::scalar::string::levenshtein::Levenshtein;
 use sail_function::scalar::string::make_valid_utf8::MakeValidUtf8;
 use sail_function::scalar::string::randstr::Randstr;
 use sail_function::scalar::string::soundex::Soundex;
 use sail_function::scalar::string::spark_base64::{SparkBase64, SparkUnbase64};
+use sail_function::scalar::string::spark_binary_pad::{SparkBinaryLpad, SparkBinaryRpad};
 use sail_function::scalar::string::spark_concat_ws::SparkConcatWs;
 use sail_function::scalar::string::spark_encode_decode::{SparkDecode, SparkEncode};
 use sail_function::scalar::string::spark_mask::SparkMask;
@@ -23,13 +27,9 @@ use sail_function::scalar::string::spark_quote::SparkQuote;
 use sail_function::scalar::string::spark_regexp_extract_all::SparkRegexpExtractAll;
 use sail_function::scalar::string::spark_sentences::SparkSentences;
 use sail_function::scalar::string::spark_split::SparkSplit;
-use sail_function::scalar::string::spark_binary_pad::{SparkBinaryLpad, SparkBinaryRpad};
 use sail_function::scalar::string::spark_to_binary::{SparkToBinary, SparkTryToBinary};
 use sail_function::scalar::string::spark_to_char::SparkToCharNumber;
 use sail_function::scalar::string::spark_to_number::SparkToNumber;
-use datafusion_expr::ScalarUDF;
-use datafusion_spark::function::math::hex::SparkHex;
-use sail_function::scalar::datetime::spark_to_chrono_fmt::SparkToChronoFmt;
 
 use crate::error::{PlanError, PlanResult};
 use crate::function::common::{ScalarFunction, ScalarFunctionInput};
@@ -329,7 +329,10 @@ fn decode_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
 fn is_binary_type(t: &DataType) -> bool {
     matches!(
         t,
-        DataType::Binary | DataType::LargeBinary | DataType::BinaryView | DataType::FixedSizeBinary(_)
+        DataType::Binary
+            | DataType::LargeBinary
+            | DataType::BinaryView
+            | DataType::FixedSizeBinary(_)
     )
 }
 
@@ -393,7 +396,9 @@ fn to_char_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
 
     if first_type.as_ref().map(is_binary_type).unwrap_or(false) {
         if input.arguments.len() != 2 {
-            return Err(PlanError::invalid("to_char requires 2 arguments for binary input"));
+            return Err(PlanError::invalid(
+                "to_char requires 2 arguments for binary input",
+            ));
         }
         let (bytes, format) = input.arguments.two()?;
         let fmt_lower = match &format {
@@ -434,7 +439,12 @@ fn btrim_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
         .arguments
         .into_iter()
         .map(|e| {
-            if e.get_type(schema).ok().as_ref().map(is_binary_type).unwrap_or(false) {
+            if e.get_type(schema)
+                .ok()
+                .as_ref()
+                .map(is_binary_type)
+                .unwrap_or(false)
+            {
                 cast(e, DataType::Utf8)
             } else {
                 e

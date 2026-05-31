@@ -29,13 +29,19 @@ pub(crate) async fn handle_add_artifacts(
                     let name = artifact.name.clone();
                     let data = artifact.data.map(|c| c.data).unwrap_or_default();
                     store.store(name.clone(), data);
-                    summaries.push(ArtifactSummary { name, is_crc_successful: true });
+                    summaries.push(ArtifactSummary {
+                        name,
+                        is_crc_successful: true,
+                    });
                 }
             }
             Payload::BeginChunk(begin) => {
                 if let Some((prev_name, prev_data)) = in_flight.take() {
                     store.store(prev_name.clone(), prev_data);
-                    summaries.push(ArtifactSummary { name: prev_name, is_crc_successful: true });
+                    summaries.push(ArtifactSummary {
+                        name: prev_name,
+                        is_crc_successful: true,
+                    });
                 }
                 let first_bytes = begin.initial_chunk.map(|c| c.data).unwrap_or_default();
                 in_flight = Some((begin.name, first_bytes));
@@ -50,7 +56,10 @@ pub(crate) async fn handle_add_artifacts(
 
     if let Some((name, data)) = in_flight {
         store.store(name.clone(), data);
-        summaries.push(ArtifactSummary { name, is_crc_successful: true });
+        summaries.push(ArtifactSummary {
+            name,
+            is_crc_successful: true,
+        });
     }
 
     Ok(summaries)

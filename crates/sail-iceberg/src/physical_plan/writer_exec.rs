@@ -328,7 +328,8 @@ impl ExecutionPlan for IcebergWriterExec {
                 PhysicalSinkMode::OverwritePartitions => {}
                 PhysicalSinkMode::OverwriteIf { .. } => {
                     return Err(DataFusionError::NotImplemented(
-                        "predicate (replaceWhere) overwrite not implemented for Iceberg".to_string(),
+                        "predicate (replaceWhere) overwrite not implemented for Iceberg"
+                            .to_string(),
                     ));
                 }
             }

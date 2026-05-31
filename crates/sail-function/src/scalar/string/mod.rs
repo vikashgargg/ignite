@@ -1,11 +1,11 @@
 pub mod decimal_format;
 pub mod format_number;
-pub mod spark_binary_pad;
 pub mod levenshtein;
 pub mod make_valid_utf8;
 pub mod randstr;
 pub mod soundex;
 pub mod spark_base64;
+pub mod spark_binary_pad;
 pub mod spark_concat_ws;
 pub mod spark_encode_decode;
 pub mod spark_mask;

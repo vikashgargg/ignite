@@ -5,7 +5,9 @@ use std::sync::Arc;
 use log::{error, info};
 use sail_common::config::{AppConfig, ExecutionMode};
 use sail_common::runtime::RuntimeManager;
-use sail_execution::worker_manager::leader_election::{KubernetesLeaderElector, LeaderElectionConfig};
+use sail_execution::worker_manager::leader_election::{
+    KubernetesLeaderElector, LeaderElectionConfig,
+};
 use sail_spark_connect::entrypoint::serve;
 use tokio::net::TcpListener;
 
@@ -212,5 +214,7 @@ pub fn run_spark_connect_server_local_cluster(
     if workers > 0 {
         config.cluster.worker_initial_count = workers;
     }
-    with_spark_connect_server(Arc::new(config), (ip, port), shutdown(), |_| async { Ok(()) })
+    with_spark_connect_server(Arc::new(config), (ip, port), shutdown(), |_| async {
+        Ok(())
+    })
 }

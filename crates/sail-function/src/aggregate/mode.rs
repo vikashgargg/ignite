@@ -127,27 +127,29 @@ impl AggregateUDFImpl for ModeFunction {
             DataType::Utf8 | DataType::Utf8View | DataType::LargeUtf8 => {
                 Box::new(BytesModeAccumulator::new(data_type))
             }
-            DataType::Interval(IntervalUnit::YearMonth) => {
-                Box::new(PrimitiveModeAccumulator::<IntervalYearMonthType>::new(data_type))
-            }
-            DataType::Interval(IntervalUnit::DayTime) => {
-                Box::new(PrimitiveModeAccumulator::<IntervalDayTimeType>::new(data_type))
-            }
+            DataType::Interval(IntervalUnit::YearMonth) => Box::new(PrimitiveModeAccumulator::<
+                IntervalYearMonthType,
+            >::new(data_type)),
+            DataType::Interval(IntervalUnit::DayTime) => Box::new(PrimitiveModeAccumulator::<
+                IntervalDayTimeType,
+            >::new(data_type)),
             DataType::Interval(IntervalUnit::MonthDayNano) => {
-                Box::new(PrimitiveModeAccumulator::<IntervalMonthDayNanoType>::new(data_type))
+                Box::new(PrimitiveModeAccumulator::<IntervalMonthDayNanoType>::new(
+                    data_type,
+                ))
             }
-            DataType::Duration(TimeUnit::Second) => {
-                Box::new(PrimitiveModeAccumulator::<DurationSecondType>::new(data_type))
-            }
-            DataType::Duration(TimeUnit::Millisecond) => {
-                Box::new(PrimitiveModeAccumulator::<DurationMillisecondType>::new(data_type))
-            }
-            DataType::Duration(TimeUnit::Microsecond) => {
-                Box::new(PrimitiveModeAccumulator::<DurationMicrosecondType>::new(data_type))
-            }
-            DataType::Duration(TimeUnit::Nanosecond) => {
-                Box::new(PrimitiveModeAccumulator::<DurationNanosecondType>::new(data_type))
-            }
+            DataType::Duration(TimeUnit::Second) => Box::new(PrimitiveModeAccumulator::<
+                DurationSecondType,
+            >::new(data_type)),
+            DataType::Duration(TimeUnit::Millisecond) => Box::new(PrimitiveModeAccumulator::<
+                DurationMillisecondType,
+            >::new(data_type)),
+            DataType::Duration(TimeUnit::Microsecond) => Box::new(PrimitiveModeAccumulator::<
+                DurationMicrosecondType,
+            >::new(data_type)),
+            DataType::Duration(TimeUnit::Nanosecond) => Box::new(PrimitiveModeAccumulator::<
+                DurationNanosecondType,
+            >::new(data_type)),
             _ => {
                 return not_impl_err!("Unsupported data type: {:?} for mode function", data_type);
             }

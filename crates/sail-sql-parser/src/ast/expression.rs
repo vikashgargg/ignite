@@ -11,14 +11,15 @@ use crate::ast::data_type::{DataType, IntervalDayTimeUnit, IntervalYearMonthUnit
 use crate::ast::identifier::{Ident, ObjectName, Variable};
 use crate::ast::keywords::{
     All, And, Any, As, Asc, Between, Both, By, Case, Cast, Collate, Cube, Current, CurrentDate,
-    CurrentTime, CurrentTimestamp, CurrentUser, Date, Day, Days, Desc, Distinct, Div, Else, End, Escape, Exists,
-    Extract, False, Filter, First, Following, For, From, Group, Grouping, Groups, Hour, Hours, Identifier,
-    Ignore, Ilike, In, Interval, Is, Last, Leading, Like, Microsecond, Microseconds, Millisecond,
-    Milliseconds, Minute, Minutes, Month, Months, Not, Null, Nulls, Or, Order, Over, Overlay,
-    Distribute, Partition, Placing, Position, Preceding, Range, Regexp, Respect, Rlike, Rollup,
-    Row, Rows, Second, Seconds, Sets, Similar, Single, Sort, Struct, Substr, Substring, Table,
-    Then, Time, Timestamp, TimestampLtz, TimestampNtz, To, Trailing, Trim, True, TryCast,
-    Unbounded, Unknown, Week, Weeks, When, Where, With, Within, Year, Years,
+    CurrentTime, CurrentTimestamp, CurrentUser, Date, Day, Days, Desc, Distinct, Distribute, Div,
+    Else, End, Escape, Exists, Extract, False, Filter, First, Following, For, From, Group,
+    Grouping, Groups, Hour, Hours, Identifier, Ignore, Ilike, In, Interval, Is, Last, Leading,
+    Like, Microsecond, Microseconds, Millisecond, Milliseconds, Minute, Minutes, Month, Months,
+    Not, Null, Nulls, Or, Order, Over, Overlay, Partition, Placing, Position, Preceding, Range,
+    Regexp, Respect, Rlike, Rollup, Row, Rows, Second, Seconds, Sets, Similar, Single, Sort,
+    Struct, Substr, Substring, Table, Then, Time, Timestamp, TimestampLtz, TimestampNtz, To,
+    Trailing, Trim, True, TryCast, Unbounded, Unknown, Week, Weeks, When, Where, With, Within,
+    Year, Years,
 };
 use crate::ast::literal::{IntegerLiteral, NumberLiteral, StringLiteral};
 use crate::ast::operator;
@@ -425,8 +426,16 @@ pub struct TableArgModifiers {
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
 #[parser(dependency = "Expr")]
 pub enum TableArgPartition {
-    PartitionBy(Partition, By, #[parser(function = |e, o| compose(e, o))] TableArgExprList),
-    DistributeBy(Distribute, By, #[parser(function = |e, o| compose(e, o))] TableArgExprList),
+    PartitionBy(
+        Partition,
+        By,
+        #[parser(function = |e, o| compose(e, o))] TableArgExprList,
+    ),
+    DistributeBy(
+        Distribute,
+        By,
+        #[parser(function = |e, o| compose(e, o))] TableArgExprList,
+    ),
 }
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]

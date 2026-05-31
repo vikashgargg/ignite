@@ -38,10 +38,7 @@ pub fn run_pyspark_shell() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_shell_via_subprocess(
-    python: &str,
-    port: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn run_shell_via_subprocess(python: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let mut tmp = tempfile::Builder::new().suffix(".py").tempfile()?;
     tmp.write_all(SPARK_SHELL_SRC.as_bytes())?;
     tmp.flush()?;

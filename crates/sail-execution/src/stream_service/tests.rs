@@ -50,14 +50,19 @@ impl TaskStreamFetcher for SingleSourceFetcher {
 #[tokio::test]
 async fn test_arrow_flight_shuffle_roundtrip() {
     // Build 100 rows: a single Int32 column with values 0..100.
-    let schema = Arc::new(Schema::new(vec![Field::new("value", DataType::Int32, false)]));
+    let schema = Arc::new(Schema::new(vec![Field::new(
+        "value",
+        DataType::Int32,
+        false,
+    )]));
     let values: Int32Array = (0i32..100).collect();
     let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(values)]).unwrap();
 
     // Wire up a channel-backed source stream.
     let (tx, rx) = tokio::sync::mpsc::channel::<TaskStreamResult<RecordBatch>>(128);
-    let source: TaskStreamSource =
-        Box::pin(tonic::codegen::tokio_stream::wrappers::ReceiverStream::new(rx));
+    let source: TaskStreamSource = Box::pin(
+        tonic::codegen::tokio_stream::wrappers::ReceiverStream::new(rx),
+    );
 
     // Send the batch from a background task; dropping `tx` closes the stream.
     let batch_for_write = batch.clone();
@@ -107,7 +112,10 @@ async fn test_arrow_flight_shuffle_roundtrip() {
     // Collect and verify.
     let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-    assert_eq!(total_rows, 100, "expected 100 rows over Arrow Flight, got {total_rows}");
+    assert_eq!(
+        total_rows, 100,
+        "expected 100 rows over Arrow Flight, got {total_rows}"
+    );
 
     let col = batches[0]
         .column(0)

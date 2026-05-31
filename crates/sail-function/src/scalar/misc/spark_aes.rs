@@ -3,7 +3,9 @@ use std::fmt;
 
 use aes::cipher::block_padding::Pkcs7;
 use aes::cipher::consts::U12;
-use aes::cipher::{BlockDecrypt, BlockEncrypt, BlockEncryptMut, KeyInit as BlockKeyInit, KeyIvInit};
+use aes::cipher::{
+    BlockDecrypt, BlockEncrypt, BlockEncryptMut, KeyInit as BlockKeyInit, KeyIvInit,
+};
 use aes::{Aes128, Aes192, Aes256};
 use aes_gcm::aead::rand_core::{OsRng, RngCore};
 use aes_gcm::aead::{Aead, KeyInit, Payload};
@@ -1007,9 +1009,7 @@ impl ScalarUDFImpl for SparkAESDecrypt {
                 }?;
                 Ok(decrypted)
             }
-            EncryptionMode::ECB => {
-                Ok(ecb_decrypt_pkcs7(expr, key)?)
-            }
+            EncryptionMode::ECB => Ok(ecb_decrypt_pkcs7(expr, key)?),
         }?;
 
         Ok(ColumnarValue::Scalar(ScalarValue::Binary(Some(result))))

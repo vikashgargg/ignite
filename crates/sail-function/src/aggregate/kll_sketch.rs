@@ -2,7 +2,9 @@ use std::any::Any;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Array, ArrayRef, BinaryArray, Float32Array, Float64Array, Int64Array};
+use datafusion::arrow::array::{
+    Array, ArrayRef, BinaryArray, Float32Array, Float64Array, Int64Array,
+};
 use datafusion::arrow::datatypes::{DataType, Field, FieldRef};
 use datafusion_common::{plan_datafusion_err, Result, ScalarValue};
 use datafusion_expr::function::{AccumulatorArgs, StateFieldsArgs};
@@ -128,8 +130,14 @@ macro_rules! kll_agg_udaf {
                     signature: Signature::one_of(
                         vec![
                             datafusion_expr::TypeSignature::Exact(vec![$input_type]),
-                            datafusion_expr::TypeSignature::Exact(vec![$input_type, DataType::Int32]),
-                            datafusion_expr::TypeSignature::Exact(vec![$input_type, DataType::Int64]),
+                            datafusion_expr::TypeSignature::Exact(vec![
+                                $input_type,
+                                DataType::Int32,
+                            ]),
+                            datafusion_expr::TypeSignature::Exact(vec![
+                                $input_type,
+                                DataType::Int64,
+                            ]),
                         ],
                         Volatility::Immutable,
                     ),

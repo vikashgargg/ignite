@@ -9,24 +9,24 @@ use datafusion_expr::{
     col, lit, or, Aggregate, Distinct, DistinctOn, Explain, Expr, FetchType, Filter, Join,
     Projection, SkipType, SubqueryAlias, TableScan, Union, UserDefinedLogicalNode, Window,
 };
-use sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema;
 use sail_common_datafusion::rename::table_provider::RenameTableProvider;
+use sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema;
 use sail_common_datafusion::streaming::event::schema::{
     is_flow_event_schema, MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
 };
 use sail_common_datafusion::streaming::source::{StreamSource, StreamSourceTableProvider};
 use sail_logical_plan::barrier::BarrierNode;
 use sail_logical_plan::file_write::FileWriteNode;
-use sail_logical_plan::streaming::foreach_batch::ForeachBatchSinkNode;
-use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::range::RangeNode;
 use sail_logical_plan::show_string::ShowStringNode;
 use sail_logical_plan::streaming::collector::StreamCollectorNode;
+use sail_logical_plan::streaming::dedup::StreamDeduplicateNode;
 use sail_logical_plan::streaming::filter::StreamFilterNode;
+use sail_logical_plan::streaming::foreach_batch::ForeachBatchSinkNode;
 use sail_logical_plan::streaming::limit::StreamLimitNode;
+use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
-use sail_logical_plan::streaming::dedup::StreamDeduplicateNode;
 use sail_logical_plan::streaming::watermark::WatermarkNode;
 use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 
@@ -100,8 +100,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                 // Stateless per-micro-batch analytic window (e.g. rank, lag, row_number).
                 // Strip flow-event schema → apply window on data columns → re-add flow-event cols.
                 let streaming_input = window.input.clone();
-                let data_schema =
-                    try_from_flow_event_schema(streaming_input.schema().inner())?;
+                let data_schema = try_from_flow_event_schema(streaming_input.schema().inner())?;
                 let data_cols: Vec<_> = data_schema
                     .fields()
                     .iter()
@@ -122,19 +121,16 @@ impl TreeNodeRewriter for StreamingRewriter {
                     .map(datafusion_expr::Expr::Column)
                     .collect();
                 out_exprs.push(
-                    lit(datafusion_common::ScalarValue::Binary(None))
-                        .alias(MARKER_FIELD_NAME),
+                    lit(datafusion_common::ScalarValue::Binary(None)).alias(MARKER_FIELD_NAME),
                 );
                 out_exprs.push(lit(false).alias(RETRACTED_FIELD_NAME));
-                Ok(Transformed::yes(LogicalPlan::Projection(Projection::try_new(
-                    out_exprs,
-                    new_window,
-                )?)))
+                Ok(Transformed::yes(LogicalPlan::Projection(
+                    Projection::try_new(out_exprs, new_window)?,
+                )))
             }
             LogicalPlan::Aggregate(agg) => {
                 let streaming_input = agg.input.clone();
-                let data_schema =
-                    try_from_flow_event_schema(streaming_input.schema().inner())?;
+                let data_schema = try_from_flow_event_schema(streaming_input.schema().inner())?;
 
                 // Build the data-only pipeline (filter retracted + project columns).
                 let filter = LogicalPlan::Filter(Filter::try_new(
@@ -146,10 +142,8 @@ impl TreeNodeRewriter for StreamingRewriter {
                     .iter()
                     .map(|f| col(f.name().as_str()))
                     .collect();
-                let data_only = LogicalPlan::Projection(Projection::try_new(
-                    data_cols,
-                    Arc::new(filter),
-                )?);
+                let data_only =
+                    LogicalPlan::Projection(Projection::try_new(data_cols, Arc::new(filter))?);
 
                 // Detect event-time window aggregation.
                 // Criteria: (1) group_by contains a window() alias ("window" or "session_window"),
@@ -164,9 +158,8 @@ impl TreeNodeRewriter for StreamingRewriter {
                 if let Some((event_time_col, delay_micros)) = watermark_info {
                     // Stateful event-time window aggregation via WindowAccumNode.
                     // The physical planner will map this to WindowAccumExec.
-                    let data_schema_ref = Arc::new(datafusion_common::DFSchema::try_from(
-                        data_schema.clone()
-                    )?);
+                    let data_schema_ref =
+                        Arc::new(datafusion_common::DFSchema::try_from(data_schema.clone())?);
                     // Compute what the aggregate output schema would be.
                     let agg_output_schema = {
                         let trial = Aggregate::try_new(
@@ -208,8 +201,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                     .map(datafusion_expr::Expr::Column)
                     .collect();
                 out_exprs.push(
-                    lit(datafusion_common::ScalarValue::Binary(None))
-                        .alias(MARKER_FIELD_NAME),
+                    lit(datafusion_common::ScalarValue::Binary(None)).alias(MARKER_FIELD_NAME),
                 );
                 out_exprs.push(lit(false).alias(RETRACTED_FIELD_NAME));
                 Ok(Transformed::yes(LogicalPlan::Projection(
@@ -225,10 +217,8 @@ impl TreeNodeRewriter for StreamingRewriter {
                 // columns. This handles stream × static and stream × stream joins.
                 // State-based windowed joins (stream × stream with watermark) are not
                 // yet supported and will produce per-batch results instead.
-                let left_data_schema =
-                    try_from_flow_event_schema(join.left.schema().inner())?;
-                let right_data_schema =
-                    try_from_flow_event_schema(join.right.schema().inner())?;
+                let left_data_schema = try_from_flow_event_schema(join.left.schema().inner())?;
+                let right_data_schema = try_from_flow_event_schema(join.right.schema().inner())?;
 
                 let left_cols: Vec<_> = left_data_schema
                     .fields()
@@ -268,8 +258,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                     .map(datafusion_expr::Expr::Column)
                     .collect();
                 out_exprs.push(
-                    lit(datafusion_common::ScalarValue::Binary(None))
-                        .alias(MARKER_FIELD_NAME),
+                    lit(datafusion_common::ScalarValue::Binary(None)).alias(MARKER_FIELD_NAME),
                 );
                 out_exprs.push(lit(false).alias(RETRACTED_FIELD_NAME));
 
@@ -355,8 +344,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                 // Bottom-up rewriting means `input` already has the flow-event schema.
                 let (input, key_cols) = match distinct {
                     Distinct::All(input) => {
-                        let data_schema =
-                            try_from_flow_event_schema(input.schema().inner())?;
+                        let data_schema = try_from_flow_event_schema(input.schema().inner())?;
                         let key_cols = data_schema
                             .fields()
                             .iter()

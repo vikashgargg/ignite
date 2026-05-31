@@ -17,11 +17,14 @@ use bytes::Bytes;
 use datafusion::arrow::array::{ArrayRef, RecordBatch, StringArray};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::error::ArrowError;
-use datafusion::arrow::json::ReaderBuilder;
 use datafusion::arrow::json::reader::infer_json_schema_from_iterator;
+use datafusion::arrow::json::ReaderBuilder;
+use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
+use datafusion::physical_plan::ExecutionPlan;
 use datafusion_common::config::JsonOptions;
 use datafusion_common::{Result, Statistics};
-use datafusion_datasource::decoder::{Decoder, DecoderDeserializer, deserialize_stream};
+use datafusion_datasource::decoder::{deserialize_stream, Decoder, DecoderDeserializer};
 use datafusion_datasource::file::FileSource;
 use datafusion_datasource::file_compression_type::FileCompressionType;
 use datafusion_datasource::file_format::FileFormat;
@@ -29,10 +32,7 @@ use datafusion_datasource::file_scan_config::{FileScanConfig, FileScanConfigBuil
 use datafusion_datasource::file_stream::{FileOpenFuture, FileOpener};
 use datafusion_datasource::projection::{ProjectionOpener, SplitProjection};
 use datafusion_datasource::source::DataSourceExec;
-use datafusion_datasource::{PartitionedFile, RangeCalculation, TableSchema, calculate_range};
-use datafusion::physical_plan::ExecutionPlan;
-use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
-use datafusion::physical_expr::projection::ProjectionExprs;
+use datafusion_datasource::{calculate_range, PartitionedFile, RangeCalculation, TableSchema};
 use datafusion_session::Session;
 use futures::{StreamExt, TryStreamExt};
 use object_store::{GetOptions, GetResultPayload, ObjectMeta, ObjectStore, ObjectStoreExt};
@@ -352,15 +352,12 @@ impl FileOpener for PermissiveJsonOpener {
         let col_name = self.corrupt_col_name.clone();
 
         Ok(Box::pin(async move {
-            let calculated_range =
-                calculate_range(&partitioned_file, &store, None).await?;
+            let calculated_range = calculate_range(&partitioned_file, &store, None).await?;
             let range = match calculated_range {
                 RangeCalculation::Range(None) => None,
                 RangeCalculation::Range(Some(r)) => Some(r.into()),
                 RangeCalculation::TerminateEarly => {
-                    return Ok(
-                        futures::stream::poll_fn(|_| std::task::Poll::Ready(None)).boxed(),
-                    );
+                    return Ok(futures::stream::poll_fn(|_| std::task::Poll::Ready(None)).boxed());
                 }
             };
             let options = GetOptions {
@@ -393,17 +390,17 @@ impl FileOpener for PermissiveJsonOpener {
                         Some(_) => {
                             file.seek(SeekFrom::Start(result.range.start as _))?;
                             let limit = result.range.end - result.range.start;
-                            Box::new(
-                                file_compression_type.convert_read(file.take(limit))?,
-                            )
+                            Box::new(file_compression_type.convert_read(file.take(limit))?)
                         }
                     };
                     let mut data = Vec::new();
                     BufReader::new(bytes_reader).read_to_end(&mut data)?;
                     let bytes = Bytes::from(data);
-                    let input = futures::stream::once(std::future::ready(
-                        Ok::<_, datafusion_common::DataFusionError>(bytes),
-                    ));
+                    let input =
+                        futures::stream::once(std::future::ready(Ok::<
+                            _,
+                            datafusion_common::DataFusionError,
+                        >(bytes)));
                     let stream = deserialize_stream(input, deser);
                     Ok(stream.map_err(Into::into).boxed())
                 }
@@ -475,8 +472,7 @@ impl FileSource for PermissiveJsonSource {
         _partition: usize,
     ) -> Result<Arc<dyn FileOpener>> {
         let file_schema = self.table_schema.file_schema();
-        let projected_schema =
-            Arc::new(file_schema.project(&self.projection.file_indices)?);
+        let projected_schema = Arc::new(file_schema.project(&self.projection.file_indices)?);
 
         let mut opener: Arc<dyn FileOpener> = Arc::new(PermissiveJsonOpener {
             batch_size: self
@@ -618,9 +614,8 @@ impl FileFormat for PermissiveJsonFormat {
             if values.is_empty() {
                 continue;
             }
-            let file_schema = infer_json_schema_from_iterator(
-                values.iter().map(|v| Ok::<_, ArrowError>(v)),
-            )?;
+            let file_schema =
+                infer_json_schema_from_iterator(values.iter().map(|v| Ok::<_, ArrowError>(v)))?;
             merged_meta.extend(file_schema.metadata().clone());
             for field in file_schema.fields() {
                 if !merged_fields.iter().any(|f| f.name() == field.name()) {
@@ -683,7 +678,7 @@ mod tests {
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion_datasource::decoder::Decoder;
 
-    use super::{JsonMode, PermissiveJsonDecoder, split_corrupt_col};
+    use super::{split_corrupt_col, JsonMode, PermissiveJsonDecoder};
 
     fn schema_with_corrupt() -> Arc<Schema> {
         Arc::new(Schema::new(vec![
@@ -787,7 +782,7 @@ mod tests {
     async fn test_streaming_pipeline_permissive() {
         use bytes::Bytes;
         use datafusion_common::DataFusionError;
-        use datafusion_datasource::decoder::{DecoderDeserializer, deserialize_stream};
+        use datafusion_datasource::decoder::{deserialize_stream, DecoderDeserializer};
         use futures::TryStreamExt;
 
         let schema = schema_with_corrupt();
@@ -805,11 +800,10 @@ mod tests {
         );
         let deser = DecoderDeserializer::new(decoder);
 
-        let data =
-            Bytes::from_static(b"{\"id\":1,\"name\":\"alice\"}\nbad_json\n{\"id\":3,\"name\":\"carol\"}\n");
-        let input = futures::stream::once(std::future::ready(
-            Ok::<_, DataFusionError>(data),
-        ));
+        let data = Bytes::from_static(
+            b"{\"id\":1,\"name\":\"alice\"}\nbad_json\n{\"id\":3,\"name\":\"carol\"}\n",
+        );
+        let input = futures::stream::once(std::future::ready(Ok::<_, DataFusionError>(data)));
         let batches: Vec<_> = deserialize_stream(input, deser)
             .map_err(|e: datafusion::arrow::error::ArrowError| {
                 datafusion_common::DataFusionError::from(e)

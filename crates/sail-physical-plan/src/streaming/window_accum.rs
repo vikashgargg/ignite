@@ -8,6 +8,7 @@ use datafusion::arrow::array::{
 use datafusion::arrow::compute;
 use datafusion::arrow::datatypes::{DataType, SchemaRef, TimeUnit};
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::physical_expr::aggregate::AggregateFunctionExpr;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
 use datafusion::physical_plan::empty::EmptyExec;
@@ -17,7 +18,6 @@ use datafusion::physical_plan::{
     DisplayAs, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
 };
 use datafusion_common::{internal_err, plan_datafusion_err, plan_err, Result};
-use datafusion::physical_expr::aggregate::AggregateFunctionExpr;
 use futures::{stream, StreamExt};
 use sail_common_datafusion::streaming::event::encoding::{
     DecodedFlowEventStream, EncodedFlowEventStream,
@@ -46,28 +46,55 @@ impl StaticBatchExec {
             EmissionType::Final,
             Boundedness::Bounded,
         ));
-        Self { batches, schema, properties: props }
+        Self {
+            batches,
+            schema,
+            properties: props,
+        }
     }
 }
 
 impl DisplayAs for StaticBatchExec {
-    fn fmt_as(&self, _t: datafusion::physical_plan::DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
         write!(f, "StaticBatchExec")
     }
 }
 
 impl ExecutionPlan for StaticBatchExec {
-    fn name(&self) -> &str { "StaticBatchExec" }
-    fn as_any(&self) -> &dyn Any { self }
-    fn properties(&self) -> &Arc<PlanProperties> { &self.properties }
-    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> { vec![] }
-    fn with_new_children(self: Arc<Self>, _: Vec<Arc<dyn ExecutionPlan>>) -> Result<Arc<dyn ExecutionPlan>> {
+    fn name(&self) -> &str {
+        "StaticBatchExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![]
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        _: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(self)
     }
-    fn execute(&self, _partition: usize, _ctx: Arc<TaskContext>) -> Result<SendableRecordBatchStream> {
+    fn execute(
+        &self,
+        _partition: usize,
+        _ctx: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
         let schema = self.schema.clone();
         let batches = self.batches.clone();
-        let s = stream::iter(batches.into_iter().map(Ok::<_, datafusion_common::DataFusionError>));
+        let s = stream::iter(
+            batches
+                .into_iter()
+                .map(Ok::<_, datafusion_common::DataFusionError>),
+        );
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, s)))
     }
 }
@@ -85,7 +112,12 @@ struct AccumState {
 
 impl AccumState {
     fn new(event_time_col_idx: usize, delay_micros: i64) -> Self {
-        Self { pending_rows: vec![], watermark_micros: None, event_time_col_idx, delay_micros }
+        Self {
+            pending_rows: vec![],
+            watermark_micros: None,
+            event_time_col_idx,
+            delay_micros,
+        }
     }
 
     fn push(&mut self, batch: RecordBatch) {
@@ -157,7 +189,9 @@ impl WindowAccumExec {
             EquivalenceProperties::new(flow_schema),
             datafusion::physical_expr::Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
-            Boundedness::Unbounded { requires_infinite_memory: false },
+            Boundedness::Unbounded {
+                requires_infinite_memory: false,
+            },
         ));
         Ok(Self {
             input,
@@ -180,18 +214,37 @@ impl WindowAccumExec {
 }
 
 impl DisplayAs for WindowAccumExec {
-    fn fmt_as(&self, _t: datafusion::physical_plan::DisplayFormatType, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "WindowAccumExec: eventTime={}, delay={}µs", self.event_time_col, self.delay_micros)
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(
+            f,
+            "WindowAccumExec: eventTime={}, delay={}µs",
+            self.event_time_col, self.delay_micros
+        )
     }
 }
 
 impl ExecutionPlan for WindowAccumExec {
-    fn name(&self) -> &str { "WindowAccumExec" }
-    fn as_any(&self) -> &dyn Any { self }
-    fn properties(&self) -> &Arc<PlanProperties> { &self.properties }
-    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> { vec![&self.input] }
+    fn name(&self) -> &str {
+        "WindowAccumExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
 
-    fn with_new_children(self: Arc<Self>, mut children: Vec<Arc<dyn ExecutionPlan>>) -> Result<Arc<dyn ExecutionPlan>> {
+    fn with_new_children(
+        self: Arc<Self>,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
         let (Some(child), true) = (children.pop(), children.is_empty()) else {
             return plan_err!("{} expects exactly one child", self.name());
         };
@@ -205,19 +258,27 @@ impl ExecutionPlan for WindowAccumExec {
         )?))
     }
 
-    fn execute(&self, partition: usize, context: Arc<TaskContext>) -> Result<SendableRecordBatchStream> {
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
         if partition != 0 {
             return internal_err!("WindowAccumExec: invalid partition {partition}");
         }
         let col_idx = self.event_time_col_idx().ok_or_else(|| {
-            plan_datafusion_err!("event-time column '{}' not found in input schema", self.event_time_col)
+            plan_datafusion_err!(
+                "event-time column '{}' not found in input schema",
+                self.event_time_col
+            )
         })?;
 
         let group_exprs = Arc::clone(&self.group_exprs);
         let aggr_exprs = self.aggr_exprs.clone();
         let data_schema = self.data_input_schema.clone();
         let agg_schema = self.agg_output_schema.clone();
-        let input_stream = DecodedFlowEventStream::try_new(self.input.execute(partition, context.clone())?)?;
+        let input_stream =
+            DecodedFlowEventStream::try_new(self.input.execute(partition, context.clone())?)?;
 
         // State carried through the unfold loop:
         // (input_stream, accum_state, output_buffer, context)
@@ -256,7 +317,15 @@ impl ExecutionPlan for WindowAccumExec {
                             // Re-aggregate all pending rows.
                             let batches = acc.pending_rows.clone();
                             let wm = acc.watermark_micros;
-                            match run_aggregate(batches, &group_exprs, &aggr_exprs, &data_schema, ctx.clone()).await {
+                            match run_aggregate(
+                                batches,
+                                &group_exprs,
+                                &aggr_exprs,
+                                &data_schema,
+                                ctx.clone(),
+                            )
+                            .await
+                            {
                                 Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
                                 Ok(agg_batches) => {
                                     for agg_batch in agg_batches {
@@ -265,11 +334,15 @@ impl ExecutionPlan for WindowAccumExec {
                                                 Ok(filtered) if filtered.num_rows() > 0 => {
                                                     let len = filtered.num_rows();
                                                     let retracted = {
-                                                        let mut b = BooleanBuilder::with_capacity(len);
+                                                        let mut b =
+                                                            BooleanBuilder::with_capacity(len);
                                                         b.append_n(len, false);
                                                         b.finish()
                                                     };
-                                                    buf.push_back(FlowEvent::Data { batch: filtered, retracted });
+                                                    buf.push_back(FlowEvent::Data {
+                                                        batch: filtered,
+                                                        retracted,
+                                                    });
                                                 }
                                                 _ => {}
                                             }
@@ -331,7 +404,9 @@ fn window_end_mask(batch: &RecordBatch, watermark_micros: Option<i64>) -> Option
         .position(|f| f.name().eq_ignore_ascii_case("window"))?;
     let struct_arr = batch.column(idx).as_any().downcast_ref::<StructArray>()?;
     let end_col = struct_arr.column_by_name("end")?;
-    let end_ts = end_col.as_any().downcast_ref::<TimestampMicrosecondArray>()?;
+    let end_ts = end_col
+        .as_any()
+        .downcast_ref::<TimestampMicrosecondArray>()?;
     let mut b = BooleanBuilder::with_capacity(batch.num_rows());
     for i in 0..end_ts.len() {
         b.append_value(!end_ts.is_null(i) && end_ts.value(i) <= wm);

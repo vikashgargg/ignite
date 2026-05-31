@@ -11,7 +11,8 @@ use datafusion::physical_plan::ExecutionPlan;
 use sail_common_datafusion::column_features::ColumnFeatures;
 use sail_common_datafusion::datasource::{
     find_path_in_options, MergeStrategy, OptionLayer, PhysicalSinkMode, RowLevelCommand,
-    RowLevelWriteInfo, SinkInfo, SourceInfo, TableFormat, TableFormatColumnSpec, TableFormatRegistry,
+    RowLevelWriteInfo, SinkInfo, SourceInfo, TableFormat, TableFormatColumnSpec,
+    TableFormatRegistry,
 };
 use sail_common_datafusion::streaming::event::schema::is_flow_event_schema;
 use sail_data_source::options::gen::{DeltaReadOptions, DeltaWriteOptions};
@@ -611,10 +612,12 @@ impl TableFormat for DeltaTableFormat {
             }
             new_fields.push(field);
         }
-        let new_schema = StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let new_schema =
+            StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
         let kmode = snapshot.effective_column_mapping_mode();
-        let (_, updated_metadata) = evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let (_, updated_metadata) =
+            evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
         CommitBuilder::default()
             .with_actions(vec![CommitAction::Metadata(updated_metadata)])
@@ -683,10 +686,12 @@ impl TableFormat for DeltaTableFormat {
             );
         }
 
-        let new_schema = StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let new_schema =
+            StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
         let kmode = snapshot.effective_column_mapping_mode();
-        let (_, updated_metadata) = evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let (_, updated_metadata) =
+            evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
         CommitBuilder::default()
             .with_actions(vec![CommitAction::Metadata(updated_metadata)])
@@ -754,10 +759,12 @@ impl TableFormat for DeltaTableFormat {
             })
             .collect();
 
-        let new_schema = StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let new_schema =
+            StructType::try_new(new_fields).map_err(|e| DataFusionError::External(Box::new(e)))?;
         let kmode = snapshot.effective_column_mapping_mode();
-        let (_, updated_metadata) = evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
-            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+        let (_, updated_metadata) =
+            evolve_schema(&current_schema, &new_schema, current_metadata, kmode)
+                .map_err(|e| DataFusionError::External(Box::new(e)))?;
 
         CommitBuilder::default()
             .with_actions(vec![CommitAction::Metadata(updated_metadata)])

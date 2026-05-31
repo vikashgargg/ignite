@@ -29,7 +29,9 @@ impl PlanResolver<'_> {
             ));
         };
         if row_format.is_some() {
-            log::warn!("ROW FORMAT in INSERT OVERWRITE DIRECTORY is not supported and will be ignored");
+            log::warn!(
+                "ROW FORMAT in INSERT OVERWRITE DIRECTORY is not supported and will be ignored"
+            );
         }
         let format = match file_format {
             Some(spec::TableFileFormat::General { format }) => format,
@@ -108,10 +110,7 @@ impl PlanResolver<'_> {
                     .map(Expr::Column)
                     .collect();
                 let all_cols: Vec<Expr> = existing.into_iter().chain(static_cols).collect();
-                input = LogicalPlan::Projection(Projection::try_new(
-                    all_cols,
-                    Arc::new(input),
-                )?);
+                input = LogicalPlan::Projection(Projection::try_new(all_cols, Arc::new(input))?);
             }
         }
 

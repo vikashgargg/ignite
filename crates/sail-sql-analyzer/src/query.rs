@@ -1,6 +1,8 @@
 use either::Either;
 use sail_common::spec;
-use sail_sql_parser::ast::expression::{AtomExpr, DuplicateTreatment, Expr, GroupingSet, OrderByExpr};
+use sail_sql_parser::ast::expression::{
+    AtomExpr, DuplicateTreatment, Expr, GroupingSet, OrderByExpr,
+};
 use sail_sql_parser::ast::identifier::{Ident, ObjectName};
 use sail_sql_parser::ast::literal::IntegerLiteral;
 use sail_sql_parser::ast::operator::Comma;
@@ -122,7 +124,11 @@ pub fn from_ast_named_expression(expr: NamedExpr) -> SqlResult<spec::Expr> {
 }
 
 fn from_ast_named_window_def(nw: NamedWindow) -> SqlResult<(String, spec::Window)> {
-    let NamedWindow { name, r#as: _, window } = nw;
+    let NamedWindow {
+        name,
+        r#as: _,
+        window,
+    } = nw;
     Ok((name.value, from_ast_window_spec(window)?))
 }
 
@@ -145,7 +151,11 @@ fn expand_named_windows_in_expr(
                 window: def,
             })
         }
-        spec::Expr::Alias { expr, name, metadata } => Ok(spec::Expr::Alias {
+        spec::Expr::Alias {
+            expr,
+            name,
+            metadata,
+        } => Ok(spec::Expr::Alias {
             expr: Box::new(expand_named_windows_in_expr(*expr, defs)?),
             name,
             metadata,
@@ -395,121 +405,167 @@ fn from_ast_hive_from(term: HiveFromTerm) -> SqlResult<spec::QueryPlan> {
         let (quantifier, projection, body_lateral_views, r#where, group_by, having, qualify, limit) =
             match body {
                 HiveFromBody::Select {
-                    select: SelectClause { select: _, quantifier, projection },
+                    select:
+                        SelectClause {
+                            select: _,
+                            quantifier,
+                            projection,
+                        },
                     lateral_views,
                     r#where,
                     group_by,
                     having,
                     qualify,
-                } => (quantifier, projection, lateral_views, r#where, group_by, having, qualify, None),
+                } => (
+                    quantifier,
+                    projection,
+                    lateral_views,
+                    r#where,
+                    group_by,
+                    having,
+                    qualify,
+                    None,
+                ),
                 HiveFromBody::Insert {
                     insert: _,
                     into: _,
                     table: _,
                     name: _,
-                    select: SelectClause { select: _, quantifier, projection },
+                    select:
+                        SelectClause {
+                            select: _,
+                            quantifier,
+                            projection,
+                        },
                     lateral_views,
                     r#where,
                     group_by,
                     having,
                     qualify,
                     limit,
-                } => (quantifier, projection, lateral_views, r#where, group_by, having, qualify, limit),
+                } => (
+                    quantifier,
+                    projection,
+                    lateral_views,
+                    r#where,
+                    group_by,
+                    having,
+                    qualify,
+                    limit,
+                ),
             };
         {
-        let plan = from_ast_tables(shared_tables.clone())?;
-        let all_lateral_views = lateral_views
-            .iter()
-            .cloned()
-            .chain(body_lateral_views)
-            .collect();
-        let condition =
-            r#where.map(|WhereClause { r#where: _, condition }| condition);
-        let plan = if let Some(condition) = condition {
-            query_plan_with_filter(plan, condition)?
-        } else {
-            plan
-        };
-        let plan = query_plan_with_lateral_views(plan, all_lateral_views)?;
-        let projection = projection
-            .into_items()
-            .map(from_ast_named_expression)
-            .collect::<SqlResult<_>>()?;
-        let group_by = group_by
-            .map(|x| -> SqlResult<_> {
-                let GroupByClause {
-                    group_by: _,
-                    expressions,
-                    modifier,
-                } = x;
-                let expr = expressions
-                    .into_items()
-                    .map(from_ast_grouping_expression)
-                    .collect::<SqlResult<Vec<spec::Expr>>>()?;
-                let expr = match modifier {
-                    None => expr,
-                    Some(GroupByModifier::WithRollup(_, _)) => {
-                        vec![spec::Expr::Rollup(expr)]
-                    }
-                    Some(GroupByModifier::WithCube(_, _)) => {
-                        vec![spec::Expr::Cube(expr)]
-                    }
-                    Some(GroupByModifier::GroupingSets(_, _, _, sets, _)) => {
-                        let sets = sets
-                            .into_items()
-                            .map(from_ast_grouping_set)
-                            .collect::<SqlResult<Vec<_>>>()?;
-                        vec![spec::Expr::GroupingSets(sets)]
-                    }
-                };
-                Ok(expr)
-            })
-            .transpose()?
-            .unwrap_or_default();
-        let having = having
-            .map(|HavingClause { having: _, condition }| from_ast_expression(condition))
-            .transpose()?;
-        let plan = if group_by.is_empty() && having.is_none() {
-            spec::QueryPlan::new(spec::QueryNode::Project {
-                input: Some(Box::new(plan)),
-                expressions: projection,
-            })
-        } else {
-            spec::QueryPlan::new(spec::QueryNode::Aggregate(spec::Aggregate {
-                input: Box::new(plan),
-                grouping: group_by,
-                aggregate: projection,
-                having,
-                with_grouping_expressions: false,
-            }))
-        };
-        let plan = match quantifier {
-            None | Some(DuplicateTreatment::All(_)) => plan,
-            Some(DuplicateTreatment::Distinct(_)) => {
-                spec::QueryPlan::new(spec::QueryNode::Deduplicate(spec::Deduplicate {
+            let plan = from_ast_tables(shared_tables.clone())?;
+            let all_lateral_views = lateral_views
+                .iter()
+                .cloned()
+                .chain(body_lateral_views)
+                .collect();
+            let condition = r#where.map(
+                |WhereClause {
+                     r#where: _,
+                     condition,
+                 }| condition,
+            );
+            let plan = if let Some(condition) = condition {
+                query_plan_with_filter(plan, condition)?
+            } else {
+                plan
+            };
+            let plan = query_plan_with_lateral_views(plan, all_lateral_views)?;
+            let projection = projection
+                .into_items()
+                .map(from_ast_named_expression)
+                .collect::<SqlResult<_>>()?;
+            let group_by = group_by
+                .map(|x| -> SqlResult<_> {
+                    let GroupByClause {
+                        group_by: _,
+                        expressions,
+                        modifier,
+                    } = x;
+                    let expr = expressions
+                        .into_items()
+                        .map(from_ast_grouping_expression)
+                        .collect::<SqlResult<Vec<spec::Expr>>>()?;
+                    let expr = match modifier {
+                        None => expr,
+                        Some(GroupByModifier::WithRollup(_, _)) => {
+                            vec![spec::Expr::Rollup(expr)]
+                        }
+                        Some(GroupByModifier::WithCube(_, _)) => {
+                            vec![spec::Expr::Cube(expr)]
+                        }
+                        Some(GroupByModifier::GroupingSets(_, _, _, sets, _)) => {
+                            let sets = sets
+                                .into_items()
+                                .map(from_ast_grouping_set)
+                                .collect::<SqlResult<Vec<_>>>()?;
+                            vec![spec::Expr::GroupingSets(sets)]
+                        }
+                    };
+                    Ok(expr)
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let having = having
+                .map(
+                    |HavingClause {
+                         having: _,
+                         condition,
+                     }| from_ast_expression(condition),
+                )
+                .transpose()?;
+            let plan = if group_by.is_empty() && having.is_none() {
+                spec::QueryPlan::new(spec::QueryNode::Project {
+                    input: Some(Box::new(plan)),
+                    expressions: projection,
+                })
+            } else {
+                spec::QueryPlan::new(spec::QueryNode::Aggregate(spec::Aggregate {
                     input: Box::new(plan),
-                    column_names: vec![],
-                    all_columns_as_keys: true,
-                    within_watermark: false,
+                    grouping: group_by,
+                    aggregate: projection,
+                    having,
+                    with_grouping_expressions: false,
                 }))
-            }
-        };
-        let plan = if let Some(QualifyClause { qualify: _, condition }) = qualify {
-            query_plan_with_filter(plan, condition)?
-        } else {
-            plan
-        };
-        let plan = match limit {
-            None | Some(LimitClause { limit: _, value: LimitValue::All(_) }) => plan,
-            Some(LimitClause { limit: _, value: LimitValue::Value(v) }) => {
-                spec::QueryPlan::new(spec::QueryNode::Limit {
+            };
+            let plan = match quantifier {
+                None | Some(DuplicateTreatment::All(_)) => plan,
+                Some(DuplicateTreatment::Distinct(_)) => {
+                    spec::QueryPlan::new(spec::QueryNode::Deduplicate(spec::Deduplicate {
+                        input: Box::new(plan),
+                        column_names: vec![],
+                        all_columns_as_keys: true,
+                        within_watermark: false,
+                    }))
+                }
+            };
+            let plan = if let Some(QualifyClause {
+                qualify: _,
+                condition,
+            }) = qualify
+            {
+                query_plan_with_filter(plan, condition)?
+            } else {
+                plan
+            };
+            let plan = match limit {
+                None
+                | Some(LimitClause {
+                    limit: _,
+                    value: LimitValue::All(_),
+                }) => plan,
+                Some(LimitClause {
+                    limit: _,
+                    value: LimitValue::Value(v),
+                }) => spec::QueryPlan::new(spec::QueryNode::Limit {
                     input: Box::new(plan),
                     skip: None,
                     limit: Some(from_ast_expression(*v)?),
-                })
-            }
-        };
-        plans.push(plan);
+                }),
+            };
+            plans.push(plan);
         } // close the inner block opened after body destructuring
     }
 
@@ -1082,9 +1138,7 @@ fn query_plan_with_table_modifier(
                     let columns = columns
                         .map(|seq| {
                             seq.into_items()
-                                .map(|(item, alias)| {
-                                    (vec![item], alias.map(|(_, alias)| alias))
-                                })
+                                .map(|(item, alias)| (vec![item], alias.map(|(_, alias)| alias)))
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
@@ -1110,21 +1164,23 @@ fn query_plan_with_table_modifier(
                     let columns = columns
                         .map(|seq| {
                             seq.into_items()
-                                .map(|UnpivotColumnGroup {
-                                    left: _,
-                                    names,
-                                    right: _,
-                                    alias,
-                                }| {
-                                    let items = names
-                                        .map(|seq| {
-                                            seq.into_items()
-                                                .map(|item| item.name)
-                                                .collect::<Vec<_>>()
-                                        })
-                                        .unwrap_or_default();
-                                    (items, alias.map(|(_, alias)| alias))
-                                })
+                                .map(
+                                    |UnpivotColumnGroup {
+                                         left: _,
+                                         names,
+                                         right: _,
+                                         alias,
+                                     }| {
+                                        let items = names
+                                            .map(|seq| {
+                                                seq.into_items()
+                                                    .map(|item| item.name)
+                                                    .collect::<Vec<_>>()
+                                            })
+                                            .unwrap_or_default();
+                                        (items, alias.map(|(_, alias)| alias))
+                                    },
+                                )
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();

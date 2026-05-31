@@ -74,11 +74,15 @@ impl ScalarUDFImpl for SparkTryToTimeWithFmt {
         match value_cv {
             ColumnarValue::Scalar(ScalarValue::Utf8(s)) => {
                 let micros = s.as_deref().and_then(|v| Self::parse_micros(v, &fmt));
-                Ok(ColumnarValue::Scalar(ScalarValue::Time64Microsecond(micros)))
+                Ok(ColumnarValue::Scalar(ScalarValue::Time64Microsecond(
+                    micros,
+                )))
             }
             ColumnarValue::Scalar(ScalarValue::LargeUtf8(s)) => {
                 let micros = s.as_deref().and_then(|v| Self::parse_micros(v, &fmt));
-                Ok(ColumnarValue::Scalar(ScalarValue::Time64Microsecond(micros)))
+                Ok(ColumnarValue::Scalar(ScalarValue::Time64Microsecond(
+                    micros,
+                )))
             }
             ColumnarValue::Array(array) => {
                 let result: Time64MicrosecondArray = match array.data_type() {

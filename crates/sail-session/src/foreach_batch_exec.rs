@@ -30,11 +30,7 @@ pub struct ForeachBatchSinkExec {
 }
 
 impl ForeachBatchSinkExec {
-    pub fn new(
-        input: Arc<dyn ExecutionPlan>,
-        command: Vec<u8>,
-        eval_type: i32,
-    ) -> Result<Self> {
+    pub fn new(input: Arc<dyn ExecutionPlan>, command: Vec<u8>, eval_type: i32) -> Result<Self> {
         // Build the payload expected by PySparkUdfPayload::load:
         // 4-byte big-endian eval_type followed by the raw command bytes.
         let mut payload = Vec::with_capacity(4 + command.len());
@@ -101,7 +97,11 @@ impl ExecutionPlan for ForeachBatchSinkExec {
         }))
     }
 
-    fn execute(&self, partition: usize, context: Arc<TaskContext>) -> Result<SendableRecordBatchStream> {
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
         if partition != 0 {
             return plan_err!("ForeachBatchSinkExec only supports a single partition");
         }
@@ -140,12 +140,13 @@ impl ExecutionPlan for ForeachBatchSinkExec {
 
 fn call_foreach_batch(payload: &[u8], batch: RecordBatch, epoch_id: i64) -> Result<()> {
     Python::attach(|py| {
-        let func = PySparkUdfPayload::load(py, payload)
-            .map_err(|e| exec_datafusion_err!("foreachBatch: failed to load Python function: {e}"))?;
+        let func = PySparkUdfPayload::load(py, payload).map_err(|e| {
+            exec_datafusion_err!("foreachBatch: failed to load Python function: {e}")
+        })?;
 
-        let arrow_table = batch
-            .to_pyarrow(py)
-            .map_err(|e| exec_datafusion_err!("foreachBatch: failed to convert batch to PyArrow: {e}"))?;
+        let arrow_table = batch.to_pyarrow(py).map_err(|e| {
+            exec_datafusion_err!("foreachBatch: failed to convert batch to PyArrow: {e}")
+        })?;
 
         func.call1((arrow_table, epoch_id))
             .map_err(|e| exec_datafusion_err!("foreachBatch: Python function error: {e}"))?;

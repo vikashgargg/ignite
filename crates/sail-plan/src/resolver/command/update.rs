@@ -25,7 +25,9 @@ impl PlanResolver<'_> {
         // The PlanResolverState maps those IDs to the real column names — resolve
         // the WHERE condition and SET expressions BEFORE renaming, while the state
         // still knows about those opaque IDs.
-        let table_plan = self.resolve_merge_table_plan_for_update(table.clone(), state).await?;
+        let table_plan = self
+            .resolve_merge_table_plan_for_update(table.clone(), state)
+            .await?;
         let schema = table_plan.schema().clone();
 
         // Resolve the WHERE condition (if any) against the opaque schema.
@@ -87,7 +89,8 @@ impl PlanResolver<'_> {
                 table,
                 column_match: WriteColumnMatch::ByName,
             });
-        self.resolve_write_with_builder(projected, builder, state).await
+        self.resolve_write_with_builder(projected, builder, state)
+            .await
     }
 
     /// Creates a scan plan for the named table — shared with the merge resolver pattern.

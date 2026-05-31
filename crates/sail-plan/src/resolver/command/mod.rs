@@ -170,11 +170,15 @@ impl PlanResolver<'_> {
             CommandNode::RecoverPartitions { .. } => {
                 self.resolve_catalog_command(CatalogCommand::ClearCache)
             }
-            CommandNode::IsCached { table } => self.resolve_catalog_command(CatalogCommand::IsCached {
-                table: table.into(),
-            }),
+            CommandNode::IsCached { table } => {
+                self.resolve_catalog_command(CatalogCommand::IsCached {
+                    table: table.into(),
+                })
+            }
             CommandNode::CacheTable { table, .. } => {
-                self.resolve_catalog_command(CatalogCommand::CacheTable { table: table.into() })
+                self.resolve_catalog_command(CatalogCommand::CacheTable {
+                    table: table.into(),
+                })
             }
             CommandNode::UncacheTable { table, if_exists } => {
                 self.resolve_catalog_command(CatalogCommand::UncacheTable {
@@ -184,7 +188,9 @@ impl PlanResolver<'_> {
             }
             CommandNode::ClearCache => self.resolve_catalog_command(CatalogCommand::ClearCache),
             CommandNode::RefreshTable { table } => {
-                self.resolve_catalog_command(CatalogCommand::RefreshTable { table: table.into() })
+                self.resolve_catalog_command(CatalogCommand::RefreshTable {
+                    table: table.into(),
+                })
             }
             CommandNode::RefreshByPath { path } => {
                 self.resolve_catalog_command(CatalogCommand::RefreshByPath { path })
@@ -367,11 +373,14 @@ impl PlanResolver<'_> {
                     data_types.append_value(format!("{}", field.data_type()));
                     comments.append_null();
                 }
-                let batch = RecordBatch::try_new(describe_schema.clone(), vec![
-                    Arc::new(col_names.finish()),
-                    Arc::new(data_types.finish()),
-                    Arc::new(comments.finish()),
-                ])
+                let batch = RecordBatch::try_new(
+                    describe_schema.clone(),
+                    vec![
+                        Arc::new(col_names.finish()),
+                        Arc::new(data_types.finish()),
+                        Arc::new(comments.finish()),
+                    ],
+                )
                 .map_err(|e| PlanError::internal(e.to_string()))?;
                 let table = Arc::new(
                     MemTable::try_new(describe_schema, vec![vec![batch]])

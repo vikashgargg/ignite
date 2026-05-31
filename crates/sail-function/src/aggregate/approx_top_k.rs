@@ -120,7 +120,11 @@ impl ApproxTopKFunction {
             ScalarValue::UInt64(Some(v)) => v as i64,
             _ => return Ok(5),
         };
-        if k < 1 { Ok(5) } else { Ok(k as usize) }
+        if k < 1 {
+            Ok(5)
+        } else {
+            Ok(k as usize)
+        }
     }
 }
 
@@ -330,8 +334,7 @@ impl Accumulator for ApproxTopKAccumulator {
     }
 
     fn size(&self) -> usize {
-        std::mem::size_of_val(self)
-            + self.counter.values.len() * std::mem::size_of::<ScalarValue>()
+        std::mem::size_of_val(self) + self.counter.values.len() * std::mem::size_of::<ScalarValue>()
     }
 
     fn state(&mut self) -> Result<Vec<ScalarValue>> {
@@ -346,9 +349,10 @@ impl Accumulator for ApproxTopKAccumulator {
         let vals_list = ScalarValue::new_list_nullable(&vals, &self.input_type);
         let cnts_list = ScalarValue::new_list_nullable(&cnts, &DataType::Int64);
 
-        let k_i32: i32 = self.k.try_into().map_err(|_| {
-            DataFusionError::Execution("k exceeds i32::MAX".to_string())
-        })?;
+        let k_i32: i32 = self
+            .k
+            .try_into()
+            .map_err(|_| DataFusionError::Execution("k exceeds i32::MAX".to_string()))?;
 
         Ok(vec![
             ScalarValue::List(vals_list),
@@ -382,12 +386,9 @@ impl Accumulator for ApproxTopKAccumulator {
                 self.k = k_i32 as usize;
             }
 
-            let cnts_typed = cnts
-                .as_any()
-                .downcast_ref::<Int64Array>()
-                .ok_or_else(|| {
-                    DataFusionError::Internal("Expected Int64Array for counts".to_string())
-                })?;
+            let cnts_typed = cnts.as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                DataFusionError::Internal("Expected Int64Array for counts".to_string())
+            })?;
 
             let mut other = FreqCounter::new();
             for j in 0..vals.len() {
@@ -476,12 +477,9 @@ impl Accumulator for ApproxTopKAccumulateBinaryAccumulator {
         let Some(col) = states.first() else {
             return Ok(());
         };
-        let bins = col
-            .as_any()
-            .downcast_ref::<BinaryArray>()
-            .ok_or_else(|| {
-                DataFusionError::Internal("approx_top_k_accumulate merge: expected Binary".into())
-            })?;
+        let bins = col.as_any().downcast_ref::<BinaryArray>().ok_or_else(|| {
+            DataFusionError::Internal("approx_top_k_accumulate merge: expected Binary".into())
+        })?;
         for row in 0..bins.len() {
             if bins.is_null(row) {
                 continue;
@@ -501,7 +499,8 @@ impl Accumulator for ApproxTopKAccumulateBinaryAccumulator {
                     break;
                 }
                 let count = i64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
-                let slen = u32::from_le_bytes(bytes[pos + 8..pos + 12].try_into().unwrap()) as usize;
+                let slen =
+                    u32::from_le_bytes(bytes[pos + 8..pos + 12].try_into().unwrap()) as usize;
                 pos += 12;
                 if pos + slen > bytes.len() {
                     break;
@@ -523,7 +522,6 @@ impl Accumulator for ApproxTopKAccumulateBinaryAccumulator {
     }
 
     fn size(&self) -> usize {
-        std::mem::size_of_val(self)
-            + self.counter.values.len() * std::mem::size_of::<ScalarValue>()
+        std::mem::size_of_val(self) + self.counter.values.len() * std::mem::size_of::<ScalarValue>()
     }
 }

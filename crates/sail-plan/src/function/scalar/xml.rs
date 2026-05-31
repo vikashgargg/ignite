@@ -32,7 +32,10 @@ pub(super) fn list_built_in_xml_functions() -> Vec<(&'static str, ScalarFunction
 
     vec![
         ("from_xml", F::udf(SketchScalarStub::binary("from_xml"))),
-        ("schema_of_xml", F::udf(SketchScalarStub::string("schema_of_xml"))),
+        (
+            "schema_of_xml",
+            F::udf(SketchScalarStub::string("schema_of_xml")),
+        ),
         ("to_xml", F::udf(SketchScalarStub::string("to_xml"))),
         ("xpath", F::custom(xpath)),
         (

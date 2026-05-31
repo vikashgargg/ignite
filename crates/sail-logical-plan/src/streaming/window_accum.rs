@@ -88,7 +88,11 @@ impl UserDefinedLogicalNodeCore for WindowAccumNode {
         )
     }
 
-    fn with_exprs_and_inputs(&self, exprs: Vec<Expr>, mut inputs: Vec<LogicalPlan>) -> Result<Self> {
+    fn with_exprs_and_inputs(
+        &self,
+        exprs: Vec<Expr>,
+        mut inputs: Vec<LogicalPlan>,
+    ) -> Result<Self> {
         if inputs.len() != 1 {
             return plan_err!("{} requires exactly one input", self.name());
         }

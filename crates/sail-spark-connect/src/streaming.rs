@@ -40,18 +40,23 @@ impl StreamingQuery {
         stream: SendableRecordBatchStream,
         checkpoint_location: Option<String>,
     ) -> Self {
-        let initial_batch_id = checkpoint_location.as_deref().map(|loc| {
-            let offsets_dir = PathBuf::from(loc).join("offsets");
-            read_latest_batch_id(&offsets_dir)
-                .map(|id| id + 1)
-                .unwrap_or(0)
-        }).unwrap_or(0);
+        let initial_batch_id = checkpoint_location
+            .as_deref()
+            .map(|loc| {
+                let offsets_dir = PathBuf::from(loc).join("offsets");
+                read_latest_batch_id(&offsets_dir)
+                    .map(|id| id + 1)
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
 
         let ui_id = uuid::Uuid::new_v4().to_string();
         {
             let id = ui_id.clone();
             let n = name.clone();
-            tokio::spawn(async move { web_ui::register_query(id, n).await; });
+            tokio::spawn(async move {
+                web_ui::register_query(id, n).await;
+            });
         }
 
         let (signal_tx, signal_rx) = oneshot::channel();
@@ -59,7 +64,16 @@ impl StreamingQuery {
         let (stopped_tx, stopped_rx) = watch::channel(false);
         let ui_id_run = ui_id.clone();
         tokio::spawn(async move {
-            Self::run(signal_rx, error_tx, stopped_tx, stream, checkpoint_location, initial_batch_id, ui_id_run).await;
+            Self::run(
+                signal_rx,
+                error_tx,
+                stopped_tx,
+                stream,
+                checkpoint_location,
+                initial_batch_id,
+                ui_id_run,
+            )
+            .await;
         });
         Self {
             name,

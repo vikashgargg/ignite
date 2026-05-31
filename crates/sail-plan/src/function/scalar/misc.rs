@@ -9,6 +9,9 @@ use sail_catalog::utils::quote_namespace_if_needed;
 use sail_common_datafusion::extension::SessionExtensionAccessor;
 use sail_common_datafusion::session::plan::PlanService;
 use sail_common_datafusion::utils::items::ItemTaker;
+use sail_function::aggregate::kll_sketch::{
+    KllSketchGetQuantileBigint, KllSketchGetQuantileDouble, KllSketchGetQuantileFloat,
+};
 use sail_function::scalar::misc::monotonically_increasing_id::SparkMonotonicallyIncreasingId;
 use sail_function::scalar::misc::raise_error::RaiseError;
 use sail_function::scalar::misc::spark_aes::{
@@ -16,9 +19,6 @@ use sail_function::scalar::misc::spark_aes::{
 };
 use sail_function::scalar::misc::spark_partition_id::SparkPartitionId;
 use sail_function::scalar::misc::version::SparkVersion;
-use sail_function::aggregate::kll_sketch::{
-    KllSketchGetQuantileBigint, KllSketchGetQuantileDouble, KllSketchGetQuantileFloat,
-};
 use sail_function::scalar::sketch::{
     CollationFunc, HllSketchEstimateFunc, HllUnionFunc, SketchScalarStub, ThetaDifferenceFunc,
     ThetaIntersectionFunc, ThetaSketchEstimateFunc, ThetaUnionFunc,
@@ -159,56 +159,119 @@ pub(super) fn list_built_in_misc_functions() -> Vec<(&'static str, ScalarFunctio
         ("current_database", F::custom(current_database)),
         ("current_schema", F::custom(current_database)),
         ("current_user", F::custom(current_user)),
-        ("approx_top_k_estimate", F::udf(SketchScalarStub::string("approx_top_k_estimate"))),
+        (
+            "approx_top_k_estimate",
+            F::udf(SketchScalarStub::string("approx_top_k_estimate")),
+        ),
         ("collation", F::udf(CollationFunc::new())),
         ("from_avro", F::udf(SketchScalarStub::binary("from_avro"))),
-        ("from_protobuf", F::udf(SketchScalarStub::binary("from_protobuf"))),
+        (
+            "from_protobuf",
+            F::udf(SketchScalarStub::binary("from_protobuf")),
+        ),
         ("equal_null", F::binary_op(Operator::IsNotDistinctFrom)),
         ("hll_sketch_estimate", F::udf(HllSketchEstimateFunc::new())),
         ("hll_union", F::udf(HllUnionFunc::new())),
-        ("kll_sketch_get_n_bigint", F::udf(SketchScalarStub::int64("kll_sketch_get_n_bigint"))),
-        ("kll_sketch_get_n_double", F::udf(SketchScalarStub::int64("kll_sketch_get_n_double"))),
-        ("kll_sketch_get_n_float", F::udf(SketchScalarStub::int64("kll_sketch_get_n_float"))),
-        ("kll_sketch_get_quantile_bigint", F::udf(KllSketchGetQuantileBigint::new())),
-        ("kll_sketch_get_quantile_double", F::udf(KllSketchGetQuantileDouble::new())),
-        ("kll_sketch_get_quantile_float", F::udf(KllSketchGetQuantileFloat::new())),
-        ("kll_sketch_get_rank_bigint", F::udf(SketchScalarStub::float64("kll_sketch_get_rank_bigint"))),
-        ("kll_sketch_get_rank_double", F::udf(SketchScalarStub::float64("kll_sketch_get_rank_double"))),
-        ("kll_sketch_get_rank_float", F::udf(SketchScalarStub::float64("kll_sketch_get_rank_float"))),
-        ("kll_sketch_merge_bigint", F::udf(SketchScalarStub::binary("kll_sketch_merge_bigint"))),
-        ("kll_sketch_merge_double", F::udf(SketchScalarStub::binary("kll_sketch_merge_double"))),
-        ("kll_sketch_merge_float", F::udf(SketchScalarStub::binary("kll_sketch_merge_float"))),
-        ("kll_sketch_to_string_bigint", F::udf(SketchScalarStub::string("kll_sketch_to_string_bigint"))),
-        ("kll_sketch_to_string_double", F::udf(SketchScalarStub::string("kll_sketch_to_string_double"))),
-        ("kll_sketch_to_string_float", F::udf(SketchScalarStub::string("kll_sketch_to_string_float"))),
+        (
+            "kll_sketch_get_n_bigint",
+            F::udf(SketchScalarStub::int64("kll_sketch_get_n_bigint")),
+        ),
+        (
+            "kll_sketch_get_n_double",
+            F::udf(SketchScalarStub::int64("kll_sketch_get_n_double")),
+        ),
+        (
+            "kll_sketch_get_n_float",
+            F::udf(SketchScalarStub::int64("kll_sketch_get_n_float")),
+        ),
+        (
+            "kll_sketch_get_quantile_bigint",
+            F::udf(KllSketchGetQuantileBigint::new()),
+        ),
+        (
+            "kll_sketch_get_quantile_double",
+            F::udf(KllSketchGetQuantileDouble::new()),
+        ),
+        (
+            "kll_sketch_get_quantile_float",
+            F::udf(KllSketchGetQuantileFloat::new()),
+        ),
+        (
+            "kll_sketch_get_rank_bigint",
+            F::udf(SketchScalarStub::float64("kll_sketch_get_rank_bigint")),
+        ),
+        (
+            "kll_sketch_get_rank_double",
+            F::udf(SketchScalarStub::float64("kll_sketch_get_rank_double")),
+        ),
+        (
+            "kll_sketch_get_rank_float",
+            F::udf(SketchScalarStub::float64("kll_sketch_get_rank_float")),
+        ),
+        (
+            "kll_sketch_merge_bigint",
+            F::udf(SketchScalarStub::binary("kll_sketch_merge_bigint")),
+        ),
+        (
+            "kll_sketch_merge_double",
+            F::udf(SketchScalarStub::binary("kll_sketch_merge_double")),
+        ),
+        (
+            "kll_sketch_merge_float",
+            F::udf(SketchScalarStub::binary("kll_sketch_merge_float")),
+        ),
+        (
+            "kll_sketch_to_string_bigint",
+            F::udf(SketchScalarStub::string("kll_sketch_to_string_bigint")),
+        ),
+        (
+            "kll_sketch_to_string_double",
+            F::udf(SketchScalarStub::string("kll_sketch_to_string_double")),
+        ),
+        (
+            "kll_sketch_to_string_float",
+            F::udf(SketchScalarStub::string("kll_sketch_to_string_float")),
+        ),
         ("theta_difference", F::udf(ThetaDifferenceFunc::new())),
         ("theta_intersection", F::udf(ThetaIntersectionFunc::new())),
-        ("theta_sketch_estimate", F::udf(ThetaSketchEstimateFunc::new())),
+        (
+            "theta_sketch_estimate",
+            F::udf(ThetaSketchEstimateFunc::new()),
+        ),
         ("theta_union", F::udf(ThetaUnionFunc::new())),
         (
             "input_file_block_length",
             F::custom(input_file_block_length),
         ),
-        (
-            "input_file_block_start",
-            F::custom(input_file_block_start),
-        ),
+        ("input_file_block_start", F::custom(input_file_block_start)),
         ("input_file_name", F::custom(input_file_name)),
-        ("java_method", F::udf(SketchScalarStub::string("java_method"))),
+        (
+            "java_method",
+            F::udf(SketchScalarStub::string("java_method")),
+        ),
         (
             "monotonically_increasing_id",
             F::udf(SparkMonotonicallyIncreasingId::new()),
         ),
         ("raise_error", F::udf(RaiseError::new())),
         ("reflect", F::udf(SketchScalarStub::string("reflect"))),
-        ("schema_of_avro", F::udf(SketchScalarStub::string("schema_of_avro"))),
+        (
+            "schema_of_avro",
+            F::udf(SketchScalarStub::string("schema_of_avro")),
+        ),
         ("session_user", F::custom(current_user)),
         ("spark_partition_id", F::udf(SparkPartitionId::new())),
         ("to_avro", F::udf(SketchScalarStub::binary("to_avro"))),
-        ("to_protobuf", F::udf(SketchScalarStub::binary("to_protobuf"))),
+        (
+            "to_protobuf",
+            F::udf(SketchScalarStub::binary("to_protobuf")),
+        ),
         ("try_aes_encrypt", F::udf(SparkTryAESEncrypt::new())),
         ("try_aes_decrypt", F::udf(SparkTryAESDecrypt::new())),
-        ("try_reflect", F::udf(SketchScalarStub::string("try_reflect"))),
+        (
+            "try_reflect",
+            F::udf(SketchScalarStub::string("try_reflect")),
+        ),
         ("typeof", F::custom(type_of)),
         ("user", F::custom(current_user)),
         ("uuid", F::nullary(expr_fn::uuid)),

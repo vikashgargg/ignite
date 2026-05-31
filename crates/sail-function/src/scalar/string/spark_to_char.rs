@@ -65,14 +65,11 @@ impl ScalarUDFImpl for SparkToCharNumber {
             }
             ColumnarValue::Array(arr) => {
                 let fmts = datafusion::arrow::compute::cast(arr, &DataType::Utf8)?;
-                let fmt_arr = fmts
-                    .as_any()
-                    .downcast_ref::<StringArray>()
-                    .ok_or_else(|| {
-                        datafusion_common::DataFusionError::Internal(
-                            "Failed to cast format to StringArray".to_string(),
-                        )
-                    })?;
+                let fmt_arr = fmts.as_any().downcast_ref::<StringArray>().ok_or_else(|| {
+                    datafusion_common::DataFusionError::Internal(
+                        "Failed to cast format to StringArray".to_string(),
+                    )
+                })?;
                 match &args[0] {
                     ColumnarValue::Array(num_arr) => {
                         let f64_arr = cast_arrow_array_to_f64(num_arr)?;

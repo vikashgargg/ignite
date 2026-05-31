@@ -36,7 +36,7 @@ impl JsonReadOptions {
         let JsonReadOptions {
             schema_infer_max_records,
             compression,
-            mode: _,                        // Spark-specific, used by PermissiveJsonFormat
+            mode: _,                          // Spark-specific, used by PermissiveJsonFormat
             column_name_of_corrupt_record: _, // Spark-specific, used by PermissiveJsonFormat
         } = self;
         let compression = FileCompressionType::from_str(&compression)

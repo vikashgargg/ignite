@@ -42,7 +42,10 @@ struct ThetaSketch {
 
 impl ThetaSketch {
     fn new() -> Self {
-        Self { hashes: BTreeSet::new(), theta: u64::MAX }
+        Self {
+            hashes: BTreeSet::new(),
+            theta: u64::MAX,
+        }
     }
 
     fn insert(&mut self, h: u64) {
@@ -130,17 +133,31 @@ impl ThetaSketchAgg {
 }
 
 impl AggregateUDFImpl for ThetaSketchAgg {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { &self.name }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Binary)
+    }
 
     fn accumulator(&self, _: AccumulatorArgs) -> Result<Box<dyn Accumulator>> {
-        Ok(Box::new(ThetaSketchAccumulator { sketch: ThetaSketch::new() }))
+        Ok(Box::new(ThetaSketchAccumulator {
+            sketch: ThetaSketch::new(),
+        }))
     }
 
     fn state_fields(&self, _: StateFieldsArgs) -> Result<Vec<FieldRef>> {
-        Ok(vec![Arc::new(Field::new("theta_state", DataType::Binary, true))])
+        Ok(vec![Arc::new(Field::new(
+            "theta_state",
+            DataType::Binary,
+            true,
+        ))])
     }
 }
 
@@ -151,9 +168,13 @@ struct ThetaSketchAccumulator {
 
 impl Accumulator for ThetaSketchAccumulator {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
-        let Some(col) = values.first() else { return Ok(()) };
+        let Some(col) = values.first() else {
+            return Ok(());
+        };
         for row in 0..col.len() {
-            if col.is_null(row) { continue; }
+            if col.is_null(row) {
+                continue;
+            }
             let sv = ScalarValue::try_from_array(col.as_ref(), row)?;
             self.sketch.insert(hash_scalar(&sv));
         }
@@ -161,11 +182,17 @@ impl Accumulator for ThetaSketchAccumulator {
     }
 
     fn merge_batch(&mut self, states: &[ArrayRef]) -> Result<()> {
-        let Some(col) = states.first() else { return Ok(()) };
-        let bins = col.as_any().downcast_ref::<BinaryArray>()
+        let Some(col) = states.first() else {
+            return Ok(());
+        };
+        let bins = col
+            .as_any()
+            .downcast_ref::<BinaryArray>()
             .ok_or_else(|| plan_datafusion_err!("theta_sketch merge: expected Binary"))?;
         for row in 0..bins.len() {
-            if bins.is_null(row) { continue; }
+            if bins.is_null(row) {
+                continue;
+            }
             let other = ThetaSketch::deserialize(bins.value(row))?;
             self.sketch.merge(&other);
         }
@@ -212,17 +239,31 @@ impl ThetaSketchUnionAgg {
 }
 
 impl AggregateUDFImpl for ThetaSketchUnionAgg {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { &self.name }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Binary)
+    }
 
     fn accumulator(&self, _: AccumulatorArgs) -> Result<Box<dyn Accumulator>> {
-        Ok(Box::new(ThetaUnionAccumulator { sketch: ThetaSketch::new() }))
+        Ok(Box::new(ThetaUnionAccumulator {
+            sketch: ThetaSketch::new(),
+        }))
     }
 
     fn state_fields(&self, _: StateFieldsArgs) -> Result<Vec<FieldRef>> {
-        Ok(vec![Arc::new(Field::new("theta_state", DataType::Binary, true))])
+        Ok(vec![Arc::new(Field::new(
+            "theta_state",
+            DataType::Binary,
+            true,
+        ))])
     }
 }
 
@@ -234,11 +275,17 @@ struct ThetaUnionAccumulator {
 
 impl Accumulator for ThetaUnionAccumulator {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
-        let Some(col) = values.first() else { return Ok(()) };
-        let bins = col.as_any().downcast_ref::<BinaryArray>()
+        let Some(col) = values.first() else {
+            return Ok(());
+        };
+        let bins = col
+            .as_any()
+            .downcast_ref::<BinaryArray>()
             .ok_or_else(|| plan_datafusion_err!("theta_union: expected Binary input"))?;
         for row in 0..bins.len() {
-            if bins.is_null(row) { continue; }
+            if bins.is_null(row) {
+                continue;
+            }
             let other = ThetaSketch::deserialize(bins.value(row))?;
             self.sketch.merge(&other);
         }
@@ -282,17 +329,31 @@ impl ThetaSketchDistinctAgg {
 }
 
 impl AggregateUDFImpl for ThetaSketchDistinctAgg {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { &self.name }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Float64) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Float64)
+    }
 
     fn accumulator(&self, _: AccumulatorArgs) -> Result<Box<dyn Accumulator>> {
-        Ok(Box::new(ThetaDistinctAccumulator { sketch: ThetaSketch::new() }))
+        Ok(Box::new(ThetaDistinctAccumulator {
+            sketch: ThetaSketch::new(),
+        }))
     }
 
     fn state_fields(&self, _: StateFieldsArgs) -> Result<Vec<FieldRef>> {
-        Ok(vec![Arc::new(Field::new("theta_state", DataType::Binary, true))])
+        Ok(vec![Arc::new(Field::new(
+            "theta_state",
+            DataType::Binary,
+            true,
+        ))])
     }
 }
 
@@ -303,9 +364,13 @@ struct ThetaDistinctAccumulator {
 
 impl Accumulator for ThetaDistinctAccumulator {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
-        let Some(col) = values.first() else { return Ok(()) };
+        let Some(col) = values.first() else {
+            return Ok(());
+        };
         for row in 0..col.len() {
-            if col.is_null(row) { continue; }
+            if col.is_null(row) {
+                continue;
+            }
             let sv = ScalarValue::try_from_array(col.as_ref(), row)?;
             self.sketch.insert(hash_scalar(&sv));
         }
@@ -313,11 +378,17 @@ impl Accumulator for ThetaDistinctAccumulator {
     }
 
     fn merge_batch(&mut self, states: &[ArrayRef]) -> Result<()> {
-        let Some(col) = states.first() else { return Ok(()) };
-        let bins = col.as_any().downcast_ref::<BinaryArray>()
+        let Some(col) = states.first() else {
+            return Ok(());
+        };
+        let bins = col
+            .as_any()
+            .downcast_ref::<BinaryArray>()
             .ok_or_else(|| plan_datafusion_err!("theta_distinct merge: expected Binary"))?;
         for row in 0..bins.len() {
-            if bins.is_null(row) { continue; }
+            if bins.is_null(row) {
+                continue;
+            }
             let other = ThetaSketch::deserialize(bins.value(row))?;
             self.sketch.merge(&other);
         }

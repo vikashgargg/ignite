@@ -11,16 +11,14 @@ use sail_sql_parser::ast::statement::{
     AlterColumnItem, AlterColumnOperation, AlterTableOperation, AlterViewOperation,
     AnalyzeTableModifier, AsQueryClause, Assignment, AssignmentList, ColumnAlteration,
     ColumnAlterationList, ColumnAlterationOption, ColumnDefinition, ColumnDefinitionList,
-    ColumnDefinitionOption, ColumnDropList,
-    ColumnOrConstraintItem, ColumnPosition, ColumnTypeDefinition, CommentValue,
-    CreateDatabaseClause, CreateTableClause,
-    CreateViewClause, DeleteTableAlias, DescribeItem, ExplainFormat, FileFormat,
-    InsertDirectoryDestination, MergeMatchClause, MergeMatchedAction,
-    MergeNotMatchedBySourceAction, MergeNotMatchedByTargetAction, MergeSource, PartitionByItem,
-    PartitionByList, PartitionClause, PartitionValue, PartitionValueList, PropertyKey,
-    PropertyKeyList, PropertyKeyValue, PropertyList, PropertyValue, RowFormat,
-    RowFormatDelimitedClause, SetClause, SortColumn, SortColumnClause, SortColumnList, Statement,
-    TableConstraintAst, UpdateTableAlias, ViewColumn,
+    ColumnDefinitionOption, ColumnDropList, ColumnOrConstraintItem, ColumnPosition,
+    ColumnTypeDefinition, CommentValue, CreateDatabaseClause, CreateTableClause, CreateViewClause,
+    DeleteTableAlias, DescribeItem, ExplainFormat, FileFormat, InsertDirectoryDestination,
+    MergeMatchClause, MergeMatchedAction, MergeNotMatchedBySourceAction,
+    MergeNotMatchedByTargetAction, MergeSource, PartitionByItem, PartitionByList, PartitionClause,
+    PartitionValue, PartitionValueList, PropertyKey, PropertyKeyList, PropertyKeyValue,
+    PropertyList, PropertyValue, RowFormat, RowFormatDelimitedClause, SetClause, SortColumn,
+    SortColumnClause, SortColumnList, Statement, TableConstraintAst, UpdateTableAlias, ViewColumn,
 };
 use sail_sql_parser::tree::TreeText;
 
@@ -112,7 +110,9 @@ pub fn from_ast_statement(statement: Statement) -> SqlResult<spec::Plan> {
         } => {
             let cascade = match specifier {
                 Some(Either::Left(Restrict { .. })) => {
-                    log::warn!("RESTRICT in DROP DATABASE is not enforced; dropping without restriction");
+                    log::warn!(
+                        "RESTRICT in DROP DATABASE is not enforced; dropping without restriction"
+                    );
                     false
                 }
                 Some(Either::Right(Cascade { .. })) => true,
@@ -1353,12 +1353,8 @@ fn from_ast_table_definition_columns(
              right: _,
          }| items,
     );
-    let mut col_output = Vec::with_capacity(
-        items
-            .as_ref()
-            .map(|x| 1 + x.tail.len())
-            .unwrap_or_default(),
-    );
+    let mut col_output =
+        Vec::with_capacity(items.as_ref().map(|x| 1 + x.tail.len()).unwrap_or_default());
     let mut constraint_output = Vec::new();
     for item in items.map(|x| x.into_items()).into_iter().flatten() {
         match item {
@@ -1944,10 +1940,7 @@ fn from_ast_column_alteration_list(
                 name: from_ast_object_name(name)?,
                 data_type: from_ast_data_type(data_type)?,
                 nullable: !opts.not_null,
-                comment: opts
-                    .comment
-                    .map(from_ast_string)
-                    .transpose()?,
+                comment: opts.comment.map(from_ast_string).transpose()?,
             })
         })
         .collect()
@@ -2012,12 +2005,10 @@ fn from_ast_alter_table_operation(
                 Some(AlterColumnItem {
                     name,
                     operation: AlterColumnOperation::Type(_, data_type, _),
-                }) if items.next().is_none() => {
-                    Ok(spec::AlterTableOperation::AlterColumnType {
-                        name: from_ast_object_name(name)?,
-                        data_type: from_ast_data_type(data_type)?,
-                    })
-                }
+                }) if items.next().is_none() => Ok(spec::AlterTableOperation::AlterColumnType {
+                    name: from_ast_object_name(name)?,
+                    data_type: from_ast_data_type(data_type)?,
+                }),
                 Some(AlterColumnItem {
                     name,
                     operation: AlterColumnOperation::RenameWithChange { new_name, .. },

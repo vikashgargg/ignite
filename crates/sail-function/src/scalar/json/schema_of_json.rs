@@ -157,10 +157,7 @@ fn schema_of_json_inner(args: &[ArrayRef]) -> Result<ArrayRef> {
     Ok(Arc::new(StringArray::from(vec![type_ddl])))
 }
 
-fn infer_json_schema_type(
-    json_string: &str,
-    options: &SparkSchemaOfJsonOptions,
-) -> Result<String> {
+fn infer_json_schema_type(json_string: &str, options: &SparkSchemaOfJsonOptions) -> Result<String> {
     let json = if options.allow_numeric_leading_zeros {
         strip_leading_zeros_from_numbers(json_string)
     } else {
@@ -196,12 +193,13 @@ fn strip_leading_zeros_from_numbers(json: &str) -> String {
             continue;
         }
         // Detect numbers with leading zeros: 0 followed by a digit
-        if bytes[i] == b'0'
-            && i + 1 < bytes.len()
-            && bytes[i + 1].is_ascii_digit()
-        {
+        if bytes[i] == b'0' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
             // Skip leading zeros but keep at least one digit
-            while i < bytes.len() && bytes[i] == b'0' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+            while i < bytes.len()
+                && bytes[i] == b'0'
+                && i + 1 < bytes.len()
+                && bytes[i + 1].is_ascii_digit()
+            {
                 i += 1;
             }
             continue;

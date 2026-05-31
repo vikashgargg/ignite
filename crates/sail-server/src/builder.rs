@@ -56,7 +56,10 @@ pub struct ServerBuilder<'b> {
 }
 
 impl<'b> ServerBuilder<'b> {
-    pub fn new(name: &'static str, options: ServerBuilderOptions) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        name: &'static str,
+        options: ServerBuilderOptions,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let (health_reporter, health_server) = tonic_health::server::health_reporter();
 
         // TODO: We may want to turn off reflection in production if it affects performance.

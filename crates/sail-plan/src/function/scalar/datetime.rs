@@ -18,10 +18,10 @@ use sail_function::scalar::datetime::spark_make_time::SparkMakeTime;
 use sail_function::scalar::datetime::spark_make_timestamp::SparkMakeTimestampNtz;
 use sail_function::scalar::datetime::spark_make_ym_interval::SparkMakeYmInterval;
 use sail_function::scalar::datetime::spark_next_day::SparkNextDay;
+use sail_function::scalar::datetime::spark_time::SparkTime;
 use sail_function::scalar::datetime::spark_time_diff::SparkTimeDiff;
 use sail_function::scalar::datetime::spark_time_trunc::SparkTimeTrunc;
 use sail_function::scalar::datetime::spark_to_chrono_fmt::SparkToChronoFmt;
-use sail_function::scalar::datetime::spark_time::SparkTime;
 use sail_function::scalar::datetime::spark_try_make_timestamp_ntz::SparkTryMakeTimestampNtz;
 use sail_function::scalar::datetime::spark_try_to_date::SparkTryToDate;
 use sail_function::scalar::datetime::spark_try_to_time::SparkTryToTimeWithFmt;
@@ -825,8 +825,16 @@ fn spark_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
         )));
     }
     // Optional args
-    let _start_time = if args.len() == 4 { Some(args.pop().unwrap()) } else { None };
-    let _slide_lit = if args.len() == 3 { Some(args.pop().unwrap()) } else { None };
+    let _start_time = if args.len() == 4 {
+        Some(args.pop().unwrap())
+    } else {
+        None
+    };
+    let _slide_lit = if args.len() == 3 {
+        Some(args.pop().unwrap())
+    } else {
+        None
+    };
     let duration_expr = args.pop().unwrap();
     let col_expr = args.pop().unwrap();
 
@@ -858,13 +866,10 @@ fn spark_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
 
     // Result: named_struct("start", window_start, "end", window_end) aliased as "window"
     // so GROUP BY window(...) produces a column named "window" that can be accessed as window.start
-    Ok(expr_fn::named_struct(vec![
-        lit("start"),
-        window_start,
-        lit("end"),
-        window_end,
-    ])
-    .alias("window"))
+    Ok(
+        expr_fn::named_struct(vec![lit("start"), window_start, lit("end"), window_end])
+            .alias("window"),
+    )
 }
 
 fn spark_window_time(input: ScalarFunctionInput) -> PlanResult<Expr> {
@@ -903,13 +908,10 @@ fn spark_session_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
     let col_expr = args.pop().unwrap();
 
     // Stub: return struct with start=col, end=col (session bounds are complex to compute)
-    Ok(expr_fn::named_struct(vec![
-        lit("start"),
-        col_expr.clone(),
-        lit("end"),
-        col_expr,
-    ])
-    .alias("session_window"))
+    Ok(
+        expr_fn::named_struct(vec![lit("start"), col_expr.clone(), lit("end"), col_expr])
+            .alias("session_window"),
+    )
 }
 
 pub(super) fn list_built_in_datetime_functions() -> Vec<(&'static str, ScalarFunction)> {

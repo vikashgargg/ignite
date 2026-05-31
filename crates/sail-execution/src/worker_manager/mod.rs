@@ -1,5 +1,5 @@
-pub mod leader_election;
 mod kubernetes;
+pub mod leader_election;
 mod local;
 mod options;
 

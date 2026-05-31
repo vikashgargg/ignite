@@ -54,9 +54,9 @@ impl KafkaReadOptions {
                     group_id = Self::generate_group_id(&value);
                 }
                 "maxbatchsize" | "maxoffsetspertrigger" | "maxoffsetspermicrobatch" => {
-                    max_batch_size = value.parse::<usize>().map_err(|e| {
-                        DataFusionError::Plan(format!("invalid {key}: {e}"))
-                    })?;
+                    max_batch_size = value
+                        .parse::<usize>()
+                        .map_err(|e| DataFusionError::Plan(format!("invalid {key}: {e}")))?;
                 }
                 "fetchtimeoutms" => {
                     fetch_timeout_ms = value.parse::<u64>().map_err(|e| {

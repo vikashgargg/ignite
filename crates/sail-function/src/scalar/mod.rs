@@ -1,12 +1,12 @@
 pub mod array;
 pub mod collection;
-pub mod higher_order;
 pub mod csv;
 pub mod datetime;
 pub mod drop_struct_field;
 pub mod explode;
 pub mod geo;
 pub mod hash;
+pub mod higher_order;
 pub mod json;
 pub mod map;
 pub mod math;

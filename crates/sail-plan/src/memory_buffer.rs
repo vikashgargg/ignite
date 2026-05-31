@@ -94,7 +94,10 @@ impl TableProvider for MemoryStreamBuffer {
             None => (self.schema.clone(), batches),
         };
 
-        Ok(Arc::new(MemoryBufferScanExec::new(projected_batches, schema)))
+        Ok(Arc::new(MemoryBufferScanExec::new(
+            projected_batches,
+            schema,
+        )))
     }
 
     fn supports_filters_pushdown(
@@ -123,7 +126,10 @@ impl MemoryBufferScanExec {
             EmissionType::Final,
             Boundedness::Bounded,
         ));
-        Self { batches, properties }
+        Self {
+            batches,
+            properties,
+        }
     }
 }
 

@@ -29,7 +29,9 @@ use sail_function::aggregate::percentile::PercentileFunction;
 use sail_function::aggregate::percentile_disc::percentile_disc_udaf;
 use sail_function::aggregate::product::ProductFunction;
 use sail_function::aggregate::schema_of_variant_agg::SchemaOfVariantAggFunction;
-use sail_function::aggregate::sketch::{Int64AggStub, SketchAggStub, ThetaSketchAgg, ThetaSketchDistinctAgg, ThetaSketchUnionAgg};
+use sail_function::aggregate::sketch::{
+    Int64AggStub, SketchAggStub, ThetaSketchAgg, ThetaSketchDistinctAgg, ThetaSketchUnionAgg,
+};
 use sail_function::aggregate::skewness::SkewnessFunc;
 use sail_function::aggregate::try_avg::TryAvgFunction;
 use sail_function::scalar::struct_function::StructFunction;
@@ -647,10 +649,26 @@ fn list_built_in_aggregate_functions() -> Vec<(&'static str, AggFunction)> {
         ("corr", F::default(correlation::corr_udaf)),
         ("count", F::custom(count)),
         ("count_if", F::custom(count_if)),
-        ("approx_top_k", F::default(|| Arc::new(AggregateUDF::from(ApproxTopKFunction::new())))),
-        ("approx_top_k_accumulate", F::default(|| Arc::new(AggregateUDF::from(ApproxTopKAccumulateFunction::new())))),
-        ("approx_top_k_combine", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("approx_top_k_combine"))))),
-        ("count_min_sketch", F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("count_min_sketch"))))),
+        (
+            "approx_top_k",
+            F::default(|| Arc::new(AggregateUDF::from(ApproxTopKFunction::new()))),
+        ),
+        (
+            "approx_top_k_accumulate",
+            F::default(|| Arc::new(AggregateUDF::from(ApproxTopKAccumulateFunction::new()))),
+        ),
+        (
+            "approx_top_k_combine",
+            F::default(|| {
+                Arc::new(AggregateUDF::from(SketchAggStub::new(
+                    "approx_top_k_combine",
+                )))
+            }),
+        ),
+        (
+            "count_min_sketch",
+            F::default(|| Arc::new(AggregateUDF::from(SketchAggStub::new("count_min_sketch")))),
+        ),
         ("covar_pop", F::default(covariance::covar_pop_udaf)),
         ("covar_samp", F::default(covariance::covar_samp_udaf)),
         ("every", F::default(bool_and_or::bool_and_udaf)),
@@ -659,15 +677,58 @@ fn list_built_in_aggregate_functions() -> Vec<(&'static str, AggFunction)> {
         ("grouping", F::default(grouping::grouping_udaf)),
         ("grouping_id", F::custom(grouping_id)),
         ("histogram_numeric", F::custom(histogram_numeric)),
-        ("hll_sketch_agg", F::default(|| Arc::new(AggregateUDF::from(ThetaSketchAgg::new("hll_sketch_agg"))))),
-        ("hll_union_agg", F::default(|| Arc::new(AggregateUDF::from(ThetaSketchUnionAgg::new("hll_union_agg"))))),
-        ("kll_sketch_agg_bigint", F::default(|| Arc::new(AggregateUDF::from(KllSketchAggBigint::new())))),
-        ("kll_sketch_agg_double", F::default(|| Arc::new(AggregateUDF::from(KllSketchAggDouble::new())))),
-        ("kll_sketch_agg_float", F::default(|| Arc::new(AggregateUDF::from(KllSketchAggFloat::new())))),
-        ("theta_intersection_agg", F::default(|| Arc::new(AggregateUDF::from(ThetaSketchUnionAgg::new("theta_intersection_agg"))))),
-        ("theta_sketch_agg", F::default(|| Arc::new(AggregateUDF::from(ThetaSketchAgg::new("theta_sketch_agg"))))),
-        ("theta_union_agg", F::default(|| Arc::new(AggregateUDF::from(ThetaSketchUnionAgg::new("theta_union_agg"))))),
-        ("theta_sketch_distinct", F::default(|| Arc::new(AggregateUDF::from(ThetaSketchDistinctAgg::new("theta_sketch_distinct"))))),
+        (
+            "hll_sketch_agg",
+            F::default(|| Arc::new(AggregateUDF::from(ThetaSketchAgg::new("hll_sketch_agg")))),
+        ),
+        (
+            "hll_union_agg",
+            F::default(|| {
+                Arc::new(AggregateUDF::from(ThetaSketchUnionAgg::new(
+                    "hll_union_agg",
+                )))
+            }),
+        ),
+        (
+            "kll_sketch_agg_bigint",
+            F::default(|| Arc::new(AggregateUDF::from(KllSketchAggBigint::new()))),
+        ),
+        (
+            "kll_sketch_agg_double",
+            F::default(|| Arc::new(AggregateUDF::from(KllSketchAggDouble::new()))),
+        ),
+        (
+            "kll_sketch_agg_float",
+            F::default(|| Arc::new(AggregateUDF::from(KllSketchAggFloat::new()))),
+        ),
+        (
+            "theta_intersection_agg",
+            F::default(|| {
+                Arc::new(AggregateUDF::from(ThetaSketchUnionAgg::new(
+                    "theta_intersection_agg",
+                )))
+            }),
+        ),
+        (
+            "theta_sketch_agg",
+            F::default(|| Arc::new(AggregateUDF::from(ThetaSketchAgg::new("theta_sketch_agg")))),
+        ),
+        (
+            "theta_union_agg",
+            F::default(|| {
+                Arc::new(AggregateUDF::from(ThetaSketchUnionAgg::new(
+                    "theta_union_agg",
+                )))
+            }),
+        ),
+        (
+            "theta_sketch_distinct",
+            F::default(|| {
+                Arc::new(AggregateUDF::from(ThetaSketchDistinctAgg::new(
+                    "theta_sketch_distinct",
+                )))
+            }),
+        ),
         ("kurtosis", F::custom(kurtosis)),
         ("last", F::custom(last_value)),
         ("last_value", F::custom(last_value)),

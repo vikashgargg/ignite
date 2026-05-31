@@ -10,9 +10,7 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{exec_datafusion_err, plan_err, Result};
 use futures::StreamExt;
-use sail_common_datafusion::streaming::event::schema::{
-    MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
-};
+use sail_common_datafusion::streaming::event::schema::{MARKER_FIELD_NAME, RETRACTED_FIELD_NAME};
 use sail_plan::memory_buffer::BufferHandle;
 
 /// Physical sink node for `df.writeStream.format("memory").queryName(name)`.
@@ -135,9 +133,7 @@ fn strip_flow_event_fields(batch: RecordBatch) -> Result<RecordBatch> {
         .fields()
         .iter()
         .enumerate()
-        .filter(|(_, f)| {
-            f.name() != MARKER_FIELD_NAME && f.name() != RETRACTED_FIELD_NAME
-        })
+        .filter(|(_, f)| f.name() != MARKER_FIELD_NAME && f.name() != RETRACTED_FIELD_NAME)
         .map(|(i, _)| i)
         .collect();
 

@@ -44,9 +44,16 @@ impl StreamDeduplicateExec {
             EquivalenceProperties::new(flow_schema),
             datafusion::physical_expr::Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
-            Boundedness::Unbounded { requires_infinite_memory: true },
+            Boundedness::Unbounded {
+                requires_infinite_memory: true,
+            },
         ));
-        Ok(Self { input, key_cols, data_schema, properties })
+        Ok(Self {
+            input,
+            key_cols,
+            data_schema,
+            properties,
+        })
     }
 }
 
@@ -56,7 +63,11 @@ impl DisplayAs for StreamDeduplicateExec {
         _t: datafusion::physical_plan::DisplayFormatType,
         f: &mut std::fmt::Formatter,
     ) -> std::fmt::Result {
-        write!(f, "StreamDeduplicateExec: keys=[{}]", self.key_cols.join(", "))
+        write!(
+            f,
+            "StreamDeduplicateExec: keys=[{}]",
+            self.key_cols.join(", ")
+        )
     }
 }
 
@@ -122,12 +133,11 @@ impl ExecutionPlan for StreamDeduplicateExec {
                         None => return None,
                         Some(Err(e)) => return Some((Err(e), (input, seen))),
                         Some(Ok(FlowEvent::Data { batch, .. })) => {
-                            let filtered =
-                                match filter_new_rows(&batch, &key_indices, &mut seen) {
-                                    Err(e) => return Some((Err(e), (input, seen))),
-                                    Ok(b) if b.num_rows() == 0 => continue,
-                                    Ok(b) => b,
-                                };
+                            let filtered = match filter_new_rows(&batch, &key_indices, &mut seen) {
+                                Err(e) => return Some((Err(e), (input, seen))),
+                                Ok(b) if b.num_rows() == 0 => continue,
+                                Ok(b) => b,
+                            };
                             let len = filtered.num_rows();
                             let retracted = {
                                 let mut b = BooleanBuilder::with_capacity(len);
@@ -135,7 +145,10 @@ impl ExecutionPlan for StreamDeduplicateExec {
                                 b.finish()
                             };
                             return Some((
-                                Ok(FlowEvent::Data { batch: filtered, retracted }),
+                                Ok(FlowEvent::Data {
+                                    batch: filtered,
+                                    retracted,
+                                }),
                                 (input, seen),
                             ));
                         }
@@ -163,9 +176,7 @@ fn filter_new_rows(
     for row_idx in 0..batch.num_rows() {
         let key: Vec<ScalarValue> = key_indices
             .iter()
-            .map(|&col_idx| {
-                ScalarValue::try_from_array(batch.column(col_idx), row_idx)
-            })
+            .map(|&col_idx| ScalarValue::try_from_array(batch.column(col_idx), row_idx))
             .collect::<Result<_>>()?;
         keep.append_value(seen.insert(key));
     }

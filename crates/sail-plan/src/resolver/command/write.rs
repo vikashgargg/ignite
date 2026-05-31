@@ -351,23 +351,23 @@ impl PlanResolver<'_> {
                                 self.config.default_table_file_format.clone();
                         }
                     }
-                    let is_external =
-                        if let Some(location) = info.as_ref().and_then(|x| x.location.as_ref()) {
-                            file_write_options.options.push(OptionLayer::OptionList {
-                                items: vec![("path".to_string(), location.clone())],
-                            });
-                            info.as_ref().map_or(true, |i| i.is_external)
-                        } else {
-                            let default_location =
-                                self.resolve_default_table_location(&table).await?;
-                            file_write_options.options.insert(
-                                0,
-                                OptionLayer::OptionList {
-                                    items: vec![("path".to_string(), default_location)],
-                                },
-                            );
-                            false
-                        };
+                    let is_external = if let Some(location) =
+                        info.as_ref().and_then(|x| x.location.as_ref())
+                    {
+                        file_write_options.options.push(OptionLayer::OptionList {
+                            items: vec![("path".to_string(), location.clone())],
+                        });
+                        info.as_ref().map_or(true, |i| i.is_external)
+                    } else {
+                        let default_location = self.resolve_default_table_location(&table).await?;
+                        file_write_options.options.insert(
+                            0,
+                            OptionLayer::OptionList {
+                                items: vec![("path".to_string(), default_location)],
+                            },
+                        );
+                        false
+                    };
                     if file_write_options
                         .partition_by
                         .iter()

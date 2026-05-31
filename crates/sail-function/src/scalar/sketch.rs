@@ -179,7 +179,9 @@ fn merge_two_sketches(
     let (ha, ta) = decode_sketch(&bytes_a);
     let (hb, tb) = decode_sketch(&bytes_b);
     let (merged, theta) = combine(ha, ta, hb, tb);
-    Ok(ColumnarValue::Scalar(ScalarValue::Binary(Some(encode_sketch(merged, theta)))))
+    Ok(ColumnarValue::Scalar(ScalarValue::Binary(Some(
+        encode_sketch(merged, theta),
+    ))))
 }
 
 /// `theta_union(s1, s2) → Binary` — union of two theta sketches.
@@ -189,15 +191,32 @@ pub struct ThetaUnionFunc {
 }
 impl ThetaUnionFunc {
     pub fn new() -> Self {
-        Self { signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable) }
+        Self {
+            signature: Signature::exact(
+                vec![DataType::Binary, DataType::Binary],
+                Volatility::Immutable,
+            ),
+        }
     }
 }
-impl Default for ThetaUnionFunc { fn default() -> Self { Self::new() } }
+impl Default for ThetaUnionFunc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ScalarUDFImpl for ThetaUnionFunc {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { "theta_union" }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        "theta_union"
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Binary)
+    }
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         merge_two_sketches(args, |mut ha, ta, hb, tb| {
             let theta = ta.min(tb);
@@ -222,20 +241,40 @@ pub struct ThetaIntersectionFunc {
 }
 impl ThetaIntersectionFunc {
     pub fn new() -> Self {
-        Self { signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable) }
+        Self {
+            signature: Signature::exact(
+                vec![DataType::Binary, DataType::Binary],
+                Volatility::Immutable,
+            ),
+        }
     }
 }
-impl Default for ThetaIntersectionFunc { fn default() -> Self { Self::new() } }
+impl Default for ThetaIntersectionFunc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ScalarUDFImpl for ThetaIntersectionFunc {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { "theta_intersection" }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        "theta_intersection"
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Binary)
+    }
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         merge_two_sketches(args, |ha, ta, hb, tb| {
             let theta = ta.min(tb);
             let set_b: std::collections::HashSet<u64> = hb.into_iter().collect();
-            let intersected: Vec<u64> = ha.into_iter().filter(|h| set_b.contains(h) && *h < theta).collect();
+            let intersected: Vec<u64> = ha
+                .into_iter()
+                .filter(|h| set_b.contains(h) && *h < theta)
+                .collect();
             (intersected, theta)
         })
     }
@@ -248,20 +287,40 @@ pub struct ThetaDifferenceFunc {
 }
 impl ThetaDifferenceFunc {
     pub fn new() -> Self {
-        Self { signature: Signature::exact(vec![DataType::Binary, DataType::Binary], Volatility::Immutable) }
+        Self {
+            signature: Signature::exact(
+                vec![DataType::Binary, DataType::Binary],
+                Volatility::Immutable,
+            ),
+        }
     }
 }
-impl Default for ThetaDifferenceFunc { fn default() -> Self { Self::new() } }
+impl Default for ThetaDifferenceFunc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ScalarUDFImpl for ThetaDifferenceFunc {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { "theta_difference" }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Binary) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        "theta_difference"
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Binary)
+    }
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         merge_two_sketches(args, |ha, ta, hb, tb| {
             let theta = ta.min(tb);
             let set_b: std::collections::HashSet<u64> = hb.into_iter().collect();
-            let diff: Vec<u64> = ha.into_iter().filter(|h| !set_b.contains(h) && *h < theta).collect();
+            let diff: Vec<u64> = ha
+                .into_iter()
+                .filter(|h| !set_b.contains(h) && *h < theta)
+                .collect();
             (diff, theta)
         })
     }
@@ -273,14 +332,30 @@ pub struct HllUnionFunc {
     inner: ThetaUnionFunc,
 }
 impl HllUnionFunc {
-    pub fn new() -> Self { Self { inner: ThetaUnionFunc::new() } }
+    pub fn new() -> Self {
+        Self {
+            inner: ThetaUnionFunc::new(),
+        }
+    }
 }
-impl Default for HllUnionFunc { fn default() -> Self { Self::new() } }
+impl Default for HllUnionFunc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ScalarUDFImpl for HllUnionFunc {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { "hll_union" }
-    fn signature(&self) -> &Signature { self.inner.signature() }
-    fn return_type(&self, args: &[DataType]) -> Result<DataType> { self.inner.return_type(args) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        "hll_union"
+    }
+    fn signature(&self) -> &Signature {
+        self.inner.signature()
+    }
+    fn return_type(&self, args: &[DataType]) -> Result<DataType> {
+        self.inner.return_type(args)
+    }
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         self.inner.invoke_with_args(args)
     }
@@ -307,24 +382,34 @@ impl ThetaSketchEstimateFunc {
 }
 
 impl ScalarUDFImpl for ThetaSketchEstimateFunc {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { "theta_sketch_estimate" }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Float64) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        "theta_sketch_estimate"
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Float64)
+    }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
-        let arg = args.args.into_iter().next()
+        let arg = args
+            .args
+            .into_iter()
+            .next()
             .ok_or_else(|| plan_datafusion_err!("theta_sketch_estimate: missing argument"))?;
         match arg {
-            ColumnarValue::Scalar(ScalarValue::Binary(Some(bytes))) => {
-                Ok(ColumnarValue::Scalar(ScalarValue::Float64(Some(estimate_from_bytes(&bytes)?))))
-            }
-            ColumnarValue::Scalar(_) => {
-                Ok(ColumnarValue::Scalar(ScalarValue::Float64(Some(0.0))))
-            }
+            ColumnarValue::Scalar(ScalarValue::Binary(Some(bytes))) => Ok(ColumnarValue::Scalar(
+                ScalarValue::Float64(Some(estimate_from_bytes(&bytes)?)),
+            )),
+            ColumnarValue::Scalar(_) => Ok(ColumnarValue::Scalar(ScalarValue::Float64(Some(0.0)))),
             ColumnarValue::Array(arr) => {
-                let bins = arr.as_any().downcast_ref::<BinaryArray>()
-                    .ok_or_else(|| plan_datafusion_err!("theta_sketch_estimate: expected Binary array"))?;
+                let bins = arr.as_any().downcast_ref::<BinaryArray>().ok_or_else(|| {
+                    plan_datafusion_err!("theta_sketch_estimate: expected Binary array")
+                })?;
                 let mut b = Float64Builder::with_capacity(bins.len());
                 for i in 0..bins.len() {
                     if bins.is_null(i) {
@@ -333,7 +418,9 @@ impl ScalarUDFImpl for ThetaSketchEstimateFunc {
                         b.append_value(estimate_from_bytes(bins.value(i))?);
                     }
                 }
-                Ok(ColumnarValue::Array(std::sync::Arc::new(b.finish()) as ArrayRef))
+                Ok(ColumnarValue::Array(
+                    std::sync::Arc::new(b.finish()) as ArrayRef
+                ))
             }
         }
     }
@@ -346,20 +433,32 @@ pub struct HllSketchEstimateFunc {
 }
 
 impl Default for HllSketchEstimateFunc {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HllSketchEstimateFunc {
     pub fn new() -> Self {
-        Self { signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable) }
+        Self {
+            signature: Signature::exact(vec![DataType::Binary], Volatility::Immutable),
+        }
     }
 }
 
 impl ScalarUDFImpl for HllSketchEstimateFunc {
-    fn as_any(&self) -> &dyn Any { self }
-    fn name(&self) -> &str { "hll_sketch_estimate" }
-    fn signature(&self) -> &Signature { &self.signature }
-    fn return_type(&self, _: &[DataType]) -> Result<DataType> { Ok(DataType::Float64) }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        "hll_sketch_estimate"
+    }
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+    fn return_type(&self, _: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Float64)
+    }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         // HLL sketches from hll_sketch_agg use the same theta serialisation internally

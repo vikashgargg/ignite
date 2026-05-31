@@ -12,13 +12,12 @@ use crate::ast::expression::{
 };
 use crate::ast::identifier::{column_ident, object_name, table_ident, Ident, ObjectName};
 use crate::ast::keywords::{
-    All, Anti, As, Bucket, By, Cluster, Cross, Cube, Distinct, Distribute, Except, Exclude, For,
-    From, Full, Group, Grouping, Having, Identifier, In, Include, Inner, Insert, Intersect,
+    All, Anti, As, Bucket, By, Cluster, Cross, Cube, Delay, Distinct, Distribute, Except, Exclude,
+    For, From, Full, Group, Grouping, Having, Identifier, In, Include, Inner, Insert, Intersect,
     Into as IntoKeyword, Join, Lateral, Left, Limit, Minus, Name, Natural, Nulls, Of, Offset, On,
     Order, Out, Outer, Overwrite, Partition, Percent, Pivot, Qualify, Recursive, Repeatable, Right,
     Rollup, Rows, Select, Semi, Sets, Sort, SystemTime, SystemVersion, Table, Tablesample,
-    Delay, Timestamp, Union, Unpivot, Using, Values, Version, View, Watermark, Where, Window,
-    With,
+    Timestamp, Union, Unpivot, Using, Values, Version, View, Watermark, Where, Window, With,
 };
 use crate::ast::literal::IntegerLiteral;
 use crate::ast::operator::{Comma, LeftParenthesis, RightParenthesis};
@@ -636,8 +635,7 @@ pub enum GroupByModifier {
         Grouping,
         Sets,
         LeftParenthesis,
-        #[parser(function = |e, o| sequence(compose(e, o), unit(o)))]
-        Sequence<GroupingSet, Comma>,
+        #[parser(function = |e, o| sequence(compose(e, o), unit(o)))] Sequence<GroupingSet, Comma>,
         RightParenthesis,
     ),
 }

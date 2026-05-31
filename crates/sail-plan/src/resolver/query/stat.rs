@@ -12,10 +12,10 @@ use datafusion::functions_aggregate::stddev::stddev_udaf;
 use datafusion::functions_aggregate::sum::sum_udaf;
 use datafusion_common::{Column, ExprSchema, ScalarValue};
 use datafusion_expr::expr::{AggregateFunctionParams, ScalarFunction};
-use datafusion_functions_nested::make_array::make_array;
 use datafusion_expr::{
-    and, col, cast, expr, lit, or, Expr, ExprSchemable, LogicalPlan, LogicalPlanBuilder, ScalarUDF,
+    and, cast, col, expr, lit, or, Expr, ExprSchemable, LogicalPlan, LogicalPlanBuilder, ScalarUDF,
 };
+use datafusion_functions_nested::make_array::make_array;
 use sail_common::spec;
 use sail_common_datafusion::utils::items::ItemTaker;
 use sail_function::scalar::math::random::Random;
@@ -605,7 +605,11 @@ impl PlanResolver<'_> {
         let input = self.resolve_query_plan(input, state).await?;
         let schema = input.schema().clone();
         // accuracy = 1 / relative_error, clamp to a reasonable range
-        let accuracy = if relative_error <= 0.0 { 10000.0 } else { (1.0 / relative_error).min(1_000_000.0) };
+        let accuracy = if relative_error <= 0.0 {
+            10000.0
+        } else {
+            (1.0 / relative_error).min(1_000_000.0)
+        };
 
         // For each column, build make_array(percentile(col, p1), percentile(col, p2), ...)
         let col_arrays: Vec<Expr> = columns

@@ -22,16 +22,18 @@ fn build_tls_options(
     };
     let cert_pem = std::fs::read(cert_path)
         .map_err(|e| format!("failed to read TLS cert {cert_path:?}: {e}"))?;
-    let key_pem = std::fs::read(key_path)
-        .map_err(|e| format!("failed to read TLS key {key_path:?}: {e}"))?;
+    let key_pem =
+        std::fs::read(key_path).map_err(|e| format!("failed to read TLS key {key_path:?}: {e}"))?;
     let ca_pem = tls
         .ca
         .as_deref()
-        .map(|p| {
-            std::fs::read(p).map_err(|e| format!("failed to read TLS CA {p:?}: {e}"))
-        })
+        .map(|p| std::fs::read(p).map_err(|e| format!("failed to read TLS CA {p:?}: {e}")))
         .transpose()?;
-    Ok(Some(TlsOptions { cert_pem, key_pem, ca_pem }))
+    Ok(Some(TlsOptions {
+        cert_pem,
+        key_pem,
+        ca_pem,
+    }))
 }
 
 /// gRPC interceptor that enforces Bearer token auth when configured.
@@ -76,9 +78,14 @@ where
         .as_ref()
         .map(|s| s.expose_secret().to_string());
     let tls = build_tls_options(&config.auth.tls)?;
-    let server_opts = ServerBuilderOptions { tls, ..Default::default() };
+    let server_opts = ServerBuilderOptions {
+        tls,
+        ..Default::default()
+    };
 
-    let interceptor = BearerTokenInterceptor { expected: expected_token };
+    let interceptor = BearerTokenInterceptor {
+        expected: expected_token,
+    };
 
     tokio::spawn(async {
         if let Err(e) = crate::web_ui::serve(4040).await {

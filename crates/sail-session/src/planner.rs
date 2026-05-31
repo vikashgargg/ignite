@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::foreach_batch_exec::ForeachBatchSinkExec;
+use crate::memory_sink_exec::MemorySinkExec;
 use async_trait::async_trait;
 use datafusion::execution::context::QueryPlanner;
 use datafusion::execution::SessionState;
@@ -36,8 +38,8 @@ use sail_logical_plan::streaming::collector::StreamCollectorNode;
 use sail_logical_plan::streaming::dedup::StreamDeduplicateNode;
 use sail_logical_plan::streaming::filter::StreamFilterNode;
 use sail_logical_plan::streaming::foreach_batch::ForeachBatchSinkNode;
-use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::streaming::limit::StreamLimitNode;
+use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
 use sail_logical_plan::streaming::watermark::WatermarkNode;
@@ -59,8 +61,6 @@ use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
 use sail_physical_plan::streaming::window_accum::WindowAccumExec;
-use crate::foreach_batch_exec::ForeachBatchSinkExec;
-use crate::memory_sink_exec::MemorySinkExec;
 use sail_plan::catalog::CatalogCommandNode;
 use sail_plan_lakehouse::new_lakehouse_extension_planners;
 
@@ -355,12 +355,14 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 .group_exprs
                 .iter()
                 .map(|e| {
-                    let phys = planner.create_physical_expr(e, logical_input.schema(), session_state)?;
+                    let phys =
+                        planner.create_physical_expr(e, logical_input.schema(), session_state)?;
                     let name = e.name_for_alias().unwrap_or_else(|_| "__group".to_string());
                     Ok((phys, name))
                 })
                 .collect::<datafusion_common::Result<_>>()?;
-            let physical_group_by = datafusion::physical_plan::aggregates::PhysicalGroupBy::new_single(group_exprs);
+            let physical_group_by =
+                datafusion::physical_plan::aggregates::PhysicalGroupBy::new_single(group_exprs);
             // Build physical aggregate function expressions.
             let aggr_exprs: Vec<Arc<datafusion::physical_expr::aggregate::AggregateFunctionExpr>> =
                 node.aggr_exprs

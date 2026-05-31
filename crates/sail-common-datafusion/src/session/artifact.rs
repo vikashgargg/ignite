@@ -18,7 +18,9 @@ impl SessionExtension for ArtifactStore {
 
 impl ArtifactStore {
     pub fn new() -> Self {
-        Self { inner: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     pub fn store(&self, name: String, data: Vec<u8>) {
@@ -28,7 +30,10 @@ impl ArtifactStore {
     }
 
     pub fn exists(&self, name: &str) -> bool {
-        self.inner.lock().map(|m| m.contains_key(name)).unwrap_or(false)
+        self.inner
+            .lock()
+            .map(|m| m.contains_key(name))
+            .unwrap_or(false)
     }
 
     pub fn get(&self, name: &str) -> Option<Vec<u8>> {

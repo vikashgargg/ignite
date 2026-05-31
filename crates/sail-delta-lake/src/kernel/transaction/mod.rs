@@ -433,13 +433,12 @@ impl OperationMetrics {
             | DeltaOperation::AlterColumn { .. }
             | DeltaOperation::AddColumns { .. }
             | DeltaOperation::DropColumns { .. }
-            | DeltaOperation::RenameColumn { .. } => {}
-                                                       //   - UPDATE: numAddedFiles, numRemovedFiles, numUpdatedRows, numCopiedRows,
-                                                       //     executionTimeMs, scanTimeMs, rewriteTimeMs
-                                                       //   - OPTIMIZE / ZORDER: numAdded/Removed files+bytes histograms,
-                                                       //     partitionsOptimized, numBatches, filesAdded/filesRemoved quantiles
-                                                       //   - VACUUM START/END: numFilesToDelete, sizeOfDataToDelete,
-                                                       //     numDeletedFiles, numVacuumedDirectories
+            | DeltaOperation::RenameColumn { .. } => {} //   - UPDATE: numAddedFiles, numRemovedFiles, numUpdatedRows, numCopiedRows,
+                                                        //     executionTimeMs, scanTimeMs, rewriteTimeMs
+                                                        //   - OPTIMIZE / ZORDER: numAdded/Removed files+bytes histograms,
+                                                        //     partitionsOptimized, numBatches, filesAdded/filesRemoved quantiles
+                                                        //   - VACUUM START/END: numFilesToDelete, sizeOfDataToDelete,
+                                                        //     numDeletedFiles, numVacuumedDirectories
         }
     }
 }

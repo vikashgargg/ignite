@@ -98,15 +98,17 @@ impl ScalarUDFImpl for SparkBinaryLpad {
                 continue;
             }
             let target_len = target_len as usize;
-            let fill_null = fill_opt
-                .map(|a| a.is_null(i))
-                .unwrap_or(false);
+            let fill_null = fill_opt.map(|a| a.is_null(i)).unwrap_or(false);
             if fill_null {
                 builder.append_null();
                 continue;
             }
 
-            let result = binary_lpad(src, target_len, fill_opt.map(|a| a.as_binary::<i32>().value(i)));
+            let result = binary_lpad(
+                src,
+                target_len,
+                fill_opt.map(|a| a.as_binary::<i32>().value(i)),
+            );
             builder.append_value(&result);
         }
 
@@ -227,15 +229,17 @@ impl ScalarUDFImpl for SparkBinaryRpad {
                 continue;
             }
             let target_len = target_len as usize;
-            let fill_null = fill_opt
-                .map(|a| a.is_null(i))
-                .unwrap_or(false);
+            let fill_null = fill_opt.map(|a| a.is_null(i)).unwrap_or(false);
             if fill_null {
                 builder.append_null();
                 continue;
             }
 
-            let result = binary_rpad(src, target_len, fill_opt.map(|a| a.as_binary::<i32>().value(i)));
+            let result = binary_rpad(
+                src,
+                target_len,
+                fill_opt.map(|a| a.as_binary::<i32>().value(i)),
+            );
             builder.append_value(&result);
         }
 

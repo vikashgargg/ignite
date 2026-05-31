@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::{
-    Array, ArrayRef, BooleanArray, Date32Array, Date64Array, Decimal128Array,
-    DictionaryArray, FixedSizeBinaryArray, Float32Array, Float64Array,
-    Int16Array, Int32Array, Int64Array, Int8Array, LargeBinaryArray,
-    LargeListArray, LargeStringArray, ListArray, StringArray, TimestampMicrosecondArray,
-    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
-    UInt16Array, UInt32Array, UInt64Array, UInt8Array, BinaryArray,
+    Array, ArrayRef, BinaryArray, BooleanArray, Date32Array, Date64Array, Decimal128Array,
+    DictionaryArray, FixedSizeBinaryArray, Float32Array, Float64Array, Int16Array, Int32Array,
+    Int64Array, Int8Array, LargeBinaryArray, LargeListArray, LargeStringArray, ListArray,
+    StringArray, TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
 };
 use datafusion::arrow::compute::take;
 use datafusion::arrow::datatypes::{
@@ -457,9 +456,11 @@ macro_rules! create_hashes_internal {
                             DataType::List(_) => {
                                 col.as_any().downcast_ref::<ListArray>().unwrap().value(i)
                             }
-                            DataType::LargeList(_) => {
-                                col.as_any().downcast_ref::<LargeListArray>().unwrap().value(i)
-                            }
+                            DataType::LargeList(_) => col
+                                .as_any()
+                                .downcast_ref::<LargeListArray>()
+                                .unwrap()
+                                .value(i),
                             _ => unreachable!(),
                         };
                         for j in 0..row_values.len() {

@@ -55,11 +55,20 @@ enum Command {
             help = "Require clients to present this Bearer token in every gRPC call (also settable via SAIL_AUTH__TOKEN env var)"
         )]
         auth_token: Option<String>,
-        #[arg(long, help = "Path to PEM-encoded server TLS certificate (enables TLS; also SAIL_AUTH__TLS__CERT)")]
+        #[arg(
+            long,
+            help = "Path to PEM-encoded server TLS certificate (enables TLS; also SAIL_AUTH__TLS__CERT)"
+        )]
         tls_cert: Option<String>,
-        #[arg(long, help = "Path to PEM-encoded server TLS private key (also SAIL_AUTH__TLS__KEY)")]
+        #[arg(
+            long,
+            help = "Path to PEM-encoded server TLS private key (also SAIL_AUTH__TLS__KEY)"
+        )]
         tls_key: Option<String>,
-        #[arg(long, help = "Path to PEM-encoded CA certificate for client verification (enables mTLS; also SAIL_AUTH__TLS__CA)")]
+        #[arg(
+            long,
+            help = "Path to PEM-encoded CA certificate for client verification (enables mTLS; also SAIL_AUTH__TLS__CA)"
+        )]
         tls_ca: Option<String>,
     },
 
@@ -91,7 +100,11 @@ enum Command {
     Bench {
         #[arg(long, default_value_t = 1, help = "TPC-H scale factor")]
         scale_factor: u32,
-        #[arg(long, default_value = "local", help = "Storage path or S3 URI for data")]
+        #[arg(
+            long,
+            default_value = "local",
+            help = "Storage path or S3 URI for data"
+        )]
         data_path: String,
     },
 
@@ -101,7 +114,11 @@ enum Command {
         role: ClusterRole,
         #[arg(long, default_value = "0.0.0.0", help = "IP address to bind to")]
         ip: String,
-        #[arg(long, default_value_t = 50051, help = "Spark Connect port (scheduler role)")]
+        #[arg(
+            long,
+            default_value_t = 50051,
+            help = "Spark Connect port (scheduler role)"
+        )]
         port: u16,
         #[arg(long, help = "Scheduler address (host:port), required for worker role")]
         scheduler: Option<String>,
@@ -169,7 +186,18 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Worker => run_worker(),
 
-        Command::Server { ip, port, directory, mode, workers, ha, auth_token, tls_cert, tls_key, tls_ca } => {
+        Command::Server {
+            ip,
+            port,
+            directory,
+            mode,
+            workers,
+            ha,
+            auth_token,
+            tls_cert,
+            tls_key,
+            tls_ca,
+        } => {
             if let Some(dir) = directory {
                 std::env::set_current_dir(dir)?;
             }
@@ -222,11 +250,18 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
 
         Command::Shell => run_pyspark_shell(),
 
-        Command::Bench { scale_factor, data_path } => {
-            run_bench(scale_factor, &data_path)
-        }
+        Command::Bench {
+            scale_factor,
+            data_path,
+        } => run_bench(scale_factor, &data_path),
 
-        Command::Cluster { role, ip, port, scheduler, workers } => {
+        Command::Cluster {
+            role,
+            ip,
+            port,
+            scheduler,
+            workers,
+        } => {
             match role {
                 ClusterRole::Scheduler => {
                     // The "scheduler" role runs the Spark Connect server in
@@ -246,7 +281,11 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Command::Flight(cmd) => match cmd {
-            FlightCommand::Server { ip, port, directory } => {
+            FlightCommand::Server {
+                ip,
+                port,
+                directory,
+            } => {
                 if let Some(dir) = directory {
                     std::env::set_current_dir(dir)?;
                 }
@@ -254,11 +293,24 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             }
         },
 
-        Command::McpServer { host, port, transport, spark_remote, directory } => {
+        Command::McpServer {
+            host,
+            port,
+            transport,
+            spark_remote,
+            directory,
+        } => {
             if let Some(dir) = directory {
                 std::env::set_current_dir(dir)?;
             }
-            run_spark_mcp_server(McpSettings { transport, host, port }, spark_remote)
+            run_spark_mcp_server(
+                McpSettings {
+                    transport,
+                    host,
+                    port,
+                },
+                spark_remote,
+            )
         }
     }
 }
@@ -279,7 +331,10 @@ spark.sql({query:?}).show(truncate=False)
     )
     .expect("failed to write temp script");
     let path = tmp.into_temp_path();
-    path.keep().expect("failed to keep temp file").to_string_lossy().to_string()
+    path.keep()
+        .expect("failed to keep temp file")
+        .to_string_lossy()
+        .to_string()
 }
 
 fn run_bench(scale_factor: u32, data_path: &str) -> Result<(), Box<dyn std::error::Error>> {

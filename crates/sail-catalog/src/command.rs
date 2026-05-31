@@ -515,7 +515,8 @@ impl CatalogCommand {
                         }
                         AlterTableOptions::RenameTable { .. } => {
                             return Err(CatalogError::NotSupported(
-                                "RENAME TABLE is not yet supported for storage-backed tables".to_string(),
+                                "RENAME TABLE is not yet supported for storage-backed tables"
+                                    .to_string(),
                             ));
                         }
                     };
@@ -621,7 +622,10 @@ impl CatalogCommand {
                 };
                 display.functions().to_record_batch(rows)?
             }
-            CatalogCommand::ListFunctions { database: _, pattern } => {
+            CatalogCommand::ListFunctions {
+                database: _,
+                pattern,
+            } => {
                 let names = manager.list_functions(pattern.as_deref())?;
                 display.functions().to_record_batch(names)?
             }

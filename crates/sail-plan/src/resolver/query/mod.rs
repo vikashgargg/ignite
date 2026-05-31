@@ -245,7 +245,10 @@ impl PlanResolver<'_> {
                     .ok()
                     .and_then(|store| store.get(&artifact_name));
                 match data {
-                    Some(bytes) => self.resolve_query_local_relation(Some(bytes), None, state).await?,
+                    Some(bytes) => {
+                        self.resolve_query_local_relation(Some(bytes), None, state)
+                            .await?
+                    }
                     None => {
                         return Err(PlanError::invalid(format!(
                             "cached remote relation not found: {relation_id}"

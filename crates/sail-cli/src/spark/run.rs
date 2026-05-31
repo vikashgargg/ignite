@@ -55,9 +55,7 @@ fn run_via_subprocess(
         .arg(file)
         .status()?;
     if !status.success() {
-        return Err(
-            format!("PySpark exited with code {}", status.code().unwrap_or(-1)).into(),
-        );
+        return Err(format!("PySpark exited with code {}", status.code().unwrap_or(-1)).into());
     }
     Ok(())
 }

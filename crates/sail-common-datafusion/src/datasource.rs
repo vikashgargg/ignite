@@ -381,10 +381,7 @@ pub trait TableFormat: Send + Sync {
         columns: Vec<TableFormatColumnSpec>,
     ) -> Result<()> {
         let _ = (runtime_env, path, columns);
-        not_impl_err!(
-            "ADD COLUMNS not supported for {} format",
-            self.name()
-        )
+        not_impl_err!("ADD COLUMNS not supported for {} format", self.name())
     }
 
     /// Drops one or more columns from a table schema.
@@ -396,10 +393,7 @@ pub trait TableFormat: Send + Sync {
         if_exists: bool,
     ) -> Result<()> {
         let _ = (runtime_env, path, names, if_exists);
-        not_impl_err!(
-            "DROP COLUMNS not supported for {} format",
-            self.name()
-        )
+        not_impl_err!("DROP COLUMNS not supported for {} format", self.name())
     }
 
     /// Renames a column in a table schema.
@@ -411,10 +405,7 @@ pub trait TableFormat: Send + Sync {
         new: Vec<String>,
     ) -> Result<()> {
         let _ = (runtime_env, path, old, new);
-        not_impl_err!(
-            "RENAME COLUMN not supported for {} format",
-            self.name()
-        )
+        not_impl_err!("RENAME COLUMN not supported for {} format", self.name())
     }
 }
 
