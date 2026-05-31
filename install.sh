@@ -68,8 +68,8 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install pyspark --quiet --disable-pip-version-check \
-  || error "pyspark install failed. Try: $VENV_DIR/bin/pip install pyspark"
+"$VENV_DIR/bin/pip" install "pyspark>=3.4,<4.0" --quiet --disable-pip-version-check \
+  || error "pyspark install failed. Try: $VENV_DIR/bin/pip install 'pyspark>=3.4,<4.0'"
 
 PYSPARK_SITE="$("$VENV_DIR/bin/python3" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
 
