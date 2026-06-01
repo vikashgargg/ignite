@@ -202,6 +202,11 @@ use sail_function::scalar::variant::spark_is_variant_null::SparkIsVariantNullUdf
 use sail_function::scalar::variant::spark_json_to_variant::SparkJsonToVariantUdf;
 use sail_function::scalar::variant::spark_schema_of_variant::SparkSchemaOfVariantUdf;
 use sail_function::scalar::variant::spark_to_variant_object::SparkToVariantObjectUdf;
+use sail_function::scalar::higher_order::{
+    HofEncodeParts, SailArrayAggregate, SailArrayExists, SailArrayFilter, SailArrayForAll,
+    SailArraySort, SailArrayTransform, SailArrayZipWith, SailMapFilter, SailMapTransformKeys,
+    SailMapTransformValues, SailMapZipWith,
+};
 use sail_function::scalar::variant::spark_variant_explode::SparkVariantExplodeUdf;
 use sail_function::scalar::variant::spark_variant_get::SparkVariantGet;
 use sail_function::scalar::variant::spark_variant_to_json::SparkVariantToJsonUdf;
@@ -2080,6 +2085,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         };
         match udf_kind {
             UdfKind::Standard(gen::StandardUdf {}) => {}
+            UdfKind::HigherOrder(higher_order) => {
+                return self.decode_higher_order_udf(higher_order);
+            }
             UdfKind::PySpark(gen::PySparkUdf {
                 kind,
                 name,
@@ -2613,6 +2621,28 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         } else if let Some(func) = node.inner().as_any().downcast_ref::<SparkAbs>() {
             let ansi_mode = func.ansi_mode();
             UdfKind::SparkAbs(gen::SparkAbsUdf { ansi_mode })
+        } else if let Some(f) = node_inner.downcast_ref::<SailArrayFilter>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailArrayTransform>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailArrayExists>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailArrayForAll>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailArrayAggregate>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailArrayZipWith>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailArraySort>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailMapTransformKeys>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailMapTransformValues>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailMapFilter>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
+        } else if let Some(f) = node_inner.downcast_ref::<SailMapZipWith>() {
+            UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
         } else {
             return Ok(());
         };
@@ -2911,6 +2941,118 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
 }
 
 impl RemoteExecutionCodec {
+    /// Serialize a higher-order UDF's encodable parts into the proto message.
+    fn encode_higher_order_udf(
+        &self,
+        name: &str,
+        parts: HofEncodeParts,
+    ) -> Result<gen::HigherOrderUdf> {
+        let lambda_expr =
+            self.try_encode_message(serialize_physical_expr(&parts.lambda_expr, self)?)?;
+        let return_type = match parts.return_type {
+            Some(dt) => Some(self.try_encode_data_type(&dt)?),
+            None => None,
+        };
+        let finish_expr = match parts.finish_expr {
+            Some(expr) => Some(self.try_encode_message(serialize_physical_expr(&expr, self)?)?),
+            None => None,
+        };
+        Ok(gen::HigherOrderUdf {
+            name: name.to_string(),
+            lambda_expr,
+            param_names: parts.param_names,
+            return_type,
+            finish_expr,
+        })
+    }
+
+    /// Reconstruct a higher-order UDF from its proto message on a remote worker.
+    fn decode_higher_order_udf(&self, udf: gen::HigherOrderUdf) -> Result<Arc<ScalarUDF>> {
+        let gen::HigherOrderUdf {
+            name,
+            lambda_expr,
+            param_names,
+            return_type,
+            finish_expr,
+        } = udf;
+        // A fresh context supplies built-in functions; Sail UDFs nested in the
+        // lambda body are decoded recursively through `self`. Column refs carry
+        // their own (name, index), so an empty schema is sufficient.
+        let ctx = datafusion::prelude::SessionContext::new();
+        let task_ctx = ctx.task_ctx();
+        let schema = Schema::empty();
+        let lambda = parse_physical_expr(
+            &self.try_decode_message(&lambda_expr)?,
+            &task_ctx,
+            &schema,
+            self,
+        )?;
+        let return_type = match return_type {
+            Some(bytes) => Some(self.try_decode_data_type(&bytes)?),
+            None => None,
+        };
+        let rt = || -> Result<DataType> {
+            return_type
+                .clone()
+                .ok_or_else(|| plan_datafusion_err!("{name}: missing return_type"))
+        };
+        let p = |i: usize| -> Result<String> {
+            param_names
+                .get(i)
+                .cloned()
+                .ok_or_else(|| plan_datafusion_err!("{name}: missing param {i}"))
+        };
+        let udf = match name.as_str() {
+            "sail_array_filter" => {
+                ScalarUDF::from(SailArrayFilter::new(lambda, param_names.clone(), rt()?))
+            }
+            "sail_array_transform" => {
+                ScalarUDF::from(SailArrayTransform::new(lambda, param_names.clone(), rt()?))
+            }
+            "sail_array_zip_with" => {
+                ScalarUDF::from(SailArrayZipWith::new(lambda, param_names.clone(), rt()?))
+            }
+            "sail_array_sort" => {
+                ScalarUDF::from(SailArraySort::new(lambda, param_names.clone(), rt()?))
+            }
+            "sail_array_exists" => ScalarUDF::from(SailArrayExists::new(lambda, p(0)?)),
+            "sail_array_forall" => ScalarUDF::from(SailArrayForAll::new(lambda, p(0)?)),
+            "sail_array_aggregate" => {
+                let finish = match finish_expr {
+                    Some(bytes) => Some(parse_physical_expr(
+                        &self.try_decode_message(&bytes)?,
+                        &task_ctx,
+                        &schema,
+                        self,
+                    )?),
+                    None => None,
+                };
+                ScalarUDF::from(SailArrayAggregate::new(
+                    lambda,
+                    p(0)?,
+                    p(1)?,
+                    finish,
+                    p(2)?,
+                    rt()?,
+                ))
+            }
+            "sail_map_transform_keys" => {
+                ScalarUDF::from(SailMapTransformKeys::new(lambda, p(0)?, p(1)?, rt()?))
+            }
+            "sail_map_transform_values" => {
+                ScalarUDF::from(SailMapTransformValues::new(lambda, p(0)?, p(1)?, rt()?))
+            }
+            "sail_map_filter" => {
+                ScalarUDF::from(SailMapFilter::new(lambda, p(0)?, p(1)?, rt()?))
+            }
+            "sail_map_zip_with" => {
+                ScalarUDF::from(SailMapZipWith::new(lambda, p(0)?, p(1)?, p(2)?, rt()?))
+            }
+            other => return plan_err!("unknown higher-order UDF: {other}"),
+        };
+        Ok(Arc::new(udf))
+    }
+
     fn try_decode_physical_sink_mode(
         &self,
         proto_mode: gen::PhysicalSinkMode,

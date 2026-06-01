@@ -8,6 +8,7 @@ use datafusion::physical_plan::joins::{
     CrossJoinExec, HashJoinExec, NestedLoopJoinExec, PartitionMode, PiecewiseMergeJoinExec,
 };
 use datafusion::physical_plan::limit::GlobalLimitExec;
+use datafusion::physical_plan::recursive_query::RecursiveQueryExec;
 use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::sorts::sort_preserving_merge::SortPreservingMergeExec;
 use datafusion::physical_plan::{
@@ -212,6 +213,13 @@ fn build_job_graph(
         // At the stage boundary, we only expect to use the child partition once
         // since the shuffle writer can materialize the data for multiple consumption.
         vec![build_job_graph(child.clone(), PartitionUsage::Once, graph)?]
+    } else if plan.as_any().is::<RecursiveQueryExec>() {
+        // Recursive queries maintain a shared work table mutated across iterations
+        // by RecursiveQueryExec and read by a WorkTableExec in the recursive term.
+        // Both must run in the same task — splitting them across stages causes
+        // "Unexpected empty work table". Keep the whole subtree intact (no shuffle
+        // boundary inside the recursion).
+        plan.children().into_iter().cloned().collect()
     } else {
         plan.children()
             .into_iter()

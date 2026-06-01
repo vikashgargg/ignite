@@ -21,6 +21,24 @@ fn next_hof_id() -> u64 {
     HOF_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Encodable parts of a higher-order UDF, consumed by the distributed
+/// execution codec so lambda HOFs can be serialized to remote workers.
+///
+/// `param_names` order is fixed per UDF and known to the decoder:
+/// - filter/transform/zip_with/array_sort: the lambda's param names
+/// - exists/forall: `[param_name]`
+/// - aggregate: `[acc_param, elem_param, finish_param]`
+/// - map_transform_keys/values, map_filter: `[key_param, val_param]`
+/// - map_zip_with: `[key_param, val1_param, val2_param]`
+pub struct HofEncodeParts {
+    pub lambda_expr: Arc<dyn PhysicalExpr>,
+    pub param_names: Vec<String>,
+    /// Absent for exists/forall (boolean result is implicit).
+    pub return_type: Option<DataType>,
+    /// Only present for `sail_array_aggregate` (the optional finish lambda).
+    pub finish_expr: Option<Arc<dyn PhysicalExpr>>,
+}
+
 fn eval_predicate(
     lambda_expr: &Arc<dyn PhysicalExpr>,
     param_names: &[String],
@@ -88,6 +106,17 @@ impl SailArrayFilter {
             param_names,
             return_type,
             signature: Signature::any(1, Volatility::Volatile),
+        }
+    }
+}
+
+impl SailArrayFilter {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: self.param_names.clone(),
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
         }
     }
 }
@@ -246,6 +275,17 @@ impl SailArrayTransform {
     }
 }
 
+impl SailArrayTransform {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: self.param_names.clone(),
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
+        }
+    }
+}
+
 impl PartialEq for SailArrayTransform {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -370,6 +410,17 @@ impl SailArrayExists {
     }
 }
 
+impl SailArrayExists {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: vec![self.param_name.clone()],
+            return_type: None,
+            finish_expr: None,
+        }
+    }
+}
+
 impl PartialEq for SailArrayExists {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -466,6 +517,17 @@ impl SailArrayForAll {
             lambda_expr,
             param_name,
             signature: Signature::any(1, Volatility::Volatile),
+        }
+    }
+}
+
+impl SailArrayForAll {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: vec![self.param_name.clone()],
+            return_type: None,
+            finish_expr: None,
         }
     }
 }
@@ -581,6 +643,21 @@ impl SailArrayAggregate {
             finish_param,
             result_type,
             signature: Signature::any(2, Volatility::Volatile),
+        }
+    }
+}
+
+impl SailArrayAggregate {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.merge_expr.clone(),
+            param_names: vec![
+                self.acc_param.clone(),
+                self.elem_param.clone(),
+                self.finish_param.clone(),
+            ],
+            return_type: Some(self.result_type.clone()),
+            finish_expr: self.finish_expr.clone(),
         }
     }
 }
@@ -741,6 +818,17 @@ impl SailArrayZipWith {
             param_names,
             return_type,
             signature: Signature::any(2, Volatility::Volatile),
+        }
+    }
+}
+
+impl SailArrayZipWith {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: self.param_names.clone(),
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
         }
     }
 }
@@ -930,6 +1018,17 @@ impl SailArraySort {
             param_names,
             return_type,
             signature: Signature::any(1, Volatility::Volatile),
+        }
+    }
+}
+
+impl SailArraySort {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: self.param_names.clone(),
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
         }
     }
 }
@@ -1181,6 +1280,17 @@ impl SailMapTransformKeys {
     }
 }
 
+impl SailMapTransformKeys {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: vec![self.key_param.clone(), self.val_param.clone()],
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
+        }
+    }
+}
+
 impl PartialEq for SailMapTransformKeys {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -1273,6 +1383,17 @@ impl SailMapTransformValues {
     }
 }
 
+impl SailMapTransformValues {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: vec![self.key_param.clone(), self.val_param.clone()],
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
+        }
+    }
+}
+
 impl PartialEq for SailMapTransformValues {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -1361,6 +1482,17 @@ impl SailMapFilter {
             val_param,
             return_type,
             signature: Signature::any(1, Volatility::Volatile),
+        }
+    }
+}
+
+impl SailMapFilter {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: vec![self.key_param.clone(), self.val_param.clone()],
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
         }
     }
 }
@@ -1469,6 +1601,21 @@ impl SailMapZipWith {
             val2_param,
             return_type,
             signature: Signature::any(2, Volatility::Volatile),
+        }
+    }
+}
+
+impl SailMapZipWith {
+    pub fn encode_parts(&self) -> HofEncodeParts {
+        HofEncodeParts {
+            lambda_expr: self.lambda_expr.clone(),
+            param_names: vec![
+                self.key_param.clone(),
+                self.val1_param.clone(),
+                self.val2_param.clone(),
+            ],
+            return_type: Some(self.return_type.clone()),
+            finish_expr: None,
         }
     }
 }

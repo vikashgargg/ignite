@@ -99,7 +99,20 @@ message ExtendedScalarUdf {
     ArraysZipUdf arrays_zip = 18;
     SparkToNumberUdf spark_to_number = 19;
     SparkAbsUdf spark_abs = 20;
+    HigherOrderUdf higher_order = 21;
   }
+}
+
+// Lambda higher-order array/map UDFs (transform, filter, exists, forall,
+// aggregate, zip_with, array_sort, map_transform_keys/values, map_filter,
+// map_zip_with). The lambda body is a serialized physical expression so the
+// UDF can be reconstructed on remote workers.
+message HigherOrderUdf {
+  string name = 1;                  // e.g. "sail_array_transform"
+  bytes lambda_expr = 2;            // serialized physical expr (via try_encode_message)
+  repeated string param_names = 3;  // ordered; layout known per name
+  optional bytes return_type = 4;   // serialized DataType; absent for exists/forall
+  optional bytes finish_expr = 5;   // only for sail_array_aggregate
 }
 
 message ExtendedStreamUdf {
