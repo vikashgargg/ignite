@@ -39,7 +39,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get install -y protobuf-compiler libssl-dev libcurl4-openssl-dev
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -59,7 +59,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get install -y protobuf-compiler libssl-dev libcurl4-openssl-dev
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -93,7 +93,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
         run: |
-          sudo apt-get install -y protobuf-compiler musl-tools
+          sudo apt-get install -y protobuf-compiler musl-tools libssl-dev libcurl4-openssl-dev
           pip install cargo-zigbuild 2>/dev/null || cargo install cargo-zigbuild
       - uses: actions/setup-python@v5
         with:
@@ -141,7 +141,7 @@ jobs:
           key: ${{ runner.os }}-cargo-distributed-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install system deps
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get install -y protobuf-compiler libssl-dev libcurl4-openssl-dev
 
       - name: Build release binary
         env:
@@ -240,7 +240,7 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo apt-get install -y protobuf-compiler netcat-openbsd
+          sudo apt-get install -y protobuf-compiler netcat-openbsd libssl-dev libcurl4-openssl-dev
 
       - name: Install kind
         run: |
@@ -440,7 +440,7 @@ jobs:
           key: ${{ runner.os }}-cargo-tpch-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install system deps
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get install -y protobuf-compiler libssl-dev libcurl4-openssl-dev
 
       - name: Build release binary
         env:
