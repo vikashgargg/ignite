@@ -44,6 +44,13 @@ fn get_pyspark_version() -> PyUdfResult<PySparkVersion> {
 }
 
 fn check_python_udf_version(version: &str) -> PyUdfResult<()> {
+    // When subprocess mode is active (VAJRA_PYTHON is set), the UDF will be
+    // executed by the venv Python, not the embedded PyO3 Python.  Skip the
+    // version mismatch check so UDFs compiled on Python 3.13 still work when
+    // the binary was built against Python 3.12.
+    if crate::worker::is_subprocess_mode() {
+        return Ok(());
+    }
     let pyo3_version: String = Python::attach(|py| py.version().to_string());
     if pyo3_version.starts_with(version) {
         Ok(())

@@ -9,5 +9,6 @@ mod name;
 mod python;
 mod stream;
 pub mod udf;
+pub mod worker;
 
 pub use name::{get_udf_display_name, get_udf_name};

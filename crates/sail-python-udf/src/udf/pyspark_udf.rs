@@ -15,6 +15,7 @@ use crate::conversion::{TryFromPy, TryToPy};
 use crate::error::PyUdfResult;
 use crate::lazy::LazyPyObject;
 use crate::python::spark::PySpark;
+use crate::worker;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PySparkUdfKind {
@@ -25,6 +26,20 @@ pub enum PySparkUdfKind {
     // Spark 4.0 Arrow-native scalar UDF types
     ScalarArrow,
     ScalarArrowIter,
+}
+
+impl PySparkUdfKind {
+    /// Returns the string key used in the worker protocol header.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PySparkUdfKind::Batch => "batch",
+            PySparkUdfKind::ArrowBatch => "arrow_batch",
+            PySparkUdfKind::ScalarPandas => "scalar_pandas",
+            PySparkUdfKind::ScalarPandasIter => "scalar_pandas_iter",
+            PySparkUdfKind::ScalarArrow => "scalar_arrow",
+            PySparkUdfKind::ScalarArrowIter => "scalar_arrow_iter",
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -93,6 +108,15 @@ impl PySparkUDF {
         &self.config
     }
 
+    /// Extract the eval_type integer from the first 4 bytes of the payload (big-endian).
+    fn eval_type_i32(&self) -> i32 {
+        if self.payload.len() < 4 {
+            return 0;
+        }
+        let bytes: [u8; 4] = self.payload[..4].try_into().unwrap_or([0u8; 4]);
+        i32::from_be_bytes(bytes)
+    }
+
     fn udf(&self, py: Python) -> Result<Py<PyAny>> {
         let udf = self.udf.get_or_try_init(py, || {
             let udf = PySparkUdfPayload::load(py, &self.payload)?;
@@ -139,6 +163,34 @@ impl ScalarUDFImpl for PySparkUDF {
             args, number_rows, ..
         } = args;
         let args: Vec<ArrayRef> = ColumnarValue::values_to_arrays(&args)?;
+
+        // ------------------------------------------------------------------
+        // Subprocess path: when VAJRA_PYTHON is set, route through the worker
+        // subprocess so that the user's venv Python version is used instead of
+        // the PyO3-embedded Python.
+        // ------------------------------------------------------------------
+        if let Some(result) = worker::with_worker(|w| {
+            let kind = self.kind.as_str();
+            let eval_type = self.eval_type_i32();
+            w.execute_scalar(
+                &self.payload,
+                kind,
+                eval_type,
+                &self.input_types,
+                &self.output_type,
+                &args,
+                &self.config,
+                number_rows,
+            )
+        }) {
+            let array = result?;
+            let array = cast(&array, &self.output_type)?;
+            return Ok(ColumnarValue::Array(array));
+        }
+
+        // ------------------------------------------------------------------
+        // PyO3 fallback: use embedded Python (versions must match).
+        // ------------------------------------------------------------------
         let udf = Python::attach(|py| self.udf(py))?;
         let data = Python::attach(|py| -> PyUdfResult<_> {
             let output = udf.call1(py, (args.try_to_py(py)?, number_rows))?;
