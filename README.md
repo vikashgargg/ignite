@@ -30,7 +30,7 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 
 > *LakeSail v0.6.3 (2026-05-21) is the closest open-source comparison. Numbers are measured, not estimated.*
 
-| Capability | Apache Spark 3.5 | LakeSail v0.6.3 | **Vajra v0.3.0** |
+| Capability | Apache Spark 3.5 | LakeSail v0.6.3 | **Vajra v0.6.0** |
 |---|---|---|---|
 | Runtime | JVM (GC pauses) | Rust | **Rust** |
 | Cold start | 30–120 s | ~2 s | **~200 ms** |
@@ -38,8 +38,11 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | Binary / image size | ~600 MB | ~300 MB | **105 MB macOS / 80 MB Linux** |
 | TPC-H SF-1 (22 queries) | ~60 s warm JVM | ~15 s | **1.515 s (40×)** |
 | pip install | `pyspark` (JVM needed) | `pysail` | **`vajra-pyspark`** |
-| **Spark SQL compat (105-test scorecard)** | ✅ reference | ~95% | **✅ 105/105 (100%)** |
+| **Spark SQL compat (105-test scorecard, all modes)** | ✅ reference | ~95% | **✅ 105/105 (100%)** |
 | Python UDFs — scalar / Pandas / Arrow | ✅ | ✅ | **✅** |
+| **Python-version-agnostic UDFs (any 3.10+)** | ✅ | ✅ abi3 | **✅ abi3 + subprocess** |
+| **Distributed lambda HOFs + recursive CTEs** | ✅ | partial | **✅ (Sprint 4.1)** |
+| **approx_top_k / KLL / theta sketches (Spark 4.1)** | ✅ | partial | **✅ (Sprint 4.1)** |
 | **Python iterator UDFs (GroupedMap 4.1)** | ✅ | ✅ v0.6.3 | **✅** |
 | Delta Lake DML (DELETE/UPDATE/MERGE) | ✅ | ✅ | **✅** |
 | **Delta time travel (AT VERSION/TIMESTAMP)** | ✅ | ✅ v0.6.0 | **✅** |
@@ -70,7 +73,7 @@ All Vajra numbers above are measured on the release binary (LTO, ARM64 macOS).
 
 ```
 ══════════════════════════════════════════════════════════════════
-  VAJRA SPARK COMPATIBILITY SCORECARD  (v0.3.0-alpha)
+  VAJRA SPARK COMPATIBILITY SCORECARD  (v0.6.0-alpha)
 ══════════════════════════════════════════════════════════════════
   1. Basic SQL                         ✓✓✓✓✓✓✓✓✓✓✓✓✓  13/13
   2. Aggregate Functions                   ✓✓✓✓✓✓  6/6
