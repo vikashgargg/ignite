@@ -46,6 +46,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         cmake \
         make \
         perl \
+        libcurl4-openssl-dev \
+        libssl-dev \
+        zlib1g-dev \
+        libsasl2-dev \
+        libzstd-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup-init \
@@ -66,7 +71,14 @@ RUN cargo fetch --locked
 COPY crates.tar.gz ./
 RUN tar -xzf crates.tar.gz && rm crates.tar.gz
 
-RUN CARGO_BUILD_JOBS=2 CARGO_PROFILE_RELEASE_LTO=off cargo build --release -p sail-cli --bins \
+# Low-memory build settings for constrained builders (e.g. 8 GB Macs):
+# 1 codegen job + no debug symbols keeps peak RSS well under ~3 GB so the
+# build VM does not swap-thrash. LTO off keeps it single-pass.
+RUN CARGO_BUILD_JOBS=1 \
+    CARGO_PROFILE_RELEASE_LTO=off \
+    CARGO_PROFILE_RELEASE_DEBUG=false \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
+    cargo build --release -p sail-cli --bins \
     && cp /app/target/release/vajra /usr/local/bin/vajra
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
