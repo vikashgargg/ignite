@@ -8,7 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  PYO3_CROSS_PYTHON_VERSION: "3.11"
+  # PYO3_CROSS_PYTHON_VERSION is set per-job on the Linux cross-build only.
+  # The macOS job is a native arm64 build and must NOT see it (else PyO3
+  # enters cross mode and links the wrong Python).
 
 jobs:
   build-linux:
@@ -49,6 +51,8 @@ jobs:
         with:
           version: "0.14.0"
       - name: Build
+        env:
+          PYO3_CROSS_PYTHON_VERSION: "3.11"
         run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
       - name: Rename binary
         run: cp target/${{ matrix.target }}/release/vajra ${{ matrix.asset_name }}
@@ -79,6 +83,9 @@ jobs:
       # provisions on user machines, so the binary's absolute Python framework
       # link (/opt/homebrew/opt/python@3.12/...) resolves at runtime. With the
       # subprocess UDF model (VAJRA_PYTHON) the embedded Python is only a fallback.
+      # NOTE: this is a NATIVE arm64 build, so PYO3_CROSS_PYTHON_VERSION (set at
+      # workflow level for the Linux musl cross-build) must be cleared here or
+      # PyO3 enters cross mode and links the wrong python3.11.
       - name: Build aarch64 (Apple Silicon)
         env:
           PYO3_PYTHON: /opt/homebrew/opt/python@3.12/bin/python3.12
