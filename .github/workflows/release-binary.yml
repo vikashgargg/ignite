@@ -41,6 +41,8 @@ jobs:
       - name: Build (native glibc, abi3 portable Python)
         env:
           PYO3_PYTHON: python3.12
+          # Thin LTO: ~15 min vs ~50 min fat LTO, negligible runtime difference
+          CARGO_PROFILE_RELEASE_LTO: thin
         run: cargo build --release -p sail-cli --target x86_64-unknown-linux-gnu
       - name: Rename binary
         run: cp target/x86_64-unknown-linux-gnu/release/vajra vajra-x86_64-unknown-linux-gnu
@@ -78,6 +80,8 @@ jobs:
         env:
           PYO3_PYTHON: /opt/homebrew/opt/python@3.12/bin/python3.12
           MACOSX_DEPLOYMENT_TARGET: "12.0"
+          # Thin LTO: ~15 min vs ~50 min fat LTO, negligible runtime difference
+          CARGO_PROFILE_RELEASE_LTO: thin
         run: cargo build --release -p sail-cli --target aarch64-apple-darwin
       - name: Rename binary
         run: cp target/aarch64-apple-darwin/release/vajra vajra-aarch64-apple-darwin
