@@ -36,12 +36,16 @@ ARG RUST_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         gcc \
+        g++ \
         libc6-dev \
         protobuf-compiler \
         libprotobuf-dev \
         curl \
         git \
         pkg-config \
+        cmake \
+        make \
+        perl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup-init \
