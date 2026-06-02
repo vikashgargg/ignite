@@ -7645,6 +7645,7 @@ name = "sail-python-udf"
 version = "0.1.0"
 dependencies = [
  "arrow-pyarrow",
+ "base64 0.22.1",
  "datafusion",
  "datafusion-common",
  "datafusion-expr",
@@ -7655,6 +7656,8 @@ dependencies = [
  "pyo3",
  "sail-common",
  "sail-common-datafusion",
+ "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
