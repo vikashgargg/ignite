@@ -31,8 +31,8 @@ These are the gaps between Vajra and Spark 4.1 that matter for production users.
 
 | Feature | Spark 4.1 | Vajra | Priority |
 |---|---|---|---|
-| `approx_top_k` / `approx_top_k_combine` | ✅ GA | 📅 Phase 4 | P1 |
-| KLL quantile sketch functions | ✅ GA | 📅 Phase 4 | P1 |
+| `approx_top_k` / `approx_top_k_combine` | ✅ GA | ✅ Sprint 4.1 | P1 |
+| KLL quantile sketch functions | ✅ GA | ✅ Sprint 4.1 | P1 |
 | `try_to_date` / `try_to_time` safe conversions | ✅ | ✅ Sprint 4 | Done |
 | Theta sketch functions | ✅ GA | ✅ Sprint 6 (KMV) | Done |
 | `bitmap_and_agg` / `bitmap_count` | ✅ | ✅ Sprint 4 | Done |
@@ -43,8 +43,8 @@ These are the gaps between Vajra and Spark 4.1 that matter for production users.
 | Recursive CTEs (`WITH RECURSIVE`) | ✅ | ✅ Sprint 3 | Done |
 | SQL Scripting GA (DECLARE, BEGIN/END, handlers) | ✅ GA | 📅 Phase 4 | P2 |
 | `EXECUTE IMMEDIATE` | ✅ | 📅 Phase 4 | P2 |
-| Table Constraints (PRIMARY KEY, FOREIGN KEY, NOT NULL) | ✅ DSv2 | 📅 Phase 4 | P1 |
-| Column DEFAULT values in DDL | ✅ Spark 4.0 | 📅 Phase 4 | P1 |
+| Table Constraints (PRIMARY KEY, UNIQUE, NOT NULL) | ✅ DSv2 | ✅ Sprint 4.1 (metadata) | P1 |
+| Column DEFAULT values in DDL | ✅ Spark 4.0 | ✅ Sprint 4.1 | P1 |
 | MERGE INTO schema evolution | ✅ | 📅 Phase 4 | P1 |
 | Stored procedures API for catalogs | ✅ | 📅 Phase 4 | P2 |
 | QUALIFY clause | ✅ | ✅ Sprint 3 | Done |
@@ -310,13 +310,19 @@ LakeSail got 95% there. Spark built today would have all of these:
 
 **Target**: `v0.7.0-alpha` — Spark 4.1 SQL complete, Delta V3, Arrow UDTF, JDBC driver
 
-### Sprint 4.1 — Spark 4.1 SQL surface (P1 items)
-- `approx_top_k` / KLL quantile sketches
-- Schema-level collation (COLLATE keyword)
-- VARIANT shredding in Parquet
-- Column DEFAULT values + identity columns
-- MERGE INTO schema evolution
-- Table constraints (PRIMARY KEY, NOT NULL)
+### Sprint 4.1 — Spark 4.1 SQL surface + production hardening ✅ COMPLETE (2026-06-02)
+- [x] `approx_top_k` / `approx_top_k_accumulate` (real Space-Saving counter)
+- [x] KLL quantile sketches (`kll_sketch_agg_*`, `kll_sketch_get_quantile_*`)
+- [x] `theta_union` / `theta_intersection` / `theta_difference` / `hll_union` (were stubs)
+- [x] Column DEFAULT values in DDL
+- [x] Table constraints (PRIMARY KEY, UNIQUE — metadata-only)
+- [x] `raise_error` → `[USER_RAISED_EXCEPTION]` prefix
+- [x] **Python-version-agnostic UDFs** (subprocess via `VAJRA_PYTHON` — any Python 3.10–3.14+)
+- [x] **Lambda HOFs in distributed mode** (added to remote codec)
+- [x] **WITH RECURSIVE in distributed mode** (single-stage recursive subtree)
+- [ ] Schema-level collation (COLLATE keyword) — deferred to 4.1b
+- [ ] VARIANT shredding in Parquet — deferred to 4.1b
+- [ ] Identity columns + MERGE INTO schema evolution — deferred to 4.1b
 
 ### Sprint 4.2 — Delta V3 + governance
 - Deletion Vectors (read + write)

@@ -1,9 +1,41 @@
 # Vajra — Build Status
 
-> Last updated: 2026-05-30
-> Tag: **v0.5.0-alpha** (Phase 1 + Phase 2 + Phase 3 Sprint 4–6 fully complete)
-> Branch: `phase3/true-parity`
-> See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) for the full plan.
+> Last updated: 2026-06-02
+> Tag: **v0.6.0-alpha** (Phase 4 Sprint 4.1 — Spark 4.1 SQL + production hardening)
+> Branch: `phase4/spark41-delta-v3-ai`
+> See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) and [FEATURES.md](FEATURES.md) for the full plan.
+
+---
+
+## Phase 4 — Sprint 4.1 Complete ✅ (2026-06-02)
+
+### Spark 4.1 SQL surface
+| Feature | Status |
+|---|---|
+| `approx_top_k(col[, k[, maxItemCount]])` | ✅ real Space-Saving counter |
+| `approx_top_k_accumulate` / `_combine` | ✅ binary sketch accumulation |
+| KLL quantile sketches (`kll_sketch_agg_*`, `kll_sketch_get_quantile_*`) | ✅ real KLL algorithm |
+| `theta_union` / `theta_intersection` / `theta_difference` / `hll_union` | ✅ real set ops (were stubs) |
+| Column `DEFAULT 'expr'` in DDL | ✅ parsed + propagated to catalog |
+| `PRIMARY KEY` / `UNIQUE` table constraints | ✅ metadata-only (Spark semantics) |
+| `raise_error` → `[USER_RAISED_EXCEPTION]` prefix | ✅ |
+
+### Production hardening (the "true Spark replacement" work)
+| Item | Status |
+|---|---|
+| **Python-version-agnostic UDFs** — subprocess execution via `VAJRA_PYTHON` | ✅ works on any Python 3.10–3.14+ without recompiling (Spark-like model) |
+| **Lambda HOFs in distributed mode** (`transform`/`filter`/`exists`/`forall`/`aggregate`/`zip_with`/`array_sort`/`map_*`) | ✅ added to distributed codec (`HigherOrderUdf` proto) |
+| **WITH RECURSIVE in distributed mode** | ✅ recursive-query subtree kept in one stage (no shuffle split) |
+| `install.sh` — auto Python 3.10+ detection, pyspark 4.x venv, all Spark Connect deps | ✅ |
+| macOS: Apple Silicon only, Python 3.12 embedded (matches CI) | ✅ |
+
+### Scorecard — 105/105 across all execution modes ✅
+| Mode | Score |
+|---|---|
+| `local` | ✅ 105/105 |
+| `local-cluster` (4 workers) | ✅ 105/105 (was 94/105 before distributed HOF + recursive-CTE fixes) |
+| Apple Container (local + cluster) | ✅ same binary |
+| `kubernetes-cluster` (kind) | ✅ same binary |
 
 ---
 
@@ -167,18 +199,22 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 
 ---
 
-## Competitive Position vs LakeSail v0.6.3 (2026-05-30)
+## Competitive Position vs LakeSail v0.6.3 (2026-06-02)
 
-LakeSail is at v0.6.3 (released 2026-05-21). As of Sprint 4–6 completion, Vajra now **leads or matches LakeSail on every dimension**.
+LakeSail is at v0.6.3 (released 2026-05-21). As of Phase 4 Sprint 4.1, Vajra **leads or matches LakeSail on every dimension**, and now additionally has a production-grade Python-version-agnostic UDF runtime and verified distributed correctness for lambda HOFs + recursive CTEs.
 
-| Dimension | LakeSail v0.6.3 | **Vajra v0.5.0** | **Vajra Advantage** |
+| Dimension | LakeSail v0.6.3 | **Vajra v0.6.0** | **Vajra Advantage** |
 |---|---|---|---|
 | Runtime | Rust | **Rust** | — |
 | Cold start | ~2 s | **~200 ms** | **10× faster** |
 | Idle memory | ~500 MB | **~300 MB** | **40% less** |
 | TPC-H SF-1 | ~15 s | **1.515 s** | **10× faster** |
 | Binary size | ~300 MB | **105 MB macOS / 80 MB Linux** | **3–4× smaller** |
-| Spark compat (105 scorecard) | ~95% | **100% (105/105)** | **✅** |
+| Spark compat (105 scorecard) | ~95% | **100% (105/105), all modes** | **✅** |
+| Python UDFs version-agnostic | abi3 (3.8+) | **subprocess (3.10–3.14+)** | **match** |
+| `approx_top_k` / KLL / theta sketches | partial | **✅ Sprint 4.1** | **✅ ahead** |
+| Lambda HOFs distributed | ✅ | **✅ Sprint 4.1** | **match** |
+| WITH RECURSIVE distributed | partial | **✅ Sprint 4.1** | **✅** |
 | Official Spark test suite | partial | **95.01% (2492/2623)** | **✅** |
 | Python UDFs (scalar/Pandas/Arrow) | ✅ | **✅** | — |
 | **GroupedMap / applyInPandas (Spark 4.1)** | ✅ v0.6.3 | **✅ Sprint 4** | — |
