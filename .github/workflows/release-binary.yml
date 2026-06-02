@@ -38,7 +38,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
         run: |
-          sudo apt-get install -y protobuf-compiler musl-tools
+          sudo apt-get install -y protobuf-compiler musl-tools \
+            cmake make perl libcurl4-openssl-dev libssl-dev zlib1g-dev libsasl2-dev libzstd-dev
           pip install cargo-zigbuild 2>/dev/null || cargo install cargo-zigbuild
       - uses: actions/setup-python@v5
         with:
@@ -73,11 +74,15 @@ jobs:
             target
           key: macos-cargo-aarch64-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
-        run: brew install protobuf
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+        run: brew install protobuf cmake python@3.12
+      # Build against Homebrew python@3.12 — the exact interpreter install.sh
+      # provisions on user machines, so the binary's absolute Python framework
+      # link (/opt/homebrew/opt/python@3.12/...) resolves at runtime. With the
+      # subprocess UDF model (VAJRA_PYTHON) the embedded Python is only a fallback.
       - name: Build aarch64 (Apple Silicon)
+        env:
+          PYO3_PYTHON: /opt/homebrew/opt/python@3.12/bin/python3.12
+          MACOSX_DEPLOYMENT_TARGET: "12.0"
         run: cargo build --release -p sail-cli --target aarch64-apple-darwin
       - name: Rename binary
         run: cp target/aarch64-apple-darwin/release/vajra vajra-aarch64-apple-darwin
