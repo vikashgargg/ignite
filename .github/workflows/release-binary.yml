@@ -13,53 +13,41 @@ env:
   # enters cross mode and links the wrong Python).
 
 jobs:
+  # Standalone Linux binary: NATIVE glibc x86_64 build. librdkafka (Kafka
+  # source) builds cleanly natively — the musl static target is dropped because
+  # musl has no target libcurl, so librdkafka cannot cross-compile to it.
+  # For aarch64 Linux and full production deployment, use the container image
+  # (docker/Dockerfile, glibc, both arches) — that is the production artifact.
   build-linux:
-    name: Build Linux (${{ matrix.arch }})
+    name: Build Linux (x86_64 glibc)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            target: x86_64-unknown-linux-musl
-            asset_name: vajra-x86_64-unknown-linux-musl
-          - arch: aarch64
-            target: aarch64-unknown-linux-musl
-            asset_name: vajra-aarch64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ matrix.target }}-v2-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system deps
         run: |
-          sudo apt-get install -y protobuf-compiler musl-tools \
+          sudo apt-get install -y protobuf-compiler \
             cmake make perl libcurl4-openssl-dev libssl-dev zlib1g-dev libsasl2-dev libzstd-dev
-          pip install cargo-zigbuild 2>/dev/null || cargo install cargo-zigbuild
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: "0.14.0"
-      - name: Build
+          python-version: "3.12"
+      - name: Build (native glibc, abi3 portable Python)
         env:
-          PYO3_CROSS_PYTHON_VERSION: "3.11"
-        run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
+          PYO3_PYTHON: python3.12
+        run: cargo build --release -p sail-cli --target x86_64-unknown-linux-gnu
       - name: Rename binary
-        run: cp target/${{ matrix.target }}/release/vajra ${{ matrix.asset_name }}
+        run: cp target/x86_64-unknown-linux-gnu/release/vajra vajra-x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
+          name: vajra-x86_64-unknown-linux-gnu
+          path: vajra-x86_64-unknown-linux-gnu
           retention-days: 1
 
   build-macos:

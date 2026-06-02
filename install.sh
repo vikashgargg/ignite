@@ -19,8 +19,8 @@ ARCH="$(uname -m)"
 case "$OS" in
   Linux*)
     case "$ARCH" in
-      x86_64)  TARGET="x86_64-unknown-linux-musl" ;;
-      aarch64) TARGET="aarch64-unknown-linux-musl" ;;
+      x86_64)  TARGET="x86_64-unknown-linux-gnu" ;;
+      aarch64) error "aarch64 Linux: use the container image (docker/Dockerfile) for production, or build from source: https://github.com/$REPO" ;;
       *)       error "Unsupported Linux architecture: $ARCH. Build from source: https://github.com/$REPO" ;;
     esac
     ;;
