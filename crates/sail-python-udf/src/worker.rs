@@ -66,7 +66,12 @@ where
                 Err(e) => return Err(e),
             }
         }
-        f(guard.as_mut().unwrap())
+        match guard.as_mut() {
+            Some(worker) => f(worker),
+            // Unreachable: a worker was just ensured above. Handle explicitly
+            // rather than unwrap() (workspace denies unwrap_used).
+            None => Err(PyUdfError::invalid("UDF worker unexpectedly absent")),
+        }
     }))
 }
 
