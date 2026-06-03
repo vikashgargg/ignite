@@ -110,8 +110,13 @@ impl AggregateUDFImpl for PercentileDisc {
                 arg_types.len()
             )));
         }
+        // percentile_disc returns an ACTUAL value from the dataset (no
+        // interpolation), so the ORDER BY column type must be PRESERVED — Spark
+        // returns an Int column's discrete percentile as Int, not Double. The
+        // accumulator handles every numeric type natively (dispatch_numeric_type),
+        // so we must NOT coerce numerics to Float64 here.
         let order_by = match &arg_types[0] {
-            dt if dt.is_numeric() => DataType::Float64,
+            dt if dt.is_numeric() => dt.clone(),
             DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => DataType::Float64,
             other => {
                 return Err(DataFusionError::Plan(format!(
