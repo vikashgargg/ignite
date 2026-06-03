@@ -249,8 +249,14 @@ jobs:
         run: sudo apt-get install -y protobuf-compiler libssl-dev libcurl4-openssl-dev netcat-openbsd
 
       - name: Build release binary
+        # Pin PyO3 to the exact setup-python interpreter and put its lib dir on
+        # the linker path. `python3.12` is not a command on the runner, so the
+        # generic env var fell back to a system python whose lib was unfindable
+        # (-lpython3.11 not found). ${pythonLocation} is exported by setup-python.
         env:
-          PYO3_PYTHON: python3.12
+          PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
+          RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
           CARGO_PROFILE_RELEASE_LTO: thin
         run: cargo build --release -p sail-cli
 
@@ -270,8 +276,8 @@ jobs:
 
       - name: Start vajra (Spark Connect server)
         env:
-          PYO3_PYTHON: python3.12
           RUST_LOG: warn
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
         run: |
           PYTHONPATH=.venvs/smoke/lib/python3.12/site-packages \
             target/release/vajra server --ip 0.0.0.0 --port 50051 &
