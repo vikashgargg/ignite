@@ -10,6 +10,8 @@ use datafusion_common::{plan_datafusion_err, Result, ScalarValue};
 use datafusion_expr::function::{AccumulatorArgs, StateFieldsArgs};
 use datafusion_expr::{Accumulator, AggregateUDFImpl, Signature, Volatility};
 
+use crate::byte_utils::{read_f64_le, read_u32_le};
+
 // ---------------------------------------------------------------------------
 // KLL sketch — simplified Karnin-Lang-Liberty approximate quantile sketch
 // ---------------------------------------------------------------------------
@@ -88,18 +90,18 @@ impl KllSketch {
         if bytes.len() < 8 {
             return Err(plan_datafusion_err!("kll_sketch: buffer too short"));
         }
-        let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+        let magic = read_u32_le(bytes, 0);
         if magic != KLL_MAGIC {
             return Err(plan_datafusion_err!("kll_sketch: bad magic {:08x}", magic));
         }
-        let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+        let count = read_u32_le(bytes, 4) as usize;
         if bytes.len() < 8 + count * 8 {
             return Err(plan_datafusion_err!("kll_sketch: truncated value list"));
         }
         let mut values = Vec::with_capacity(count);
         for i in 0..count {
             let off = 8 + i * 8;
-            let v = f64::from_le_bytes(bytes[off..off + 8].try_into().unwrap());
+            let v = read_f64_le(bytes, off);
             values.push(v);
         }
         Ok(Self { values })
@@ -520,7 +522,7 @@ fn kll_quantile_scalar(
                     None => ScalarValue::Null,
                 });
             }
-            ScalarValue::iter_to_array(results.into_iter()).map(ColumnarValue::Array)
+            ScalarValue::iter_to_array(results).map(ColumnarValue::Array)
         }
     }
 }

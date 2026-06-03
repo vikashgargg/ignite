@@ -412,6 +412,13 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 .catalog
                 .default_schema
                 .clone();
+            // Look up the ephemeral in-process table registered by the streaming
+            // memory sink (Spark's `format("memory")`). This is not general
+            // catalog traversal, so the centralized catalog API does not apply.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "resolve ephemeral memory-sink table for streaming format(\"memory\")"
+            )]
             let catalog = session_state
                 .catalog_list()
                 .catalog(&catalog_name)

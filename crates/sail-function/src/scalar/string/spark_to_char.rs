@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{ArrayRef, StringArray};
+use datafusion::arrow::array::StringArray;
 use datafusion::arrow::datatypes::DataType;
 use datafusion_common::{Result, ScalarValue};
 use datafusion_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
@@ -202,8 +202,8 @@ pub fn oracle_format_number(value: f64, fmt: &str) -> Option<String> {
     // Build padded integer digit string (left-pad with fill char)
     let pad_count = n - int_str.len();
     let mut padded: Vec<char> = Vec::with_capacity(n);
-    for j in 0..pad_count {
-        padded.push(if int_slots[j] == '0' { '0' } else { ' ' });
+    for &slot in &int_slots[..pad_count] {
+        padded.push(if slot == '0' { '0' } else { ' ' });
     }
     padded.extend(int_str.chars());
 

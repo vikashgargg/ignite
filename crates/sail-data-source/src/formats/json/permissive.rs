@@ -23,7 +23,7 @@ use datafusion::physical_expr::projection::ProjectionExprs;
 use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_common::config::JsonOptions;
-use datafusion_common::{Result, Statistics};
+use datafusion_common::{DataFusionError, Result, Statistics};
 use datafusion_datasource::decoder::{deserialize_stream, Decoder, DecoderDeserializer};
 use datafusion_datasource::file::FileSource;
 use datafusion_datasource::file_compression_type::FileCompressionType;
@@ -116,12 +116,11 @@ impl PermissiveJsonDecoder {
         mode: JsonMode,
         corrupt_col_idx: Option<usize>,
         output_schema: Option<SchemaRef>,
-    ) -> Self {
+    ) -> Result<Self, ArrowError> {
         let inner = ReaderBuilder::new(inner_schema)
             .with_batch_size(batch_size)
-            .build_decoder()
-            .expect("building JSON decoder should not fail");
-        Self {
+            .build_decoder()?;
+        Ok(Self {
             inner,
             buf: Vec::new(),
             mode,
@@ -130,7 +129,7 @@ impl PermissiveJsonDecoder {
             pending_meta: VecDeque::new(),
             line_queue: VecDeque::new(),
             batch_queue: VecDeque::new(),
-        }
+        })
     }
 
     /// Scan `self.buf` for complete (newline-terminated) lines, validate/
@@ -199,9 +198,9 @@ impl PermissiveJsonDecoder {
     /// `self.batch_queue`.  Continues until `line_queue` is empty.
     fn drain_queue_to_inner(&mut self) -> Result<(), ArrowError> {
         while !self.line_queue.is_empty() {
-            let consumed = {
-                let (line_bytes, _) = self.line_queue.front().unwrap();
-                self.inner.decode(line_bytes)?
+            let consumed = match self.line_queue.front() {
+                Some((line_bytes, _)) => self.inner.decode(line_bytes)?,
+                None => break,
             };
             if consumed == 0 {
                 // Inner is full: self-flush and continue.
@@ -211,9 +210,10 @@ impl PermissiveJsonDecoder {
                 }
                 continue; // retry the same front entry
             }
-            let (_, meta) = self.line_queue.pop_front().unwrap();
-            if self.corrupt_col_idx.is_some() {
-                self.pending_meta.push_back(meta);
+            if let Some((_, meta)) = self.line_queue.pop_front() {
+                if self.corrupt_col_idx.is_some() {
+                    self.pending_meta.push_back(meta);
+                }
             }
         }
         Ok(())
@@ -379,7 +379,7 @@ impl FileOpener for PermissiveJsonOpener {
                 mode,
                 corrupt_col_idx,
                 output_schema,
-            );
+            )?;
             let deser = DecoderDeserializer::new(decoder);
 
             match result.payload {
@@ -475,9 +475,11 @@ impl FileSource for PermissiveJsonSource {
         let projected_schema = Arc::new(file_schema.project(&self.projection.file_indices)?);
 
         let mut opener: Arc<dyn FileOpener> = Arc::new(PermissiveJsonOpener {
-            batch_size: self
-                .batch_size
-                .expect("batch size must be set before creating opener"),
+            batch_size: self.batch_size.ok_or_else(|| {
+                DataFusionError::Internal(
+                    "batch size must be set before creating opener".to_string(),
+                )
+            })?,
             projected_schema,
             file_compression_type: base_config.file_compression_type,
             object_store,
@@ -615,7 +617,7 @@ impl FileFormat for PermissiveJsonFormat {
                 continue;
             }
             let file_schema =
-                infer_json_schema_from_iterator(values.iter().map(|v| Ok::<_, ArrowError>(v)))?;
+                infer_json_schema_from_iterator(values.iter().map(Ok::<_, ArrowError>))?;
             merged_meta.extend(file_schema.metadata().clone());
             for field in file_schema.fields() {
                 if !merged_fields.iter().any(|f| f.name() == field.name()) {
@@ -671,6 +673,7 @@ impl FileFormat for PermissiveJsonFormat {
 }
 
 #[cfg(test)]
+#[expect(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use std::sync::Arc;
 
@@ -701,7 +704,7 @@ mod tests {
             Some((i, s)) => (Some(i), Some(s)),
             None => (None, None),
         };
-        PermissiveJsonDecoder::new(inner_schema, 1024, mode, idx, out)
+        PermissiveJsonDecoder::new(inner_schema, 1024, mode, idx, out).unwrap()
     }
 
     #[test]
@@ -797,7 +800,8 @@ mod tests {
             JsonMode::Permissive,
             corrupt_col_idx,
             output_schema,
-        );
+        )
+        .unwrap();
         let deser = DecoderDeserializer::new(decoder);
 
         let data = Bytes::from_static(

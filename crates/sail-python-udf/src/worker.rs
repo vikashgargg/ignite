@@ -151,10 +151,7 @@ impl UdfWorker {
 
     /// Returns `true` if the child process is still running.
     pub fn is_alive(&mut self) -> bool {
-        match self.process.try_wait() {
-            Ok(None) => true,
-            _ => false,
-        }
+        matches!(self.process.try_wait(), Ok(None))
     }
 
     /// Execute a scalar UDF on a batch of inputs.
@@ -167,6 +164,7 @@ impl UdfWorker {
     /// - `output_type` — Arrow DataType of output
     /// - `args` — input Arrow arrays
     /// - `number_rows` — number of rows in the batch
+    #[expect(clippy::too_many_arguments)]
     pub fn execute_scalar(
         &mut self,
         payload: &[u8],
@@ -181,7 +179,7 @@ impl UdfWorker {
         // ---- serialise Arrow types as IPC schema bytes → base64 ----
         let input_type_blobs: Vec<String> = input_types
             .iter()
-            .map(|dt| serialize_type_b64(dt))
+            .map(serialize_type_b64)
             .collect::<PyUdfResult<_>>()?;
         let output_type_blob = serialize_type_b64(output_type)?;
 

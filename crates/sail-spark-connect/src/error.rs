@@ -228,6 +228,7 @@ pub(crate) enum SparkThrowable {
     SparkRuntimeException(String),
     #[expect(dead_code)]
     SparkUpgradeException(String),
+    #[expect(dead_code)]
     SparkException(String),
     PythonException(String),
 }

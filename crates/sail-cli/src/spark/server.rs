@@ -26,10 +26,16 @@ async fn shutdown() {
 
     #[cfg(unix)]
     let sigterm = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(e) => {
+                // Fall back to never resolving so Ctrl-C still drives shutdown.
+                error!("failed to install SIGTERM handler: {e}");
+                std::future::pending::<()>().await;
+            }
+        }
     };
     #[cfg(not(unix))]
     let sigterm = std::future::pending::<()>();
@@ -187,9 +193,13 @@ pub fn run_spark_connect_server_kubernetes_ha(
                             return;
                         }
                     };
-                    let server_address = listener
-                        .local_addr()
-                        .expect("local_addr after successful bind");
+                    let server_address = match listener.local_addr() {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            error!("Leader: failed to read local_addr: {e}");
+                            return;
+                        }
+                    };
                     info!("Vajra ready on {server_address} (Spark Connect gRPC) [mode: kubernetes-cluster-ha]");
                     if let Err(e) = serve(listener, shutdown(), config, handle).await {
                         error!("{e}");

@@ -283,7 +283,9 @@ fn decode_dispatch(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
         ));
     }
     let mut iter = arguments.into_iter();
-    let subject = iter.next().unwrap();
+    let Some(subject) = iter.next() else {
+        return Err(PlanError::invalid("decode requires a subject argument"));
+    };
     let remaining: Vec<expr::Expr> = iter.collect();
     // Even total remaining → odd pairs → last is default; odd total → even pairs → NULL default
     let has_default = remaining.len() % 2 == 1;

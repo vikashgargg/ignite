@@ -357,7 +357,7 @@ impl PlanResolver<'_> {
                         file_write_options.options.push(OptionLayer::OptionList {
                             items: vec![("path".to_string(), location.clone())],
                         });
-                        info.as_ref().map_or(true, |i| i.is_external)
+                        info.as_ref().is_none_or(|i| i.is_external)
                     } else {
                         let default_location = self.resolve_default_table_location(&table).await?;
                         file_write_options.options.insert(

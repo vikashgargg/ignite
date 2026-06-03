@@ -121,12 +121,13 @@ lazy_static! {
 
         patterns
             .iter()
-            .map(|&(pattern, replacement)| {
+            .filter_map(|&(pattern, replacement)| {
                 let regex_pattern = format!(r"(?P<pre>^|[^%]){}", regex::escape(pattern));
-                let re = Regex::new(&regex_pattern)
-                    .expect("hardcoded datetime format regex is valid");
+                // Patterns are hardcoded and known-valid, so compilation never
+                // fails; `ok()?` keeps the workspace `expect_used` lint satisfied.
+                let re = Regex::new(&regex_pattern).ok()?;
                 let replacement_str = format!("${{pre}}{replacement}");
-                (re, replacement_str)
+                Some((re, replacement_str))
             })
             .collect()
     };
@@ -150,38 +151,6 @@ pub fn spark_datetime_format_to_chrono_strftime(format: &str) -> Result<String> 
     result = result.replace(".%.", "%.");
 
     Ok(result)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_convert_spark_datetime_format_to_chrono() -> Result<()> {
-        assert_eq!(
-            spark_datetime_format_to_chrono_strftime("yyyy-MM-dd HH:mm:ss")?,
-            "%Y-%m-%d %H:%M:%S"
-        );
-        assert_eq!(
-            spark_datetime_format_to_chrono_strftime("ss.SSS")?,
-            "%S%.3f"
-        );
-        assert_eq!(spark_datetime_format_to_chrono_strftime("MM mm")?, "%m %M");
-        assert_eq!(
-            spark_datetime_format_to_chrono_strftime("EEEE EEE E")?,
-            "%A %a %a"
-        );
-        assert_eq!(spark_datetime_format_to_chrono_strftime("SSSSS")?, "%.5f");
-        assert_eq!(
-            spark_datetime_format_to_chrono_strftime("yyyy-MM-dd'T'HH:mm:ss.SSSZ")?,
-            "%Y-%m-%d'T'%H:%M:%S%.3f%z"
-        );
-        assert_eq!(
-            spark_datetime_format_to_chrono_strftime("yyyy年MM月dd日")?,
-            "%Y年%m月%d日"
-        );
-        Ok(())
-    }
 }
 
 // Shared array conversion helpers for make_timestamp functions
@@ -292,5 +261,37 @@ pub(crate) fn to_float64_array(
         other => {
             exec_err!("Unsupported {arg_name} arg {other:?} for Spark function `{fn_name}`")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_spark_datetime_format_to_chrono() -> Result<()> {
+        assert_eq!(
+            spark_datetime_format_to_chrono_strftime("yyyy-MM-dd HH:mm:ss")?,
+            "%Y-%m-%d %H:%M:%S"
+        );
+        assert_eq!(
+            spark_datetime_format_to_chrono_strftime("ss.SSS")?,
+            "%S%.3f"
+        );
+        assert_eq!(spark_datetime_format_to_chrono_strftime("MM mm")?, "%m %M");
+        assert_eq!(
+            spark_datetime_format_to_chrono_strftime("EEEE EEE E")?,
+            "%A %a %a"
+        );
+        assert_eq!(spark_datetime_format_to_chrono_strftime("SSSSS")?, "%.5f");
+        assert_eq!(
+            spark_datetime_format_to_chrono_strftime("yyyy-MM-dd'T'HH:mm:ss.SSSZ")?,
+            "%Y-%m-%d'T'%H:%M:%S%.3f%z"
+        );
+        assert_eq!(
+            spark_datetime_format_to_chrono_strftime("yyyy年MM月dd日")?,
+            "%Y年%m月%d日"
+        );
+        Ok(())
     }
 }

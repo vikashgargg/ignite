@@ -14,9 +14,7 @@ use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, Physic
 use datafusion::physical_plan::empty::EmptyExec;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use datafusion::physical_plan::{
-    DisplayAs, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
-};
+use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{internal_err, plan_datafusion_err, plan_err, Result};
 use futures::{stream, StreamExt};
 use sail_common_datafusion::streaming::event::encoding::{
@@ -129,7 +127,7 @@ impl AccumState {
             DataType::Timestamp(TimeUnit::Microsecond, _) => col
                 .as_any()
                 .downcast_ref::<TimestampMicrosecondArray>()
-                .and_then(|a| compute::max(a)),
+                .and_then(compute::max),
             _ => None,
         };
         if let Some(ts) = max_ts {

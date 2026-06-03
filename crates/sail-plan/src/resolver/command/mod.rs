@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{StringArray, StringBuilder};
+use arrow::array::StringBuilder;
 use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema};
 use arrow::record_batch::RecordBatch;
 use datafusion::datasource::memory::MemTable;

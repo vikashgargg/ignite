@@ -73,8 +73,11 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
         if inputs.len() != 1 {
             return plan_err!("{} requires exactly one input", self.name());
         }
+        let Some(input) = inputs.pop() else {
+            return plan_err!("{} requires exactly one input", self.name());
+        };
         Ok(Self::new(
-            inputs.pop().unwrap(),
+            input,
             self.event_time_col.clone(),
             self.delay_micros,
         ))

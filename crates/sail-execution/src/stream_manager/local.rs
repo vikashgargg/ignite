@@ -223,7 +223,6 @@ impl LocalStream for DiskStream {
             path: self.path.clone(),
             done: Arc::clone(&self.done),
             pending_senders: std::mem::take(&mut self.senders),
-            buffer: self.buffer,
         }))
     }
 
@@ -239,7 +238,6 @@ struct DiskStreamSink {
     path: PathBuf,
     done: Arc<Notify>,
     pending_senders: Vec<mpsc::Sender<TaskStreamResult<RecordBatch>>>,
-    buffer: usize,
 }
 
 #[tonic::async_trait]

@@ -317,7 +317,7 @@ fn schema_without_writer_metric_columns(schema: &SchemaRef) -> SchemaRef {
 }
 
 fn operation_for_sink_mode(
-    table_url: &Url,
+    _table_url: &Url,
     partition_columns: &[String],
     sink_mode: &PhysicalSinkMode,
 ) -> Option<DeltaOperation> {

@@ -1,6 +1,5 @@
 use datafusion_expr::{col, when, Expr, LogicalPlan, LogicalPlanBuilder};
 use sail_common::spec;
-use sail_common_datafusion::rename::logical_plan::rename_logical_plan;
 
 use crate::error::{PlanError, PlanResult};
 use crate::resolver::command::write::{WriteColumnMatch, WriteMode, WritePlanBuilder, WriteTarget};
@@ -60,23 +59,23 @@ impl PlanResolver<'_> {
             .fields()
             .iter()
             .zip(column_names.iter())
-            .map(|(field, real_name)| {
+            .map(|(field, real_name)| -> PlanResult<Expr> {
                 let real_name_lower = real_name.to_lowercase();
                 // col("#0") etc. — the opaque reference DataFusion knows about.
                 let original = col(field.name().as_str());
 
-                match assignment_exprs.iter().find(|(c, _)| c == &real_name_lower) {
+                let value = match assignment_exprs.iter().find(|(c, _)| c == &real_name_lower) {
                     None => original,
                     Some((_, new_value)) => match &condition_expr {
                         None => new_value.clone(),
                         Some(cond) => when(cond.clone(), new_value.clone())
                             .otherwise(original)
-                            .expect("CASE expression is always valid here"),
+                            .map_err(PlanError::from)?,
                     },
-                }
-                .alias(real_name.as_str())
+                };
+                Ok(value.alias(real_name.as_str()))
             })
-            .collect();
+            .collect::<PlanResult<_>>()?;
 
         let projected = LogicalPlanBuilder::from(table_plan)
             .project(projections)?

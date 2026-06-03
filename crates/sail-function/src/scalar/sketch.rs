@@ -5,6 +5,8 @@ use datafusion::arrow::datatypes::DataType;
 use datafusion_common::{plan_datafusion_err, Result, ScalarValue};
 use datafusion_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility};
 
+use crate::byte_utils::{read_u32_le, read_u64_le};
+
 /// Return type discriminator for sketch scalar stubs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SketchReturnType {
@@ -105,12 +107,12 @@ fn estimate_from_bytes(bytes: &[u8]) -> Result<f64> {
     if bytes.len() < 16 {
         return Ok(0.0);
     }
-    let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    let magic = read_u32_le(bytes, 0);
     if magic != THETA_MAGIC {
         return Ok(0.0);
     }
-    let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-    let theta = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    let count = read_u32_le(bytes, 4) as usize;
+    let theta = read_u64_le(bytes, 8);
     if count < THETA_K {
         return Ok(count as f64);
     }
@@ -126,19 +128,19 @@ fn decode_sketch(bytes: &[u8]) -> (Vec<u64>, u64) {
     if bytes.len() < 16 {
         return (vec![], u64::MAX);
     }
-    let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    let magic = read_u32_le(bytes, 0);
     if magic != THETA_MAGIC {
         return (vec![], u64::MAX);
     }
-    let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-    let theta = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    let count = read_u32_le(bytes, 4) as usize;
+    let theta = read_u64_le(bytes, 8);
     let mut hashes = Vec::with_capacity(count);
     for i in 0..count {
         let off = 16 + i * 8;
         if off + 8 > bytes.len() {
             break;
         }
-        hashes.push(u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap()));
+        hashes.push(read_u64_le(bytes, off));
     }
     (hashes, theta)
 }

@@ -69,9 +69,9 @@ impl UserDefinedLogicalNodeCore for StreamDeduplicateNode {
         if inputs.len() != 1 {
             return plan_err!("{} requires exactly one input", self.name());
         }
-        Ok(Self::new(
-            Arc::new(inputs.pop().unwrap()),
-            self.key_cols.clone(),
-        ))
+        let Some(input) = inputs.pop() else {
+            return plan_err!("{} requires exactly one input", self.name());
+        };
+        Ok(Self::new(Arc::new(input), self.key_cols.clone()))
     }
 }

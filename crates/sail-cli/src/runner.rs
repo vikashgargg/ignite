@@ -238,7 +238,7 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             if let Some(dir) = directory {
                 std::env::set_current_dir(dir)?;
             }
-            run_pyspark_script(format_sql_script(&query))
+            run_pyspark_script(format_sql_script(&query)?)
         }
 
         Command::Run { file, directory } => {
@@ -315,12 +315,12 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn format_sql_script(query: &str) -> String {
+fn format_sql_script(query: &str) -> Result<String, Box<dyn std::error::Error>> {
     // Write a tiny PySpark script that runs the SQL and prints results.
     // This is passed to run_pyspark_script which expects a file path or "-".
     // We write to a temp file and return the path.
     use std::io::Write;
-    let mut tmp = tempfile::NamedTempFile::new().expect("failed to create temp file");
+    let mut tmp = tempfile::NamedTempFile::new()?;
     writeln!(
         tmp,
         r#"from pyspark.sql import SparkSession
@@ -328,13 +328,9 @@ spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
 spark.sql({query:?}).show(truncate=False)
 "#,
         query = query
-    )
-    .expect("failed to write temp script");
+    )?;
     let path = tmp.into_temp_path();
-    path.keep()
-        .expect("failed to keep temp file")
-        .to_string_lossy()
-        .to_string()
+    Ok(path.keep()?.to_string_lossy().to_string())
 }
 
 fn run_bench(scale_factor: u32, data_path: &str) -> Result<(), Box<dyn std::error::Error>> {

@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // is called inside the Tokio runtime, the calling thread can temporarily be
         // used as a runtime worker, so it needs enough stack for deep async futures
         // (e.g. recursive plan resolution).
-        std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .stack_size(32 * 1024 * 1024)
             .spawn(move || match sail_cli::runner::main(args) {
                 Ok(()) => {}
@@ -37,10 +37,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     eprintln!("Error: {e}");
                     std::process::exit(1);
                 }
-            })
-            .expect("failed to spawn main thread")
+            })?;
+        handle
             .join()
-            .expect("main thread panicked");
+            .map_err(|_| -> Box<dyn std::error::Error> { "main thread panicked".into() })?;
     }
     Ok(())
 }

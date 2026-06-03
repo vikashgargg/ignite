@@ -75,6 +75,14 @@ impl PlanResolver<'_> {
             let resolved_input = self.resolve_write_input(*input, state).await?;
             let data_schema = Arc::new(resolved_input.schema().as_arrow().clone());
             let buffer = Arc::new(MemoryStreamBuffer::new(data_schema));
+            // The memory sink registers an ephemeral in-process table provider so
+            // that `writeStream.format("memory").queryName(q)` can be queried as `q`,
+            // matching Spark. This is not a catalog table, so the centralized
+            // catalog-registration path does not apply here.
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "ephemeral in-process memory-sink table, not a catalog table"
+            )]
             self.ctx
                 .register_table(query_name.as_str(), Arc::clone(&buffer) as Arc<_>)
                 .map_err(PlanError::from)?;

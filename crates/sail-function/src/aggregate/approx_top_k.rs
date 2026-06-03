@@ -10,6 +10,7 @@ use datafusion::logical_expr::function::{AccumulatorArgs, StateFieldsArgs};
 use datafusion::logical_expr::{Accumulator, AggregateUDFImpl, Signature, Volatility};
 
 use crate::aggregate::utils::get_scalar_value;
+use crate::byte_utils::{read_i64_le, read_u32_le};
 
 // ---------------------------------------------------------------------------
 // Space-Saving frequency counter
@@ -66,7 +67,7 @@ impl FreqCounter {
             .map(|(v, c)| (v.clone(), *c))
             .collect();
         // sort descending by count
-        pairs.sort_by(|a, b| b.1.cmp(&a.1));
+        pairs.sort_by_key(|p| std::cmp::Reverse(p.1));
         pairs.truncate(k);
         pairs
     }
@@ -308,7 +309,7 @@ impl Accumulator for ApproxTopKAccumulator {
         let counts: Vec<i64> = top.iter().map(|(_, c)| *c).collect();
 
         // Build the items array
-        let items_array = ScalarValue::iter_to_array(items_scalars.into_iter())?;
+        let items_array = ScalarValue::iter_to_array(items_scalars)?;
 
         // Build the counts array
         let counts_array: ArrayRef = Arc::new(Int64Array::from(counts));
@@ -414,15 +415,13 @@ impl Accumulator for ApproxTopKAccumulator {
 #[derive(Debug)]
 struct ApproxTopKAccumulateBinaryAccumulator {
     counter: FreqCounter,
-    input_type: DataType,
     k: usize,
 }
 
 impl ApproxTopKAccumulateBinaryAccumulator {
-    fn new(k: usize, input_type: DataType) -> Self {
+    fn new(k: usize, _input_type: DataType) -> Self {
         Self {
             counter: FreqCounter::new(),
-            input_type,
             k,
         }
     }
@@ -488,19 +487,18 @@ impl Accumulator for ApproxTopKAccumulateBinaryAccumulator {
             if bytes.len() < 8 {
                 continue;
             }
-            let k = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
+            let k = read_u32_le(bytes, 0) as usize;
             if k > 0 {
                 self.k = k;
             }
-            let n = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
+            let n = read_u32_le(bytes, 4) as usize;
             let mut pos = 8usize;
             for _ in 0..n {
                 if pos + 12 > bytes.len() {
                     break;
                 }
-                let count = i64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
-                let slen =
-                    u32::from_le_bytes(bytes[pos + 8..pos + 12].try_into().unwrap()) as usize;
+                let count = read_i64_le(bytes, pos);
+                let slen = read_u32_le(bytes, pos + 8) as usize;
                 pos += 12;
                 if pos + slen > bytes.len() {
                     break;

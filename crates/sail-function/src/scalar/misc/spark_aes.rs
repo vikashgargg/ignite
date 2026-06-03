@@ -8,7 +8,7 @@ use aes::cipher::{
 };
 use aes::{Aes128, Aes192, Aes256};
 use aes_gcm::aead::rand_core::{OsRng, RngCore};
-use aes_gcm::aead::{Aead, KeyInit, Payload};
+use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes128Gcm, Aes256Gcm, AesGcm, Nonce};
 use cbc::cipher::BlockDecryptMut;
 use datafusion::arrow::array::{
@@ -50,7 +50,7 @@ pub fn generate_iv(mode: &EncryptionMode) -> Vec<u8> {
 
 fn ecb_decrypt_pkcs7(ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
     use aes::cipher::generic_array::GenericArray;
-    if ciphertext.len() % 16 != 0 || ciphertext.is_empty() {
+    if !ciphertext.len().is_multiple_of(16) || ciphertext.is_empty() {
         return exec_err!("Spark `aes_decrypt`: ECB ciphertext length must be a multiple of 16");
     }
     let mut buf = ciphertext.to_vec();
@@ -100,7 +100,7 @@ fn ecb_encrypt_pkcs7(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>> {
     use aes::cipher::generic_array::GenericArray;
     let pad_len = 16 - (plaintext.len() % 16);
     let mut buf = plaintext.to_vec();
-    buf.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+    buf.extend(std::iter::repeat_n(pad_len as u8, pad_len));
     match key.len() {
         16 => {
             let cipher = <Aes128 as BlockKeyInit>::new_from_slice(key)

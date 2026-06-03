@@ -109,8 +109,11 @@ impl UserDefinedLogicalNodeCore for WindowAccumNode {
         let mut exprs = exprs;
         let aggr_exprs = exprs.split_off(n_group);
         let group_exprs = exprs;
+        let Some(input) = inputs.pop() else {
+            return plan_err!("{} requires exactly one input", self.name());
+        };
         Ok(Self::new(
-            inputs.pop().unwrap(),
+            input,
             group_exprs,
             aggr_exprs,
             self.event_time_col.clone(),

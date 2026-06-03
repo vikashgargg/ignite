@@ -659,7 +659,7 @@ impl PlanResolver<'_> {
 
         // Compute total count once (subquery)
         let total_col = state.register_field_name("__total__");
-        let count_agg = Expr::AggregateFunction(expr::AggregateFunction {
+        let _count_agg = Expr::AggregateFunction(expr::AggregateFunction {
             func: count_udaf(),
             params: AggregateFunctionParams {
                 args: vec![lit(1i64)],

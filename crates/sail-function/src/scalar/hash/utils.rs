@@ -5,7 +5,7 @@ use datafusion::arrow::array::{
     DictionaryArray, FixedSizeBinaryArray, Float32Array, Float64Array, Int16Array, Int32Array,
     Int64Array, Int8Array, LargeBinaryArray, LargeListArray, LargeStringArray, ListArray,
     StringArray, TimestampMicrosecondArray, TimestampMillisecondArray, TimestampNanosecondArray,
-    TimestampSecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    TimestampSecondArray,
 };
 use datafusion::arrow::compute::take;
 use datafusion::arrow::datatypes::{

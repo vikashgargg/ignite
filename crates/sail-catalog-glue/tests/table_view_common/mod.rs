@@ -40,6 +40,7 @@ pub fn simple_table_options(columns: Vec<CreateTableColumnOptions>) -> CreateTab
         comment: None,
         constraints: vec![],
         location: Some("s3://bucket/default".to_string()),
+        is_external: true,
         format: "parquet".to_string(),
         partition_by: vec![],
         sort_by: vec![],

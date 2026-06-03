@@ -17,7 +17,7 @@ use object_store::ObjectStoreExt;
 
 use super::{ActionCommit, Transaction};
 use crate::io::StoreContext;
-use crate::spec::manifest::{Manifest, ManifestEntry, ManifestStatus, ManifestWriterBuilder};
+use crate::spec::manifest::{Manifest, ManifestEntry, ManifestWriterBuilder};
 use crate::spec::manifest_list::ManifestListWriter;
 use crate::spec::types::Literal;
 use crate::spec::{

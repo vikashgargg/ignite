@@ -828,19 +828,14 @@ fn spark_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
             args.len()
         )));
     }
-    // Optional args
-    let _start_time = if args.len() == 4 {
-        Some(args.pop().unwrap())
-    } else {
-        None
+    // Optional args (`pop` already yields `Option`, so no unwrap needed)
+    let _start_time = if args.len() == 4 { args.pop() } else { None };
+    let _slide_lit = if args.len() == 3 { args.pop() } else { None };
+    let (Some(duration_expr), Some(col_expr)) = (args.pop(), args.pop()) else {
+        return Err(PlanError::invalid(
+            "window() requires a time column and duration".to_string(),
+        ));
     };
-    let _slide_lit = if args.len() == 3 {
-        Some(args.pop().unwrap())
-    } else {
-        None
-    };
-    let duration_expr = args.pop().unwrap();
-    let col_expr = args.pop().unwrap();
 
     let duration_str = match &duration_expr {
         Expr::Literal(ScalarValue::Utf8(Some(s)), _) => s.clone(),
@@ -886,7 +881,11 @@ fn spark_window_time(input: ScalarFunctionInput) -> PlanResult<Expr> {
             args.len()
         )));
     }
-    let window_arg = args.pop().unwrap();
+    let Some(window_arg) = args.pop() else {
+        return Err(PlanError::invalid(
+            "window_time() requires a window argument".to_string(),
+        ));
+    };
     let end_expr = Expr::ScalarFunction(expr::ScalarFunction::new_udf(
         datafusion_functions::core::get_field(),
         vec![window_arg, lit("end")],
@@ -908,8 +907,11 @@ fn spark_session_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
             args.len()
         )));
     }
-    let _gap_duration = args.pop().unwrap();
-    let col_expr = args.pop().unwrap();
+    let (Some(_gap_duration), Some(col_expr)) = (args.pop(), args.pop()) else {
+        return Err(PlanError::invalid(
+            "session_window() requires a time column and gap duration".to_string(),
+        ));
+    };
 
     // Stub: return struct with start=col, end=col (session bounds are complex to compute)
     Ok(

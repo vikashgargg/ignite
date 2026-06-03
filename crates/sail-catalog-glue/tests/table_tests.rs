@@ -61,6 +61,7 @@ async fn test_create_table() {
                 comment: Some("Product catalog table".to_string()),
                 constraints: vec![],
                 location: Some("s3://bucket/products".to_string()),
+                is_external: true,
                 format: "parquet".to_string(),
                 partition_by: vec![CatalogPartitionField {
                     column: "category".to_string(),
@@ -184,6 +185,7 @@ async fn test_get_table() {
                 comment: Some("Test table description".to_string()),
                 constraints: vec![],
                 location: Some("s3://bucket/test_table".to_string()),
+                is_external: true,
                 format: "parquet".to_string(),
                 partition_by: vec![],
                 sort_by: vec![],
@@ -412,6 +414,7 @@ async fn test_storage_formats() {
                     comment: Some(format!("Table with {format} format")),
                     constraints: vec![],
                     location: Some(format!("s3://bucket/{table_name}")),
+                    is_external: true,
                     format: format.to_string(),
                     partition_by: vec![],
                     sort_by: vec![],
@@ -576,6 +579,7 @@ async fn test_partition_transforms() {
                 comment: Some("Events table with partition transforms".to_string()),
                 constraints: vec![],
                 location: Some("s3://bucket/events".to_string()),
+                is_external: true,
                 format: "iceberg".to_string(),
                 partition_by: vec![
                     CatalogPartitionField {
@@ -648,6 +652,7 @@ async fn test_hive_rejects_transforms() {
                 comment: None,
                 constraints: vec![],
                 location: Some("s3://bucket/hive_with_transforms".to_string()),
+                is_external: true,
                 format: "parquet".to_string(),
                 partition_by: vec![CatalogPartitionField {
                     column: "event_time".to_string(),
@@ -694,6 +699,7 @@ async fn test_iceberg_requires_location() {
                 comment: None,
                 constraints: vec![],
                 location: None,
+                is_external: false,
                 format: "iceberg".to_string(),
                 partition_by: vec![],
                 sort_by: vec![],

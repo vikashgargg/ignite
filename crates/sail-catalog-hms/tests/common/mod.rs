@@ -116,6 +116,7 @@ pub fn simple_table_options_with_format(
         comment: None,
         constraints: vec![],
         location: Some(format!("/tmp/{test_name}")),
+        is_external: true,
         format: format.to_string(),
         partition_by: vec![],
         sort_by: vec![],

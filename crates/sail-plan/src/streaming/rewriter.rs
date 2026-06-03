@@ -52,18 +52,17 @@ impl StreamingRewriter {
             Ok(Transformed::yes(LogicalPlan::Extension(Extension {
                 node: show.with_exprs_and_inputs(vec![], vec![input])?,
             })))
-        } else if node.as_any().is::<FileWriteNode>() {
-            Ok(Transformed::no(LogicalPlan::Extension(extension)))
-        } else if node.as_any().is::<ForeachBatchSinkNode>() {
-            Ok(Transformed::no(LogicalPlan::Extension(extension)))
-        } else if node.as_any().is::<MemorySinkNode>() {
-            Ok(Transformed::no(LogicalPlan::Extension(extension)))
-        } else if node.as_any().is::<BarrierNode>() {
-            // TODO: support BarrierNode for streaming properly.
-            Ok(Transformed::no(LogicalPlan::Extension(extension)))
-        } else if node.as_any().is::<WatermarkNode>() {
-            // WatermarkNode is a transparent passthrough; it is consumed by the
-            // parent Aggregate handler for event-time window detection.
+        } else if node.as_any().is::<FileWriteNode>()
+            || node.as_any().is::<ForeachBatchSinkNode>()
+            || node.as_any().is::<MemorySinkNode>()
+            || node.as_any().is::<BarrierNode>()
+            || node.as_any().is::<WatermarkNode>()
+        {
+            // Passthrough nodes left untouched by the streaming rewriter:
+            // - FileWriteNode / ForeachBatchSinkNode / MemorySinkNode: sinks.
+            // - BarrierNode: TODO — real streaming support.
+            // - WatermarkNode: transparent passthrough, consumed by the parent
+            //   Aggregate handler for event-time window detection.
             Ok(Transformed::no(LogicalPlan::Extension(extension)))
         } else {
             plan_err!("unsupported extension node for streaming: {node:?}")
@@ -158,7 +157,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                 if let Some((event_time_col, delay_micros)) = watermark_info {
                     // Stateful event-time window aggregation via WindowAccumNode.
                     // The physical planner will map this to WindowAccumExec.
-                    let data_schema_ref =
+                    let _data_schema_ref =
                         Arc::new(datafusion_common::DFSchema::try_from(data_schema.clone())?);
                     // Compute what the aggregate output schema would be.
                     let agg_output_schema = {
@@ -179,7 +178,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                             Arc::new(datafusion_common::DFSchema::try_from(
                                 std::sync::Arc::new(
                                     sail_common_datafusion::streaming::event::schema::to_flow_event_schema(
-                                        &agg_output_schema.as_arrow()
+                                        agg_output_schema.as_arrow()
                                     )
                                 )
                             )?),

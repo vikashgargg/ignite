@@ -10,6 +10,8 @@ use datafusion_common::{plan_datafusion_err, Result, ScalarValue};
 use datafusion_expr::function::{AccumulatorArgs, StateFieldsArgs};
 use datafusion_expr::{Accumulator, AggregateUDFImpl, Signature, TypeSignature, Volatility};
 
+use crate::byte_utils::{read_u32_le, read_u64_le};
+
 // ---------------------------------------------------------------------------
 // Theta Sketch — compact K-Minimum Values (KMV) sketch
 // ---------------------------------------------------------------------------
@@ -54,9 +56,11 @@ impl ThetaSketch {
         }
         self.hashes.insert(h);
         if self.hashes.len() > THETA_K {
-            let max = *self.hashes.iter().next_back().unwrap();
-            self.hashes.remove(&max);
-            self.theta = *self.hashes.iter().next_back().unwrap_or(&u64::MAX);
+            // Just inserted above, so the set is non-empty; drop the largest.
+            if let Some(&max) = self.hashes.iter().next_back() {
+                self.hashes.remove(&max);
+            }
+            self.theta = self.hashes.iter().next_back().copied().unwrap_or(u64::MAX);
         }
     }
 
@@ -94,19 +98,19 @@ impl ThetaSketch {
         if bytes.len() < 16 {
             return Err(plan_datafusion_err!("theta sketch: buffer too short"));
         }
-        let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+        let magic = read_u32_le(bytes, 0);
         if magic != THETA_MAGIC {
             return Err(plan_datafusion_err!("theta sketch: bad magic"));
         }
-        let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-        let theta = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+        let count = read_u32_le(bytes, 4) as usize;
+        let theta = read_u64_le(bytes, 8);
         if bytes.len() < 16 + count * 8 {
             return Err(plan_datafusion_err!("theta sketch: truncated hash list"));
         }
         let mut hashes = BTreeSet::new();
         for i in 0..count {
             let off = 16 + i * 8;
-            let h = u64::from_le_bytes(bytes[off..off + 8].try_into().unwrap());
+            let h = read_u64_le(bytes, off);
             hashes.insert(h);
         }
         Ok(Self { hashes, theta })

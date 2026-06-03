@@ -92,7 +92,8 @@ impl PlanResolver<'_> {
                             })
                             .collect::<PlanResult<_>>()?;
                         if parts.len() == 1 {
-                            parts.into_iter().next().unwrap()
+                            // Single element: `join` returns it verbatim (no separator).
+                            parts.join(", ")
                         } else {
                             format!("({})", parts.join(", "))
                         }

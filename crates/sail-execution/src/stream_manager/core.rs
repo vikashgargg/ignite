@@ -35,7 +35,7 @@ impl StreamManager {
     ) -> ExecutionResult<Box<dyn TaskStreamSink>> {
         let create = |senders: Vec<_>| -> ExecutionResult<_> {
             let mut stream = Self::create_local_stream_with_senders(
-                storage.clone(),
+                storage,
                 senders,
                 &self.options,
                 &key,
