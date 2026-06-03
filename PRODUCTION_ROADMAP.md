@@ -190,6 +190,43 @@ LakeSail has this — it's an important adoption channel.
 
 ---
 
+## Sprint 4.2 — Trust + Perf Proof (2026-06-03 → )
+
+The honest gating items between "feature-complete" and "true production Spark
+replacement." LakeSail's latest remains **v0.6.3 (2026-05-21)** — no new release.
+Vajra leads on the operational axis (streaming, JWT/mTLS, K8s HA, Apple Container,
+Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance**.
+
+### Done this sprint
+- [x] **Workspace clippy lane green** — `cargo clippy --all-targets --all-features -- -D warnings`
+  exits 0 for the first time (commit `90f69f22`). Complied with the strict lints
+  (test modules use `#[expect(...)]`) rather than loosening `clippy.toml`, matching
+  upstream LakeSail/DataFusion. 302 unit tests pass.
+- [x] **Delta declared-nullability fix** (commit `2d1147d6`) — metaData now records the
+  declared catalog column nullability (was inheriting non-null from the insert plan).
+  Threaded declared schema resolver→sink→Delta writer. Delta feature suite 134→144,
+  column-mapping 4/4, zero regressions. MERGE metric logic confirmed already correct.
+
+### Remaining — trust
+- [ ] **Full CI lane green end-to-end** `P0` — all jobs (clippy ✅, fmt, test, build-linux,
+  distributed-scorecard, k8s/macos-scorecard, differential-spark). Wire `differential-spark`
+  as a required gate so every change is trust-protected.
+- [ ] **Delta byte-size snapshot refresh** `P1` — ~10 `@sail-only` operation_metrics/merge
+  snapshots fail only on physical Parquet byte sizes (all semantic counters already match
+  Spark). Regenerate from Vajra's deterministic output, or match upstream parquet encoding.
+- [ ] **Delta EXPLAIN plan-shape + MERGE-source nullability** `P2` — remaining ~few Delta
+  feature failures (plan-string snapshots; VALUES/temp-view source nullability in the plan dump).
+- [ ] **Official Apache Spark test-suite breadth** `P1` — extend beyond the 105/105 scorecard
+  for a defensible parity number (see 5.1).
+
+### Remaining — the moat (Pillar 2, highest leverage)
+- [ ] **Real-scale performance proof** `P0` — the single biggest credibility gap. We claim
+  5–10x but have only published TPC-H SF-1 (1.515s). Need a real-scale, published result:
+  TPC-DS/TPC-H SF-100 distributed (see 5.2) and/or the ClickBench 43-query run vs Spark.
+  Until this exists, "production Spark replacement" is a claim, not a proven fact.
+
+---
+
 ## Sprint 5 — Scale + Officiality (2026-06-07 → 2026-06-21)
 
 ### 5.1 Official Apache Spark Test Suite  `[x]` P0 · ~5 days
@@ -303,6 +340,7 @@ Every sprint must stay green on all three modes:
 | Sprint | Theme | Target date | Key deliverable |
 |---|---|---|---|
 | **4** | Spark 4.x parity | 2026-06-07 | VARIANT, time travel, GroupedMap, V2 checkpoint |
+| **4.2** | Trust + perf proof | in progress | Clippy green ✅, Delta nullability ✅, full CI green, **real-scale perf** |
 | **5** | Scale + officiality | 2026-06-21 | Official Spark tests ≥95%, TPC-H SF-100, HMS |
 | **6** | Streaming completion | 2026-07-05 | Event-time windows, stateful dedup, endurance test |
 
