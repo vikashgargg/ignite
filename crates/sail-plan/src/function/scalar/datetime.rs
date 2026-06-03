@@ -184,7 +184,11 @@ fn datediff(input: ScalarFunctionInput) -> PlanResult<Expr> {
         2 => {
             let [start, end] = <[Expr; 2]>::try_from(args)
                 .map_err(|_| PlanError::invalid("datediff requires 2 or 3 arguments"))?;
-            Ok(date_days_arithmetic(start, end, Operator::Minus))
+            // Spark's datediff returns INT (int32), not bigint.
+            Ok(cast(
+                date_days_arithmetic(start, end, Operator::Minus),
+                DataType::Int32,
+            ))
         }
         3 => {
             let [unit, start, end] = <[Expr; 3]>::try_from(args)

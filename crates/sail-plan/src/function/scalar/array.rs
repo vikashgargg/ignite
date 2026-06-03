@@ -89,6 +89,22 @@ fn slice_expr(
     ))
 }
 
+/// `sort_array(array)` or `sort_array(array, ascendingOrder)`. Spark defaults
+/// the order to ascending when omitted, so this accepts 1 or 2 arguments.
+fn sort_array_fn(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
+    let mut args = input.arguments;
+    let array = args
+        .first()
+        .cloned()
+        .ok_or_else(|| PlanError::invalid("sort_array requires at least 1 argument"))?;
+    let asc = if args.len() >= 2 {
+        args.swap_remove(1)
+    } else {
+        lit(ScalarValue::Boolean(Some(true)))
+    };
+    sort_array(array, asc)
+}
+
 fn sort_array(array: expr::Expr, asc: expr::Expr) -> PlanResult<expr::Expr> {
     let (sort, nulls) = match asc {
         expr::Expr::Literal(ScalarValue::Boolean(Some(true)), _metadata) => (
@@ -412,7 +428,7 @@ pub(super) fn list_built_in_array_functions() -> Vec<(&'static str, ScalarFuncti
         ("sequence", F::udf(SparkSequence::new())),
         ("shuffle", F::unary(array_fn::shuffle)),
         ("slice", F::custom(slice)),
-        ("sort_array", F::binary(sort_array)),
+        ("sort_array", F::custom(sort_array_fn)),
     ]
 }
 
