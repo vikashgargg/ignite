@@ -214,6 +214,83 @@ jobs:
         if: always()
         run: kill "$VAJRA_PID" 2>/dev/null || true
 
+  differential-spark:
+    name: Differential test vs Apache Spark
+    runs-on: ubuntu-latest
+    # The trust gate: every change is diffed byte-for-byte against REAL Apache
+    # Spark on the common path. Fails the build on any divergence.
+    if: |
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.base_ref == 'main')
+    steps:
+      - uses: actions/checkout@v4
+
+      # Java for the reference engine (real Apache Spark 3.5, JVM).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-diff-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install system deps
+        run: sudo apt-get install -y protobuf-compiler libssl-dev libcurl4-openssl-dev netcat-openbsd
+
+      - name: Build release binary
+        env:
+          PYO3_PYTHON: python3.12
+          CARGO_PROFILE_RELEASE_LTO: thin
+        run: cargo build --release -p sail-cli
+
+      - name: Set up reference venv (Apache Spark 3.5, JVM)
+        run: |
+          python3.12 -m venv .venvs/spark-ref
+          .venvs/spark-ref/bin/pip install --quiet "pyspark==3.5.3" pandas
+
+      - name: Set up candidate venv (pyspark Spark Connect)
+        run: |
+          python3.12 -m venv .venvs/smoke
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+
+      - name: Run reference (real Apache Spark)
+        working-directory: scripts/diff_test
+        run: ENGINE=reference ../../.venvs/spark-ref/bin/python run_engine.py /tmp/ref.json
+
+      - name: Start vajra (Spark Connect server)
+        env:
+          PYO3_PYTHON: python3.12
+          RUST_LOG: warn
+        run: |
+          PYTHONPATH=.venvs/smoke/lib/python3.12/site-packages \
+            target/release/vajra server --ip 0.0.0.0 --port 50051 &
+          echo "VAJRA_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 30); do nc -z localhost 50051 && break; sleep 1; done
+          nc -z localhost 50051 || { echo "vajra did not start"; exit 1; }
+
+      - name: Run candidate (Vajra)
+        working-directory: scripts/diff_test
+        run: ENGINE=candidate SPARK_REMOTE=sc://localhost:50051 ../../.venvs/smoke/bin/python run_engine.py /tmp/cand.json
+
+      - name: Diff vs Apache Spark (fails on any divergence)
+        working-directory: scripts/diff_test
+        run: ../../.venvs/smoke/bin/python diff.py /tmp/ref.json /tmp/cand.json
+
+      - name: Stop vajra
+        if: always()
+        run: kill "$VAJRA_PID" 2>/dev/null || true
+
   k8s-scorecard:
     name: K8s scorecard (kubernetes-cluster / kind)
     runs-on: ubuntu-latest
