@@ -26,6 +26,13 @@ pub struct FileWriteNode {
     options: FileWriteOptions,
     #[educe(PartialOrd(ignore))]
     schema: DFSchemaRef,
+    /// The declared (catalog) schema of the write target, when writing to a
+    /// known table. Carries the table's column nullability, which the inserted
+    /// data plan does not preserve (DataFusion marks VALUES/literal projections
+    /// as non-nullable). Table formats use this to record the correct column
+    /// nullability in the table metadata. `None` for ad-hoc data-source writes.
+    #[educe(PartialOrd(ignore))]
+    declared_schema: Option<DFSchemaRef>,
 }
 
 impl FileWriteNode {
@@ -34,11 +41,21 @@ impl FileWriteNode {
             input,
             options,
             schema: Arc::new(DFSchema::empty()),
+            declared_schema: None,
         }
+    }
+
+    pub fn with_declared_schema(mut self, declared_schema: Option<DFSchemaRef>) -> Self {
+        self.declared_schema = declared_schema;
+        self
     }
 
     pub fn options(&self) -> &FileWriteOptions {
         &self.options
+    }
+
+    pub fn declared_schema(&self) -> Option<&DFSchemaRef> {
+        self.declared_schema.as_ref()
     }
 }
 
@@ -74,6 +91,7 @@ impl UserDefinedLogicalNodeCore for FileWriteNode {
             input: Arc::new(inputs.one()?),
             options: self.options.clone(),
             schema: self.schema.clone(),
+            declared_schema: self.declared_schema.clone(),
         })
     }
 

@@ -204,6 +204,13 @@ pub struct SinkInfo {
     /// metadata attached via `Expr::Alias::with_metadata`). Table formats can use
     /// this to recover column-level metadata such as `delta.generationExpression`.
     pub logical_schema: Option<datafusion_common::DFSchemaRef>,
+    /// The declared (catalog) schema of the write target, when writing to a
+    /// known table. Unlike `logical_schema` (the write *input*), this preserves
+    /// the table's declared column nullability, which the input plan loses
+    /// (VALUES/literal projections are marked non-nullable). Table formats use
+    /// it to record correct nullability in table metadata. `None` for ad-hoc
+    /// data-source writes.
+    pub declared_schema: Option<datafusion_common::DFSchemaRef>,
 }
 
 /// Returns the path from options, or `None` if not set.

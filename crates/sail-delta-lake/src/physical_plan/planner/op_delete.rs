@@ -129,6 +129,7 @@ pub async fn build_delete_plan(
         ctx.table_exists(),
         &filter_exec.schema(),
         operation,
+        None,
     )?;
 
     assemble_commit_plan(

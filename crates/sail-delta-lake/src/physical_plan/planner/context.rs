@@ -48,6 +48,12 @@ pub struct DeltaPlannerConfig {
     /// field metadata set at logical-plan construction time.
     pub generation_expressions: HashMap<String, String>,
     pub table_snapshot: Option<Arc<DeltaSnapshot>>,
+    /// The declared (logical) table schema, used to source the *metaData*
+    /// column nullability on the initial commit of a new table. Spark columns
+    /// are nullable unless declared `NOT NULL`, but the inserted-data plan marks
+    /// VALUES/literal projections as non-nullable; without this the first commit
+    /// would persist the wrong nullability. Only the metadata schema uses it.
+    pub declared_schema: Option<SchemaRef>,
 }
 
 impl DeltaPlannerConfig {
@@ -68,6 +74,7 @@ impl DeltaPlannerConfig {
             table_exists,
             generation_expressions: HashMap::new(),
             table_snapshot: None,
+            declared_schema: None,
         }
     }
 
@@ -76,6 +83,11 @@ impl DeltaPlannerConfig {
         generation_expressions: HashMap<String, String>,
     ) -> Self {
         self.generation_expressions = generation_expressions;
+        self
+    }
+
+    pub fn with_declared_schema(mut self, declared_schema: Option<SchemaRef>) -> Self {
+        self.declared_schema = declared_schema;
         self
     }
 
@@ -167,6 +179,7 @@ impl<'a> PlannerContext<'a> {
             self.table_exists(),
             input_schema,
             operation_override,
+            self.config.declared_schema.as_ref(),
         )
     }
 

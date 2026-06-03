@@ -121,6 +121,7 @@ pub async fn build_merge_plan(
         true,
         &writer_input.schema(),
         merge_operation.clone(),
+        None,
     )?;
 
     assemble_commit_plan(
@@ -203,6 +204,7 @@ pub async fn build_merge_plan_mor(
         true,
         &writer_schema,
         merge_operation.clone(),
+        None,
     )?;
 
     let writer: Arc<dyn ExecutionPlan> = Arc::new(DeltaWriterExec::new(

@@ -89,6 +89,7 @@ impl TableFormat for IcebergTableFormat {
             sort_order,
             options,
             logical_schema: _,
+            declared_schema: _,
         } = info;
 
         if bucket_by.is_some() {

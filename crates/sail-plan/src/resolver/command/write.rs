@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::Schema;
-use datafusion_common::{Column, DFSchema};
+use datafusion_common::{Column, DFSchema, DFSchemaRef};
 use datafusion_expr::expr::{FieldMetadata, Sort};
 use datafusion_expr::{
     col, lit, when, BinaryExpr, Expr, ExprSchemable, Extension, LogicalPlan, LogicalPlanBuilder,
@@ -228,6 +228,11 @@ impl PlanResolver<'_> {
                 .collect(),
         };
         let mut preconditions = vec![];
+        // Declared (catalog) schema of the write target, carrying the table's
+        // column nullability. The write input plan loses this (VALUES/literal
+        // projections are non-nullable), so table formats use it to record the
+        // correct nullability in table metadata. Only set for table targets.
+        let mut declared_schema: Option<DFSchemaRef> = None;
         match target {
             WriteTarget::DataSource => {
                 if !table_properties.is_empty() {
@@ -265,6 +270,9 @@ impl PlanResolver<'_> {
                 column_match,
             } => {
                 let info = self.resolve_table_info(&table).await?;
+                if let Some(info) = info.as_ref() {
+                    declared_schema = Some(Arc::new(DFSchema::try_from(info.schema())?));
+                }
 
                 // Return early if the target exists and the mode says to skip
                 if matches!(mode, WriteMode::IgnoreIfExists) && info.is_some() {
@@ -451,7 +459,10 @@ impl PlanResolver<'_> {
             }
         };
         let plan = LogicalPlan::Extension(Extension {
-            node: Arc::new(FileWriteNode::new(Arc::new(input), file_write_options)),
+            node: Arc::new(
+                FileWriteNode::new(Arc::new(input), file_write_options)
+                    .with_declared_schema(declared_schema),
+            ),
         });
         Ok(LogicalPlan::Extension(Extension {
             node: Arc::new(BarrierNode::new(preconditions, Arc::new(plan))),

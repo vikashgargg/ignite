@@ -260,6 +260,7 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             sort_order,
             options,
             logical_schema: _,
+            declared_schema: _,
         } = info;
         if is_flow_event_schema(&input.schema()) {
             return plan_err!("cannot write streaming data to listing table");

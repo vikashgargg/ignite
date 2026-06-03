@@ -190,6 +190,7 @@ impl ExtensionPlanner for ExtensionPhysicalPlanner {
                 logical_input,
                 physical_input.clone(),
                 node.options().clone(),
+                node.declared_schema().cloned(),
             )
             .await?
         } else if let Some(node) = node.as_any().downcast_ref::<FileDeleteNode>() {

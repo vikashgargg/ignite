@@ -89,6 +89,7 @@ impl ExtensionPlanner for DeltaExtensionPlanner {
                 logical_input,
                 physical_input.clone(),
                 node.options().clone(),
+                node.declared_schema().cloned(),
             )
             .await?;
             return Ok(Some(plan));

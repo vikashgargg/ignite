@@ -17,6 +17,7 @@ pub async fn create_file_write_physical_plan(
     logical_input: &LogicalPlan,
     physical_input: Arc<dyn ExecutionPlan>,
     options: FileWriteOptions,
+    declared_schema: Option<datafusion_common::DFSchemaRef>,
 ) -> Result<Arc<dyn ExecutionPlan>> {
     let FileWriteOptions {
         format,
@@ -50,6 +51,7 @@ pub async fn create_file_write_physical_plan(
         // TODO: detect duplicated keys in each set of options
         options,
         logical_schema: Some(logical_input.schema().clone()),
+        declared_schema,
     };
     let registry = ctx.extension::<TableFormatRegistry>()?;
     registry.get(&format)?.create_writer(ctx, info).await

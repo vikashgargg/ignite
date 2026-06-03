@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::{Field, Schema, SchemaRef};
+use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef};
 use datafusion_common::{DataFusionError, Result};
 use sail_common_datafusion::datasource::{
     PhysicalSinkMode, MERGE_SOURCE_METRIC_COLUMN, OPERATION_COLUMN,
@@ -142,6 +142,7 @@ pub fn prepare_delta_write_context(
     table_exists: bool,
     input_schema: &SchemaRef,
     operation_override: Option<DeltaOperation>,
+    declared_schema: Option<&SchemaRef>,
 ) -> Result<DeltaWriteContext> {
     let input_schema = normalize_delta_schema(&schema_without_writer_metric_columns(input_schema));
     let mut initial_actions: Vec<Action> = Vec::new();
@@ -180,7 +181,16 @@ pub fn prepare_delta_write_context(
     if !table_exists {
         let has_timestamp_ntz = contains_timestampntz_arrow(final_schema.as_ref());
         let has_variant = contains_variant_arrow(final_schema.as_ref());
-        let mut kernel_schema = StructType::try_from(final_schema.as_ref())
+        // The Delta `metaData` schema must reflect the *declared* table schema's
+        // nullability (Spark columns are nullable unless `NOT NULL`), not the
+        // nullability of the inserted data plan (DataFusion marks VALUES/literal
+        // projections as non-nullable). Reconcile by field name; the physical
+        // write schema (`final_schema`) is left untouched.
+        let metadata_arrow_schema = match declared_schema {
+            Some(declared) => apply_declared_nullability(final_schema.as_ref(), declared.as_ref()),
+            None => final_schema.clone(),
+        };
+        let mut kernel_schema = StructType::try_from(metadata_arrow_schema.as_ref())
             .map_err(|e| DataFusionError::External(Box::new(e)))?;
         if !options.generation_expressions.is_empty() {
             kernel_schema =
@@ -529,6 +539,54 @@ fn validate_schema_compatibility(table_schema: &Schema, input_schema: &Schema) -
         }
     }
     Ok(())
+}
+
+/// Build a copy of `schema` whose field nullability is taken from `template`
+/// (the declared table schema) wherever a field of the same name exists,
+/// recursing into struct children. Types, ordering, and metadata are preserved
+/// from `schema`; fields absent from `template` keep their original nullability.
+fn apply_declared_nullability(schema: &Schema, template: &Schema) -> SchemaRef {
+    let template_fields: HashMap<&str, &Arc<Field>> = template
+        .fields()
+        .iter()
+        .map(|f| (f.name().as_str(), f))
+        .collect();
+    let fields: Vec<Field> = schema
+        .fields()
+        .iter()
+        .map(|f| reconcile_field_nullability(f, template_fields.get(f.name().as_str()).copied()))
+        .collect();
+    Arc::new(Schema::new(fields))
+}
+
+fn reconcile_field_nullability(field: &Arc<Field>, template: Option<&Arc<Field>>) -> Field {
+    let Some(template) = template else {
+        return field.as_ref().clone();
+    };
+    let data_type = match (field.data_type(), template.data_type()) {
+        (DataType::Struct(child_fields), DataType::Struct(template_children)) => {
+            let template_map: HashMap<&str, &Arc<Field>> = template_children
+                .iter()
+                .map(|f| (f.name().as_str(), f))
+                .collect();
+            let new_children: Fields = child_fields
+                .iter()
+                .map(|cf| {
+                    Arc::new(reconcile_field_nullability(
+                        cf,
+                        template_map.get(cf.name().as_str()).copied(),
+                    ))
+                })
+                .collect();
+            DataType::Struct(new_children)
+        }
+        _ => field.data_type().clone(),
+    };
+    field
+        .as_ref()
+        .clone()
+        .with_data_type(data_type)
+        .with_nullable(template.is_nullable())
 }
 
 fn inject_generation_expressions(

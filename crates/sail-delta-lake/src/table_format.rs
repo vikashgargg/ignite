@@ -109,6 +109,7 @@ impl TableFormat for DeltaTableFormat {
             sort_order,
             options,
             logical_schema,
+            declared_schema,
         } = info;
 
         if is_flow_event_schema(&input.schema()) {
@@ -246,6 +247,7 @@ impl TableFormat for DeltaTableFormat {
             table_exists,
         )
         .with_generation_expressions(extract_generation_expressions(logical_schema.as_deref()))
+        .with_declared_schema(declared_schema.as_deref().map(|s| Arc::clone(s.inner())))
         .with_table_snapshot(table_snapshot);
         let planner_ctx = PlannerContext::new(ctx, table_config);
         let planner = DeltaPhysicalPlanner::new(planner_ctx);

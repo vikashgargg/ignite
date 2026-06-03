@@ -220,6 +220,7 @@ async fn build_overwrite_if_plan(
         ctx.table_exists(),
         &union_plan.schema(),
         operation_override,
+        None,
     )?;
     let writer = Arc::new(DeltaWriterExec::new(
         Arc::clone(&union_plan),
