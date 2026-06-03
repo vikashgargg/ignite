@@ -20,6 +20,18 @@ runs:
         # to get the latest protoc release.
         repo-token: ${{ github.token }}
 
+    # rdkafka-sys (Kafka source) builds librdkafka via cmake, which needs
+    # libcurl/openssl/zlib/sasl/zstd dev headers. Without these the build fails
+    # with "curl/curl.h: No such file or directory". Installed here so every
+    # workflow using setup-rust (rust-build, rust-tests, spark-tests) gets them.
+    - name: Install librdkafka build dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          cmake make perl libcurl4-openssl-dev libssl-dev zlib1g-dev libsasl2-dev libzstd-dev
+
     # The Rust stable toolchain is likely installed already, but we need to check for updates.
     - name: Install Rust toolchain (stable)
       run: |
