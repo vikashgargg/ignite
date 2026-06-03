@@ -66,6 +66,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Run unit tests
+        # PyO3 embedding build+run needs the interpreter pinned and its lib dir
+        # on the link/runtime path (the binaries link libpython3 via abi3).
+        env:
+          PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
+          RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
         run: cargo test --workspace --lib -- --test-threads=4
 
   build-linux:
@@ -150,7 +156,9 @@ jobs:
 
       - name: Build release binary
         env:
-          PYO3_PYTHON: python3.12
+          PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
+          RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
         run: cargo build --release -p sail-cli
 
       - name: Set up smoke venv
@@ -162,6 +170,7 @@ jobs:
         env:
           SAIL_MODE: local-cluster
           RUST_LOG: warn
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
         run: |
           mkdir -p /tmp/vajra
           target/release/vajra server --ip 0.0.0.0 --port 50051 &
@@ -532,7 +541,9 @@ jobs:
 
       - name: Build release binary
         env:
-          PYO3_PYTHON: python3.12
+          PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
+          RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
         run: cargo build --release -p sail-cli
 
       - name: Set up Python venv
@@ -544,6 +555,7 @@ jobs:
         env:
           SAIL_MODE: local-cluster
           RUST_LOG: warn
+          LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
         run: |
           mkdir -p /tmp/tpch_data
           target/release/vajra server --ip 0.0.0.0 --port 50051 &
