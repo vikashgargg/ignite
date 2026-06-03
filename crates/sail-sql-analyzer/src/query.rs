@@ -1,7 +1,7 @@
 use either::Either;
 use sail_common::spec;
 use sail_sql_parser::ast::expression::{
-    AtomExpr, DuplicateTreatment, Expr, GroupingSet, OrderByExpr,
+    AtomExpr, DuplicateTreatment, Expr, OrderByExpr,
 };
 use sail_sql_parser::ast::identifier::{Ident, ObjectName};
 use sail_sql_parser::ast::literal::IntegerLiteral;
@@ -582,7 +582,7 @@ fn from_ast_hive_from(term: HiveFromTerm) -> SqlResult<spec::QueryPlan> {
                 allow_missing_columns: false,
             }))
         })
-        .expect("bodies non-empty");
+        .ok_or_else(|| SqlError::invalid("query has no SELECT/INSERT body"))?;
     Ok(plan)
 }
 
@@ -1101,7 +1101,7 @@ fn query_plan_with_table_modifier(
                 interval_expr,
             } = wm;
             let event_time_str = match event_time_alias {
-                Some((_, alias)) => alias.value.into(),
+                Some((_, alias)) => alias.value,
                 None => event_time.text().trim().to_string(),
             };
             let delay_threshold = interval_expr.text().trim().to_string();

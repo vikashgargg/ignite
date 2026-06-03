@@ -68,10 +68,12 @@ jobs:
       - name: Run unit tests
         # PyO3 embedding build+run needs the interpreter pinned and its lib dir
         # on the link/runtime path (the binaries link libpython3 via abi3).
+        # RUST_MIN_STACK: the recursive SQL gold-data tests need a larger stack.
         env:
           PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
           RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
           LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
+          RUST_MIN_STACK: "33554432"
         run: cargo test --workspace --lib -- --test-threads=4
 
   build-linux:

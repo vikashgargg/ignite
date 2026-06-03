@@ -15,7 +15,7 @@ use crate::ast::keywords::{
     All, Anti, As, Bucket, By, Cluster, Cross, Cube, Delay, Distinct, Distribute, Except, Exclude,
     For, From, Full, Group, Grouping, Having, Identifier, In, Include, Inner, Insert, Intersect,
     Into as IntoKeyword, Join, Lateral, Left, Limit, Minus, Name, Natural, Nulls, Of, Offset, On,
-    Order, Out, Outer, Overwrite, Partition, Percent, Pivot, Qualify, Recursive, Repeatable, Right,
+    Order, Out, Outer, Partition, Percent, Pivot, Qualify, Recursive, Repeatable, Right,
     Rollup, Rows, Select, Semi, Sets, Sort, SystemTime, SystemVersion, Table, Tablesample,
     Timestamp, Union, Unpivot, Using, Values, Version, View, Watermark, Where, Window, With,
 };
@@ -438,6 +438,7 @@ pub struct TableSampleRepeatable {
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
 #[parser(dependency = "Expr")]
+#[expect(clippy::large_enum_variant)]
 pub enum TableModifier {
     Pivot(#[parser(function = |e, o| compose(e, o))] PivotClause),
     Unpivot(UnpivotClause),
@@ -527,7 +528,6 @@ pub struct UnpivotColumnGroup {
     // Allow empty for (())
     pub names: Option<Sequence<UnpivotColumnItem, Comma>>,
     pub right: RightParenthesis,
-    #[expect(clippy::type_complexity)]
     pub alias: Option<(Option<As>, Ident)>,
 }
 

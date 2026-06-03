@@ -484,6 +484,9 @@ pub struct ColumnDefinition {
 
 #[derive(Debug, Clone, TreeParser, TreeSyntax, TreeText)]
 #[parser(dependency = "Expr")]
+// IDENTITY-column variants carry the START WITH/INCREMENT BY tuple, which trips
+// type_complexity; the shape is dictated by the SQL grammar + TreeParser derive.
+#[expect(clippy::type_complexity)]
 pub enum ColumnDefinitionOption {
     NotNull(Not, Null),
     Default(Default, #[parser(function = |e, _| e)] Expr),

@@ -16,12 +16,12 @@ use crate::ast::keywords::{
     Grouping, Groups, Hour, Hours, Identifier, Ignore, Ilike, In, Interval, Is, Last, Leading,
     Like, Microsecond, Microseconds, Millisecond, Milliseconds, Minute, Minutes, Month, Months,
     Not, Null, Nulls, Or, Order, Over, Overlay, Partition, Placing, Position, Preceding, Range,
-    Regexp, Respect, Rlike, Rollup, Row, Rows, Second, Seconds, Sets, Similar, Single, Sort,
+    Regexp, Respect, Rlike, Rollup, Row, Rows, Second, Seconds, Sets, Similar, Single,
     Struct, Substr, Substring, Table, Then, Time, Timestamp, TimestampLtz, TimestampNtz, To,
     Trailing, Trim, True, TryCast, Unbounded, Unknown, Week, Weeks, When, Where, With, Within,
     Year, Years,
 };
-use crate::ast::literal::{IntegerLiteral, NumberLiteral, StringLiteral};
+use crate::ast::literal::{NumberLiteral, StringLiteral};
 use crate::ast::operator;
 use crate::ast::operator::{
     Comma, DoubleColon, LeftBracket, LeftParenthesis, Period, RightBracket, RightParenthesis,
