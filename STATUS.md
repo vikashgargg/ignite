@@ -117,7 +117,12 @@ Root causes of the long-standing CI red (now being fixed in Phase 4.2):
   native Linux `cargo build` → `-lpython3.11 not found`. **Fixed** (scoped to
   the musl cross-compile only).
 - Accumulated `-D warnings` clippy debt across crates (never enforced because
-  clippy failed on the first crate and stopped). **Being cleared crate by crate.**
+  clippy failed on the first crate and stopped). **CLEARED** (2026-06-03, commit
+  `90f69f22`): `cargo clippy --all-targets --all-features -- -D warnings` now
+  exits **0 with zero warnings** across the entire workspace — the first time
+  ever. All fixes behavior-preserving; followed upstream LakeSail/DataFusion
+  (test modules use `#[expect(clippy::unwrap_used)]`, production code returns
+  errors; `clippy.toml` NOT loosened). 302 unit tests pass, 0 failures.
 - Unit tests overflow the default stack on recursive SQL gold tests → needs
   `RUST_MIN_STACK`. **Fixed** in the test job.
 - musl `rdkafka` static cross-compile (libcurl) — Linux release switched to
