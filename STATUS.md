@@ -102,11 +102,34 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 - `make container-build` / `make container-run` / `make container-run-cluster`
 - Binary: `vajra-aarch64-apple-darwin` (~105 MB, statically linked)
 
-### CI ✅ (all platforms)
-- `distributed-scorecard` — Linux x86_64, local-cluster mode, 105/105
-- `k8s-scorecard` — Linux x86_64, kind cluster, kubernetes-cluster mode *(K8s supports both x86_64 and arm64 Linux workers)*
-- `macos-scorecard` — macOS Apple Silicon (arm64), local-cluster mode
-- **Note**: Apple Container is Apple Silicon only. K8s works on any Linux arch.
+### CI status — being made genuinely green (Phase 4.2, 2026-06)
+
+> **Honest correction:** earlier revisions of this file claimed "CI ✅ (all
+> platforms)". That was **aspirational, not factual** — GitHub Actions CI had
+> been **red on every run**. What was actually validated each sprint was the
+> **functional scorecard (105/105)**, run *locally* with manual env workarounds
+> (`DYLD_FRAMEWORK_PATH`, `PYTHONPATH`, `RUST_MIN_STACK`). Local `cargo
+> build`/`test`/scorecard do not use CI's `-D warnings` or its Python-linking
+> env, so latent CI failures never surfaced locally.
+
+Root causes of the long-standing CI red (now being fixed in Phase 4.2):
+- `PYO3_CROSS_PYTHON_VERSION` set workflow-wide forced PyO3 cross-mode on every
+  native Linux `cargo build` → `-lpython3.11 not found`. **Fixed** (scoped to
+  the musl cross-compile only).
+- Accumulated `-D warnings` clippy debt across crates (never enforced because
+  clippy failed on the first crate and stopped). **Being cleared crate by crate.**
+- Unit tests overflow the default stack on recursive SQL gold tests → needs
+  `RUST_MIN_STACK`. **Fixed** in the test job.
+- musl `rdkafka` static cross-compile (libcurl) — Linux release switched to
+  native glibc; musl deferred.
+
+Verified green-after-fix so far: native-Linux PyO3 builds compile + tests run;
+the **differential-spark gate** (byte-for-byte vs real Apache Spark) is being
+brought online as the continuous correctness guarantee.
+
+CI jobs: `fmt`, `clippy`, `test`, `build-linux`, `distributed-scorecard`,
+`k8s-scorecard`, `macos-scorecard`, `differential-spark`, plus the upstream
+`build.yml` (rust-build/tests, python-tests, spark-tests).
 
 ---
 

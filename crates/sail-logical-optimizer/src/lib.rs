@@ -64,6 +64,7 @@ impl OptimizerRule for SafeOptimizeProjections {
         self.inner.apply_order()
     }
 
+    #[expect(deprecated)]
     fn supports_rewrite(&self) -> bool {
         self.inner.supports_rewrite()
     }
@@ -82,14 +83,16 @@ impl OptimizerRule for SafeOptimizeProjections {
 
 fn plan_has_recursive_query(plan: &LogicalPlan) -> bool {
     let mut found = false;
-    plan.apply(|node| {
+    // The visitor closure is infallible (always returns Ok), so the traversal
+    // cannot error; `found` is set by side effect. Discard the Result rather
+    // than expect() (workspace denies expect_used).
+    let _ = plan.apply(|node| {
         if matches!(node, LogicalPlan::RecursiveQuery(_)) {
             found = true;
             Ok(datafusion::common::tree_node::TreeNodeRecursion::Stop)
         } else {
             Ok(datafusion::common::tree_node::TreeNodeRecursion::Continue)
         }
-    })
-    .expect("plan traversal never fails");
+    });
     found
 }
