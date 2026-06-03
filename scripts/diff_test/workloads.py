@@ -91,4 +91,80 @@ WORKLOADS = [
      "SELECT x FROM t WHERE x IN (SELECT x FROM t WHERE x%2=0) ORDER BY x"),
     ("union_all", [],
      "SELECT id FROM range(3) UNION ALL SELECT id FROM range(2) ORDER BY id"),
+
+    # ── More string functions ─────────────────────────────────────────────
+    ("string_funcs2", [],
+     "SELECT regexp_replace('hello123','[0-9]+','#') rr, split('a,b,c',',') sp, "
+     "lpad('5',3,'0') lp, rpad('5',3,'0') rp, replace('aaa','a','b') rep, "
+     "instr('hello','ll') ins, locate('l','hello') loc, reverse('abc') rev"),
+    ("string_case_pad", [],
+     "SELECT initcap('hello world') ic, ascii('A') asc_, char(65) ch, "
+     "repeat('ab',3) rpt, translate('abc','ab','xy') tr"),
+
+    # ── Math functions ────────────────────────────────────────────────────
+    ("math_funcs", [],
+     "SELECT round(3.14159,2) rnd, ceil(2.1) cl, floor(2.9) fl, abs(-5) ab, "
+     "power(2,10) pw, sqrt(16.0) sq, mod(17,5) md, greatest(1,5,3) gt, least(1,5,3) lt"),
+    ("math_funcs2", [],
+     "SELECT sign(-3) sg, exp(0) ex, cast(round(ln(exp(2.0)),6) as double) l, "
+     "pmod(-7,3) pm, factorial(5) fac"),
+
+    # ── Null handling ─────────────────────────────────────────────────────
+    ("null_handling", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,NULL),(NULL,2),(3,3) AS v(a,b)",
+     ],
+     "SELECT coalesce(a,b,-1) c, nvl(a,0) n, ifnull(b,0) i, nullif(a,3) nf FROM t ORDER BY c"),
+
+    # ── Casts / type conversions ──────────────────────────────────────────
+    ("casts", [],
+     "SELECT cast('123' AS INT) i, cast(45.67 AS INT) ti, cast(1 AS STRING) s, "
+     "cast('2026-03-09' AS DATE) d, cast('true' AS BOOLEAN) b"),
+    ("try_cast", [],
+     "SELECT try_cast('abc' AS INT) bad, try_cast('42' AS INT) good"),
+
+    # ── More aggregates ───────────────────────────────────────────────────
+    ("agg_stats", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1.0),(2.0),(3.0),(4.0),(5.0) AS v(x)",
+     ],
+     "SELECT round(stddev(x),6) sd, round(variance(x),6) vr, round(stddev_pop(x),6) sdp FROM t"),
+    ("collect", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES ('a',1),('a',2),('b',3) AS v(k,n)",
+     ],
+     "SELECT k, sort_array(collect_list(n)) cl, sort_array(collect_set(n)) cs FROM t GROUP BY k ORDER BY k"),
+    ("first_last", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES ('a',1),('a',2),('a',3) AS v(k,n)",
+     ],
+     "SELECT k, first(n) f, last(n) l, count_if(n>1) ci FROM t GROUP BY k ORDER BY k"),
+
+    # ── distinct / dedup ──────────────────────────────────────────────────
+    ("distinct", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,'a'),(1,'a'),(2,'b') AS v(x,y)",
+     ],
+     "SELECT DISTINCT x, y FROM t ORDER BY x, y"),
+
+    # ── More dates ────────────────────────────────────────────────────────
+    ("date_funcs2", [],
+     "SELECT to_date('2026-03-09') td, date_format(DATE '2026-03-09','yyyy/MM/dd') df, "
+     "last_day(DATE '2026-02-15') ld, dayofweek(DATE '2026-03-09') dw, "
+     "weekofyear(DATE '2026-03-09') wy, quarter(DATE '2026-08-01') q"),
+
+    # ── Structs ───────────────────────────────────────────────────────────
+    ("structs", [],
+     "SELECT named_struct('a',1,'b','x') ns, struct(1,2,3) st"),
+    ("struct_field", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT named_struct('x',10,'y','hi') AS s",
+     ],
+     "SELECT s.x sx, s.y sy FROM t"),
+
+    # ── explode / lateral ─────────────────────────────────────────────────
+    ("explode", [],
+     "SELECT explode(array(10,20,30)) AS e ORDER BY e"),
+    ("posexplode", [],
+     "SELECT pos, col FROM (SELECT posexplode(array('a','b','c'))) ORDER BY pos"),
+
+    # ── Conditional / predicates ──────────────────────────────────────────
+    ("predicates", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(5),(10),(15) AS v(x)",
+     ],
+     "SELECT x, x BETWEEN 5 AND 10 bt, x IN (1,15) inl, x IS NOT NULL nn FROM t ORDER BY x"),
 ]

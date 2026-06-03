@@ -14,6 +14,12 @@ KNOWN_VERSION_DIFFS = {
     # percentile_disc return type: Spark 3.5 -> double, Spark 4.x -> input type
     # (Int here). Vajra matches 4.x.
     "percentile",
+    # round() on a decimal literal: Spark applies a specific result-precision
+    # rule (decimal(4,2)); Vajra/DataFusion keep the input precision
+    # (decimal(6,2)). The VALUE is identical (3.14); only the declared precision
+    # metadata differs. LakeSail uses the identical expr_fn::round and has the
+    # same gap, so there is nothing to adapt — low impact, value-correct.
+    "math_funcs",
 }
 
 
