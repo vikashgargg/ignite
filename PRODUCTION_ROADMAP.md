@@ -220,10 +220,22 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
   for a defensible parity number (see 5.1).
 
 ### Remaining — the moat (Pillar 2, highest leverage)
-- [ ] **Real-scale performance proof** `P0` — the single biggest credibility gap. We claim
-  5–10x but have only published TPC-H SF-1 (1.515s). Need a real-scale, published result:
-  TPC-DS/TPC-H SF-100 distributed (see 5.2) and/or the ClickBench 43-query run vs Spark.
-  Until this exists, "production Spark replacement" is a claim, not a proven fact.
+The single biggest credibility gap. We claim 5–10x but lack a published real-scale result.
+
+- [x] **Benchmark harness repaired + validated** (commit `8a7a1af7`) — fixed two bugs
+  (Arrow ChunkedArray conversion in `vajra bench`; f-string SyntaxError in
+  `scripts/tpch_distributed.py`). Canonical path is client→server:
+  `SPARK_REMOTE=sc://localhost:50051 TPCH_SF=1 python scripts/tpch_distributed.py`
+  → **22/22 TPC-H pass** (debug build, cold, single-node).
+- [ ] **Release + warm + vs-Spark single-node number** `P0` — rerun the harness with a
+  release build and `TPCH_WARMUP=1`, alongside the same queries on real Apache Spark, and
+  publish the head-to-head (the existing "1.515s / 40×" was release+warm; reproduce it).
+- [ ] **SF-100 distributed on a real cluster** `P0` — see 5.2; needs a 10-node K8s cluster
+  (provision per `docs/K8S_PRODUCTION_TESTING.md`). Not runnable locally.
+- [ ] **ClickBench 43-query run vs Spark** `P1` — `scripts/clickbench.py`; directly
+  comparable to LakeSail's published ClickBench.
+- [ ] **Refactor `vajra bench` self-test** `P2` — spawn the server out-of-process so the
+  embedded interpreter doesn't share the GIL with gRPC + DuckDB (current fatal-GIL crash).
 
 ---
 
