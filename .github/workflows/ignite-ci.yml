@@ -9,8 +9,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Required by PyO3 when cross-compiling to a different OS/arch.
-  PYO3_CROSS_PYTHON_VERSION: "3.11"
+  # NOTE: PYO3_CROSS_PYTHON_VERSION must NOT be set workflow-wide. It forces
+  # PyO3 into cross mode and emits -lpython3.11 for every NATIVE cargo build,
+  # which then fails ("unable to find -lpython3.11"). It is set per-job only on
+  # the genuine cross-compile (build-linux musl via zigbuild).
 
 jobs:
   fmt:
@@ -103,6 +105,9 @@ jobs:
         with:
           version: "0.14.0"
       - name: Build static binary (musl via zigbuild)
+        env:
+          # Genuine cross-compile: PyO3 needs the target Python version hint here.
+          PYO3_CROSS_PYTHON_VERSION: "3.11"
         run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
       - name: Show binary size
         run: |
