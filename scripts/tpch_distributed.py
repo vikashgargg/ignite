@@ -530,7 +530,8 @@ def main() -> None:
     if passed:
         print(f"Avg per query: {total_time/len(results):.3f}s")
     if failed:
-        print(f"\nFailed: {', '.join(f'Q{r[\"query\"]}' for r in failed)}")
+        failed_list = ", ".join("Q{}".format(r["query"]) for r in failed)
+        print(f"\nFailed: {failed_list}")
 
     # Write JSON summary
     summary_path = TPCH_DATA_DIR / "benchmark_result.json"

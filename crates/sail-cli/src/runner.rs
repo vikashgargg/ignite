@@ -371,18 +371,24 @@ except Exception:
     pass  # already installed in some bundles
 
 if DATA == "local":
-    print(f"Generating TPC-H SF={{SF}} with DuckDB (in-memory)...")
+    import tempfile
+    print(f"Generating TPC-H SF={{SF}} with DuckDB...")
     conn.sql(f"CALL dbgen(sf={{SF}})")
     tables = [r[0] for r in conn.sql("SHOW TABLES").fetchall()]
     q_rows  = conn.sql("SELECT query_nr, query FROM tpch_queries()").fetchall()
     queries = dict(q_rows)
     print(f"Generated {{len(tables)}} tables.\n")
 
-    print("Loading into Vajra via Arrow...")
+    # Write each table to Parquet via DuckDB, then read it back through Vajra.
+    # This avoids an Arrow->pandas->createDataFrame round-trip (which breaks on
+    # multi-chunk Arrow tables) and exercises the realistic Parquet read path.
+    gen_dir = tempfile.mkdtemp(prefix="vajra_tpch_")
+    print(f"Writing Parquet to {{gen_dir}} and loading into Vajra...")
     t_load = time.time()
     for tbl in tables:
-        arrow = conn.sql(f"FROM {{tbl}}").fetch_arrow_table()
-        spark.createDataFrame(arrow.to_pandas()).createOrReplaceTempView(tbl)
+        pq = f"{{gen_dir}}/{{tbl}}.parquet"
+        conn.sql(f"COPY {{tbl}} TO '{{pq}}' (FORMAT PARQUET)")
+        spark.read.parquet(pq).createOrReplaceTempView(tbl)
     print(f"Load time: {{time.time()-t_load:.2f}}s\n")
 else:
     import os
