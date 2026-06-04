@@ -353,6 +353,35 @@ WORKLOADS = [
     ("hash_funcs", [],
      "SELECT md5('abc') m, sha1('abc') s1, sha2('abc',256) s2, crc32('abc') c"),
 
+    # ── JSON (common in real pipelines) ────────────────────────────────────────────
+    ("json_get_object", [],
+     "SELECT get_json_object('{\"a\":1,\"b\":{\"c\":2}}','$.b.c') gc, "
+     "get_json_object('{\"a\":\"x\"}','$.a') ga, "
+     "get_json_object('{\"arr\":[10,20,30]}','$.arr[1]') gi"),
+    ("json_tuple", [],
+     "SELECT json_tuple('{\"a\":\"1\",\"b\":\"2\",\"c\":\"3\"}','a','b','c') AS (a,b,c)"),
+    ("json_from_to", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT '{\"id\":7,\"name\":\"x\"}' AS j",
+     ],
+     "SELECT from_json(j,'id INT, name STRING').id fid, to_json(named_struct('k',1,'v','y')) tj FROM t"),
+    ("json_array_len", [],
+     "SELECT json_array_length('[1,2,3,4]') jal, get_json_object('{\"n\":null}','$.n') gn"),
+
+    # ── Timestamp / date edge cases ─────────────────────────────────────────────────
+    ("timestamp_arithmetic", [],
+     "SELECT datediff(DATE'2024-12-31',DATE'2024-01-01') dd, "
+     "months_between(DATE'2024-12-01',DATE'2024-01-01') mb, "
+     "date_add(DATE'2024-02-28',1) leap"),
+    ("date_extract_fields", [],
+     "SELECT extract(YEAR FROM DATE'2024-03-15') y, extract(MONTH FROM DATE'2024-03-15') m, "
+     "extract(DAY FROM TIMESTAMP'2024-03-15 10:20:30') d, weekday(DATE'2024-03-15') wd"),
+    ("date_boundaries", [],
+     "SELECT last_day(DATE'2024-02-15') feb_leap, last_day(DATE'2023-02-15') feb, "
+     "dayofyear(DATE'2024-12-31') doy, weekofyear(DATE'2024-01-01') woy"),
+    ("string_to_date_formats", [],
+     "SELECT to_date('2024-03-15') d1, to_date('15/03/2024','dd/MM/yyyy') d2, "
+     "date_format(DATE'2024-03-15','EEEE') dow_name"),
+
     # ══ Batch 2 — higher-divergence-risk surface ═══════════════════════════
 
     # ── Decimals: arithmetic, precision, aggregation ────────────────────────

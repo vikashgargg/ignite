@@ -14,12 +14,43 @@ use sail_function::scalar::json::{
 use crate::error::{PlanError, PlanResult};
 use crate::function::common::{ScalarFunction, ScalarFunctionBuilder as F, ScalarFunctionInput};
 
+/// Expand one dotted JSONPath segment into key + array-index components so the
+/// `json_as_text` UDF (which treats integer path args as array indices) can
+/// resolve them. `arr[1]` -> [lit("arr"), lit(1)], `key` -> [lit("key")],
+/// `m[0][2]` -> [lit("m"), lit(0), lit(2)].
+fn json_path_segment(seg: &str) -> Vec<expr::Expr> {
+    let Some(open) = seg.find('[') else {
+        return vec![lit(seg.to_string())];
+    };
+    let mut out = Vec::new();
+    let key = &seg[..open];
+    if !key.is_empty() {
+        out.push(lit(key.to_string()));
+    }
+    for part in seg[open..].split('[') {
+        if part.is_empty() {
+            continue;
+        }
+        match part.strip_suffix(']').and_then(|n| n.trim().parse::<i64>().ok()) {
+            Some(i) => out.push(lit(i)),
+            None => out.push(lit(format!("[{part}"))),
+        }
+    }
+    out
+}
+
 fn get_json_object(expr: expr::Expr, path: expr::Expr) -> PlanResult<expr::Expr> {
     let paths: Vec<expr::Expr> = match path {
         expr::Expr::Literal(ScalarValue::Utf8(Some(value)), _metadata)
             if value.starts_with("$.") =>
         {
-            Ok::<_, DataFusionError>(value.replacen("$.", "", 1).split(".").map(lit).collect())
+            Ok::<_, DataFusionError>(
+                value
+                    .replacen("$.", "", 1)
+                    .split('.')
+                    .flat_map(json_path_segment)
+                    .collect(),
+            )
         }
         // FIXME: json_as_text_udf for array of paths with subpaths is not implemented, so only top level keys supported
         _ => Ok(vec![when(

@@ -22,11 +22,6 @@ KNOWN_VERSION_DIFFS = {
     # metadata differs. LakeSail uses the identical expr_fn::round and has the
     # same gap, so there is nothing to adapt — low impact, value-correct.
     "math_funcs",
-    # array_position result type: Spark declares bigint; Vajra/DataFusion declare
-    # decimal(20,0). The VALUE is identical (the position index); only the
-    # declared result-type metadata differs. Value-correct; low-priority type
-    # alignment, not a wrong answer.
-    "array_position",
     # transform() lambda index is bigint in Vajra, so `x + i` widens the element
     # type int->bigint. Element VALUES are identical; only array<int> vs
     # array<bigint> metadata differs.

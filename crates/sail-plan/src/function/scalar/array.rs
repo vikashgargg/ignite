@@ -160,20 +160,26 @@ fn array_contains_all(array: expr::Expr, element: expr::Expr) -> expr::Expr {
 }
 
 fn array_position(array: expr::Expr, element: expr::Expr) -> PlanResult<expr::Expr> {
-    Ok(coalesce(vec![
-        datafusion_array_position(
-            // datafusion panics if from_index > array_len
-            // So if the inner array_len == 0, search in NULL array instead
-            when(
-                expr_fn::cardinality(array.clone()).gt(lit(0)),
-                array.clone(),
-            )
-            .end()?,
-            element,
-            lit(1_i32),
-        ),
-        when(array.clone().is_not_null(), lit(0_i32)).end()?,
-    ]))
+    // Spark's `array_position` returns BIGINT. DataFusion's returns UInt64
+    // (which maps to decimal(20,0) in the Spark type system), so cast the
+    // result to Int64 for type parity with Spark.
+    Ok(cast(
+        coalesce(vec![
+            datafusion_array_position(
+                // datafusion panics if from_index > array_len
+                // So if the inner array_len == 0, search in NULL array instead
+                when(
+                    expr_fn::cardinality(array.clone()).gt(lit(0)),
+                    array.clone(),
+                )
+                .end()?,
+                element,
+                lit(1_i32),
+            ),
+            when(array.clone().is_not_null(), lit(0_i32)).end()?,
+        ]),
+        DataType::Int64,
+    ))
 }
 
 fn array_insert(input: ScalarFunctionInput) -> PlanResult<expr::Expr> {
