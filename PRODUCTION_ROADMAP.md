@@ -208,9 +208,15 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
   column-mapping 4/4, zero regressions. MERGE metric logic confirmed already correct.
 
 ### Remaining — trust
+- [x] **Differential trust harness broadened 37→82 workloads** (commit `e5c23806`) —
+  byte-for-byte vs Apache Spark 3.5.3, **82/82 match**. Surfaced + fixed a real
+  Spark-incompatibility (`log(x)` 1-arg natural log). 2 value-correct type-metadata
+  diffs documented in `diff.py`. The `differential-spark` CI job fails on any divergence.
+- [ ] **Make `differential-spark` a required check** `P0` — branch-protection setting on
+  `main` (repo settings) so no merge can silently diverge from Spark. Then keep growing
+  workloads toward the full function surface.
 - [ ] **Full CI lane green end-to-end** `P0` — all jobs (clippy ✅, fmt, test, build-linux,
-  distributed-scorecard, k8s/macos-scorecard, differential-spark). Wire `differential-spark`
-  as a required gate so every change is trust-protected.
+  distributed-scorecard, k8s/macos-scorecard, differential-spark ✅).
 - [ ] **Delta byte-size snapshot refresh** `P1` — ~10 `@sail-only` operation_metrics/merge
   snapshots fail only on physical Parquet byte sizes (all semantic counters already match
   Spark). Regenerate from Vajra's deterministic output, or match upstream parquet encoding.
