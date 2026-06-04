@@ -199,11 +199,13 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
 
 ### Done this sprint
 - [x] **Merged to `main`** (2026-06-04, `fc6ec9e2`) after the local scorecard gate.
-  Multi-mode verification with the release binary: `local` **105/105**, `local-cluster`
-  (4-worker distributed) **105/105**. Apple Container rebuild + K8s(kind) re-run are
-  blocked on this host (in-container build needs ~60 GB vs 24 GB free; Docker daemon
-  down for kind) — Sprint 4.2 is code+tests only, so the unchanged deployment layer
-  still packages the verified binary; container/K8s run in CI and on larger-disk hosts.
+  Multi-mode verification with the fresh release binary: `local` **105/105**,
+  `local-cluster` (4-worker distributed) **105/105**, **Apple Container** (fresh image,
+  `SAIL_MODE=local-cluster`, 4 workers) **105/105**. Apple build needed a 5 GB builder VM
+  (`container builder start --memory 5g`) — the default 2 GB OOM-killed `hive_metastore`
+  on the 8 GB host. K8s(kind) is the only remaining leg, gated on the local Docker engine
+  API becoming reachable (Desktop "running" but socket unresponsive); deployment layer
+  unchanged this sprint and covered by CI `k8s-scorecard`.
 - [x] **Workspace clippy lane green** — `cargo clippy --all-targets --all-features -- -D warnings`
   exits 0 for the first time (commit `90f69f22`). Complied with the strict lints
   (test modules use `#[expect(...)]`) rather than loosening `clippy.toml`, matching

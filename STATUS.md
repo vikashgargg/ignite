@@ -17,18 +17,19 @@
 | Differential trust harness **37→111 workloads, 111/111 vs Spark** | ✅ `c57c6bf0` |
 | Real Spark-compat fixes: `log(x)` 1-arg, `array_position`→bigint, `get_json_object` array-index | ✅ |
 
-### Multi-mode verification (release binary, 2026-06-04)
+### Multi-mode verification (fresh release build, 2026-06-04)
 | Mode | Score |
 |---|---|
 | `local` | ✅ 105/105 |
 | `local-cluster` (4 workers, distributed) | ✅ 105/105 |
-| Apple Container (rebuild) | ⏳ blocked locally — in-container source build needs ~60 GB; 24 GB free. Deployment layer (Dockerfile) unchanged this sprint; runs in CI / on a larger-disk host |
-| K8s (kind, local-cluster) | ⏳ blocked locally — `kind` requires the Docker daemon (currently down). Manifests/Helm unchanged this sprint; runs in CI `k8s-scorecard` |
+| **Apple Container** (fresh image `4cf12a97`, `SAIL_MODE=local-cluster`, 4 workers) | ✅ 105/105 |
+| K8s (kind, local-cluster) | ⏳ pending — `kind` needs a reachable Docker engine (Desktop shows "running" but its API socket isn't responding; needs an engine restart). Manifests/Helm unchanged this sprint; also covered by CI `k8s-scorecard` |
 
-> Sprint 4.2 changes are **code + tests only** (Rust + diff harness). The container/K8s
-> deployment layer is unchanged, so the same binary verified in local + local-cluster
-> mode (105/105) is what those images package. Full container/K8s re-run pending local
-> disk headroom (~60 GB) + a running Docker daemon, or the CI lanes.
+> Same single binary verified across `local`, distributed `local-cluster`, **and Apple
+> Container** (105/105 each). The Apple build initially OOM-killed `hive_metastore` on the
+> 2 GB builder VM (8 GB host); rebuilding with a 5 GB builder (`container builder start
+> --memory 5g`) succeeded. K8s is the last leg, gated only on the local Docker engine API
+> becoming reachable; the deployment layer is unchanged this sprint and runs in CI.
 
 ---
 
