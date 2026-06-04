@@ -1,9 +1,34 @@
 # Vajra — Build Status
 
-> Last updated: 2026-06-02
-> Tag: **v0.6.0-alpha** (Phase 4 Sprint 4.1 — Spark 4.1 SQL + production hardening)
-> Branch: `phase4/spark41-delta-v3-ai`
+> Last updated: 2026-06-04
+> Tag: **v0.6.0-alpha** (Phase 4 Sprint 4.2 — trust + perf proof; merged to `main`)
+> Branch: `main` (Sprint 4.2 merged at `fc6ec9e2`)
 > See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) and [FEATURES.md](FEATURES.md) for the full plan.
+
+---
+
+## Sprint 4.2 merged to main ✅ (2026-06-04)
+
+| Item | Status |
+|---|---|
+| Workspace clippy `-D warnings` green (first time) | ✅ `90f69f22` |
+| Delta declared-nullability metaData fix (feature suite 134→144) | ✅ `2d1147d6` |
+| TPC-H SF-1 head-to-head: **Vajra 1.78s vs Spark 3.5.3 63.46s (~36×)** | ✅ `9805ffae`, [docs/benchmarks/TPCH_SF1.md](docs/benchmarks/TPCH_SF1.md) |
+| Differential trust harness **37→111 workloads, 111/111 vs Spark** | ✅ `c57c6bf0` |
+| Real Spark-compat fixes: `log(x)` 1-arg, `array_position`→bigint, `get_json_object` array-index | ✅ |
+
+### Multi-mode verification (release binary, 2026-06-04)
+| Mode | Score |
+|---|---|
+| `local` | ✅ 105/105 |
+| `local-cluster` (4 workers, distributed) | ✅ 105/105 |
+| Apple Container (rebuild) | ⏳ blocked locally — in-container source build needs ~60 GB; 24 GB free. Deployment layer (Dockerfile) unchanged this sprint; runs in CI / on a larger-disk host |
+| K8s (kind, local-cluster) | ⏳ blocked locally — `kind` requires the Docker daemon (currently down). Manifests/Helm unchanged this sprint; runs in CI `k8s-scorecard` |
+
+> Sprint 4.2 changes are **code + tests only** (Rust + diff harness). The container/K8s
+> deployment layer is unchanged, so the same binary verified in local + local-cluster
+> mode (105/105) is what those images package. Full container/K8s re-run pending local
+> disk headroom (~60 GB) + a running Docker daemon, or the CI lanes.
 
 ---
 

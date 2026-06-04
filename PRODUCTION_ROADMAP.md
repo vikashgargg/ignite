@@ -198,6 +198,12 @@ Vajra leads on the operational axis (streaming, JWT/mTLS, K8s HA, Apple Containe
 Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance**.
 
 ### Done this sprint
+- [x] **Merged to `main`** (2026-06-04, `fc6ec9e2`) after the local scorecard gate.
+  Multi-mode verification with the release binary: `local` **105/105**, `local-cluster`
+  (4-worker distributed) **105/105**. Apple Container rebuild + K8s(kind) re-run are
+  blocked on this host (in-container build needs ~60 GB vs 24 GB free; Docker daemon
+  down for kind) — Sprint 4.2 is code+tests only, so the unchanged deployment layer
+  still packages the verified binary; container/K8s run in CI and on larger-disk hosts.
 - [x] **Workspace clippy lane green** — `cargo clippy --all-targets --all-features -- -D warnings`
   exits 0 for the first time (commit `90f69f22`). Complied with the strict lints
   (test modules use `#[expect(...)]`) rather than loosening `clippy.toml`, matching
