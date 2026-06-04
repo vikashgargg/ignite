@@ -503,6 +503,27 @@ fn log(base: Expr, num: Expr) -> Expr {
     expr_fn::log(base, positive_or_null(num))
 }
 
+/// Spark `log`: the 1-argument form is the natural logarithm
+/// (`log(x)` == `ln(x)`), while the 2-argument form is `log(base, x)`.
+/// DataFusion's `log` is the 2-argument form only, so dispatch on arity here
+/// for Spark compatibility.
+fn spark_log(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    let ScalarFunctionInput { arguments, .. } = input;
+    match arguments.len() {
+        1 => Ok(ln(cast(arguments.one()?, DataType::Float64))),
+        2 => {
+            let (base, num) = arguments.two()?;
+            Ok(log(
+                cast(base, DataType::Float64),
+                cast(num, DataType::Float64),
+            ))
+        }
+        n => Err(PlanError::invalid(format!(
+            "log() expects 1 or 2 arguments, got {n}"
+        ))),
+    }
+}
+
 fn log10(expr: Expr) -> Expr {
     expr_fn::log10(positive_or_null(expr))
 }
@@ -611,7 +632,7 @@ pub(super) fn list_built_in_math_functions() -> Vec<(&'static str, ScalarFunctio
         ("hypot", F::binary(hypot)),
         ("least", F::var_arg(expr_fn::least)),
         ("ln", F::unary(double(ln))),
-        ("log", F::binary(double2(log))),
+        ("log", F::custom(spark_log)),
         ("log10", F::unary(double(log10))),
         ("log1p", F::unary(double(log1p))),
         ("log2", F::unary(double(log2))),

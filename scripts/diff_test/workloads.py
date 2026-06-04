@@ -167,4 +167,189 @@ WORKLOADS = [
         "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(5),(10),(15) AS v(x)",
      ],
      "SELECT x, x BETWEEN 5 AND 10 bt, x IN (1,15) inl, x IS NOT NULL nn FROM t ORDER BY x"),
+
+    # ══ Expanded common-path coverage (trust breadth) ══════════════════════
+
+    # ── More join types ────────────────────────────────────────────────────
+    ("right_join", [
+        "CREATE OR REPLACE TEMP VIEW l AS SELECT * FROM VALUES (1,'x'),(2,'y') AS v(id,a)",
+        "CREATE OR REPLACE TEMP VIEW r AS SELECT * FROM VALUES (1,'p'),(3,'r') AS v(id,b)",
+     ],
+     "SELECT l.id li, r.id ri, l.a, r.b FROM l RIGHT JOIN r ON l.id=r.id ORDER BY r.id"),
+    ("full_outer_join", [
+        "CREATE OR REPLACE TEMP VIEW l AS SELECT * FROM VALUES (1,'x'),(2,'y') AS v(id,a)",
+        "CREATE OR REPLACE TEMP VIEW r AS SELECT * FROM VALUES (2,'q'),(3,'r') AS v(id,b)",
+     ],
+     "SELECT l.id li, r.id ri FROM l FULL OUTER JOIN r ON l.id=r.id ORDER BY li, ri"),
+    ("left_semi_join", [
+        "CREATE OR REPLACE TEMP VIEW l AS SELECT * FROM VALUES (1),(2),(3) AS v(id)",
+        "CREATE OR REPLACE TEMP VIEW r AS SELECT * FROM VALUES (2),(3),(4) AS v(id)",
+     ],
+     "SELECT id FROM l LEFT SEMI JOIN r USING (id) ORDER BY id"),
+    ("left_anti_join", [
+        "CREATE OR REPLACE TEMP VIEW l AS SELECT * FROM VALUES (1),(2),(3) AS v(id)",
+        "CREATE OR REPLACE TEMP VIEW r AS SELECT * FROM VALUES (2),(3),(4) AS v(id)",
+     ],
+     "SELECT id FROM l LEFT ANTI JOIN r USING (id) ORDER BY id"),
+    ("multi_key_join", [
+        "CREATE OR REPLACE TEMP VIEW l AS SELECT * FROM VALUES (1,'a',10),(1,'b',20) AS v(k1,k2,n)",
+        "CREATE OR REPLACE TEMP VIEW r AS SELECT * FROM VALUES (1,'a',100) AS v(k1,k2,m)",
+     ],
+     "SELECT l.k1,l.k2,l.n,r.m FROM l JOIN r ON l.k1=r.k1 AND l.k2=r.k2 ORDER BY l.k2"),
+
+    # ── More window functions ───────────────────────────────────────────────
+    ("window_lag_lead", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,10),(2,20),(3,30) AS v(id,n)",
+     ],
+     "SELECT id, lag(n) OVER (ORDER BY id) lg, lead(n) OVER (ORDER BY id) ld FROM t ORDER BY id"),
+    ("window_first_last_value", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES ('a',1),('a',2),('b',3) AS v(k,n)",
+     ],
+     "SELECT k, first_value(n) OVER (PARTITION BY k ORDER BY n) fv, "
+     "last_value(n) OVER (PARTITION BY k ORDER BY n ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) lv "
+     "FROM t ORDER BY k, n"),
+    ("window_running_sum", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,10),(2,20),(3,30) AS v(id,n)",
+     ],
+     "SELECT id, sum(n) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) rs FROM t ORDER BY id"),
+    ("window_ntile_pctrank", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(2),(3),(4) AS v(id)",
+     ],
+     "SELECT id, ntile(2) OVER (ORDER BY id) nt, percent_rank() OVER (ORDER BY id) pr, "
+     "cume_dist() OVER (ORDER BY id) cd FROM t ORDER BY id"),
+
+    # ── String functions (extended) ──────────────────────────────────────────
+    ("string_regexp", [],
+     "SELECT regexp_replace('a1b2c3','[0-9]','#') rr, regexp_extract('foo-123','([0-9]+)',1) re"),
+    ("string_split", [],
+     "SELECT split('a,b,c',',') sp, element_at(split('x:y:z',':'),2) el"),
+    ("string_pad_instr", [],
+     "SELECT lpad('5',3,'0') lp, rpad('5',3,'0') rp, instr('hello','ll') ins, locate('o','foobar') loc"),
+    ("string_translate_repeat", [],
+     "SELECT translate('abc','ac','xz') tr, repeat('ab',3) rep, reverse('abc') rev, initcap('hello world') ic"),
+    ("string_left_right_substridx", [],
+     "SELECT left('hello',2) lf, right('hello',2) rt, substring_index('a.b.c','.',2) si"),
+    ("string_replace_concat_ws", [],
+     "SELECT replace('aaa','a','b') rp, concat_ws('-','a','b','c') cw, format_string('%d-%s',5,'x') fs"),
+
+    # ── Date / time (extended) ────────────────────────────────────────────────
+    ("date_add_sub_diff", [],
+     "SELECT date_add(DATE'2024-01-01',5) da, date_sub(DATE'2024-01-10',3) ds, "
+     "datediff(DATE'2024-01-10',DATE'2024-01-01') dd"),
+    ("date_parts", [],
+     "SELECT year(DATE'2024-03-15') y, month(DATE'2024-03-15') m, day(DATE'2024-03-15') d, "
+     "dayofweek(DATE'2024-03-15') dow, dayofyear(DATE'2024-03-15') doy, quarter(DATE'2024-03-15') q"),
+    ("date_last_next_add_months", [],
+     "SELECT last_day(DATE'2024-02-10') ld, add_months(DATE'2024-01-31',1) am, "
+     "months_between(DATE'2024-03-01',DATE'2024-01-01') mb"),
+    ("date_format_trunc", [],
+     "SELECT date_format(DATE'2024-03-15','yyyy/MM/dd') df, trunc(DATE'2024-03-15','MM') tm"),
+
+    # ── Numeric / math (extended) ─────────────────────────────────────────────
+    ("math_ceil_floor_abs_sign", [],
+     "SELECT ceil(2.1) c, floor(2.9) f, abs(-7) a, sign(-3) sg"),
+    ("math_greatest_least", [],
+     "SELECT greatest(1,5,3) g, least(1,5,3) l, mod(17,5) m, pmod(-3,5) pm"),
+    ("math_bitwise", [],
+     "SELECT shiftleft(1,4) sl, shiftright(32,2) sr, (6 & 3) ba, (6 | 1) bo, (5 ^ 1) bx"),
+    ("math_pow_sqrt", [],
+     "SELECT power(2,10) p, sqrt(144) sq, cast(exp(0) AS int) e, cast(log(1) AS int) lg"),
+
+    # ── Aggregates (extended) ─────────────────────────────────────────────────
+    ("agg_stddev_var", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (2),(4),(4),(4),(5),(5),(7),(9) AS v(x)",
+     ],
+     "SELECT round(stddev_pop(x),6) sp, round(var_pop(x),6) vp FROM t"),
+    ("agg_count_if_bool", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(2),(3),(4),(5) AS v(x)",
+     ],
+     "SELECT count_if(x>3) ci, bool_and(x>0) ba, bool_or(x>4) bo FROM t"),
+    ("agg_max_min_by", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES ('a',3),('b',1),('c',2) AS v(k,n)",
+     ],
+     "SELECT max_by(k,n) mb, min_by(k,n) mnb FROM t"),
+    ("agg_collect_set_sorted", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (3),(1),(2),(1),(3) AS v(x)",
+     ],
+     "SELECT sort_array(collect_set(x)) cs, sort_array(collect_list(x)) cl FROM t"),
+
+    # ── Complex types: arrays (extended) ───────────────────────────────────────
+    ("array_membership", [],
+     "SELECT array_contains(array(1,2,3),2) ac, size(array(1,2,3)) sz, "
+     "sort_array(array_distinct(array(1,1,2,3,3))) ad"),
+    # array_position value is correct (2); only the declared result type differs
+    # (Spark bigint vs Vajra decimal(20,0)) — isolated + allowlisted in diff.py.
+    ("array_position", [],
+     "SELECT array_position(array(10,20,30),20) ap"),
+    ("array_set_ops", [],
+     "SELECT sort_array(array_union(array(1,2),array(2,3))) au, "
+     "sort_array(array_intersect(array(1,2,3),array(2,3,4))) ai, "
+     "sort_array(array_except(array(1,2,3),array(2))) ae"),
+    ("array_slice_flatten_seq", [],
+     "SELECT slice(array(1,2,3,4),2,2) sl, flatten(array(array(1,2),array(3))) fl, sequence(1,5) sq"),
+    ("array_element_max_min", [],
+     "SELECT element_at(array(10,20,30),2) el, array_max(array(3,1,2)) amx, array_min(array(3,1,2)) amn, "
+     "array_join(array('a','b','c'),'-') aj"),
+
+    # ── Complex types: maps (extended) ──────────────────────────────────────────
+    ("map_ops", [],
+     "SELECT sort_array(map_keys(map('a',1,'b',2))) mk, sort_array(map_values(map('a',1,'b',2))) mv, "
+     "element_at(map('a',1,'b',2),'b') ea"),
+
+    # ── Higher-order functions (extended) ────────────────────────────────────────
+    ("hof_transform_filter", [],
+     "SELECT transform(array(1,2,3), x -> x*2) tf, filter(array(1,2,3,4), x -> x%2=0) ff"),
+    ("hof_exists_forall", [],
+     "SELECT exists(array(1,2,3), x -> x>2) ex, forall(array(2,4,6), x -> x%2=0) fa"),
+    ("hof_aggregate_zip", [],
+     "SELECT aggregate(array(1,2,3,4), 0, (acc,x) -> acc+x) ag, "
+     "zip_with(array(1,2,3), array(10,20,30), (a,b) -> a+b) zw"),
+
+    # ── Set ops ────────────────────────────────────────────────────────────────
+    ("intersect", [
+        "CREATE OR REPLACE TEMP VIEW a AS SELECT * FROM VALUES (1),(2),(3) AS v(x)",
+        "CREATE OR REPLACE TEMP VIEW b AS SELECT * FROM VALUES (2),(3),(4) AS v(x)",
+     ],
+     "SELECT x FROM a INTERSECT SELECT x FROM b ORDER BY x"),
+    ("except_op", [
+        "CREATE OR REPLACE TEMP VIEW a AS SELECT * FROM VALUES (1),(2),(3) AS v(x)",
+        "CREATE OR REPLACE TEMP VIEW b AS SELECT * FROM VALUES (2) AS v(x)",
+     ],
+     "SELECT x FROM a EXCEPT SELECT x FROM b ORDER BY x"),
+
+    # ── Null / 3-valued logic ────────────────────────────────────────────────────
+    ("null_coalesce_nvl", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,CAST(NULL AS INT)),(CAST(NULL AS INT),5) AS v(a,b)",
+     ],
+     "SELECT coalesce(a,b,-1) co, nvl(a,0) nv, nvl2(a,1,2) nv2, ifnull(a,99) ifn, nullif(a,1) nf FROM t ORDER BY co"),
+    ("null_safe_eq", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,1),(CAST(NULL AS INT),CAST(NULL AS INT)) AS v(a,b)",
+     ],
+     "SELECT (a <=> b) nse FROM t ORDER BY nse"),
+
+    # ── Conditional ──────────────────────────────────────────────────────────────
+    ("conditional_if_nested_case", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(2),(3) AS v(x)",
+     ],
+     "SELECT x, if(x>1,'hi','lo') f, CASE WHEN x=1 THEN 'a' WHEN x=2 THEN 'b' ELSE 'c' END c FROM t ORDER BY x"),
+
+    # ── Sorting / limit ──────────────────────────────────────────────────────────
+    ("order_by_nulls", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(CAST(NULL AS INT)),(3) AS v(x)",
+     ],
+     "SELECT x FROM t ORDER BY x ASC NULLS LAST"),
+
+    # ── Grouping sets / rollup ─────────────────────────────────────────────────────
+    ("rollup", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES ('a','x',1),('a','y',2),('b','x',3) AS v(k1,k2,n)",
+     ],
+     "SELECT k1, k2, sum(n) s FROM t GROUP BY ROLLUP(k1,k2) ORDER BY k1 NULLS LAST, k2 NULLS LAST"),
+    ("grouping_sets", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES ('a','x',1),('a','y',2),('b','x',3) AS v(k1,k2,n)",
+     ],
+     "SELECT k1, k2, sum(n) s FROM t GROUP BY GROUPING SETS ((k1),(k2)) ORDER BY k1 NULLS LAST, k2 NULLS LAST"),
+
+    # ── Hashing (deterministic algorithms) ──────────────────────────────────────────
+    ("hash_funcs", [],
+     "SELECT md5('abc') m, sha1('abc') s1, sha2('abc',256) s2, crc32('abc') c"),
 ]

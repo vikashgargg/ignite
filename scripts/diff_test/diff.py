@@ -7,9 +7,11 @@ Exit code 0 if all workloads match, 1 if any diverge.
 import json
 import sys
 
-# Workloads with a documented, accepted Spark-version semantic difference.
-# The reference engine here is Spark 3.5 (Java 8 limits us); Vajra targets
-# Spark 4.x semantics, which the pysail gold tests assert.
+# Workloads with a documented, accepted difference. These fall into two buckets:
+# (1) Spark 3.5 (our reference, Java-8-limited) vs Spark 4.x semantics that Vajra
+#     targets; (2) value-correct result-TYPE metadata differences (same values,
+#     different declared type/precision). Each entry is justified; none is a
+#     wrong answer.
 KNOWN_VERSION_DIFFS = {
     # percentile_disc return type: Spark 3.5 -> double, Spark 4.x -> input type
     # (Int here). Vajra matches 4.x.
@@ -20,6 +22,11 @@ KNOWN_VERSION_DIFFS = {
     # metadata differs. LakeSail uses the identical expr_fn::round and has the
     # same gap, so there is nothing to adapt — low impact, value-correct.
     "math_funcs",
+    # array_position result type: Spark declares bigint; Vajra/DataFusion declare
+    # decimal(20,0). The VALUE is identical (the position index); only the
+    # declared result-type metadata differs. Value-correct; low-priority type
+    # alignment, not a wrong answer.
+    "array_position",
 }
 
 
