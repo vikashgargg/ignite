@@ -208,12 +208,14 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
   column-mapping 4/4, zero regressions. MERGE metric logic confirmed already correct.
 
 ### Remaining — trust
-- [x] **Differential trust harness broadened 37→103 workloads** (commits `e5c23806`,
-  `a4704d4a`) — byte-for-byte vs Apache Spark 3.5.3, **103/103 match**. Surfaced + fixed a
-  real Spark-incompatibility (`log(x)` 1-arg natural log). Value-correct type-metadata diffs
-  (round/array_position/array_transform_index/bround) documented in `diff.py`. ANSI-mode
-  cast semantics tested on the common path. The `differential-spark` CI job fails on any
-  divergence.
+- [x] **Differential trust harness broadened 37→111 workloads** (commits `e5c23806`,
+  `a4704d4a`, `b4088b78`) — byte-for-byte vs Apache Spark 3.5.3, **111/111 match**. Surfaced
+  and **fixed three real Spark issues**: `log(x)` 1-arg natural log; `array_position` now
+  returns BIGINT (was decimal(20,0)) — exact type parity; `get_json_object` now resolves
+  array-index JSONPath like `$.arr[1]` (was NULL). Remaining documented value-correct type
+  diffs (allowlisted): `round` precision, `bround` (double vs decimal), `array_transform_index`
+  (lambda index widen). ANSI-mode cast semantics tested on the common path. The
+  `differential-spark` CI job fails on any divergence.
 - [ ] **Make `differential-spark` a required check** `P0` — branch-protection setting on
   `main` (repo settings) so no merge can silently diverge from Spark. Then keep growing
   workloads toward the full function surface.
