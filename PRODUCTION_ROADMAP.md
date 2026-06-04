@@ -227,9 +227,11 @@ The single biggest credibility gap. We claim 5–10x but lack a published real-s
   `scripts/tpch_distributed.py`). Canonical path is client→server:
   `SPARK_REMOTE=sc://localhost:50051 TPCH_SF=1 python scripts/tpch_distributed.py`
   → **22/22 TPC-H pass** (debug build, cold, single-node).
-- [ ] **Release + warm + vs-Spark single-node number** `P0` — rerun the harness with a
-  release build and `TPCH_WARMUP=1`, alongside the same queries on real Apache Spark, and
-  publish the head-to-head (the existing "1.515s / 40×" was release+warm; reproduce it).
+- [x] **Release + warm + vs-Spark single-node number** — published head-to-head in
+  [docs/benchmarks/TPCH_SF1.md](docs/benchmarks/TPCH_SF1.md): TPC-H SF-1, 22/22 both engines,
+  identical Parquet + queries, same machine, both warm, `local[4]`. **Vajra 1.780s vs
+  Apache Spark 3.5.3 63.463s → ~36×.** Reproducible via `scripts/tpch_distributed.py`
+  (now dual-engine: remote=Vajra, `local[*]`=reference Spark).
 - [ ] **SF-100 distributed on a real cluster** `P0` — see 5.2; needs a 10-node K8s cluster
   (provision per `docs/K8S_PRODUCTION_TESTING.md`). Not runnable locally.
 - [ ] **ClickBench 43-query run vs Spark** `P1` — `scripts/clickbench.py`; directly

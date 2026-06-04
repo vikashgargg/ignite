@@ -489,11 +489,17 @@ def main() -> None:
     print(f"Warmup    : {'yes' if TPCH_WARMUP else 'no'}")
     print()
 
-    spark = (
-        SparkSession.builder
-        .remote(SPARK_REMOTE)
-        .getOrCreate()
-    )
+    # `SPARK_REMOTE=local[*]` (or any `local...` value) runs against a real
+    # in-process Apache Spark (JVM) for an apples-to-apples reference comparison;
+    # otherwise connect to a remote Spark Connect server (Vajra).
+    if SPARK_REMOTE.startswith("local"):
+        print(f"Engine    : reference Apache Spark (master={SPARK_REMOTE})")
+        # pyspark auto-enables Spark Connect when the SPARK_REMOTE env var is
+        # present; drop it so getOrCreate() uses the classic in-process JVM.
+        os.environ.pop("SPARK_REMOTE", None)
+        spark = SparkSession.builder.master(SPARK_REMOTE).getOrCreate()
+    else:
+        spark = SparkSession.builder.remote(SPARK_REMOTE).getOrCreate()
 
     if not TPCH_SKIP_GENERATE:
         print("Generating TPC-H data...")
