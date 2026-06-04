@@ -27,6 +27,13 @@ KNOWN_VERSION_DIFFS = {
     # declared result-type metadata differs. Value-correct; low-priority type
     # alignment, not a wrong answer.
     "array_position",
+    # transform() lambda index is bigint in Vajra, so `x + i` widens the element
+    # type int->bigint. Element VALUES are identical; only array<int> vs
+    # array<bigint> metadata differs.
+    "array_transform_index",
+    # bround() returns double in Vajra vs decimal in Spark. The numeric value is
+    # identical (banker's rounding); only the declared type differs.
+    "bround",
 }
 
 

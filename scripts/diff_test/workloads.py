@@ -352,4 +352,91 @@ WORKLOADS = [
     # ── Hashing (deterministic algorithms) ──────────────────────────────────────────
     ("hash_funcs", [],
      "SELECT md5('abc') m, sha1('abc') s1, sha2('abc',256) s2, crc32('abc') c"),
+
+    # ══ Batch 2 — higher-divergence-risk surface ═══════════════════════════
+
+    # ── Decimals: arithmetic, precision, aggregation ────────────────────────
+    ("decimal_arithmetic", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES "
+        "(CAST(10.50 AS DECIMAL(10,2)), CAST(3.00 AS DECIMAL(10,2))) AS v(a,b)",
+     ],
+     "SELECT a+b ap, a-b am, a*b amul FROM t"),
+    ("decimal_agg", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES "
+        "(CAST(1.10 AS DECIMAL(10,2))),(CAST(2.20 AS DECIMAL(10,2))),(CAST(3.30 AS DECIMAL(10,2))) AS v(x)",
+     ],
+     # avg() of decimal goes through the round/precision rule (see math_funcs);
+     # sum/min/max are precision-stable across engines.
+     "SELECT sum(x) s, min(x) mn, max(x) mx FROM t"),
+    ("decimal_cast", [],
+     "SELECT CAST('123.456' AS DECIMAL(10,3)) d1, CAST(7 AS DECIMAL(5,2)) d2"),
+
+    # ── Timestamps (explicit literals; timezone-independent) ─────────────────
+    ("timestamp_parts", [],
+     "SELECT hour(TIMESTAMP'2024-03-15 13:45:30') h, minute(TIMESTAMP'2024-03-15 13:45:30') mi, "
+     "second(TIMESTAMP'2024-03-15 13:45:30') s, date_format(TIMESTAMP'2024-03-15 13:45:30','HH:mm:ss') df"),
+    ("timestamp_to_date_cast", [],
+     "SELECT CAST(TIMESTAMP'2024-03-15 13:45:30' AS DATE) d, "
+     "to_date('2024-03-15','yyyy-MM-dd') td, date_trunc('HOUR', TIMESTAMP'2024-03-15 13:45:30') dt"),
+    ("unix_time_roundtrip", [],
+     "SELECT from_unixtime(0,'yyyy-MM-dd HH:mm:ss') fu, unix_timestamp('1970-01-01 00:00:00','yyyy-MM-dd HH:mm:ss') ut"),
+
+    # ── Casts / coercion (clean inputs; overflow/invalid are ANSI-mode
+    #    dependent — Spark 3.5 non-ANSI wraps/nulls, Vajra matches Spark 4.x
+    #    ANSI and errors — so we test the path both engines agree on) ─────────
+    ("cast_string_numeric", [],
+     "SELECT CAST('42' AS INT) i, CAST('3.14' AS DOUBLE) d, CAST('100' AS LONG) l"),
+    ("cast_boolean", [],
+     "SELECT CAST(1 AS BOOLEAN) b1, CAST(0 AS BOOLEAN) b0, CAST('true' AS BOOLEAN) bt, CAST('false' AS BOOLEAN) bf"),
+    ("cast_numeric_widen_narrow", [],
+     "SELECT CAST(5 AS TINYINT) tn, CAST(100 AS SMALLINT) sn, CAST(3.99 AS INT) tr, CAST(2147483647 AS LONG) lg"),
+
+    # ── Statistical aggregates (float; rounded) ──────────────────────────────
+    ("agg_corr_covar", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,2),(2,4),(3,6),(4,8) AS v(x,y)",
+     ],
+     "SELECT round(corr(x,y),6) c, round(covar_pop(x,y),6) cp, round(covar_samp(x,y),6) cs FROM t"),
+    ("agg_skew_kurt", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(2),(2),(3),(3),(3),(4) AS v(x)",
+     ],
+     "SELECT round(skewness(x),6) sk, round(kurtosis(x),6) ku, round(stddev_samp(x),6) ss, round(var_samp(x),6) vs FROM t"),
+    ("agg_any_value", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (5),(5),(5) AS v(x)",
+     ],
+     "SELECT any_value(x) av, sum(DISTINCT x) sd FROM t"),
+
+    # ── Advanced string functions ────────────────────────────────────────────
+    ("string_ascii_base64", [],
+     "SELECT ascii('A') a, char(66) c, base64(CAST('abc' AS BINARY)) b64, "
+     "CAST(unbase64('YWJj') AS STRING) ub"),
+    ("string_levenshtein_overlay", [],
+     "SELECT levenshtein('kitten','sitting') lv, overlay('abcdef' PLACING 'XY' FROM 2 FOR 2) ov, "
+     "soundex('Robert') sx"),
+    ("string_regexp_extract_all", [],
+     "SELECT split('a1b2c3','[0-9]') sp2, regexp_extract('2024-03-15','(\\\\d+)-(\\\\d+)',2) re2, "
+     "char_length('hello') cl"),
+
+    # ── Advanced numeric ──────────────────────────────────────────────────────
+    ("numeric_conv_unhex", [],
+     "SELECT conv('FF',16,10) cv, CAST(unhex('41') AS STRING) uh"),
+    # bround value is correct (banker's rounding: 2.5->2, 3.5->4); Vajra returns
+    # double where Spark returns decimal — value-equal type diff, allowlisted.
+    ("bround", [],
+     "SELECT bround(2.5,0) br, bround(3.5,0) br2"),
+    ("numeric_trig_misc", [],
+     "SELECT round(degrees(3.141592653589793),6) dg, cast(cbrt(27) as int) cb, "
+     "round(hypot(3,4),6) hy, factorial(5) fa"),
+
+    # ── Advanced arrays (Spark 3.5-available) ─────────────────────────────────
+    ("array_repeat_overlap", [],
+     "SELECT array_repeat('x',3) ar, arrays_overlap(array(1,2),array(2,3)) ao, "
+     "array_contains(array(1,2,3),5) nc"),
+    ("array_transform_index", [],
+     "SELECT transform(array(10,20,30), (x,i) -> x+i) ti, "
+     "filter(array(1,2,3,4,5), x -> x>2) fl"),
+
+    # ── Maps (extended) ────────────────────────────────────────────────────────
+    ("map_concat_entries", [],
+     "SELECT element_at(map_concat(map('a',1),map('b',2)),'b') mc, "
+     "sort_array(map_keys(map_from_entries(array(struct(1,'a'),struct(2,'b'))))) mfe"),
 ]
