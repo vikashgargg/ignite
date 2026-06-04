@@ -208,10 +208,12 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
   column-mapping 4/4, zero regressions. MERGE metric logic confirmed already correct.
 
 ### Remaining — trust
-- [x] **Differential trust harness broadened 37→82 workloads** (commit `e5c23806`) —
-  byte-for-byte vs Apache Spark 3.5.3, **82/82 match**. Surfaced + fixed a real
-  Spark-incompatibility (`log(x)` 1-arg natural log). 2 value-correct type-metadata
-  diffs documented in `diff.py`. The `differential-spark` CI job fails on any divergence.
+- [x] **Differential trust harness broadened 37→103 workloads** (commits `e5c23806`,
+  `a4704d4a`) — byte-for-byte vs Apache Spark 3.5.3, **103/103 match**. Surfaced + fixed a
+  real Spark-incompatibility (`log(x)` 1-arg natural log). Value-correct type-metadata diffs
+  (round/array_position/array_transform_index/bround) documented in `diff.py`. ANSI-mode
+  cast semantics tested on the common path. The `differential-spark` CI job fails on any
+  divergence.
 - [ ] **Make `differential-spark` a required check** `P0` — branch-protection setting on
   `main` (repo settings) so no merge can silently diverge from Spark. Then keep growing
   workloads toward the full function surface.
