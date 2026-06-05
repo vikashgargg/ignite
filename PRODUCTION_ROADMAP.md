@@ -201,11 +201,11 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
 - [x] **Merged to `main`** (2026-06-04, `fc6ec9e2`) after the local scorecard gate.
   Multi-mode verification with the fresh release binary: `local` **105/105**,
   `local-cluster` (4-worker distributed) **105/105**, **Apple Container** (fresh image,
-  `SAIL_MODE=local-cluster`, 4 workers) **105/105**. Apple build needed a 5 GB builder VM
-  (`container builder start --memory 5g`) — the default 2 GB OOM-killed `hive_metastore`
-  on the 8 GB host. K8s(kind) is the only remaining leg, gated on the local Docker engine
-  API becoming reachable (Desktop "running" but socket unresponsive); deployment layer
-  unchanged this sprint and covered by CI `k8s-scorecard`.
+  `SAIL_MODE=local-cluster`, 4 workers) **105/105**, **K8s (kind, kubernetes-cluster mode,
+  driver spawns worker pods)** **103/105** (≥100 CI bar; 2 `_metadata.file_path` distributed
+  edge fails). Fixes landed: 5 GB Apple builder VM (default 2 GB OOM'd `hive_metastore`);
+  `docker/Dockerfile` Rust `1.86→1.95` + `ARG CARGO_JOBS` (commit `71e9bdf2`); scorecard
+  `SCORECARD_REMOTE_TMP` for the K8s `/tmp/sail` mount. **All four modes verified.**
 - [x] **Workspace clippy lane green** — `cargo clippy --all-targets --all-features -- -D warnings`
   exits 0 for the first time (commit `90f69f22`). Complied with the strict lints
   (test modules use `#[expect(...)]`) rather than loosening `clippy.toml`, matching

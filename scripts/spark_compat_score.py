@@ -181,7 +181,10 @@ def _parquet_schema_evolve(spark, tmp):
 # /var/folders/... paths that don't exist inside the container.
 _remote_mode = bool(os.environ.get("SPARK_REMOTE", ""))
 if _remote_mode:
-    _tmp_root = "/tmp/vajra/scorecard-tmp"
+    # Shared path mounted into the server. Apple Container mounts /tmp/vajra;
+    # K8s mounts /tmp/sail (see k8s/kind-config.yaml + worker pod template), so
+    # the path is overridable via SCORECARD_REMOTE_TMP.
+    _tmp_root = os.environ.get("SCORECARD_REMOTE_TMP", "/tmp/vajra/scorecard-tmp")
     shutil.rmtree(_tmp_root, ignore_errors=True)
     os.makedirs(_tmp_root, exist_ok=True)
     import contextlib

@@ -22,14 +22,16 @@
 |---|---|
 | `local` | ✅ 105/105 |
 | `local-cluster` (4 workers, distributed) | ✅ 105/105 |
-| **Apple Container** (fresh image `4cf12a97`, `SAIL_MODE=local-cluster`, 4 workers) | ✅ 105/105 |
-| K8s (kind, local-cluster) | ⏳ pending — `kind` needs a reachable Docker engine (Desktop shows "running" but its API socket isn't responding; needs an engine restart). Manifests/Helm unchanged this sprint; also covered by CI `k8s-scorecard` |
+| **Apple Container** (fresh image, `SAIL_MODE=local-cluster`, 4 workers) | ✅ 105/105 |
+| **K8s** (kind, `SAIL_MODE=kubernetes-cluster`, driver pod spawns worker pods) | ✅ 103/105 (≥100 CI bar; 2 fails are the `_metadata.file_path` distributed edge — executor-local path, not a query bug) |
 
-> Same single binary verified across `local`, distributed `local-cluster`, **and Apple
-> Container** (105/105 each). The Apple build initially OOM-killed `hive_metastore` on the
-> 2 GB builder VM (8 GB host); rebuilding with a 5 GB builder (`container builder start
-> --memory 5g`) succeeded. K8s is the last leg, gated only on the local Docker engine API
-> becoming reachable; the deployment layer is unchanged this sprint and runs in CI.
+> **All four deployment modes verified with the fresh binary.** Apple build needed a 5 GB
+> builder VM (`container builder start --memory 5g`; default 2 GB OOM-killed
+> `hive_metastore` on the 8 GB host). K8s needed three real fixes, all committed:
+> `docker/Dockerfile` Rust `1.86→1.95` (`aws-config` MSRV 1.91.1), `ARG CARGO_JOBS`
+> (8 parallel jobs OOM-killed the final link → cap to 2 on small hosts), and the scorecard
+> `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/sail`, not `/tmp/vajra`). The K8s
+> driver dynamically spawned `sail-worker-*` pods per query — true distributed execution.
 
 ---
 
