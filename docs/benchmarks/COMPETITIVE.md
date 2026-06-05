@@ -59,6 +59,16 @@ memory at scale.** All reproducible (`scripts/`, `k8s/eks/`, `docs/SCALE_TESTING
   demonstrable trust (CI-gating differential), multi-mode verification, and
   transparent benchmarking.**
 
+## Direct Vajra-vs-LakeSail check (ClickBench, shared core)
+Because Vajra is forked from sail, the honest correctness check is: does Vajra
+match LakeSail on the **identical** ClickBench harness? LakeSail's published run
+is **65.50 s hot** (197.04 s cold) on a single c6a.4xlarge, best-of-3. Vajra's
+current ClickBench numbers use a different setup (1M smoke / 100M distributed on
+S3, single-pass) and are **not directly comparable yet**. The same-setup runner
+and LakeSail's reference numbers are in [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md);
+full analysis in [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md). Expectation:
+within noise (~±15% total) given the shared DataFusion core.
+
 ## What's next (to close the remaining gaps)
 - **Same-cluster Spark reference for ClickBench 100M** (we have Vajra's number;
   add Spark for a full distributed head-to-head).

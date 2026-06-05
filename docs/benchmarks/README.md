@@ -16,6 +16,13 @@ vs **real Apache Spark** (not estimates). Scripts are dual-engine
 Details: [TPCH_SF1.md](TPCH_SF1.md), [TPCH_SF100.md](TPCH_SF100.md),
 [CLICKBENCH.md](CLICKBENCH.md). EKS scale runs: [../SCALE_TESTING.md](../SCALE_TESTING.md).
 
+**Vajra vs LakeSail (fork-parity check):** [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md)
+— LakeSail's published ClickBench numbers (hot total **65.50 s** on c6a.4xlarge)
++ an identical-harness runner ([`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md))
+so Vajra can be measured on the *same* setup. ⚠️ Vajra's current ClickBench numbers
+(1M smoke / 100M distributed-on-S3) are **not yet directly comparable** to LakeSail's
+single-node best-of-3 run — the same-setup run is pending.
+
 ## How to read the speedup — be precise (it depends on scale + workload)
 - **Small/warm data → huge multiplier** (engine + JVM-startup overhead dominates):
   TPC-H **SF-1 ~36×**, ClickBench 1M ~12×.
