@@ -256,8 +256,12 @@ The single biggest credibility gap. We claim 5–10x but lack a published real-s
   kubernetes-cluster`, driver spawned worker pods, data from **S3**): **43/43 passed,
   377.9s.** Proves distributed + S3 object store + real K8s at scale. Whole run cost **~$1**,
   torn down to **$0**. Toolkit: `k8s/eks/`, `scripts/aws_eks_teardown.sh`,
-  [docs/SCALE_TESTING.md](docs/SCALE_TESTING.md). TPC-H **SF-100** specifically (vs a
-  same-cluster Spark reference) is the remaining run — same toolkit, bigger nodes.
+  [docs/SCALE_TESTING.md](docs/SCALE_TESTING.md).
+- [x] **TPC-H SF-100 (100 GB) time + memory head-to-head vs Spark** — same 128 GB node,
+  same data ([docs/benchmarks/TPCH_SF100.md](docs/benchmarks/TPCH_SF100.md)): **Vajra
+  346.97s / 51.7 GiB vs Apache Spark 3.5.3 1099.27s / 115 GiB → ~3.2× faster, ~2.2× less
+  memory**, 22/22 each. Memory claim now MEASURED. Honest scaling: ~36× at SF-1 (warm)
+  narrows to ~3.2× at SF-100 — publish per-scale, not a flat "30–40×". ~$1.5 run, torn to $0.
 - [x] **ClickBench 43-query run vs Spark** — published in
   [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md): single-node smoke (~1M
   rows), identical data + SQL, same machine. **Vajra 3.872s (43/43) vs Apache Spark 3.5.3

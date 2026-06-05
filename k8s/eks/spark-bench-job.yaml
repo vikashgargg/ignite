@@ -1,0 +1,47 @@
+# Apache Spark 3.5.3 reference: run the SAME tpch_distributed.py at SF-100 in
+# local[*] mode on the same node + same node-local data as Vajra. Reports wall
+# time per query and the pod's peak memory (cgroup v2 memory.peak) at the end.
+# Requires a ConfigMap 'tpch-script' (= scripts/tpch_distributed.py), created at
+# run time. Run AFTER scaling Vajra to 0 so it gets the full node.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spark-tpch-sf100
+  namespace: vajra
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: spark
+          image: python:3.12-slim-bookworm
+          resources:
+            requests: { cpu: "8", memory: "16Gi" }
+            limits: { cpu: "15", memory: "115Gi" }
+          env:
+            - { name: SPARK_REMOTE, value: "local[16]" }
+            - { name: TPCH_DATA_DIR, value: "/data/tpch" }
+            - { name: TPCH_SKIP_GENERATE, value: "1" }
+            - { name: TPCH_SF, value: "100" }
+            - { name: SPARK_LOCAL_IP, value: "127.0.0.1" }
+            - { name: PYSPARK_SUBMIT_ARGS, value: "--driver-memory 95g --conf spark.sql.shuffle.partitions=64 pyspark-shell" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: script, mountPath: /app }
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              apt-get update -qq && apt-get install -y -qq openjdk-17-jre-headless procps >/dev/null
+              pip install --quiet "pyspark==3.5.3" duckdb pandas
+              echo "=== Spark 3.5.3 TPC-H SF-100 (local[16], 95g driver) ==="
+              python3 /app/tpch_distributed.py || true
+              echo "=== Spark pod peak memory ==="
+              cat /sys/fs/cgroup/memory.peak 2>/dev/null | awk '{printf "peak_RSS_bytes=%d (%.1f GiB)\n",$1,$1/1073741824}'
+      volumes:
+        - name: data
+          hostPath: { path: /data, type: DirectoryOrCreate }
+        - name: script
+          configMap: { name: tpch-script }

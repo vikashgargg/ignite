@@ -16,6 +16,7 @@
 | TPC-H SF-1 head-to-head: **Vajra 1.78s vs Spark 3.5.3 63.46s (~36×)** | ✅ `9805ffae`, [docs/benchmarks/TPCH_SF1.md](docs/benchmarks/TPCH_SF1.md) |
 | ClickBench (1M, same machine): **Vajra 3.87s vs Spark 48.07s (~12.4×)** | ✅ [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md) |
 | **ClickBench FULL 100M distributed on AWS EKS (Graviton spot, S3, kubernetes-cluster): 43/43, 377.9s** | ✅ ~$1 run, torn down to $0; [docs/SCALE_TESTING.md](docs/SCALE_TESTING.md) |
+| **TPC-H SF-100 (100 GB) on AWS EKS, time+memory vs Spark: Vajra 347s / 51.7 GiB vs Spark 1099s / 115 GiB → ~3.2× faster, ~2.2× less RAM** | ✅ [docs/benchmarks/TPCH_SF100.md](docs/benchmarks/TPCH_SF100.md) |
 | Differential trust harness **37→124 workloads, 124/124 vs Spark** | ✅ `d079af37` |
 | Real Spark-compat fixes: `log(x)` 1-arg, `array_position`→bigint, `get_json_object` array-index | ✅ |
 

@@ -1,0 +1,29 @@
+# Single large Graviton spot node for a controlled SF-100 time+memory head-to-head
+# (Vajra vs Apache Spark on identical local data). Distributed-at-scale is already
+# proven by the ClickBench-100M EKS run; this isolates the per-engine comparison.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: vajra-sf100
+  region: ap-south-1
+  version: "1.31"
+vpc:
+  nat:
+    gateway: Disable
+managedNodeGroups:
+  - name: big-arm
+    amiFamily: AmazonLinux2023
+    instanceTypes: ["r7g.4xlarge", "r7g.2xlarge"]   # 16 vCPU / 128 GB (spill ok)
+    spot: true
+    desiredCapacity: 1
+    minSize: 0
+    maxSize: 1
+    volumeSize: 350          # SF-100 parquet (~100 GB) + scratch
+    volumeType: gp3
+    privateNetworking: false
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess

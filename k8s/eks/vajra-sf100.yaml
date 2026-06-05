@@ -1,0 +1,36 @@
+# Vajra in local-cluster mode on the single big node, reading TPC-H SF-100 from
+# node-local /data (hostPath). __ECR__ is substituted at deploy time.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vajra-sf100
+  namespace: vajra
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: vajra-sf100 } }
+  template:
+    metadata: { labels: { app: vajra-sf100 } }
+    spec:
+      containers:
+        - name: server
+          image: __ECR__/vajra:latest
+          args: ["server", "--ip", "0.0.0.0", "--port", "50051", "--mode", "local-cluster", "--workers", "4"]
+          ports: [ { containerPort: 50051 } ]
+          resources:
+            requests: { cpu: "8", memory: "16Gi" }
+            limits: { cpu: "15", memory: "115Gi" }
+          env:
+            - { name: RUST_LOG, value: warn }
+            - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          hostPath: { path: /data, type: DirectoryOrCreate }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vajra-sf100, namespace: vajra }
+spec:
+  selector: { app: vajra-sf100 }
+  ports: [ { port: 50051, targetPort: 50051 } ]

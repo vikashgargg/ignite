@@ -1,0 +1,54 @@
+# Generate TPC-H SF-100 (~100 GB) parquet to the node's local disk (hostPath
+# /data), shared by the Vajra and Spark benchmark pods on the same single node.
+apiVersion: v1
+kind: Namespace
+metadata: { name: vajra }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tpch-gen
+  namespace: vajra
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: gen
+          image: python:3.12-slim
+          resources:
+            requests: { cpu: "8", memory: "24Gi" }
+            limits: { cpu: "14", memory: "110Gi" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          env:
+            - { name: TPCH_SF, value: "100" }
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              pip install --quiet duckdb
+              mkdir -p /data/tpch
+              python3 - <<'PY'
+              import duckdb, os
+              sf = int(os.environ["TPCH_SF"])
+              con = duckdb.connect("/data/gen.duckdb")  # file-backed → spills to disk
+              con.execute("PRAGMA memory_limit='90GB'; PRAGMA threads=14;")
+              con.execute("INSTALL tpch; LOAD tpch;")
+              print(f"dbgen sf={sf} ...", flush=True)
+              con.execute(f"CALL dbgen(sf={sf})")
+              tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+              for t in tables:
+                  d = f"/data/tpch/{t}"; os.makedirs(d, exist_ok=True)
+                  print(f"  COPY {t} -> {d}/data.parquet", flush=True)
+                  con.execute(f"COPY {t} TO '{d}/data.parquet' (FORMAT PARQUET)")
+              con.close()
+              print("TPC-H SF-%d generated." % sf, flush=True)
+              PY
+              rm -f /data/gen.duckdb
+              du -sh /data/tpch/* 2>/dev/null | tail -10
+      volumes:
+        - name: data
+          hostPath: { path: /data, type: DirectoryOrCreate }

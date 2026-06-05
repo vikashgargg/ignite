@@ -9,27 +9,29 @@ vs **real Apache Spark** (not estimates). Scripts are dual-engine
 | Benchmark | Scale | Setup | Vajra | Apache Spark 3.5.3 | Speedup |
 |---|---|---|---|---|---|
 | **TPC-H** | SF-1 (~1 GB) | single node, warm, `local[4]` | **1.78 s** (22/22) | 63.46 s (22/22) | **≈36×** |
+| **TPC-H** | **SF-100 (~100 GB)** | **single node**, AWS EKS r7gd.4xlarge (128 GB) | **346.97 s** (22/22) | 1099.27 s (22/22) | **≈3.2× + ≈2.2× less RAM** |
 | **ClickBench** | ~1M rows | single node, `local[4]` | **3.87 s** (43/43) | 48.07 s (42/43) | **≈12.4×** |
 | **ClickBench** | **100M rows (13.7 GB)** | **distributed, AWS EKS** (3× Graviton spot, S3) | **377.9 s** (43/43) | — (not run on same cluster) | — |
 
-Details: [TPCH_SF1.md](TPCH_SF1.md), [CLICKBENCH.md](CLICKBENCH.md). EKS scale run:
-[../SCALE_TESTING.md](../SCALE_TESTING.md).
+Details: [TPCH_SF1.md](TPCH_SF1.md), [TPCH_SF100.md](TPCH_SF100.md),
+[CLICKBENCH.md](CLICKBENCH.md). EKS scale runs: [../SCALE_TESTING.md](../SCALE_TESTING.md).
 
-## How to read the speedup — be precise
-- The multiplier is **workload-dependent**, not a single number:
-  - **TPC-H (join-heavy): ~36×** vs Spark 3.5.3 (single node).
-  - **ClickBench (scan/aggregation on one wide table): ~12×.**
-- So an honest public claim is **"up to ~36× on TPC-H; ~10–15× on ClickBench"**,
-  not a flat "30–40× on everything." Quote the benchmark with the number.
+## How to read the speedup — be precise (it depends on scale + workload)
+- **Small/warm data → huge multiplier** (engine + JVM-startup overhead dominates):
+  TPC-H **SF-1 ~36×**, ClickBench 1M ~12×.
+- **Large data → smaller but still-substantial multiplier** (both engines become
+  genuinely I/O/compute-bound): TPC-H **SF-100 ~3.2×**.
+- Honest public claim: **"~3× faster and ~2× less memory at 100 GB scale; up to
+  ~36× on small/warm workloads"** — *not* a flat "30–40× on everything." Always
+  quote the benchmark + scale with the number.
 - Vajra also passed queries Spark 3.5.3 rejects (ClickBench Q40 CASE coercion),
   i.e. broader Spark-4.x-compatible semantics.
 
-## Memory claim — NOT YET MEASURED (do not publish as fact)
-We have **no head-to-head memory number** yet. "No JVM → less memory" is
-architecturally plausible but unproven here. To substantiate it, measure **peak
-RSS of Vajra vs Spark on the same workload/cluster** — planned in the TPC-H
-SF-100 EKS run (deploy both engines, capture container/pod memory). Until that
-exists, claim only what is measured.
+## Memory — MEASURED at SF-100 ✅
+Head-to-head peak memory on the same 128 GB node, same SF-100 data:
+**Vajra 51.7 GiB vs Spark 115 GiB** (Spark saturated its cap) → **Vajra used
+≥2.2× less memory** and never pinned RAM. See [TPCH_SF100.md](TPCH_SF100.md).
+The "no JVM → less memory" claim is now backed by a measured number at scale.
 
 ## Correctness (the trust pillar, not speed)
 - **124/124** differential workloads byte-for-byte vs Apache Spark (CI-gating).
