@@ -251,14 +251,19 @@ The single biggest credibility gap. We claim 5–10x but lack a published real-s
   identical Parquet + queries, same machine, both warm, `local[4]`. **Vajra 1.780s vs
   Apache Spark 3.5.3 63.463s → ~36×.** Reproducible via `scripts/tpch_distributed.py`
   (now dual-engine: remote=Vajra, `local[*]`=reference Spark).
-- [ ] **SF-100 distributed on a real cluster** `P0` — see 5.2; needs a 10-node K8s cluster
-  (provision per `docs/K8S_PRODUCTION_TESTING.md`). Not runnable locally.
+- [x] **Distributed at 100M-row scale on real AWS EKS** `P0` — full **ClickBench (100M rows,
+  13.7 GB)** run distributed on a 3-node Graviton **spot** EKS cluster (`SAIL_MODE=
+  kubernetes-cluster`, driver spawned worker pods, data from **S3**): **43/43 passed,
+  377.9s.** Proves distributed + S3 object store + real K8s at scale. Whole run cost **~$1**,
+  torn down to **$0**. Toolkit: `k8s/eks/`, `scripts/aws_eks_teardown.sh`,
+  [docs/SCALE_TESTING.md](docs/SCALE_TESTING.md). TPC-H **SF-100** specifically (vs a
+  same-cluster Spark reference) is the remaining run — same toolkit, bigger nodes.
 - [x] **ClickBench 43-query run vs Spark** — published in
-  [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md): smoke subset (~1M rows),
-  identical data + SQL, same machine. **Vajra 3.872s (43/43) vs Apache Spark 3.5.3 48.072s
-  (42/43) → ≈12.4×.** Vajra also passes Q40 where Spark 3.5.3 errors on a CASE coercion
-  (matches Spark 4.x). `scripts/clickbench.py` is now dual-engine (remote=Vajra,
-  `local[*]`=reference Spark). Full 100M-row run pending a larger host (with SF-100).
+  [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md): single-node smoke (~1M
+  rows), identical data + SQL, same machine. **Vajra 3.872s (43/43) vs Apache Spark 3.5.3
+  48.072s (42/43) → ≈12.4×** (+ full 100M distributed on EKS above). Vajra also passes Q40
+  where Spark 3.5.3 errors on a CASE coercion (matches Spark 4.x). `scripts/clickbench.py`
+  is dual-engine and S3-aware.
 - [ ] **Refactor `vajra bench` self-test** `P2` — spawn the server out-of-process so the
   embedded interpreter doesn't share the GIL with gRPC + DuckDB (current fatal-GIL crash).
 

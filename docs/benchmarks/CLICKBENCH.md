@@ -27,9 +27,26 @@ SPARK_REMOTE=sc://localhost:50051 CLICKBENCH_FULL=1 python scripts/clickbench.py
 SPARK_REMOTE=local[4] CLICKBENCH_DATA=~/.cache/clickbench python scripts/clickbench.py
 ```
 
+## Full scale — 100M rows, distributed on AWS EKS ✅
+
+The **complete official ClickBench** (100M rows, 13.7 GB Parquet) run **distributed
+on a real EKS cluster** (2026-06-05, ap-south-1):
+- 3× Graviton (arm64) **spot** nodes, NAT disabled (`k8s/eks/cluster.yaml`).
+- Vajra in `SAIL_MODE=kubernetes-cluster` — the driver pod **dynamically spawned
+  worker pods** across the nodes (true distributed execution).
+- Data read from **S3** (`s3://…/clickbench`) via the node IAM role.
+
+**Result: 43/43 queries passed, 377.9 s total, 8.79 s avg** at 100M-row scale on
+production K8s. (Heaviest: Q24 56 s, Q19 41 s; several sub-second.) Whole run
+(provision → 13.7 GB load → benchmark → full teardown) cost **~$1**, then verified
+back to **$0** — see [docs/SCALE_TESTING.md](../SCALE_TESTING.md).
+
+This proves the previously-missing pillar: **distributed execution + S3 object
+store + real Kubernetes at 100M-row scale** — not just single-node.
+
 ## Caveats / next
-- Smoke subset (~1M rows); the official 100M-row ClickBench is the scale proof
-  point (needs a larger host — same constraint as TPC-H SF-100).
-- Single pass (no warmup); both engines under identical conditions.
-- Reference is Apache Spark 3.5.3 (the production line); a Spark 4.x reference is
-  a follow-up.
+- Single-node smoke (above) is the apples-to-apples vs-Spark ratio; the EKS run is
+  the distributed scale proof. A same-cluster Spark 100M reference is a follow-up
+  (would ~double cost — deferred to keep spend at ~$1).
+- Single pass (no warmup); identical conditions per engine.
+- Reference is Apache Spark 3.5.3 (production line); a Spark 4.x reference is a follow-up.
