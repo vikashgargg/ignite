@@ -468,4 +468,71 @@ WORKLOADS = [
     ("map_concat_entries", [],
      "SELECT element_at(map_concat(map('a',1),map('b',2)),'b') mc, "
      "sort_array(map_keys(map_from_entries(array(struct(1,'a'),struct(2,'b'))))) mfe"),
+
+    # ══ Batch 3 — more real-pipeline surface ═══════════════════════════════
+
+    # ── try_* functions (null on overflow/error; clean inputs match) ─────────
+    ("try_arithmetic", [],
+     "SELECT try_add(1,2) ta, try_subtract(5,3) ts, try_multiply(4,5) tm, try_divide(10,2) td, try_divide(1,0) tz"),
+
+    # ── Timezone conversions (explicit tz, deterministic) ────────────────────
+    ("timezone_convert", [],
+     "SELECT to_utc_timestamp(TIMESTAMP'2024-03-15 12:00:00','America/New_York') tu, "
+     "from_utc_timestamp(TIMESTAMP'2024-03-15 16:00:00','America/New_York') fu"),
+
+    # ── Bitwise aggregates ───────────────────────────────────────────────────
+    ("agg_bitwise", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (3),(5),(6) AS v(x)",
+     ],
+     "SELECT bit_and(x) ba, bit_or(x) bo, bit_xor(x) bx, bit_count(7) bc FROM t"),
+
+    # ── Regex (count / rlike / like-any) ─────────────────────────────────────
+    ("regex_match", [],
+     "SELECT 'abc123' rlike '[0-9]+' rl, regexp_replace('a.b.c','\\\\.','-') rr2, "
+     "'hello' like 'h%' lk, 'abc' ilike 'ABC' il"),
+
+    # ── String formatting / number ───────────────────────────────────────────
+    ("string_format_number", [],
+     "SELECT format_number(1234567.891,2) fn, format_number(0.5,0) fn0, "
+     "printf('%05.2f', 3.14159) pf"),
+
+    # ── stack / inline (table-generating) ────────────────────────────────────
+    ("stack_fn", [],
+     "SELECT col0, col1 FROM (SELECT stack(2, 'a', 1, 'b', 2)) ORDER BY col0"),
+
+    # ── typeof ────────────────────────────────────────────────────────────────
+    ("typeof_misc", [],
+     "SELECT typeof(1) t_int, typeof(1.5) t_dbl, typeof('x') t_str, typeof(true) t_bool"),
+    # width_bucket value correct (bucket 3); Spark bigint vs Vajra int — allowlisted.
+    ("width_bucket", [],
+     "SELECT width_bucket(5.0, 0.0, 10.0, 5) wb"),
+
+    # ── Interval arithmetic ──────────────────────────────────────────────────
+    ("interval_arithmetic", [],
+     "SELECT DATE'2024-01-15' + INTERVAL 10 DAYS d1, "
+     "DATE'2024-03-31' - INTERVAL 1 MONTH d2, "
+     "TIMESTAMP'2024-01-01 00:00:00' + INTERVAL 3 HOURS d3"),
+
+    # ── Window: nth_value + range frame ──────────────────────────────────────
+    ("window_nth_value", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1,10),(2,20),(3,30),(4,40) AS v(id,n)",
+     ],
+     "SELECT id, nth_value(n,2) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) nv FROM t ORDER BY id"),
+
+    # ── Aggregate: mode ───────────────────────────────────────────────────────
+    ("agg_mode", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(2),(2),(3),(2),(4) AS v(x)",
+     ],
+     "SELECT mode(x) md FROM t"),
+    # percentile_approx value correct (median 2); Spark returns input type (int),
+    # Vajra returns double — value-correct type diff, allowlisted (cf. percentile).
+    ("percentile_approx", [
+        "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(2),(2),(3),(2),(4) AS v(x)",
+     ],
+     "SELECT percentile_approx(x, 0.5) pa FROM t"),
+
+    # ── Conditional null functions ───────────────────────────────────────────
+    ("null_fns_extended", [],
+     "SELECT isnull(CAST(NULL AS INT)) isn, isnotnull(5) inn, "
+     "coalesce(CAST(NULL AS INT), CAST(NULL AS INT), 7) co3, nanvl(1.0, 2.0) nv"),
 ]

@@ -524,15 +524,17 @@ fn convert_timezone(input: ScalarFunctionInput) -> PlanResult<Expr> {
 }
 
 fn from_utc_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
-    let session_tz = session_timezone(&input);
+    // Spark: interpret `ts` as a wall-clock time in UTC, return wall-clock in `to_tz`.
+    // Session-timezone independent — convert FROM UTC, not from the session tz.
     let (ts, to_tz) = input.arguments.two()?;
-    Ok(convert_tz(session_tz, to_tz, ts))
+    Ok(convert_tz(lit("UTC"), to_tz, ts))
 }
 
 fn to_utc_timestamp(input: ScalarFunctionInput) -> PlanResult<Expr> {
-    let session_tz = session_timezone(&input);
+    // Spark: interpret `ts` as a wall-clock time in `from_tz`, return the UTC instant.
+    // Session-timezone independent — convert TO UTC, not to the session tz.
     let (ts, from_tz) = input.arguments.two()?;
-    Ok(convert_tz(from_tz, session_tz, ts))
+    Ok(convert_tz(from_tz, lit("UTC"), ts))
 }
 
 fn make_ym_interval(args: Vec<Expr>) -> PlanResult<Expr> {

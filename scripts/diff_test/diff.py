@@ -29,6 +29,12 @@ KNOWN_VERSION_DIFFS = {
     # bround() returns double in Vajra vs decimal in Spark. The numeric value is
     # identical (banker's rounding); only the declared type differs.
     "bround",
+    # percentile_approx on integral input: Spark returns the input type (int),
+    # Vajra returns double. Median value identical; declared type differs.
+    "percentile_approx",
+    # width_bucket: Spark returns bigint, Vajra returns int. Bucket value
+    # identical; declared type differs.
+    "width_bucket",
 }
 
 
