@@ -36,7 +36,9 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | Cold start | 30–120 s | ~2 s | **~200 ms** |
 | Idle memory | 2–4 GB JVM heap | ~500 MB | **~300 MB** |
 | Binary / image size | ~600 MB | ~300 MB | **105 MB macOS / 80 MB Linux** |
-| TPC-H SF-1 (22 queries) | ~60 s warm JVM | ~15 s | **1.515 s (40×)** |
+| TPC-H SF-1 (22q, warm) | 63.46 s | ~15 s | **1.78 s (~36×)** |
+| TPC-H SF-100 (22q, 100 GB, same node) | 1099 s / 115 GiB | not run | **347 s / 51.7 GiB (~3.2× faster, ~2.2× less RAM)** |
+| ClickBench 100M (distributed on EKS) | — | — | **377.9 s, 43/43** |
 | pip install | `pyspark` (JVM needed) | `pysail` | **`vajra-pyspark`** |
 | **Spark SQL compat (105-test scorecard, all modes)** | ✅ reference | ~95% | **✅ 105/105 (100%)** |
 | Python UDFs — scalar / Pandas / Arrow | ✅ | ✅ | **✅** |
@@ -65,7 +67,21 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | **dbt integration guide** | ✅ | ✅ v0.6.3 | **✅** |
 | **ClickBench 43/43 benchmark** | ✅ | ✅ v0.6.3 | **✅** |
 
-All Vajra numbers above are measured on the release binary (LTO, ARM64 macOS).
+All Vajra numbers above are measured (LTO release binary; SF-100 + ClickBench-100M
+on AWS EKS Graviton), not estimated. **The speedup is scale-dependent** — ~36× on
+small/warm TPC-H SF-1, narrowing to a still-substantial **~3.2× faster + ~2.2× less
+memory at 100 GB**. Quote the scale with the number; full conditions, per-query
+tables, and the honest Vajra-vs-Spark-vs-LakeSail read are in
+[docs/benchmarks/](docs/benchmarks/README.md) and
+[docs/benchmarks/COMPETITIVE.md](docs/benchmarks/COMPETITIVE.md).
+
+> **On LakeSail:** Vajra is forked from `lakehq/sail`, so the analytical core
+> (Rust + DataFusion) is shared lineage — raw query perf vs Spark sits in the same
+> ballpark for both. We do **not** claim "faster than LakeSail." Vajra's
+> differentiation is operational features (streaming, auth, K8s HA, Apple
+> Container, Web UI), a **CI-gating differential trust harness** (124 workloads
+> byte-exact vs real Spark), **four-mode** 105/105 verification, and **transparent,
+> per-scale benchmarks**. See [COMPETITIVE.md](docs/benchmarks/COMPETITIVE.md).
 
 ---
 
@@ -97,8 +113,10 @@ All Vajra numbers above are measured on the release binary (LTO, ARM64 macOS).
   Modes:  local ✅  local-cluster ✅  kubernetes-cluster ✅
 ══════════════════════════════════════════════════════════════════
 
-TPC-H SF-1 — 22/22 PASS — total 1.515s  (Spark warm JVM: ~60s)
-(Q1: 0.12s  Q9: 0.09s  Q17: 0.13s  Q18: 0.14s  Q21: 0.11s)
+TPC-H SF-1  — 22/22 PASS — Vajra 1.78s  vs  Spark 63.46s   (~36× warm/small)
+TPC-H SF-100 — 22/22 PASS — Vajra 347s / 51.7GiB  vs  Spark 1099s / 115GiB
+                            (~3.2× faster, ~2.2× less RAM — measured on EKS)
+ClickBench 100M (distributed, EKS) — 43/43 PASS — Vajra 377.9s
 ```
 
 ---

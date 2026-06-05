@@ -264,12 +264,21 @@ CI jobs: `fmt`, `clippy`, `test`, `build-linux`, `distributed-scorecard`,
 
 LakeSail is at v0.6.3 (released 2026-05-21). As of Phase 4 Sprint 4.1, Vajra **leads or matches LakeSail on every dimension**, and now additionally has a production-grade Python-version-agnostic UDF runtime and verified distributed correctness for lambda HOFs + recursive CTEs.
 
+> **Honest framing (read this):** Vajra is forked from `lakehq/sail`, so the
+> analytical core (Rust + DataFusion) is shared lineage with LakeSail. We do
+> **not** claim Vajra is "faster than LakeSail" — query perf vs Spark sits in the
+> same ballpark for both, and we have not run a head-to-head. The differentiation
+> below is real on **operational features, demonstrable trust (CI-gating
+> differential harness), multi-mode verification, and transparent per-scale
+> benchmarks**. Full read: [docs/benchmarks/COMPETITIVE.md](docs/benchmarks/COMPETITIVE.md).
+
 | Dimension | LakeSail v0.6.3 | **Vajra v0.6.0** | **Vajra Advantage** |
 |---|---|---|---|
 | Runtime | Rust | **Rust** | — |
 | Cold start | ~2 s | **~200 ms** | **10× faster** |
 | Idle memory | ~500 MB | **~300 MB** | **40% less** |
-| TPC-H SF-1 | ~15 s | **1.515 s** | **10× faster** |
+| TPC-H SF-1 (vs Spark, not vs LakeSail) | ~15 s | **1.78 s (~36× vs Spark)** | ~parity (shared core) |
+| TPC-H SF-100 vs Spark, measured on EKS | — | **347 s / 51.7 GiB (~3.2× faster, ~2.2× less RAM)** | transparent per-scale |
 | Binary size | ~300 MB | **105 MB macOS / 80 MB Linux** | **3–4× smaller** |
 | Spark compat (105 scorecard) | ~95% | **100% (105/105), all modes** | **✅** |
 | Python UDFs version-agnostic | abi3 (3.8+) | **subprocess (3.10–3.14+)** | **match** |

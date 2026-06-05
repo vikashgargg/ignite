@@ -53,9 +53,14 @@ A user can `pip install vajra-pyspark`, point their existing PySpark code at Vaj
 | K8s Helm chart + HPA | ✅ | ❌ |
 | Scheduler HA (K8s Lease) | ✅ | ❌ |
 | Web UI on :4040 | ✅ | ❌ |
-| TPC-H SF-1 speed | **1.515s (40×)** | ~15s (claimed 4×) |
+| TPC-H SF-1 speed vs Spark | **1.78s (~36× vs Spark)** | ~15s — ~parity (shared DataFusion core) |
+| TPC-H SF-100 vs Spark (EKS, measured) | **347s / 51.7 GiB (~3.2× faster, ~2.2× less RAM)** | not published per-scale |
 | Binary size | **80 MB Linux / 105 MB macOS** | ~300 MB |
 | Cold start | **~200 ms** | ~2 s |
+
+> Vajra is forked from `lakehq/sail` → shared analytical core → query perf vs
+> Spark is ~parity with LakeSail; we don't claim "faster than LakeSail." Honest
+> per-scale read: [docs/benchmarks/COMPETITIVE.md](docs/benchmarks/COMPETITIVE.md).
 
 ### Where LakeSail leads (our Sprint 4-5 targets)
 
