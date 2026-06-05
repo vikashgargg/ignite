@@ -9,12 +9,15 @@
 
 ARG PYTHON_VERSION=3.12
 ARG PYSPARK_VERSION=4.0.0
-ARG RUST_VERSION=1.86.0
+ARG RUST_VERSION=1.95.0
 
 # ── Stage 1: Rust builder ─────────────────────────────────────────────────────
 FROM python:${PYTHON_VERSION}-slim AS builder
 
 ARG RUST_VERSION
+# Cap parallel cargo jobs on low-RAM hosts to avoid OOM during the final link
+# (e.g. `--build-arg CARGO_JOBS=2` on an 8 GB Mac). Defaults to all cores for CI.
+ARG CARGO_JOBS
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -50,7 +53,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 RUN cargo fetch --locked
 
-RUN CARGO_BUILD_JOBS=$(nproc) \
+RUN CARGO_BUILD_JOBS=${CARGO_JOBS:-$(nproc)} \
     CARGO_PROFILE_RELEASE_LTO=off \
     cargo build --release -p sail-cli --bins \
     && cp /app/target/release/vajra /usr/local/bin/vajra
