@@ -1,0 +1,42 @@
+# Minimal-cost, production-shaped EKS cluster for Vajra scale benchmarking.
+# Cost levers baked in:
+#   - Graviton (arm64) SPOT nodes (~70% cheaper; matches Vajra's arm64 image)
+#   - NAT gateway DISABLED + public-subnet nodes (saves ~$0.045/hr + data)
+#   - Single small managed nodegroup; control plane is the only fixed cost ($0.10/hr)
+# Teardown is one command (`eksctl delete cluster`) because every resource lives
+# in one CloudFormation stack. See docs/SCALE_TESTING.md.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: vajra-scale
+  region: ap-south-1
+  version: "1.31"
+
+# No NAT gateway. Nodes get public IPs in public subnets (locked down by SG).
+# Acceptable for a short-lived, single-purpose benchmark cluster.
+vpc:
+  nat:
+    gateway: Disable
+
+managedNodeGroups:
+  - name: spot-arm
+    amiFamily: AmazonLinux2023
+    # Memory-headroom for a ~100 GB SF-100 working set; multiple types improve
+    # spot availability. ~$0.13/hr each spot in ap-south-1 (varies).
+    instanceTypes: ["r7g.2xlarge", "m7g.2xlarge", "r7g.xlarge"]
+    spot: true
+    desiredCapacity: 3
+    minSize: 0
+    maxSize: 3
+    volumeSize: 80
+    volumeType: gp3
+    privateNetworking: false   # public subnets → no NAT needed
+    labels: { role: vajra-worker }
+    # Let pods read/write the benchmark S3 bucket via the node instance role.
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly

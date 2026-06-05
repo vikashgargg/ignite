@@ -1,0 +1,43 @@
+# One-shot Job: stream the public ClickBench `hits` parquet (100 files, ~14 GB)
+# into s3://__BUCKET__/clickbench/. Uses the node instance role for S3 (no keys).
+# Placeholders __BUCKET__ / __REGION__ are substituted by docs/SCALE_TESTING.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vajra
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickbench-loader
+  namespace: vajra
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: loader
+          image: amazonlinux:2023
+          env:
+            - name: AWS_REGION
+              value: "__REGION__"
+            - name: BUCKET
+              value: "__BUCKET__"
+          resources:
+            requests: { cpu: "1", memory: "1Gi" }
+            limits: { cpu: "2", memory: "2Gi" }
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              dnf install -y awscli-2 curl-minimal tar gzip >/dev/null 2>&1 || dnf install -y awscli curl >/dev/null 2>&1
+              base="https://datasets.clickhouse.com/hits_compatible/athena_partitioned"
+              echo "Streaming 100 hits parquet files -> s3://$BUCKET/clickbench/ ..."
+              for i in $(seq 0 99); do
+                echo "  hits_$i.parquet"
+                curl -fsSL "$base/hits_$i.parquet" \
+                  | aws s3 cp - "s3://$BUCKET/clickbench/hits_$i.parquet" --region "$AWS_REGION"
+              done
+              echo "Done. Objects:"; aws s3 ls "s3://$BUCKET/clickbench/" --region "$AWS_REGION" | tail -3

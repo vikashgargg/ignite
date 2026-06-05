@@ -192,7 +192,12 @@ def build_session() -> SparkSession:
 
 def main() -> None:
     # Resolve data directory
-    if DATA_DIR:
+    s3_data = DATA_DIR.startswith("s3://") or DATA_DIR.startswith("s3a://")
+    if s3_data:
+        # Object-store path: the server (Vajra) reads it; no local existence check.
+        data_path = DATA_DIR.rstrip("/")
+        print(f"Using S3 data at {data_path}")
+    elif DATA_DIR:
         data_path = Path(DATA_DIR)
         files = sorted(data_path.glob("*.parquet"))
         if not files:
@@ -213,7 +218,7 @@ def main() -> None:
     # ClientEventTime / LocalEventTime as INT64 (unix seconds).  DataFusion reads
     # these as UInt16 / Int64 which Spark Connect cannot serialise to Python.
     # We fix them at view creation so all 43 queries run correctly.
-    parquet_glob = str(data_path / "*.parquet")
+    parquet_glob = f"{data_path}/*.parquet" if s3_data else str(data_path / "*.parquet")
     raw = spark.read.parquet(parquet_glob)
     raw.createOrReplaceTempView("_hits_raw")
 
