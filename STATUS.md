@@ -23,15 +23,17 @@
 | `local` | ✅ 105/105 |
 | `local-cluster` (4 workers, distributed) | ✅ 105/105 |
 | **Apple Container** (fresh image, `SAIL_MODE=local-cluster`, 4 workers) | ✅ 105/105 |
-| **K8s** (kind, `SAIL_MODE=kubernetes-cluster`, driver pod spawns worker pods) | ✅ 103/105 (≥100 CI bar; 2 fails are the `_metadata.file_path` distributed edge — executor-local path, not a query bug) |
+| **K8s** (kind, `SAIL_MODE=kubernetes-cluster`, driver pod spawns worker pods) | ✅ 105/105 |
 
-> **All four deployment modes verified with the fresh binary.** Apple build needed a 5 GB
-> builder VM (`container builder start --memory 5g`; default 2 GB OOM-killed
-> `hive_metastore` on the 8 GB host). K8s needed three real fixes, all committed:
+> **All four deployment modes verified at 105/105 with the fresh binary.** Apple build
+> needed a 5 GB builder VM (`container builder start --memory 5g`; default 2 GB OOM-killed
+> `hive_metastore` on the 8 GB host). K8s needed four real fixes, all committed:
 > `docker/Dockerfile` Rust `1.86→1.95` (`aws-config` MSRV 1.91.1), `ARG CARGO_JOBS`
-> (8 parallel jobs OOM-killed the final link → cap to 2 on small hosts), and the scorecard
-> `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/sail`, not `/tmp/vajra`). The K8s
-> driver dynamically spawned `sail-worker-*` pods per query — true distributed execution.
+> (8 parallel jobs OOM-killed the final link → cap to 2 on small hosts), the scorecard
+> `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/sail`, not `/tmp/vajra`), and the two
+> `_metadata` tests switched from a client-local `tempfile` dir to the shared `tmp` root so
+> worker pods can see the files. The K8s driver dynamically spawned `sail-worker-*` pods per
+> query — true distributed execution.
 
 ---
 

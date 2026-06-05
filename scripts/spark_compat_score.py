@@ -681,25 +681,25 @@ with _tmp_mgr as tmp:
     group("17. _metadata Column")
 
     def _metadata_test():
-        import tempfile
-        with tempfile.TemporaryDirectory() as d:
-            spark.range(3).write.parquet(d + "/data")
-            df = spark.read.parquet(d + "/data")
-            rows = df.select("id", "_metadata").collect()
-            assert rows[0]["_metadata"] is None or True  # null struct OK
-            fp = df.select("_metadata.file_path").collect()
-            return True  # no AnalysisException = pass
+        # Use the shared tmp root (visible to all driver/worker pods in
+        # distributed/K8s mode), not a client-local tempfile dir.
+        p = os.path.join(tmp, "metadata_struct/data")
+        spark.range(3).write.mode("overwrite").parquet(p)
+        df = spark.read.parquet(p)
+        rows = df.select("id", "_metadata").collect()
+        assert rows[0]["_metadata"] is None or True  # null struct OK
+        df.select("_metadata.file_path").collect()
+        return True  # no AnalysisException = pass
 
     check("_metadata struct accessible", lambda: _metadata_test())
 
     def _metadata_subfield_test():
-        import tempfile
-        with tempfile.TemporaryDirectory() as d:
-            spark.range(2).write.parquet(d + "/data")
-            df = spark.read.parquet(d + "/data")
-            fp = df.select("_metadata.file_path").collect()
-            assert len(fp) == 2
-            return True
+        p = os.path.join(tmp, "metadata_subfield/data")
+        spark.range(2).write.mode("overwrite").parquet(p)
+        df = spark.read.parquet(p)
+        fp = df.select("_metadata.file_path").collect()
+        assert len(fp) == 2
+        return True
 
     check("_metadata.file_path sub-field", lambda: _metadata_subfield_test())
 
