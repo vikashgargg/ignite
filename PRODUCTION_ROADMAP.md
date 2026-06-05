@@ -253,8 +253,12 @@ The single biggest credibility gap. We claim 5–10x but lack a published real-s
   (now dual-engine: remote=Vajra, `local[*]`=reference Spark).
 - [ ] **SF-100 distributed on a real cluster** `P0` — see 5.2; needs a 10-node K8s cluster
   (provision per `docs/K8S_PRODUCTION_TESTING.md`). Not runnable locally.
-- [ ] **ClickBench 43-query run vs Spark** `P1` — `scripts/clickbench.py`; directly
-  comparable to LakeSail's published ClickBench.
+- [x] **ClickBench 43-query run vs Spark** — published in
+  [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md): smoke subset (~1M rows),
+  identical data + SQL, same machine. **Vajra 3.872s (43/43) vs Apache Spark 3.5.3 48.072s
+  (42/43) → ≈12.4×.** Vajra also passes Q40 where Spark 3.5.3 errors on a CASE coercion
+  (matches Spark 4.x). `scripts/clickbench.py` is now dual-engine (remote=Vajra,
+  `local[*]`=reference Spark). Full 100M-row run pending a larger host (with SF-100).
 - [ ] **Refactor `vajra bench` self-test** `P2` — spawn the server out-of-process so the
   embedded interpreter doesn't share the GIL with gRPC + DuckDB (current fatal-GIL crash).
 

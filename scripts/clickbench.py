@@ -176,6 +176,12 @@ def ensure_data(data_dir: Path, files: list[str]) -> Path:
 
 
 def build_session() -> SparkSession:
+    # SPARK_REMOTE=local[*] runs reference Apache Spark (classic JVM) for an
+    # apples-to-apples comparison; otherwise connect to a Spark Connect server.
+    if SPARK_REMOTE.startswith("local"):
+        print(f"Engine    : reference Apache Spark (master={SPARK_REMOTE})")
+        os.environ.pop("SPARK_REMOTE", None)  # else pyspark auto-enables Connect
+        return SparkSession.builder.master(SPARK_REMOTE).getOrCreate()
     return SparkSession.builder.remote(SPARK_REMOTE).getOrCreate()
 
 
