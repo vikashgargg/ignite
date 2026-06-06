@@ -16,12 +16,13 @@ vs **real Apache Spark** (not estimates). Scripts are dual-engine
 Details: [TPCH_SF1.md](TPCH_SF1.md), [TPCH_SF100.md](TPCH_SF100.md),
 [CLICKBENCH.md](CLICKBENCH.md). EKS scale runs: [../SCALE_TESTING.md](../SCALE_TESTING.md).
 
-**Vajra vs LakeSail (fork-parity check):** [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md)
-— LakeSail's published ClickBench numbers (hot total **65.50 s** on c6a.4xlarge)
-+ an identical-harness runner ([`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md))
-so Vajra can be measured on the *same* setup. ⚠️ Vajra's current ClickBench numbers
-(1M smoke / 100M distributed-on-S3) are **not yet directly comparable** to LakeSail's
-single-node best-of-3 run — the same-setup run is pending.
+**Vajra vs LakeSail (fork-parity check) ✅:** [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md)
+— measured on the **identical** ClickBench harness (same c6a.4xlarge class, local
+`hits.parquet`, best-of-3): **Vajra 60.11 s vs LakeSail 65.50 s = 0.92× — MATCHING**,
+43/43, Vajra marginally faster overall. Confirms the shared DataFusion core is
+correctly implemented in the fork. Runner + raw results:
+[`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md). (Vajra's 1M-smoke
+and 100M-distributed-on-S3 numbers are a *different* setup, not comparable to this.)
 
 ## How to read the speedup — be precise (it depends on scale + workload)
 - **Small/warm data → huge multiplier** (engine + JVM-startup overhead dominates):

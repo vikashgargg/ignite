@@ -6,9 +6,11 @@ Honest competitive read, backed by our **measured, reproducible** numbers and
 ## Important context
 Vajra is **forked from `lakehq/sail`**. The analytical engine core (Rust +
 Apache DataFusion) is therefore **shared lineage** with LakeSail — so raw
-query-perf vs Spark should be in the **same ballpark** for both. We do **not**
-claim Vajra is "faster than LakeSail"; we have not benchmarked the two head-to-head,
-and it would be misleading given the common core. The real differentiation is
+query-perf is in the **same ballpark** for both. We now have a **head-to-head on
+the identical ClickBench harness**: Vajra **60.11 s vs LakeSail's published 65.50 s
+(0.92×)** on the same c6a.4xlarge class — i.e. **~parity, Vajra marginally faster**
+(details below). We do **not** spin this into "Vajra beats LakeSail" — a ~8% edge on
+one run with a shared core is parity, not a moat. The real differentiation is
 **operational features, demonstrable trust, and transparent multi-scale benchmarks.**
 
 ## Measured: Vajra vs Apache Spark (same machine/cluster, identical data + SQL)
@@ -59,15 +61,22 @@ memory at scale.** All reproducible (`scripts/`, `k8s/eks/`, `docs/SCALE_TESTING
   demonstrable trust (CI-gating differential), multi-mode verification, and
   transparent benchmarking.**
 
-## Direct Vajra-vs-LakeSail check (ClickBench, shared core)
+## Direct Vajra-vs-LakeSail check (ClickBench, shared core) — ✅ MATCHING
 Because Vajra is forked from sail, the honest correctness check is: does Vajra
-match LakeSail on the **identical** ClickBench harness? LakeSail's published run
-is **65.50 s hot** (197.04 s cold) on a single c6a.4xlarge, best-of-3. Vajra's
-current ClickBench numbers use a different setup (1M smoke / 100M distributed on
-S3, single-pass) and are **not directly comparable yet**. The same-setup runner
-and LakeSail's reference numbers are in [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md);
-full analysis in [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md). Expectation:
-within noise (~±15% total) given the shared DataFusion core.
+match LakeSail on the **identical** ClickBench harness? **Measured 2026-06-06 on a
+real c6a.4xlarge** (same instance class, local `hits.parquet`, single-node, best-of-3):
+
+| | Vajra | LakeSail (published) | ratio |
+|---|---|---|---|
+| Hot total (43q) | **60.11 s** | 65.50 s | **0.92× — Vajra ~8% faster** |
+| Passed | 43/43 | 43/43 | tie |
+
+**Verdict: MATCHING — shared DataFusion core confirmed correctly implemented.**
+Vajra is faster on 37/43 queries (notably Q7 min/max from Parquet stats, and the
+Q37–43 filtered/OFFSET queries), LakeSail faster on 4 (Q21–24; Q24 wide top-N is
+Vajra's weak spot). Runner + raw JSON: [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md);
+full analysis: [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md). (Vajra's
+1M-smoke / 100M-distributed-on-S3 numbers are a different setup, not comparable.)
 
 ## What's next (to close the remaining gaps)
 - **Same-cluster Spark reference for ClickBench 100M** (we have Vajra's number;

@@ -6,27 +6,39 @@ as LakeSail** and a true Spark replacement. ClickBench is the right correctness
 check: if Vajra's per-query times track LakeSail's on the **identical harness**,
 the fork is implemented correctly; a large systematic gap flags a regression.
 
-## ⚠️ Are the current numbers "matching"? Not directly comparable yet.
-We have **not** yet run Vajra on LakeSail's exact setup, so we cannot claim a match.
-The setups differ on every axis that matters:
+## ✅ RESULT (2026-06-06): MATCHING — Vajra 60.11 s vs LakeSail 65.50 s (0.92×)
+We ran Vajra through LakeSail's **identical** ClickBench harness — same c6a.4xlarge
+instance class, full `hits.parquet` (99.99M rows, 14.78 GB) on local disk, default
+single-node `local` mode, best-of-3 — and compared to LakeSail's published numbers.
 
-| Axis | LakeSail published | Vajra published (today) |
-|---|---|---|
-| Dataset | full `hits.parquet`, 99.99M rows, 14.78 GB | 1M smoke **or** 100M |
-| Topology | **single node** c6a.4xlarge (16 vCPU/32 GB) | **distributed** EKS (3× Graviton spot) |
-| Storage | local disk | **S3** (object store) |
-| Run protocol | **3 runs, best-of-3** (hot) | single pass (cold) |
-| Total (43q) | **65.50 s hot** / 197.04 s cold | 377.9 s (distributed, S3, cold) |
+| | **Vajra** | LakeSail (published) | ratio |
+|---|---|---|---|
+| Hot total (best-of-3, 43q) | **60.11 s** | 65.50 s | **0.92×** (Vajra ~8% faster) |
+| Median per-query V/L ratio | — | — | **0.68×** (Vajra faster on most) |
+| Queries passed | 43/43 | 43/43 | tie |
 
-So Vajra's 377.9 s (distributed/S3/cold) vs LakeSail's 65.50 s (single-node/local/hot)
-is **apples-to-oranges — not evidence of a regression.** To actually answer "do they
-match," run Vajra through the identical harness in [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md).
+**Verdict: MATCHING — the shared DataFusion core is correctly implemented in the
+fork.** Vajra is in the same ballpark and marginally faster overall, exactly as a
+common-core relationship predicts. Vajra is faster on 37/43 queries; LakeSail is
+faster on 4 (Q21–Q24). Notable points:
+- **Q7** (`MIN/MAX(EventDate)`): Vajra 0.007 s vs LakeSail 2.40 s — Vajra answers
+  from Parquet column statistics without a full scan.
+- **Q37–Q43** (filtered page-view + `OFFSET`): Vajra 3–9× faster (0.04–0.18 s vs
+  0.35–0.70 s) — stronger predicate pushdown / late materialization.
+- **Q24** (`SELECT * ... ORDER BY EventTime LIMIT 10`): Vajra 10.36 s vs 4.37 s —
+  the one clear loss; wide-projection top-N is Vajra's weakest spot here.
 
-## Expectation (why they *should* match)
-Shared DataFusion core ⇒ on the same c6a.4xlarge, local `hits.parquet`, best-of-3,
-Vajra should land **within noise** of LakeSail: total within ~±15%, most queries
-within ~±25%. `benchmarks/clickbench/compare.py` prints the per-query ratio and a
-pass/fail verdict automatically.
+Raw data: [`benchmarks/clickbench/results/vajra_c6a.4xlarge.json`](../../benchmarks/clickbench/results/vajra_c6a.4xlarge.json)
+vs [`lakesail_c6a.4xlarge.json`](../../benchmarks/clickbench/results/lakesail_c6a.4xlarge.json).
+Reproduce: [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md). This run
+used Vajra's **published `v0.6.0-alpha` x86_64 release binary** (the one `install.sh`
+ships) — fully reproducible by anyone.
+
+> Note: Vajra's *other* ClickBench numbers (1M smoke `local[4]`; 100M **distributed**
+> on EKS reading from **S3**, single-pass = 377.9 s) are a **different setup** and are
+> *not* comparable to this single-node/local/best-of-3 run — they measure distributed
+> scale, not the per-query core. This 60.11 s figure is the apples-to-apples one vs
+> LakeSail.
 
 ## LakeSail's published ClickBench reference (c6a.4xlarge, best-of-3)
 Source: `ClickHouse/ClickBench/sail/results` (copied verbatim to
@@ -50,16 +62,20 @@ Source: `ClickHouse/ClickBench/sail/results` (copied verbatim to
 Vs Apache Spark on the same box, LakeSail reports **8.4× median** per-query, best Q7
 216.7×, worst Q35 2.6×, 43/43.
 
-## How to get Vajra's column (the missing measurement)
-The harness is in [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md).
-It needs a `c6a.4xlarge` (or equivalent 16 vCPU/32 GB box) with the 14.78 GB
-`hits.parquet` on local disk — too big for the 8 GB dev Mac. Estimated cost on AWS:
-**~$0.61/hr on-demand (~$0.10–0.20/hr spot), one run ≈ 1–2 h ⇒ ~$1–2**, then full
-teardown to $0 via `scripts/aws_eks_teardown.sh`.
+## How it was run
+On a real `c6a.4xlarge` (Ubuntu 24.04, 16 vCPU / 30 GB, local gp3), 2026-06-06,
+ap-south-1: `curl` the published Vajra x86_64 release binary, download the 14.78 GB
+`hits.parquet` to local disk, `vajra server` (default `local` mode), then
+`benchmarks/clickbench/run.py` best-of-3 over Spark Connect. Whole run including the
+box ≈ **$0.30**, torn down to **$0** afterward (instance terminated, EBS/SG/keypair
+deleted, access key revoked — verified).
 
 ## Status
 - [x] LakeSail reference captured + embedded for direct comparison.
 - [x] Identical-harness runner + auto-comparator published (`benchmarks/clickbench/`).
-- [ ] **Run Vajra on c6a.4xlarge with local `hits.parquet`, best-of-3** → fill
-  `results/vajra_c6a.4xlarge.json` and report the verdict. *(pending — needs the
-  paid cloud box; awaiting go-ahead)*
+- [x] **Vajra run on c6a.4xlarge, local `hits.parquet`, best-of-3 → 60.11 s vs
+  LakeSail 65.50 s = MATCHING (0.92×).** `results/vajra_c6a.4xlarge.json` filled.
+- [ ] Re-run with a build of the current `phase4` branch (this used the
+  `v0.6.0-alpha` release binary) to confirm no regression since the release.
+- [ ] Same-box Apache Spark reference (we compare to LakeSail's *published* Spark
+  numbers; running Spark on the same box would close the last loop).
