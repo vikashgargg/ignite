@@ -1,0 +1,47 @@
+# cargo-deny configuration — supply-chain + license + advisory gate.
+# Run locally: `cargo deny check`   CI: .github/workflows/security.yml
+# The advisories section is the hard security gate; licenses/bans guard the
+# supply chain. Keep this strict and waive individual advisories explicitly
+# (with a reason + link) rather than loosening the whole gate.
+
+[advisories]
+# RUSTSEC advisory database. Any unwaived vulnerability fails CI.
+version = 2
+yanked = "deny"
+ignore = [
+    # Add specific RUSTSEC-IDs here ONLY with a justification + tracking link,
+    # e.g. "RUSTSEC-XXXX-XXXX", # transitive via <crate>; no exploitable path; tracked in #NNN
+]
+
+[licenses]
+version = 2
+# Permissive licenses acceptable for a redistributable Apache-2.0 project.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "CC0-1.0",
+    "OpenSSL",
+]
+confidence-threshold = 0.9
+# Copyleft/unknown licenses surface as errors for explicit review.
+
+[bans]
+# Warn on multiple versions of the same crate (bloat / divergent patching).
+multiple-versions = "warn"
+wildcards = "warn"
+# Crates we never want pulled in (add as needed), e.g. unmaintained TLS stacks.
+deny = []
+
+[sources]
+# Only crates.io + the project's own git sources are trusted by default.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = []

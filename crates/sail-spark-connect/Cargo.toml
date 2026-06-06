@@ -33,6 +33,7 @@ async-stream = { workspace = true }
 lazy_static = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+subtle = "2.6"
 monostate = { workspace = true }
 regex = { workspace = true }
 phf = { workspace = true }

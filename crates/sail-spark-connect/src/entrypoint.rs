@@ -6,6 +6,7 @@ use sail_common::runtime::RuntimeHandle;
 use sail_server::{ServerBuilder, ServerBuilderOptions, TlsOptions};
 pub use sail_session::session_manager::SessionManagerOptions;
 use secrecy::ExposeSecret;
+use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Status};
@@ -54,7 +55,11 @@ impl tonic::service::Interceptor for BearerTokenInterceptor {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         let provided = auth.strip_prefix("Bearer ").unwrap_or("");
-        if provided == expected {
+        // Constant-time comparison so the token cannot be recovered byte-by-byte
+        // via response-timing analysis. `ct_eq` on byte slices returns false for
+        // unequal lengths without short-circuiting on content.
+        let matches: bool = provided.as_bytes().ct_eq(expected.as_bytes()).into();
+        if matches {
             Ok(req)
         } else {
             Err(Status::unauthenticated("invalid or missing Bearer token"))

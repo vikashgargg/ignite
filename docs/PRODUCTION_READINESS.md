@@ -39,21 +39,25 @@ all P0 items below are ✅ and published.
 | Same-box Spark ClickBench reference | ⬜ | run Spark on the same box → full 3-way (Vajra/LakeSail-published/Spark) |
 | Distributed TPC-H SF-100 < 60 s | ⬜ | 10-node K8s, 22/22, total < 60 s |
 
-## 3. Security & Hardening  — **biggest gap; features exist, NOT audited**
-> Today Vajra has JWT bearer auth + mTLS as *features*, tested for functionality.
-> There is **no penetration test, no security audit, no dependency-CVE gate, no
-> fuzzing**. This is the #1 thing blocking an honest "production-ready" claim.
+## 3. Security & Hardening  — **first audit pass done; pentest still outstanding**
+> First-pass internal review done 2026-06-06 ([docs/THREAT_MODEL.md](THREAT_MODEL.md)):
+> CVE gate added + 4 dependency vulns fixed, `SECURITY.md` published, and 6 code
+> findings logged (F1 fixed). Still missing for GA: a real **penetration test**,
+> **fuzzing**, and the **resource/DoS limits**.
 
 | Item | Status | Acceptance criterion |
 |---|---|---|
-| Dependency CVE gate | ⬜ | `cargo audit` + `cargo deny` in CI, zero unwaived advisories |
-| Threat model | ⬜ | documented threat model for the Spark Connect / gRPC surface |
+| Dependency CVE gate | ✅ | `cargo audit` + `cargo deny` in CI (`.github/workflows/security.yml`, `deny.toml`); **0 vulnerabilities** (fixed 4 in `astral-tokio-tar` via testcontainers 0.27) |
+| Threat model | ✅ | [docs/THREAT_MODEL.md](THREAT_MODEL.md) — assets, trust boundaries, attacker model, findings |
+| `SECURITY.md` + disclosure policy | ✅ | [SECURITY.md](../SECURITY.md) — private reporting + hardened-deployment guidance |
+| Constant-time token compare (F1) | ✅ | timing side-channel removed (`subtle::ConstantTimeEq`) |
+| Web UI default-localhost + token⇒TLS (F3/F4) | ⬜ | Web UI not on `0.0.0.0` by default; refuse token without TLS |
+| Reflection off in prod (F2) | ⬜ | gRPC reflection disabled or behind auth in production |
 | SQL parser / Connect fuzzing | ⬜ | fuzz harness runs in CI; no panics/UB on malformed input |
 | Auth/TLS adversarial test | ⬜ | verified: no auth bypass, token forgery, downgrade, or weak-cipher accept |
-| Resource-exhaustion / DoS limits | ⬜ | per-query memory/time limits + connection caps; hostile query can't OOM the server |
+| Resource-exhaustion / DoS limits (F6) | 🟡 | inbound msg size capped; still need per-query mem/time limits + connection caps |
 | Penetration test | ⬜ | a real pentest (internal or third-party) with findings triaged + fixed |
 | Secrets handling | 🟡 | no secrets in logs; creds via env/secret store only — audit + document |
-| `SECURITY.md` + disclosure policy | ⬜ | published vulnerability-reporting process |
 
 ## 4. Reliability & Endurance  — **unproven under production conditions**
 | Item | Status | Acceptance criterion |
