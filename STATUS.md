@@ -4,6 +4,8 @@
 > Tag: **v0.6.0-alpha** (Phase 4 Sprint 4.2 — trust + perf proof; merged to `main`)
 > Branch: `main` (Sprint 4.2 merged at `fc6ec9e2`)
 > See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) and [FEATURES.md](FEATURES.md) for the full plan.
+> **Road to 1.0 GA** (what's left to be a true production Spark replacement, with
+> measurable acceptance criteria): [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
 
 ---
 

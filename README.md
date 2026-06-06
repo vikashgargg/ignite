@@ -514,7 +514,9 @@ make build-all
 | **Phase 3** ✅ | Done 2026-05-30 | VARIANT, GroupedMap, time travel, dbt, ClickBench, Iceberg OverwritePartitions, event-time windows, stateful dedup, theta sketch, Vortex skeleton, 95%+ Spark test suite |
 | **Phase 4** 📅 | Q3 2026 | GPU workers, sub-interpreter UDFs, SF-100 distributed, SaaS |
 
-Full plan: [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md)
+Full plan: [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md). What's left to reach a
+production **1.0 GA** (honest gap checklist with measurable acceptance criteria):
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
 
 ---
 
