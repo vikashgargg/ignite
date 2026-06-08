@@ -25,6 +25,12 @@ pub struct ServerBuilderOptions {
     /// enumerate the service schema anonymously, so disable it in hardened /
     /// auth-enabled deployments.
     pub reflection: bool,
+    /// Max concurrent HTTP/2 streams a single connection may open (DoS cap).
+    /// `None` = unlimited.
+    pub max_concurrent_streams: Option<u32>,
+    /// Max concurrent in-flight requests processed per connection (DoS cap).
+    /// `None` = unlimited.
+    pub concurrency_limit_per_connection: Option<usize>,
 }
 
 /// TLS/mTLS options for the gRPC server.
@@ -46,6 +52,11 @@ impl Default for ServerBuilderOptions {
             http2_adaptive_window: Some(true),
             tls: None,
             reflection: true,
+            // Finite per-connection caps so a single client can't exhaust the
+            // server with unbounded streams/in-flight requests. Generous enough
+            // for normal Spark Connect multiplexing.
+            max_concurrent_streams: Some(256),
+            concurrency_limit_per_connection: Some(256),
         }
     }
 }
@@ -88,6 +99,14 @@ impl<'b> ServerBuilder<'b> {
                 tls = tls.client_ca_root(Certificate::from_pem(ca));
             }
             server = server.tls_config(tls)?;
+        }
+
+        // DoS caps: bound per-connection streams and in-flight requests.
+        if let Some(n) = options.max_concurrent_streams {
+            server = server.max_concurrent_streams(n);
+        }
+        if let Some(n) = options.concurrency_limit_per_connection {
+            server = server.concurrency_limit_per_connection(n);
         }
 
         let router = server

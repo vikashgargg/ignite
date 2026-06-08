@@ -46,5 +46,9 @@ Enforced defaults (as of the security pass):
 Still recommended:
 - Use **mTLS** (`--tls-ca`) for service-to-service trust where possible.
 - Do not expose the gRPC port to untrusted networks.
-- Run with least-privilege OS/K8s permissions and per-pod resource limits
-  (per-query resource limits are not yet enforced — see THREAT_MODEL.md F6).
+- **Bound the memory pool** so a heavy/hostile query can't OOM the host:
+  `SAIL_RUNTIME__MEMORY_POOL__TYPE=fair` (or `greedy`) and
+  `SAIL_RUNTIME__MEMORY_POOL__FAIR__MAX_SIZE=<bytes>`. The default is `unbounded`.
+- Per-connection stream/in-flight caps are enforced by default (256 each); a
+  per-query wall-time budget is not yet enforced (see THREAT_MODEL.md F6).
+- Run with least-privilege OS/K8s permissions and per-pod resource limits.

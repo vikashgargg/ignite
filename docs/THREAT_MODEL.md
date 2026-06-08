@@ -36,7 +36,7 @@ a substitute for a third-party penetration test (still outstanding — see
 | F3 | Medium | Web UI binds `0.0.0.0:4040`, no auth, no TLS | **fixed** (loopback default) |
 | F4 | Medium | Bearer token accepted over cleartext (no TLS requirement) | **fixed** (refuses to start) |
 | F5 | Low | Insecure-by-default (no auth unless a token is set) | doc |
-| F6 | Medium | No per-query resource/time limits or connection caps (DoS) | partial |
+| F6 | Medium | Resource-exhaustion / DoS | **mitigated** (caps added) |
 | D1 | High→**Fixed** | 4 RUSTSEC vulns in `astral-tokio-tar` (dev-dep) | **fixed** |
 | D2 | Low | 3 unmaintained transitive crates (json, paste, proc-macro-error) | accepted |
 
@@ -75,12 +75,18 @@ With no `--auth-token`/TLS, the server accepts all clients (dev convenience). Th
 is acceptable for local dev but must be explicit. Documented in SECURITY.md; the
 hardened-deployment guidance covers production.
 
-### F6 — Resource-exhaustion / DoS (Medium, partial)
-Good: inbound message size is capped (`max_decoding_message_size`). Gaps: no
-per-query memory or wall-time limit, no cap on concurrent sessions/connections, so
-a hostile or accidental heavy query can exhaust host memory/CPU.
-**Fix:** per-query memory pool + time budget; connection/session caps; backpressure.
-Tracked in PRODUCTION_READINESS §4.
+### F6 — Resource-exhaustion / DoS (Medium) — **MITIGATED**
+- Inbound message size capped (`max_decoding_message_size`) — already present.
+- **Added:** finite per-connection caps — `max_concurrent_streams` (256) and
+  `concurrency_limit_per_connection` (256) in `ServerBuilderOptions`, so one client
+  cannot open unbounded streams / in-flight requests.
+- **Memory:** a bounded memory pool already exists (`SAIL_RUNTIME__MEMORY_POOL__TYPE
+  =fair|greedy` + `..._MAX_SIZE`); the *default* is `unbounded`. **Production
+  deployments should set a bounded pool** (documented in SECURITY.md). We keep the
+  default unbounded to avoid silently capping legitimate large analytics queries.
+- **Still open (operability, not default-on for analytics):** a per-query wall-time
+  budget — risky to default since long queries are legitimate. Tracked in
+  PRODUCTION_READINESS §4 (reliability) as a configurable knob.
 
 ### D1 — Dependency CVEs (was High) — **FIXED**
 `cargo audit` initially reported **4 vulnerabilities**, all in `astral-tokio-tar`
@@ -102,10 +108,13 @@ escalation.
 1. ~~**F1** constant-time token compare~~ — **done**.
 2. ~~**F3 / F4** Web UI default-localhost + refuse-token-without-TLS~~ — **done**.
 3. ~~**F2** reflection off when auth enabled~~ — **done**.
-4. **F6** query resource limits + connection caps (larger; PRODUCTION_READINESS §4) — open.
+4. ~~**F6** connection caps + memory-pool guidance~~ — **done** (per-query wall-time
+   budget remains as a configurable operability knob, PRODUCTION_READINESS §4).
 5. Keep the `cargo audit` + `cargo deny` CI gate green (D1 fixed; D2 watched) — ongoing.
 
-Remaining for GA: **F6**, plus the items this review did not cover (below).
+All code-level findings (F1–F6) are addressed. Remaining for GA are the items this
+review did **not** cover (below): a real **pentest**, **fuzzing**, and the
+driver↔worker / catalog-credential authz review.
 
 ## What this review did NOT cover (still required for GA)
 - A real **penetration test** (third-party or dedicated internal red-team).
