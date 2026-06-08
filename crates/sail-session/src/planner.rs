@@ -404,51 +404,9 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             let [input] = physical_inputs else {
                 return internal_err!("MemorySinkExec requires exactly one physical input");
             };
-            let catalog_name = session_state
-                .config_options()
-                .catalog
-                .default_catalog
-                .clone();
-            let schema_name = session_state
-                .config_options()
-                .catalog
-                .default_schema
-                .clone();
-            // Look up the ephemeral in-process table registered by the streaming
-            // memory sink (Spark's `format("memory")`). This is not general
-            // catalog traversal, so the centralized catalog API does not apply.
-            #[expect(
-                clippy::disallowed_methods,
-                reason = "resolve ephemeral memory-sink table for streaming format(\"memory\")"
-            )]
-            let catalog = session_state
-                .catalog_list()
-                .catalog(&catalog_name)
-                .ok_or_else(|| internal_datafusion_err!("default catalog not found"))?;
-            let schema = catalog
-                .schema(&schema_name)
-                .ok_or_else(|| internal_datafusion_err!("default schema not found"))?;
-            let table = schema
-                .table(&node.query_name)
-                .await
-                .map_err(|e| internal_datafusion_err!("{e}"))?
-                .ok_or_else(|| {
-                    internal_datafusion_err!(
-                        "memory sink table '{}' not registered",
-                        node.query_name
-                    )
-                })?;
-            let buffer = table
-                .as_any()
-                .downcast_ref::<sail_plan::memory_buffer::MemoryStreamBuffer>()
-                .ok_or_else(|| {
-                    internal_datafusion_err!(
-                        "table '{}' is not a MemoryStreamBuffer",
-                        node.query_name
-                    )
-                })?
-                .buffer_handle();
-            Arc::new(MemorySinkExec::new(input.clone(), buffer))
+            // The shared buffer handle is carried directly on the node (and also
+            // backs the queryable temporary view), so no catalog lookup is needed.
+            Arc::new(MemorySinkExec::new(input.clone(), node.buffer().clone()))
         } else if let Some(_node) = node.as_any().downcast_ref::<BarrierNode>() {
             let (plan, preconditions) = physical_inputs.split_last().ok_or_else(|| {
                 datafusion_common::DataFusionError::Internal(format!(

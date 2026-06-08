@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
-use datafusion_expr::{Extension, LogicalPlan};
-use sail_catalog::provider::CatalogPartitionField;
+use datafusion::datasource::{provider_as_source, TableProvider};
+use datafusion_expr::{Extension, LogicalPlan, LogicalPlanBuilder};
+use sail_catalog::manager::CatalogManager;
+use sail_catalog::provider::{CatalogPartitionField, CreateTemporaryViewOptions};
 use sail_common::spec;
+use sail_common_datafusion::extension::SessionExtensionAccessor;
 use sail_logical_plan::streaming::foreach_batch::ForeachBatchSinkNode;
 use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 
@@ -98,19 +101,38 @@ impl PlanResolver<'_> {
             let resolved_input = self.resolve_write_input(*input, state).await?;
             let data_schema = Arc::new(resolved_input.schema().as_arrow().clone());
             let buffer = Arc::new(MemoryStreamBuffer::new(data_schema));
-            // The memory sink registers an ephemeral in-process table provider so
-            // that `writeStream.format("memory").queryName(q)` can be queried as `q`,
-            // matching Spark. This is not a catalog table, so the centralized
-            // catalog-registration path does not apply here.
-            #[expect(
-                clippy::disallowed_methods,
-                reason = "ephemeral in-process memory-sink table, not a catalog table"
-            )]
-            self.ctx
-                .register_table(query_name.as_str(), Arc::clone(&buffer) as Arc<_>)
-                .map_err(PlanError::from)?;
+            // Make `writeStream.format("memory").queryName(q)` queryable as `q`, matching
+            // Spark. Register an ephemeral temporary view that scans the live buffer
+            // through Vajra's CatalogManager (NOT `SessionContext::register_table`, which
+            // targets DataFusion's default `datafusion` catalog that Vajra does not use —
+            // that path fails with "failed to resolve catalog: datafusion").
+            let scan = LogicalPlanBuilder::scan(
+                query_name.as_str(),
+                provider_as_source(Arc::clone(&buffer) as Arc<dyn TableProvider>),
+                None,
+            )
+            .and_then(|b| b.build())
+            .map_err(|e| PlanError::internal(e.to_string()))?;
+            let manager = self.ctx.extension::<CatalogManager>()?;
+            manager
+                .create_temporary_view(
+                    query_name.as_str(),
+                    CreateTemporaryViewOptions {
+                        input: Arc::new(scan),
+                        columns: vec![],
+                        if_not_exists: false,
+                        replace: true,
+                        comment: None,
+                        properties: vec![],
+                    },
+                )
+                .await?;
             return Ok(LogicalPlan::Extension(Extension {
-                node: Arc::new(MemorySinkNode::new(Arc::new(resolved_input), query_name)),
+                node: Arc::new(MemorySinkNode::new(
+                    Arc::new(resolved_input),
+                    query_name,
+                    buffer.buffer_handle(),
+                )),
             }));
         }
 
