@@ -16,6 +16,11 @@ vs **real Apache Spark** (not estimates). Scripts are dual-engine
 Details: [TPCH_SF1.md](TPCH_SF1.md), [TPCH_SF100.md](TPCH_SF100.md),
 [CLICKBENCH.md](CLICKBENCH.md). EKS scale runs: [../SCALE_TESTING.md](../SCALE_TESTING.md).
 
+**Streaming throughput ✅:** [STREAMING.md](STREAMING.md) — the micro-batch engine
+sustains **~28M rows/s** (windowed count aggregation via `trigger(availableNow)`,
+single-node debug build). First data point toward a Flink-class streaming story; a
+standardized cluster benchmark (Nexmark) is the next step.
+
 **Vajra vs LakeSail (fork-parity check) ✅:** [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md)
 — measured on the **identical** ClickBench harness (same c6a.4xlarge class, local
 `hits.parquet`, best-of-3): **Vajra 60.11 s vs LakeSail 65.50 s = 0.92× — MATCHING**,
