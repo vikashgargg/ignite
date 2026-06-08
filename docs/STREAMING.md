@@ -19,9 +19,11 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 ## Sinks
 | Sink | Status | Notes |
 |---|---|---|
-| File / data source | ✅ | `WriteMode::Append` |
-| `foreachBatch` (Python) | ✅ | `ForeachBatchSinkNode`; Scala/Java foreachBatch unsupported |
-| `memory` (queryable) | ✅ | `MemorySinkNode` registers an in-process table |
+| `console` | ✅ | verified working sink |
+| `memory` (queryable) | ✅ | **fixed 2026-06-09** — buffer registered as a temp view via CatalogManager + handle carried on the node (was: `failed to resolve catalog: datafusion`). `SELECT … FROM <queryName>` now returns written rows. |
+| `foreachBatch` (Python) | 🟡 | `ForeachBatchSinkNode`; needs server-side Python 3.12 env; Scala/Java foreachBatch unsupported |
+| File / data source (parquet/csv listing) | ⬜ | rejected: `cannot write streaming data to listing table` (`listing/source.rs:266`) — the listing sink gets a flow-event-schema input it can't write. Needs an incremental write path: decode flow events → per-micro-batch file writes + checkpoint commit. |
+| Delta / Iceberg streaming sink | ⬜ | the production-relevant file sink (transactional); not yet wired for streaming input. |
 | `foreach` (row writer) | ⬜ | explicitly rejected — use `foreachBatch` |
 | `console` | ⬜ | not implemented |
 
