@@ -119,9 +119,9 @@ async fn handle_api(State(reg): State<Registry>) -> Json<Vec<QueryEntry>> {
     Json(reg.read().await.clone())
 }
 
-pub async fn serve(port: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn serve(host: &str, port: u16) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     START.get_or_init(Instant::now);
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("Web UI bind failed on {addr}: {e}"))?;

@@ -32,9 +32,19 @@ Every push/PR (and a weekly schedule) runs `.github/workflows/security.yml`:
 Run them locally with `cargo audit` and `cargo deny check`.
 
 ## Hardened deployment (until GA)
-- **Always enable TLS** when setting an auth token (`--tls-cert/--tls-key`) — the
-  Bearer token is sent in the request metadata and is only confidential over TLS.
-- **Do not expose the Web UI (`:4040`) or the gRPC port to untrusted networks** —
-  the Web UI is currently unauthenticated. Bind to localhost or firewall it.
+Enforced defaults (as of the security pass):
+- **A token without TLS is refused at startup.** Set `--tls-cert/--tls-key` when
+  using `--auth-token`; the token rides in request metadata and is only
+  confidential over TLS. Override only on a trusted network with
+  `SAIL_AUTH__ALLOW_INSECURE_TOKEN=true`.
+- **The Web UI binds to `127.0.0.1:4040` by default** (it is unauthenticated).
+  Expose it deliberately with `SAIL_UI__HOST=0.0.0.0` behind your own network
+  policy, or disable it with `SAIL_UI__ENABLED=false`.
+- **gRPC reflection is disabled automatically when an auth token is set**, so a
+  secured server does not allow anonymous schema enumeration.
+
+Still recommended:
 - Use **mTLS** (`--tls-ca`) for service-to-service trust where possible.
-- Run with least-privilege OS/K8s permissions and per-pod resource limits.
+- Do not expose the gRPC port to untrusted networks.
+- Run with least-privilege OS/K8s permissions and per-pod resource limits
+  (per-query resource limits are not yet enforced — see THREAT_MODEL.md F6).

@@ -32,6 +32,8 @@ pub struct AppConfig {
     pub telemetry: TelemetryConfig,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub ui: UiConfig,
     /// Reserved for internal use.
     /// This field ensures that environment variables with prefix `SAIL_INTERNAL_`
     /// can only be used for internal configuration.
@@ -647,6 +649,12 @@ pub struct AuthConfig {
     /// TLS configuration for the gRPC server.
     #[serde(default)]
     pub tls: TlsConfig,
+    /// Allow a Bearer token to be used without TLS (the token is then sent in
+    /// cleartext and can be sniffed/replayed). Defaults to `false`: the server
+    /// refuses to start with a token but no TLS. Only enable on a trusted network.
+    /// Set `SAIL_AUTH__ALLOW_INSECURE_TOKEN=true` to override.
+    #[serde(default)]
+    pub allow_insecure_token: bool,
 }
 
 /// TLS / mTLS configuration for the gRPC server.
@@ -668,6 +676,36 @@ pub struct TlsConfig {
     /// When set, mTLS is enforced: clients must present a certificate signed by this CA.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ca: Option<String>,
+}
+
+/// Web UI (read-only query / streaming dashboard) configuration.
+///
+/// The UI is **unauthenticated**, so it binds to `127.0.0.1` by default and is
+/// not reachable off-host. Only set `host` to a non-loopback address (e.g.
+/// `0.0.0.0` in a firewalled cluster) behind your own network controls, or set
+/// `enabled = false` to turn it off entirely.
+///
+///   SAIL_UI__ENABLED=false
+///   SAIL_UI__HOST=0.0.0.0
+///   SAIL_UI__PORT=4040
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    /// Whether to start the Web UI HTTP server.
+    pub enabled: bool,
+    /// Host/interface the Web UI binds to. Loopback (`127.0.0.1`) by default.
+    pub host: String,
+    /// Port the Web UI listens on.
+    pub port: u16,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            host: "127.0.0.1".to_string(),
+            port: 4040,
+        }
+    }
 }
 
 /// Environment variables for application cluster configuration.

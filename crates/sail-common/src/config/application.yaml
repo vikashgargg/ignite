@@ -860,3 +860,20 @@
     If a read operation takes longer than this duration, a warning is logged suggesting
     faster I/O or subprocess isolation.
   experimental: true
+
+- key: ui.enabled
+  type: boolean
+  default: "true"
+  description: Whether to start the read-only Web UI HTTP server.
+
+- key: ui.host
+  type: string
+  default: "127.0.0.1"
+  description: |
+    Host/interface the (unauthenticated) Web UI binds to. Loopback by default so it
+    is not reachable off-host. Set to `0.0.0.0` only behind your own network controls.
+
+- key: ui.port
+  type: number
+  default: "4040"
+  description: The port the Web UI listens on.

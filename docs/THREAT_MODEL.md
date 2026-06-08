@@ -31,10 +31,10 @@ a substitute for a third-party penetration test (still outstanding — see
 
 | ID | Severity | Area | Status |
 |---|---|---|---|
-| F1 | Medium | Non-constant-time Bearer token compare (timing side-channel) | open |
-| F2 | Low–Med | gRPC reflection + health are unauthenticated | open |
-| F3 | Medium | Web UI binds `0.0.0.0:4040`, no auth, no TLS | open |
-| F4 | Medium | Bearer token accepted over cleartext (no TLS requirement) | open |
+| F1 | Medium | Non-constant-time Bearer token compare (timing side-channel) | **fixed** |
+| F2 | Low–Med | gRPC reflection unauthenticated | **fixed** (off when auth on) |
+| F3 | Medium | Web UI binds `0.0.0.0:4040`, no auth, no TLS | **fixed** (loopback default) |
+| F4 | Medium | Bearer token accepted over cleartext (no TLS requirement) | **fixed** (refuses to start) |
 | F5 | Low | Insecure-by-default (no auth unless a token is set) | doc |
 | F6 | Medium | No per-query resource/time limits or connection caps (DoS) | partial |
 | D1 | High→**Fixed** | 4 RUSTSEC vulns in `astral-tokio-tar` (dev-dep) | **fixed** |
@@ -48,27 +48,27 @@ who can make many requests.
 **Fix:** constant-time compare (e.g. `subtle::ConstantTimeEq` or
 `constant_time_eq`). Small, isolated change.
 
-### F2 — Unauthenticated reflection + health (Low–Medium)
-The Bearer interceptor wraps only the Spark Connect service
-(`InterceptedService::new(configured, interceptor)`), while the gRPC **reflection**
-and **health** services are added to the base router (`crates/sail-server/src/builder.rs`)
-**without** the interceptor. Reflection exposes the full proto service schema to
-anonymous clients (there is already a `// TODO: turn off reflection in production`).
-**Fix:** disable reflection in production builds/config, and/or place health +
-reflection behind the same auth layer.
+### F2 — Unauthenticated reflection (Low–Medium) — **FIXED**
+The Bearer interceptor wraps only the Spark Connect service, while gRPC
+**reflection** + **health** were added to the base router without it, so reflection
+exposed the full proto schema to anonymous clients.
+**Fixed:** `ServerBuilderOptions.reflection` now gates the reflection service, and
+`entrypoint.rs` sets `reflection: expected_token.is_none()` — i.e. when an auth
+token is configured, anonymous reflection is **off**. Health is intentionally left
+open (liveness probes need it; it discloses nothing sensitive).
 
-### F3 — Web UI exposed, unauthenticated (Medium)
-`crates/sail-spark-connect/src/web_ui.rs:124` binds `0.0.0.0:4040` with no auth and
-no TLS, and it starts unconditionally. It can disclose query plans, schemas, and
-metrics to anyone who can reach the port.
-**Fix:** bind to `127.0.0.1` by default (configurable), make it opt-in, and put it
-behind auth/TLS when enabled. Document the exposure until then (done in SECURITY.md).
+### F3 — Web UI exposed, unauthenticated (Medium) — **FIXED**
+`web_ui::serve` previously bound `0.0.0.0:4040` unconditionally.
+**Fixed:** added `UiConfig { enabled, host, port }` defaulting to **`127.0.0.1:4040`**,
+so the unauthenticated UI is not reachable off-host by default. Operators can set
+`SAIL_UI__HOST` (e.g. `0.0.0.0` behind a network policy) or `SAIL_UI__ENABLED=false`.
 
-### F4 — Bearer token over cleartext (Medium)
-The token interceptor functions regardless of TLS, so with TLS off the token
-travels in request metadata in the clear and is trivially sniffable/replayable.
-**Fix:** refuse to start (or loudly warn) when an auth token is set without TLS;
-document "token ⇒ require TLS." Interim mitigation documented in SECURITY.md.
+### F4 — Bearer token over cleartext (Medium) — **FIXED**
+The token interceptor functioned regardless of TLS, so with TLS off the token
+travelled in request metadata in the clear.
+**Fixed:** the server now **refuses to start** when a token is set without TLS,
+unless `SAIL_AUTH__ALLOW_INSECURE_TOKEN=true` is set explicitly (trusted-network
+escape hatch). Guidance also in SECURITY.md.
 
 ### F5 — Insecure by default (Low, by design)
 With no `--auth-token`/TLS, the server accepts all clients (dev convenience). This
@@ -99,12 +99,13 @@ escalation.
 ---
 
 ## Remediation priority
-1. **F1** constant-time token compare — quick, do first.
-2. **F3 / F4** Web UI default-localhost + require-TLS-with-token — closes the two
-   most reachable network exposures.
-3. **F2** reflection off in prod.
-4. **F6** query resource limits + connection caps (larger; PRODUCTION_READINESS §4).
-5. Keep the `cargo audit` + `cargo deny` CI gate green (D1 fixed; D2 watched).
+1. ~~**F1** constant-time token compare~~ — **done**.
+2. ~~**F3 / F4** Web UI default-localhost + refuse-token-without-TLS~~ — **done**.
+3. ~~**F2** reflection off when auth enabled~~ — **done**.
+4. **F6** query resource limits + connection caps (larger; PRODUCTION_READINESS §4) — open.
+5. Keep the `cargo audit` + `cargo deny` CI gate green (D1 fixed; D2 watched) — ongoing.
+
+Remaining for GA: **F6**, plus the items this review did not cover (below).
 
 ## What this review did NOT cover (still required for GA)
 - A real **penetration test** (third-party or dedicated internal red-team).

@@ -51,8 +51,8 @@ all P0 items below are ✅ and published.
 | Threat model | ✅ | [docs/THREAT_MODEL.md](THREAT_MODEL.md) — assets, trust boundaries, attacker model, findings |
 | `SECURITY.md` + disclosure policy | ✅ | [SECURITY.md](../SECURITY.md) — private reporting + hardened-deployment guidance |
 | Constant-time token compare (F1) | ✅ | timing side-channel removed (`subtle::ConstantTimeEq`) |
-| Web UI default-localhost + token⇒TLS (F3/F4) | ⬜ | Web UI not on `0.0.0.0` by default; refuse token without TLS |
-| Reflection off in prod (F2) | ⬜ | gRPC reflection disabled or behind auth in production |
+| Web UI default-localhost + token⇒TLS (F3/F4) | ✅ | Web UI defaults to `127.0.0.1` (`UiConfig`); server refuses to start with a token but no TLS |
+| Reflection off in prod (F2) | ✅ | gRPC reflection disabled automatically when an auth token is configured |
 | SQL parser / Connect fuzzing | ⬜ | fuzz harness runs in CI; no panics/UB on malformed input |
 | Auth/TLS adversarial test | ⬜ | verified: no auth bypass, token forgery, downgrade, or weak-cipher accept |
 | Resource-exhaustion / DoS limits (F6) | 🟡 | inbound msg size capped; still need per-query mem/time limits + connection caps |

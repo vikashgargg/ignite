@@ -83,8 +83,21 @@ where
         .as_ref()
         .map(|s| s.expose_secret().to_string());
     let tls = build_tls_options(&config.auth.tls)?;
+
+    // F4: a Bearer token without TLS travels in cleartext and can be sniffed or
+    // replayed. Refuse to start in that configuration unless explicitly allowed.
+    if expected_token.is_some() && tls.is_none() && !config.auth.allow_insecure_token {
+        return Err("refusing to start: an auth token is set without TLS, so the \
+            token would be sent in cleartext. Enable TLS (SAIL_AUTH__TLS__CERT and \
+            SAIL_AUTH__TLS__KEY), or set SAIL_AUTH__ALLOW_INSECURE_TOKEN=true to \
+            override on a trusted network."
+            .into());
+    }
+
     let server_opts = ServerBuilderOptions {
         tls,
+        // F2: don't expose anonymous gRPC reflection when auth is enabled.
+        reflection: expected_token.is_none(),
         ..Default::default()
     };
 
@@ -92,11 +105,17 @@ where
         expected: expected_token,
     };
 
-    tokio::spawn(async {
-        if let Err(e) = crate::web_ui::serve(4040).await {
-            log::warn!("Web UI error: {e}");
-        }
-    });
+    // F3: the Web UI is unauthenticated; it binds to a loopback host by default
+    // (see UiConfig) and can be disabled entirely.
+    if config.ui.enabled {
+        let ui_host = config.ui.host.clone();
+        let ui_port = config.ui.port;
+        tokio::spawn(async move {
+            if let Err(e) = crate::web_ui::serve(&ui_host, ui_port).await {
+                log::warn!("Web UI error: {e}");
+            }
+        });
+    }
 
     let session_manager = create_spark_session_manager(config, runtime)?;
     let server = SparkConnectServer::new(session_manager);
@@ -119,4 +138,48 @@ where
         .serve(listener, signal)
         .await;
     result.map_err(|e| e.to_string().into())
+}
+
+#[expect(clippy::unwrap_used)]
+#[cfg(test)]
+mod tests {
+    use tonic::service::Interceptor;
+    use tonic::Request;
+
+    use super::BearerTokenInterceptor;
+
+    fn with_auth(header: Option<&str>) -> Request<()> {
+        let mut req = Request::new(());
+        if let Some(h) = header {
+            req.metadata_mut().insert("authorization", h.parse().unwrap());
+        }
+        req
+    }
+
+    #[test]
+    fn no_token_configured_allows_everything() {
+        let mut i = BearerTokenInterceptor { expected: None };
+        assert!(i.call(with_auth(None)).is_ok());
+        assert!(i.call(with_auth(Some("Bearer whatever"))).is_ok());
+    }
+
+    #[test]
+    fn correct_token_is_accepted() {
+        let mut i = BearerTokenInterceptor {
+            expected: Some("s3cr3t".to_string()),
+        };
+        assert!(i.call(with_auth(Some("Bearer s3cr3t"))).is_ok());
+    }
+
+    #[test]
+    fn wrong_or_missing_token_is_rejected() {
+        let mut i = BearerTokenInterceptor {
+            expected: Some("s3cr3t".to_string()),
+        };
+        assert!(i.call(with_auth(Some("Bearer wrong"))).is_err());
+        assert!(i.call(with_auth(Some("s3cr3t"))).is_err()); // missing "Bearer " prefix
+        assert!(i.call(with_auth(None)).is_err());
+        // Different-length token must not panic and must be rejected (ct_eq path).
+        assert!(i.call(with_auth(Some("Bearer short"))).is_err());
+    }
 }

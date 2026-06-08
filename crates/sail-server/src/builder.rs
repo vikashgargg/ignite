@@ -21,6 +21,10 @@ pub struct ServerBuilderOptions {
     pub http2_adaptive_window: Option<bool>,
     /// Optional TLS configuration. Set cert + key for TLS, add ca for mTLS.
     pub tls: Option<TlsOptions>,
+    /// Whether to expose the gRPC reflection service. Reflection lets clients
+    /// enumerate the service schema anonymously, so disable it in hardened /
+    /// auth-enabled deployments.
+    pub reflection: bool,
 }
 
 /// TLS/mTLS options for the gRPC server.
@@ -41,6 +45,7 @@ impl Default for ServerBuilderOptions {
             http2_keepalive_timeout: Some(std::time::Duration::from_secs(10)),
             http2_adaptive_window: Some(true),
             tls: None,
+            reflection: true,
         }
     }
 }
@@ -135,8 +140,12 @@ impl<'b> ServerBuilder<'b> {
     where
         F: Future<Output = ()>,
     {
-        let reflection_server = self.reflection_server_builder.build_v1()?;
-        let router = self.router.add_service(reflection_server);
+        let router = if self.options.reflection {
+            let reflection_server = self.reflection_server_builder.build_v1()?;
+            self.router.add_service(reflection_server)
+        } else {
+            self.router
+        };
 
         let incoming = TcpIncoming::from(listener)
             .with_nodelay(Some(self.options.nodelay))
