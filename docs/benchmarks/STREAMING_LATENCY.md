@@ -24,32 +24,42 @@ benchmark (Flink p99 74±3 ms vs Spark 231±8 ms under exactly-once @ 50k ev/s).
   - `availableNow` query client round-trip: **~1.8 ms**.
   - Throughput: **~28M rows/s** (see [STREAMING.md](STREAMING.md)).
 
-## The honest gap: latency is not yet *measurable* end-to-end
-Two findings block a real continuous-latency number today (both are the actual work
-items, not just measurement annoyances):
-1. **Latency is not instrumented.** The protocol defines a `LatencyTracker` flow
-   marker ("emitted by each data source … measured by downstream operators"), but
-   **no source emits it and no operator measures it** — so Vajra cannot report
-   p50/p99 streaming latency or `processedRowsPerSecond` (streaming progress metrics
-   are absent).
-2. **Continuous output-commit cadence.** A continuous `rate → memory` query surfaces
-   **0 rows** until a checkpoint/EndOfData boundary, so sustained end-to-end latency
-   under load can't be observed via the sink. Output visibility is gated on the
-   commit boundary, whose cadence isn't configurable/observable yet.
+## The honest gap (root cause, sharpened 2026-06-09)
+The blocker is deeper than "not instrumented" — **continuous streaming queries do not
+drive the sink locally**:
+- A **bounded** query (`trigger(availableNow)`) runs the full pipeline: the sink
+  (`MemorySinkExec`) executes, processes batches, commits — verified (1000 rows; the
+  sink's batch loop fires).
+- A **continuous** query (default trigger) is reported *active*, but the sink's batch
+  loop **never runs** — instrumented with an unconditional log at the top of the
+  sink loop, **zero batches arrived** in multiple seconds at 100–1000 rows/s. This is
+  why a continuous `rate → memory` query surfaces **0 rows**: the driver's
+  `stream.next()` loop never yields a batch for an unbounded plan.
+
+Consequences:
+1. **Continuous output doesn't work** (0 rows) — the primary issue to fix.
+2. **Latency can't be measured** end-to-end: a `LatencyTracker` flow marker is defined
+   in the protocol but, even after wiring a source to emit it and the sink to measure
+   it, the markers are never processed because the continuous pipeline isn't driven.
+   (That instrumentation was prototyped and reverted — it's correct but unobservable
+   until continuous execution is fixed; bounded execution regression-tested OK.)
+3. No streaming **progress metrics** (`lastProgress`/`processedRowsPerSecond`).
 
 So the defensible statement today: **Vajra's streaming *compute* is very low latency
-(sub-5 ms per batch), but end-to-end latency is micro-batch-class and currently
-un-instrumented; we cannot yet quote a Flink-comparable p99.**
+(sub-5 ms per batch, bounded), but *continuous* streaming execution does not yet drive
+sinks locally — so continuous output and any end-to-end latency number are blocked on
+that. We cannot quote a Flink-comparable p99 yet.**
 
-## Path to Flink-class (prioritized)
-1. **Instrument latency first (so we can drive it):** emit `LatencyTracker` from
-   sources on a cadence; measure `now() − marker_ts` at the sink/a downstream
-   operator; expose it (and input/processed rows-per-second) via
-   `StreamingQuery.lastProgress` — Vajra reports no progress today. *This is the
-   immediate next step — you can't optimize what you can't measure.*
-2. **Make continuous output prompt + observable:** configurable micro-batch trigger
-   interval + commit cadence; ensure sinks surface data each batch (the memory sink
-   commit-on-checkpoint gap above).
+## Path to Flink-class (prioritized — re-sequenced after the root-cause finding)
+1. **Fix continuous execution driving the sink (THE blocker).** Make an unbounded
+   streaming plan actually run the pipeline continuously so the driver's
+   `stream.next()` yields per-micro-batch output (today only bounded/availableNow
+   does). Without this, continuous output and latency are both dead. *Immediate next
+   step.*
+2. **Then instrument latency:** emit `LatencyTracker` from sources on a cadence;
+   measure `now() − marker_ts` at the sink; expose it (and input/processed
+   rows-per-second) via `StreamingQuery.lastProgress` (Vajra reports no progress
+   today). The source+sink wiring is already understood/prototyped — it just needs #1.
 3. **Drive the micro-batch interval down** and measure p50/p99 at fixed event rates
    (Nexmark / Yahoo Streaming Benchmark methodology) on a release build.
 4. **Evaluate a continuous (event-at-a-time) execution path** for the operators where
