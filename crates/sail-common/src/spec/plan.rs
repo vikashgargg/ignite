@@ -1043,6 +1043,10 @@ pub struct WriteStream {
     pub foreach_batch: Option<FunctionDefinition>,
     pub clustering_column_names: Vec<Identifier>,
     pub sink_destination: Option<WriteStreamSinkDestination>,
+    /// The streaming trigger. `None` means the default (continuous, source-driven)
+    /// processing. `AvailableNow`/`Once` are bounded: process the currently
+    /// available data and then terminate.
+    pub trigger: Option<StreamTrigger>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1050,6 +1054,21 @@ pub struct WriteStream {
 pub enum WriteStreamSinkDestination {
     Path { path: String },
     Table { table: ObjectName },
+}
+
+/// A Structured Streaming trigger, mirroring `DataStreamWriter.trigger(...)`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum StreamTrigger {
+    /// Fire micro-batches on a fixed wall-clock interval (string duration).
+    ProcessingTime { interval: String },
+    /// Process all data available at start, in one or more micro-batches, then stop.
+    AvailableNow,
+    /// Process all available data in a single micro-batch, then stop. (Deprecated
+    /// in Spark in favor of `AvailableNow`.)
+    Once,
+    /// Continuous processing with the given checkpoint interval (string duration).
+    Continuous { checkpoint_interval: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

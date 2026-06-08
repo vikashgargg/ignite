@@ -31,7 +31,30 @@ impl PlanResolver<'_> {
             foreach_batch,
             clustering_column_names,
             sink_destination,
+            trigger,
         } = write_stream;
+        // Trigger support: bounded sources (file/table via the source adapter) already
+        // drain and emit EndOfData, so `availableNow`/`once` terminate correctly for
+        // them today. Making an unbounded source (rate/Kafka) stop under
+        // `availableNow`/`once` requires per-source bounded reads and is tracked in
+        // docs/STREAMING.md (P0). `processingTime`/`continuous` pacing is not yet honored
+        // (processing is source-driven). Log so the behavior is never silent.
+        match &trigger {
+            Some(spec::StreamTrigger::AvailableNow) | Some(spec::StreamTrigger::Once) => {
+                log::info!(
+                    "streaming trigger {trigger:?}: bounded sources will run-once and stop; \
+                     unbounded sources (rate/Kafka) still run continuously (see docs/STREAMING.md)"
+                );
+            }
+            Some(spec::StreamTrigger::ProcessingTime { .. })
+            | Some(spec::StreamTrigger::Continuous { .. }) => {
+                log::info!(
+                    "streaming trigger {trigger:?}: interval/pacing is not yet honored; \
+                     processing is source-driven (see docs/STREAMING.md)"
+                );
+            }
+            None => {}
+        }
         if foreach_writer.is_some() {
             return Err(PlanError::invalid(
                 "writeStream.foreach() row-level writer is not supported; use writeStream.foreachBatch() instead",

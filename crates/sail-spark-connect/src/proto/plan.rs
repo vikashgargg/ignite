@@ -10,7 +10,7 @@ use crate::proto::data_type::{parse_spark_data_type, DEFAULT_FIELD_NAME};
 use crate::spark::connect as sc;
 use crate::spark::connect::catalog::CatType;
 use crate::spark::connect::relation::RelType;
-use crate::spark::connect::write_stream_operation_start::SinkDestination;
+use crate::spark::connect::write_stream_operation_start::{SinkDestination, Trigger};
 use crate::spark::connect::{
     plan, Catalog, CreateDataFrameViewCommand, MergeIntoTableCommand, Plan, Relation,
     RelationCommon, StreamingForeachFunction, TransformWithStateInfo, WriteOperation,
@@ -2007,9 +2007,7 @@ impl TryFrom<WriteStreamOperationStart> for spec::CommandNode {
             foreach_writer,
             foreach_batch,
             clustering_column_names,
-            // The trigger is ignored since we always do continuous processing.
-            // The source determines how the processing is triggered.
-            trigger: _,
+            trigger,
             sink_destination,
         } = start;
         let input = input.required("input relation")?.try_into()?;
@@ -2034,6 +2032,19 @@ impl TryFrom<WriteStreamOperationStart> for spec::CommandNode {
             }
             None => None,
         };
+        let trigger = match trigger {
+            Some(Trigger::ProcessingTimeInterval(interval)) => {
+                Some(spec::StreamTrigger::ProcessingTime { interval })
+            }
+            Some(Trigger::AvailableNow(_)) => Some(spec::StreamTrigger::AvailableNow),
+            Some(Trigger::Once(_)) => Some(spec::StreamTrigger::Once),
+            Some(Trigger::ContinuousCheckpointInterval(checkpoint_interval)) => {
+                Some(spec::StreamTrigger::Continuous {
+                    checkpoint_interval,
+                })
+            }
+            None => None,
+        };
         Ok(spec::CommandNode::WriteStream(spec::WriteStream {
             input: Box::new(input),
             format,
@@ -2044,6 +2055,7 @@ impl TryFrom<WriteStreamOperationStart> for spec::CommandNode {
             foreach_batch,
             clustering_column_names,
             sink_destination,
+            trigger,
         }))
     }
 }
