@@ -21,6 +21,13 @@ sustains **~28M rows/s** (windowed count aggregation via `trigger(availableNow)`
 single-node debug build). First data point toward a Flink-class streaming story; a
 standardized cluster benchmark (Nexmark) is the next step.
 
+**Streaming latency (baseline) 🟡:** [STREAMING_LATENCY.md](STREAMING_LATENCY.md) —
+engine compute is very low latency (**sub-5 ms per micro-batch**, ~1.8 ms client
+round-trip), but Vajra is micro-batch-class and latency is **not yet instrumented**
+end-to-end (LatencyTracker marker unwired; no streaming progress metrics). Targets:
+Flink ~tens of ms vs Spark micro-batch ~100 ms–1 s. Path: instrument → tighten
+trigger → evaluate continuous mode.
+
 **Vajra vs LakeSail (fork-parity check) ✅:** [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md)
 — measured on the **identical** ClickBench harness (same c6a.4xlarge class, local
 `hits.parquet`, best-of-3): **Vajra 60.11 s vs LakeSail 65.50 s = 0.92× — MATCHING**,
