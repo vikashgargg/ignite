@@ -116,6 +116,27 @@ All code-level findings (F1–F6) are addressed. Remaining for GA are the items 
 review did **not** cover (below): a real **pentest**, **fuzzing**, and the
 driver↔worker / catalog-credential authz review.
 
+## Penetration test — first internal pass (2026-06-08)
+Active probing of a running server with `grpcurl`, `curl`, and `nc` across three
+configs (no-auth; token+insecure-no-TLS; TLS+token). Results:
+
+| Probe | Result | Confirms |
+|---|---|---|
+| Reflection list, **no auth** | enumerates Health, Reflection, SparkConnectService | baseline surface (expected when unsecured) |
+| Reflection list, **auth on** | `server does not support the reflection API` | **F2** — no anonymous schema enumeration when secured |
+| **Plaintext client → TLS port** | connection refused (deadline exceeded) | TLS is enforced; no cleartext downgrade |
+| **TLS handshake with CA** | connects cleanly | valid TLS path works |
+| **2 KB random bytes → gRPC port** | server stays up | no crash/panic on malformed input |
+| **Web UI** | `127.0.0.1:4040 → HTTP 200` | **F3** — loopback-only by default |
+
+Auth-interceptor reject/accept logic (no/wrong/correct/different-length token) is
+covered by unit tests in `entrypoint.rs`; the wire-level test above confirms the
+secured server exposes no anonymous surface beyond the (intentional) health check.
+
+**This is a first internal pass, not a third-party pentest.** It did not exercise
+authenticated SparkConnect RPCs with a forged protoset, HTTP/2-level abuse
+(stream floods, CONTINUATION/HPACK bombs), or sustained load — see below.
+
 ## What this review did NOT cover (still required for GA)
 - A real **penetration test** (third-party or dedicated internal red-team).
 - **Fuzzing** the SQL parser and the Connect/protobuf decode path.

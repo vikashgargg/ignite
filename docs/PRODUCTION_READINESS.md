@@ -56,7 +56,7 @@ all P0 items below are ✅ and published.
 | SQL parser / Connect fuzzing | ⬜ | fuzz harness runs in CI; no panics/UB on malformed input |
 | Auth/TLS adversarial test | ⬜ | verified: no auth bypass, token forgery, downgrade, or weak-cipher accept |
 | Resource-exhaustion / DoS limits (F6) | 🟡→✅ | inbound msg cap + per-connection stream/concurrency caps added; bounded memory pool available (recommend in prod). Per-query wall-time budget still a follow-up knob |
-| Penetration test | ⬜ | a real pentest (internal or third-party) with findings triaged + fixed |
+| Penetration test | 🟡 | first **internal** pass done (grpcurl/curl/nc — reflection gating, TLS enforcement, malformed-input, Web UI scope all verified; THREAT_MODEL.md). Third-party pentest + HTTP/2-abuse/load still required |
 | Secrets handling | 🟡 | no secrets in logs; creds via env/secret store only — audit + document |
 
 ## 4. Reliability & Endurance  — **unproven under production conditions**
