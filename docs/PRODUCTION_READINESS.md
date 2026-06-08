@@ -105,6 +105,14 @@ all P0 items below are ✅ and published.
   SF-100 < 60 s; §1 Spark 4.x reference + TPC-DS + ≥97% suite.
 - **P2 (polish → 1.0-rc):** §5 SLOs/tracing/runbooks; §6 arm64 Linux + semver; §7 docs.
 
+## Streaming ("master of streaming" — the LakeSail differentiator)
+Full capability audit + prioritized roadmap: [STREAMING.md](STREAMING.md). Summary:
+event-time window aggregation, watermarks, dedup, Kafka source, foreachBatch/memory
+sinks, and checkpoint+recovery all **work**; the open P0s are **stateful
+stream–stream joins** (today per-micro-batch → silently incomplete), **triggers**
+(`availableNow`/`once` currently ignored), and **explicit output modes**. This track
+doubles as the reliability evidence (the Kafka→Delta 24 h soak in §4).
+
 ## Recommended focus (next 2–3 weeks)
 Capability and speed are *already_ proven — the credibility gap is now **"is it safe
 and will it survive production?"** So:
