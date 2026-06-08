@@ -75,6 +75,9 @@ impl StreamSource for KafkaStreamSource {
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
+        // Bounded (availableNow/once) reads are not yet implemented for Kafka; the
+        // source runs continuously. Tracked in docs/STREAMING.md.
+        _bounded: bool,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()

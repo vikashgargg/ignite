@@ -37,6 +37,18 @@ pub async fn resolve_and_execute_plan(
     config: Arc<PlanConfig>,
     plan: spec::Plan,
 ) -> PlanResult<(Arc<dyn ExecutionPlan>, Vec<StringifiedPlan>)> {
+    resolve_and_execute_plan_with_options(ctx, config, plan, false).await
+}
+
+/// Like [`resolve_and_execute_plan`], but allows requesting bounded streaming
+/// execution (trigger `availableNow`/`once`): stream sources scan the available
+/// data and then end, so the streaming query terminates.
+pub async fn resolve_and_execute_plan_with_options(
+    ctx: &SessionContext,
+    config: Arc<PlanConfig>,
+    plan: spec::Plan,
+    bounded: bool,
+) -> PlanResult<(Arc<dyn ExecutionPlan>, Vec<StringifiedPlan>)> {
     let mut info = vec![];
     let resolver = PlanResolver::new(ctx, config);
     let NamedPlan { plan, fields } = resolver.resolve_named_plan(plan).await?;
@@ -45,7 +57,7 @@ pub async fn resolve_and_execute_plan(
     let (session_state, plan) = df.into_parts();
     let plan = session_state.optimize(&plan)?;
     let plan = if is_streaming_plan(&plan)? {
-        rewrite_streaming_plan(plan)?
+        rewrite_streaming_plan(plan, bounded)?
     } else {
         plan
     };

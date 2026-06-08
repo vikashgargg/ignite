@@ -34,7 +34,10 @@ use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 /// into a streaming logical plan. All the nodes (except the sink) in the plan
 /// will have a flow event schema which contains additional fields
 /// along with the original data fields.
-struct StreamingRewriter;
+struct StreamingRewriter {
+    /// Trigger `availableNow`/`once`: stream sources scan available data then stop.
+    bounded: bool,
+}
 
 impl StreamingRewriter {
     fn f_up_extension(&mut self, extension: Extension) -> Result<Transformed<LogicalPlan>> {
@@ -291,6 +294,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                                 projection.clone(),
                                 filters.clone(),
                                 *fetch,
+                                self.bounded,
                             )?),
                         })))
                     } else {
@@ -448,8 +452,8 @@ pub fn is_streaming_plan(plan: &LogicalPlan) -> Result<bool> {
 /// all logical commands are executed. An error will be returned if the plan
 /// contains logical command nodes or nodes that should be eliminated by the
 /// optimizer (e.g. subquery).
-pub fn rewrite_streaming_plan(plan: LogicalPlan) -> Result<LogicalPlan> {
-    let node = plan.rewrite(&mut StreamingRewriter)?;
+pub fn rewrite_streaming_plan(plan: LogicalPlan, bounded: bool) -> Result<LogicalPlan> {
+    let node = plan.rewrite(&mut StreamingRewriter { bounded })?;
     let plan = node.data;
 
     if is_flow_event_schema(plan.schema().inner()) {

@@ -11,7 +11,7 @@ use log::{debug, warn};
 use sail_common::spec;
 use sail_common_datafusion::extension::SessionExtensionAccessor;
 use sail_common_datafusion::session::job::JobService;
-use sail_plan::resolve_and_execute_plan;
+use sail_plan::{resolve_and_execute_plan, resolve_and_execute_plan_with_options};
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use tonic::codegen::tokio_stream::Stream;
 use tonic::Status;
@@ -34,6 +34,7 @@ use crate::spark::connect::{
     StreamingQueryManagerCommandResult, WriteOperation, WriteOperationV2,
     WriteStreamOperationStart, WriteStreamOperationStartResult,
 };
+use crate::spark::connect::write_stream_operation_start;
 use crate::streaming::timeout_millis;
 
 pub struct ExecutePlanResponseStream {
@@ -286,8 +287,16 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
     let reattachable = metadata.reattachable;
     let query_name = start.query_name.clone();
     let checkpoint_location = start.options.get("checkpointLocation").cloned();
+    // `availableNow`/`once` triggers request bounded execution: scan available data
+    // and terminate, rather than running continuously.
+    let bounded = matches!(
+        start.trigger,
+        Some(write_stream_operation_start::Trigger::AvailableNow(_))
+            | Some(write_stream_operation_start::Trigger::Once(_))
+    );
     let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
-    let (plan, info) = resolve_and_execute_plan(ctx, spark.plan_config()?, plan).await?;
+    let (plan, info) =
+        resolve_and_execute_plan_with_options(ctx, spark.plan_config()?, plan, bounded).await?;
     let stream = service.runner().execute(ctx, plan).await?;
     let id = spark.start_streaming_query(query_name.clone(), info, stream, checkpoint_location)?;
     let result = WriteStreamOperationStartResult {

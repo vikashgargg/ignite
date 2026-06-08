@@ -64,6 +64,9 @@ impl StreamSource for SocketStreamSource {
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
+        // Bounded (availableNow/once) reads are not meaningful for a socket source;
+        // it runs continuously. Tracked in docs/STREAMING.md.
+        _bounded: bool,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()

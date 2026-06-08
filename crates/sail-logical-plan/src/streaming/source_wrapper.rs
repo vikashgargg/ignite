@@ -23,6 +23,9 @@ pub struct StreamSourceWrapperNode {
     projection: Option<Vec<usize>>,
     filters: Vec<Expr>,
     fetch: Option<usize>,
+    /// When true (trigger `availableNow`/`once`), the source scans available data
+    /// then ends its stream so the query terminates.
+    bounded: bool,
 }
 
 impl PartialEq for StreamSourceWrapperNode {
@@ -32,6 +35,7 @@ impl PartialEq for StreamSourceWrapperNode {
             && self.projection == other.projection
             && self.filters == other.filters
             && self.fetch == other.fetch
+            && self.bounded == other.bounded
     }
 }
 
@@ -44,6 +48,7 @@ impl Hash for StreamSourceWrapperNode {
         self.projection.hash(state);
         self.filters.hash(state);
         self.fetch.hash(state);
+        self.bounded.hash(state);
     }
 }
 
@@ -55,6 +60,7 @@ impl StreamSourceWrapperNode {
         projection: Option<Vec<usize>>,
         filters: Vec<Expr>,
         fetch: Option<usize>,
+        bounded: bool,
     ) -> Result<Self> {
         let schema = match &names {
             Some(names) => rename_schema(&source.data_schema(), names)?,
@@ -83,11 +89,16 @@ impl StreamSourceWrapperNode {
             projection,
             filters,
             fetch,
+            bounded,
         })
     }
 
     pub fn source(&self) -> &Arc<dyn StreamSource> {
         &self.source
+    }
+
+    pub fn bounded(&self) -> bool {
+        self.bounded
     }
 
     pub fn names(&self) -> Option<&Vec<String>> {

@@ -635,6 +635,7 @@ message RateSourceExecNode {
   uint64 num_partitions = 2;
   bytes schema = 3;
   repeated uint64 projection = 4;
+  bool bounded = 5;
 }
 
 message TextSinkExecNode {

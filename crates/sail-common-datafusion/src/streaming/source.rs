@@ -35,12 +35,17 @@ pub trait StreamSource: Send + Sync + fmt::Debug {
     /// Creates an execution plan that will scan the source.
     /// An encoded flow event stream is returned from execution.
     /// The schema of the scan is the flow event schema derived from the data schema.
+    ///
+    /// When `bounded` is true (streaming trigger `availableNow`/`once`), the source
+    /// must emit the data available at query start, then end its stream (after an
+    /// `EndOfData` marker) so the query terminates instead of running continuously.
     async fn scan(
         &self,
         state: &dyn Session,
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
+        bounded: bool,
     ) -> Result<Arc<dyn ExecutionPlan>>;
 }
 

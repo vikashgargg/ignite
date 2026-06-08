@@ -44,7 +44,8 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 | Event-time watermarks | ✅ | drives window aggregation + dedup eviction |
 | Output mode — append | ✅ | default |
 | Output mode — **complete / update** | 🟡 | `output_mode` is intentionally ignored (proto/plan.rs); the sink picks append-vs-upsert. Not driven by query semantics → not Spark-equivalent for complete-mode aggregations. |
-| Triggers (processingTime / once / availableNow / continuous) | 🟡 | trigger is now **captured** end-to-end (`spec::StreamTrigger`, proto→spec→resolver; no longer discarded) and logged. **Bounded** sources (file/table via the source adapter) already drain + `EndOfData` + stop, so `availableNow`/`once` terminate correctly for them. Making **unbounded** sources (rate/Kafka) stop under `availableNow` (per-source bounded reads) + `processingTime` pacing are the remaining runtime work. |
+| `availableNow` / `once` triggers | ✅ | end-to-end: trigger → `bounded` flag → rewriter → `StreamSourceWrapperNode` → `StreamSource::scan(bounded)`. The **rate** source now scans available rows + `EndOfData` and **the query terminates** (verified: `availableNow` terminates in ~0s vs continuous runs forever). Bounded reads for **Kafka/socket** are the remaining per-source follow-up. |
+| `processingTime` / `continuous` interval pacing | ⬜ | trigger captured + logged; interval pacing not yet honored (source-driven). |
 | `mapGroupsWithState` / `flatMapGroupsWithState` | ⬜ | arbitrary keyed state not exposed |
 | Checkpoint + recovery | ✅ | offsets/state persisted; recovery on restart |
 | `dropDuplicatesWithinWatermark` | 🟡 | dedup exists; verify exact Spark semantics |
@@ -56,11 +57,10 @@ Ordered by leverage (correctness/parity first, then breadth):
    stream×stream join only matches rows within the same micro-batch (silently
    incomplete). This is the highest-impact correctness gap. Needs buffered join
    state keyed by join key + watermark-based eviction. *(`rewriter.rs` `Join` arm.)*
-2. **P0 — Triggers**: the trigger is now **modeled + captured** (spec/proto/resolver);
-   bounded sources already honor `availableNow`/`once`. Remaining: per-source **bounded
-   reads** so unbounded sources (rate/Kafka) also stop under `availableNow`/`once`
-   (thread a `bounded` flag rewriter → `StreamSourceWrapperNode` → `StreamSource::scan`
-   → reader), plus `processingTime` pacing.
+2. **P0 — Triggers**: ✅ `availableNow`/`once` implemented end-to-end and verified for
+   the **rate** source (bounded flag threaded rewriter → `StreamSourceWrapperNode` →
+   `StreamSource::scan` → reader; the query terminates). Remaining: bounded reads for
+   **Kafka/socket** (read to current end offsets then stop) and `processingTime` pacing.
 3. **P1 — Explicit output modes**: make complete/update first-class (driven by query
    semantics + retraction), not sink-inferred; reject invalid mode/query combinations
    the way Spark does (e.g. append + non-windowed aggregation).

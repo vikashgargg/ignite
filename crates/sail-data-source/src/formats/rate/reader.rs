@@ -15,6 +15,7 @@ use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{arrow_datafusion_err, plan_err, Result};
 use futures::{Stream, StreamExt};
 use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
+use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
 use sail_common_datafusion::streaming::event::FlowEvent;
@@ -67,6 +68,7 @@ impl StreamSource for RateStreamSource {
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
+        bounded: bool,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()
@@ -75,6 +77,7 @@ impl StreamSource for RateStreamSource {
             self.options.clone(),
             Arc::clone(&self.schema),
             projection,
+            bounded,
         )?))
     }
 }
@@ -86,6 +89,8 @@ pub struct RateSourceExec {
     original_schema: SchemaRef,
     projected_schema: SchemaRef,
     projection: Vec<usize>,
+    /// Trigger `availableNow`/`once`: emit one batch of available rows then stop.
+    bounded: bool,
     properties: Arc<PlanProperties>,
 }
 
@@ -96,17 +101,23 @@ impl RateSourceExec {
         options: RateReadOptions,
         schema: SchemaRef,
         projection: Vec<usize>,
+        bounded: bool,
     ) -> Result<Self> {
         let time_zone = Self::infer_time_zone(&schema)?;
         let projected_schema = Arc::new(schema.project(&projection)?);
         let output_schema = Arc::new(to_flow_event_schema(&projected_schema));
+        let boundedness = if bounded {
+            Boundedness::Bounded
+        } else {
+            Boundedness::Unbounded {
+                requires_infinite_memory: false,
+            }
+        };
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(output_schema),
             Partitioning::UnknownPartitioning(options.num_partitions),
             EmissionType::Both,
-            Boundedness::Unbounded {
-                requires_infinite_memory: false,
-            },
+            boundedness,
         ));
         Ok(Self {
             options,
@@ -114,6 +125,7 @@ impl RateSourceExec {
             original_schema: schema,
             projected_schema,
             projection,
+            bounded,
             properties,
         })
     }
@@ -128,6 +140,10 @@ impl RateSourceExec {
 
     pub fn projection(&self) -> &[usize] {
         &self.projection
+    }
+
+    pub fn bounded(&self) -> bool {
+        self.bounded
     }
 
     fn infer_time_zone(schema: &Schema) -> Result<Arc<str>> {
@@ -202,6 +218,26 @@ impl ExecutionPlan for RateSourceExec {
                 self.name(),
                 self.options.num_partitions
             );
+        }
+        if self.bounded {
+            // Trigger availableNow/once: emit one batch of the currently-available
+            // rows, then EndOfData, then end the stream so the query terminates
+            // instead of running continuously.
+            let rows = (self.options.rows_per_second / self.options.num_partitions).max(1);
+            let mut generator = BatchGenerator::try_new(
+                Arc::clone(&self.time_zone),
+                &self.projection,
+                self.projected_schema.clone(),
+            )?;
+            let events = futures::stream::iter(vec![
+                generator.generate(rows).map(FlowEvent::append_only_data),
+                Ok(FlowEvent::Marker(FlowMarker::EndOfData)),
+            ]);
+            let stream = Box::pin(FlowEventStreamAdapter::new(
+                self.projected_schema.clone(),
+                events,
+            ));
+            return Ok(Box::pin(EncodedFlowEventStream::new(stream)));
         }
         // TODO: consider token bucket algorithm for data generation with a more stable rate
         // TODO: make the data generation algorithm configurable
@@ -325,5 +361,64 @@ impl BatchGenerator {
         self.offset += batch_size;
         RecordBatch::try_new(self.projected_schema.clone(), columns)
             .map_err(|e| arrow_datafusion_err!(e))
+    }
+}
+
+#[expect(clippy::unwrap_used)]
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+    use datafusion::execution::TaskContext;
+    use datafusion::physical_plan::execution_plan::Boundedness;
+    use datafusion::physical_plan::ExecutionPlan;
+    use futures::TryStreamExt;
+
+    use super::RateSourceExec;
+    use crate::options::gen::RateReadOptions;
+
+    fn rate_schema() -> Arc<Schema> {
+        Arc::new(Schema::new(vec![
+            Field::new(
+                "timestamp",
+                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
+                false,
+            ),
+            Field::new("value", DataType::Int64, false),
+        ]))
+    }
+
+    fn options() -> RateReadOptions {
+        RateReadOptions {
+            rows_per_second: 5,
+            num_partitions: 1,
+        }
+    }
+
+    // Trigger availableNow/once: the bounded rate source must end its stream so the
+    // streaming query terminates. An unbounded source would hang this collect.
+    #[tokio::test]
+    async fn bounded_rate_source_terminates() {
+        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], true).unwrap();
+        assert!(matches!(exec.properties().boundedness, Boundedness::Bounded));
+        let stream = exec.execute(0, Arc::new(TaskContext::default())).unwrap();
+        // The outer unwrap panics (failing the test) if the source does not terminate.
+        let batches = tokio::time::timeout(Duration::from_secs(10), stream.try_collect::<Vec<_>>())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!batches.is_empty(), "bounded rate source produced no data");
+    }
+
+    // Default (continuous) rate source stays unbounded.
+    #[tokio::test]
+    async fn unbounded_rate_source_is_unbounded() {
+        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], false).unwrap();
+        assert!(matches!(
+            exec.properties().boundedness,
+            Boundedness::Unbounded { .. }
+        ));
     }
 }

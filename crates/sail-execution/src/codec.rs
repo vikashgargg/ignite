@@ -929,6 +929,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 num_partitions,
                 schema,
                 projection,
+                bounded,
             }) => {
                 let options = RateReadOptions {
                     rows_per_second: usize::try_from(rows_per_second).map_err(|_| {
@@ -944,6 +945,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     options,
                     Arc::new(schema),
                     projection,
+                    bounded,
                 )?))
             }
             NodeKind::TextSink(gen::TextSinkExecNode {
@@ -1778,6 +1780,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 num_partitions,
                 schema,
                 projection,
+                bounded: rate_source.bounded(),
             })
         } else if let Some(data_sink) = node.as_any().downcast_ref::<DataSinkExec>() {
             let input = self.try_encode_plan(data_sink.input().clone())?;
