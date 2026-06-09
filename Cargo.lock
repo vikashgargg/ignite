@@ -7541,6 +7541,7 @@ dependencies = [
 name = "sail-physical-plan"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "datafusion",
  "datafusion-common",
  "datafusion-expr",

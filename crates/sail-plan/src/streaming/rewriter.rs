@@ -173,7 +173,11 @@ impl TreeNodeRewriter for StreamingRewriter {
                     };
                     return Ok(Transformed::yes(LogicalPlan::Extension(Extension {
                         node: Arc::new(WindowAccumNode::new(
-                            data_only,
+                            // Feed the flow-event input so Watermark markers reach the
+                            // operator; the aggregate exprs are built against the data
+                            // schema in the physical planner. `data_only` above is used
+                            // only to derive the aggregate output schema.
+                            (*streaming_input).clone(),
                             agg.group_expr.clone(),
                             agg.aggr_expr.clone(),
                             event_time_col,

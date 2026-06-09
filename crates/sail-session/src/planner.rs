@@ -60,6 +60,7 @@ use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
+use sail_physical_plan::streaming::watermark::WatermarkExec;
 use sail_physical_plan::streaming::window_accum::WindowAccumExec;
 use sail_plan::catalog::CatalogCommandNode;
 use sail_plan_lakehouse::new_lakehouse_extension_planners;
@@ -321,12 +322,32 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 return internal_err!("StreamCollectorExec requires exactly one physical input");
             };
             Arc::new(StreamCollectorExec::try_new(input.clone())?)
-        } else if node.as_any().is::<WatermarkNode>() {
-            // WatermarkNode is a logical passthrough — its physical form is just the input.
+        } else if let Some(node) = node.as_any().downcast_ref::<WatermarkNode>() {
+            // WatermarkExec emits in-band watermark markers from the raw event-time
+            // column (still present here, below the window-folding projection).
             let [input] = physical_inputs else {
                 return internal_err!("WatermarkNode requires exactly one physical input");
             };
-            input.clone()
+            let data_schema = Arc::new(
+                sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema(
+                    &input.schema(),
+                )
+                .map_err(|e| {
+                    let names: Vec<_> = input
+                        .schema()
+                        .fields()
+                        .iter()
+                        .map(|f| f.name().clone())
+                        .collect();
+                    internal_datafusion_err!("WatermarkExec input schema {names:?}: {e}")
+                })?,
+            );
+            Arc::new(WatermarkExec::try_new(
+                input.clone(),
+                node.event_time_col.clone(),
+                node.delay_micros,
+                data_schema,
+            )?)
         } else if let Some(node) = node.as_any().downcast_ref::<StreamDeduplicateNode>() {
             let [input] = physical_inputs else {
                 return internal_err!("StreamDeduplicateExec requires exactly one physical input");
@@ -351,14 +372,23 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             let [logical_input] = logical_inputs else {
                 return internal_err!("WindowAccumExec requires exactly one logical input");
             };
-            let data_schema = logical_input.schema().inner().clone();
+            // The input is a flow-event stream (so Watermark markers reach the
+            // operator), but the aggregate runs on the *decoded* data batches — so
+            // build the group/aggregate expressions against the data schema, not the
+            // flow-event input schema.
+            let data_schema = Arc::new(
+                sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema(
+                    logical_input.schema().inner(),
+                )?,
+            );
+            let data_dfschema =
+                Arc::new(datafusion_common::DFSchema::try_from(data_schema.as_ref().clone())?);
             // Build physical group expressions.
             let group_exprs: Vec<(Arc<dyn datafusion_physical_expr::PhysicalExpr>, String)> = node
                 .group_exprs
                 .iter()
                 .map(|e| {
-                    let phys =
-                        planner.create_physical_expr(e, logical_input.schema(), session_state)?;
+                    let phys = planner.create_physical_expr(e, &data_dfschema, session_state)?;
                     let name = e.name_for_alias().unwrap_or_else(|_| "__group".to_string());
                     Ok((phys, name))
                 })
@@ -373,7 +403,7 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                         let (agg_expr, _filter, _order_bys) =
                             datafusion::physical_planner::create_aggregate_expr_and_maybe_filter(
                                 e,
-                                logical_input.schema(),
+                                &data_dfschema,
                                 &data_schema,
                                 session_state.execution_props(),
                             )?;

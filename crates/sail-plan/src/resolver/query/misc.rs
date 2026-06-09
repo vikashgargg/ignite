@@ -183,12 +183,26 @@ impl PlanResolver<'_> {
     ) -> PlanResult<LogicalPlan> {
         let input = self.resolve_query_plan(*watermark.input, state).await?;
         let delay_micros = parse_spark_duration_to_micros(&watermark.delay_threshold).unwrap_or(0);
+        // Resolve the event-time column to its internal (resolved) field name, so the
+        // physical WatermarkExec can find it in the optimized schema (the resolver
+        // renames columns to internal ids like `#0`).
+        let event_time_col = self
+            .resolve_columns(
+                input.schema(),
+                std::slice::from_ref(&watermark.event_time),
+                state,
+            )?
+            .into_iter()
+            .next()
+            .map(|c| c.name)
+            .ok_or_else(|| {
+                PlanError::invalid(format!(
+                    "withWatermark: event-time column `{}` not found",
+                    watermark.event_time
+                ))
+            })?;
         Ok(LogicalPlan::Extension(Extension {
-            node: Arc::new(WatermarkNode::new(
-                input,
-                watermark.event_time,
-                delay_micros,
-            )),
+            node: Arc::new(WatermarkNode::new(input, event_time_col, delay_micros)),
         }))
     }
 }
