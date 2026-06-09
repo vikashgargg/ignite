@@ -265,8 +265,14 @@ impl ExecutionPlan for WindowAccumExec {
             return internal_err!("WindowAccumExec: invalid partition {partition}");
         }
         let col_idx = self.event_time_col_idx().ok_or_else(|| {
+            let names: Vec<_> = self
+                .data_input_schema
+                .fields()
+                .iter()
+                .map(|f| f.name().clone())
+                .collect();
             plan_datafusion_err!(
-                "event-time column '{}' not found in input schema",
+                "event-time column '{}' not found in input schema {names:?}",
                 self.event_time_col
             )
         })?;
