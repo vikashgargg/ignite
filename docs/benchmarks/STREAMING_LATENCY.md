@@ -25,7 +25,28 @@ benchmark (Flink p99 74±3 ms vs Spark 231±8 ms under exactly-once @ 50k ev/s).
   i.e. source-emit → sink-process traversal is **~0.1 ms p50, ≤0.3 ms p99** — this is
   **Flink-class** (Flink p99 ~tens of ms), not the Spark ~100 ms–1 s micro-batch class
   we'd assumed.
+- **Rate-independent up to 100k rows/s** (measured 2026-06-09, continuous `rate → memory`):
+
+  | Rate | p50 | p99 | max |
+  |---|--:|--:|--:|
+  | 1,000 rows/s | 0.1 ms | 0.1 ms | 0.2 ms |
+  | 10,000 rows/s | 0.1 ms | 0.1 ms | 0.1 ms |
+  | 100,000 rows/s | 0.0 ms | 0.1 ms | 0.4 ms |
+
+  Latency does **not** degrade with throughput — the per-batch traversal stays sub-ms
+  (batch cadence ~410/s; higher rates just mean larger batches).
 - Throughput: **~28M rows/s** (see [STREAMING.md](STREAMING.md)).
+
+### Stateful streaming — known gaps (found 2026-06-09)
+Latency above is for stateless `rate → memory`. Stateful continuous aggregation has
+open issues (next work, not latency-tuning):
+- **Aggregation without a watermark** → a pipeline-breaking `AggregateExec` is planned,
+  which is invalid on unbounded input (`Cannot execute pipeline breaking queries`).
+  Stateful streaming aggregation **requires** a watermark (→ `WindowAccumExec`).
+- **Windowed aggregation WITH `withWatermark`** currently errors `event-time column
+  'timestamp' not found in input schema` — a column-resolution bug in the
+  watermark/window streaming path (the flow-event schema rename likely loses the
+  event-time column). Must be fixed before windowed-stream latency can be measured.
 
 ### Honest caveats on the latency number
 - Measures the **engine's internal traversal** (source emission → sink processing),

@@ -34,7 +34,7 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 | Projection / Filter | ✅ | flow-event schema threaded through |
 | Stateless window (rank/lag/row_number) | ✅ | per-micro-batch |
 | Aggregation — append | ✅ | stateless per-micro-batch |
-| Aggregation — **event-time window** | ✅ | stateful `WatermarkNode` + `WindowAccumNode` → `WindowAccumExec` |
+| Aggregation — **event-time window** | 🟡 | stateful `WatermarkNode` + `WindowAccumNode` → `WindowAccumExec` exists, but **continuous** `withWatermark(...).groupBy(window(...))` errors `event-time column 'timestamp' not found` (column-resolution bug in the watermark/window streaming path, found 2026-06-09). Without a watermark, continuous aggregation hits a pipeline-breaking `AggregateExec` (correctly rejected). |
 | Deduplication | ✅ | `StreamDeduplicateNode` (watermark-aware) |
 | Union / Repartition / Limit | ✅ | repartition is a no-op in micro-batch |
 | Join — stream × static | ✅ | per-micro-batch |
