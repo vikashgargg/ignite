@@ -51,12 +51,14 @@ sinks locally — so continuous output and any end-to-end latency number are blo
 that. We cannot quote a Flink-comparable p99 yet.**
 
 ## Path to Flink-class (prioritized — re-sequenced after the root-cause finding)
-1. **Fix continuous execution driving the sink (THE blocker).** Make an unbounded
-   streaming plan actually run the pipeline continuously so the driver's
-   `stream.next()` yields per-micro-batch output (today only bounded/availableNow
-   does). Without this, continuous output and latency are both dead. *Immediate next
-   step.*
-2. **Then instrument latency:** emit `LatencyTracker` from sources on a cadence;
+1. ~~**Fix continuous execution driving the sink (THE blocker).**~~ **DONE (2026-06-09).**
+   Root cause: the physical optimizer inserted `RepartitionExec: RoundRobinBatch(N)`
+   between the single-partition source and the single-consumer streaming sink;
+   unconsumed partitions backpressured the distributor and no batch reached the sink.
+   Fix: disable `enable_round_robin_repartition` when physically planning streaming
+   plans. Verified: continuous `rate → memory` now surfaces rows (0 → 416 in 5 s);
+   bounded/aggregation/console paths unchanged.
+2. **Then instrument latency (now unblocked):** emit `LatencyTracker` from sources on a cadence;
    measure `now() − marker_ts` at the sink; expose it (and input/processed
    rows-per-second) via `StreamingQuery.lastProgress` (Vajra reports no progress
    today). The source+sink wiring is already understood/prototyped — it just needs #1.
