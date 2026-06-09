@@ -823,6 +823,7 @@ fn parse_spark_window_duration(s: &str) -> PlanResult<ScalarValue> {
 /// timestamp into its tumbling-window bucket.  Sliding windows (where
 /// slideDuration < windowDuration) are not yet supported.
 fn spark_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
+    let session_tz = input.function_context.plan_config.session_timezone.clone();
     let mut args = input.arguments;
     if args.len() < 2 || args.len() > 4 {
         return Err(PlanError::invalid(format!(
@@ -864,6 +865,13 @@ fn spark_window(input: ScalarFunctionInput) -> PlanResult<Expr> {
 
     // window_end = window_start + interval
     let window_end = window_start.clone() + interval_lit;
+
+    // `date_bin` and timestamp+interval arithmetic widen to nanosecond precision, but
+    // Spark timestamps are microsecond — cast both bounds back to microsecond (preserving
+    // the session timezone) so the window struct serializes to a Spark client.
+    let ts_type = DataType::Timestamp(TimeUnit::Microsecond, Some(session_tz));
+    let window_start = cast(window_start, ts_type.clone());
+    let window_end = cast(window_end, ts_type);
 
     // Result: named_struct("start", window_start, "end", window_end) aliased as "window"
     // so GROUP BY window(...) produces a column named "window" that can be accessed as window.start
