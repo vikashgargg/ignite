@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use datafusion::dataframe::DataFrame;
+use datafusion::execution::session_state::SessionStateBuilder;
 use datafusion::physical_plan::{displayable, ExecutionPlan};
 use datafusion::prelude::SessionContext;
 use datafusion_common::display::{PlanType, StringifiedPlan, ToStringifiedPlan};
@@ -56,16 +57,38 @@ pub async fn resolve_and_execute_plan_with_options(
     let df = execute_logical_plan(ctx, plan).await?;
     let (session_state, plan) = df.into_parts();
     let plan = session_state.optimize(&plan)?;
-    let plan = if is_streaming_plan(&plan)? {
+    let streaming = is_streaming_plan(&plan)?;
+    let plan = if streaming {
         rewrite_streaming_plan(plan, bounded)?
     } else {
         plan
     };
     info.push(plan.to_stringified(PlanType::FinalLogicalPlan));
-    let plan = session_state
-        .query_planner()
-        .create_physical_plan(&plan, &session_state)
-        .await?;
+    let plan = if streaming {
+        // A streaming pipeline is single-consumer: the driver polls the sink's
+        // partition 0. DataFusion's physical optimizer otherwise inserts a
+        // `RepartitionExec: RoundRobinBatch(N)` to parallelize the single-partition
+        // source; with only partition 0 consumed, the other partitions' channels fill,
+        // backpressure stalls the round-robin distributor, and NO batch ever reaches
+        // the sink (continuous queries then produce nothing). Disable round-robin
+        // repartitioning for streaming plans so the pipeline runs unbroken. (Scoped
+        // narrowly — `target_partitions` and other rules are left untouched to avoid
+        // affecting existing streaming operators.)
+        let mut config = session_state.config().clone();
+        config.options_mut().optimizer.enable_round_robin_repartition = false;
+        let streaming_state = SessionStateBuilder::new_from_existing(session_state.clone())
+            .with_config(config)
+            .build();
+        streaming_state
+            .query_planner()
+            .create_physical_plan(&plan, &streaming_state)
+            .await?
+    } else {
+        session_state
+            .query_planner()
+            .create_physical_plan(&plan, &session_state)
+            .await?
+    };
     let plan = if let Some(fields) = fields {
         rename_physical_plan(plan, &fields)?
     } else {
