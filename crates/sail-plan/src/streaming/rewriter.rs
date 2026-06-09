@@ -218,11 +218,22 @@ impl TreeNodeRewriter for StreamingRewriter {
                 plan_err!("sort is not supported for streaming: {plan:?}")
             }
             LogicalPlan::Join(join) => {
-                // Per-micro-batch join: strip flow-event columns from both sides,
-                // run the original join on data-only schemas, then re-add flow-event
-                // columns. This handles stream × static and stream × stream joins.
-                // State-based windowed joins (stream × stream with watermark) are not
-                // yet supported and will produce per-batch results instead.
+                // A join where BOTH sides are unbounded streams needs a stateful,
+                // watermark-bounded operator (keyed dual-state + min-merge eviction).
+                // The per-micro-batch path below only matches rows within the same
+                // batch — it silently produces no cross-batch matches (0 rows). Fail
+                // loudly instead of returning wrong results; see
+                // docs/design/streaming-stream-join.md. Stream × static joins (one
+                // bounded side) still work via the per-micro-batch path.
+                if contains_stream_source(&join.left) && contains_stream_source(&join.right) {
+                    return not_impl_err!(
+                        "stream-stream join is not yet supported (needs stateful \
+                         watermark-bounded join state); join a stream with a static/bounded \
+                         table instead. See docs/design/streaming-stream-join.md"
+                    );
+                }
+                // Per-micro-batch join (stream × static): strip flow-event columns from
+                // both sides, run the original join on data-only schemas, re-add columns.
                 let left_data_schema = try_from_flow_event_schema(join.left.schema().inner())?;
                 let right_data_schema = try_from_flow_event_schema(join.right.schema().inner())?;
 
@@ -481,6 +492,25 @@ fn has_event_time_window_group(group_expr: &[datafusion_expr::Expr]) -> bool {
         Expr::Alias(alias) => matches!(alias.name.as_str(), "window" | "session_window"),
         _ => false,
     })
+}
+
+/// True if the (rewritten) plan subtree contains a real streaming source
+/// (`StreamSourceWrapperNode`), i.e. an unbounded stream — as opposed to a static
+/// table that was adapted to streaming. Used to distinguish stream×stream joins
+/// (both sides unbounded) from stream×static joins.
+fn contains_stream_source(plan: &LogicalPlan) -> bool {
+    use datafusion_common::tree_node::TreeNodeRecursion;
+    let mut found = false;
+    let _ = plan.apply(|p| {
+        if let LogicalPlan::Extension(ext) = p {
+            if ext.node.as_any().is::<StreamSourceWrapperNode>() {
+                found = true;
+                return Ok(TreeNodeRecursion::Stop);
+            }
+        }
+        Ok(TreeNodeRecursion::Continue)
+    });
+    found
 }
 
 /// Searches the plan subtree for a `WatermarkNode` and returns `(event_time_col, delay_micros)`.
