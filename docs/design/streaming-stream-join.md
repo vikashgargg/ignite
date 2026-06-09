@@ -7,7 +7,39 @@ joins + residual filter, interval-join time bounds. Other join shapes still fail
 with `not_impl_err`. Builds on the marker-based watermark foundation
 ([streaming-watermark.md](streaming-watermark.md)).
 
-## What shipped
+## Bounded state = interval join (grounded in Spark/Flink, 2026-06-09 research)
+**Eviction requires a time-range join condition** — confirmed against both engines:
+
+- **Flink `IntervalJoinOperator`**: emits pairs where `right.ts ∈ [left.ts + lowerBound,
+  left.ts + upperBound]`. On each element it buffers + probes the other side, and
+  **registers a per-element cleanup timer**. A left row is evicted once the **right
+  watermark passes `left.ts + upperBound`** (no future right row can match); a right row
+  once the **left watermark passes `right.ts − lowerBound`**.
+- **Spark `StreamingSymmetricHashJoinExec.getStateWatermarkPredicates`**: builds a per-
+  side **state watermark predicate** — a *key* watermark when the join key is the
+  event-time column, else a *value* watermark derived from a **range condition on the
+  event-time columns**. State rows below the predicate are removed
+  (`removeByKeyCondition` / `removeByValueCondition`).
+- **Both engines: no time-range condition ⇒ unbounded state.** So a plain equi-join
+  cannot be evicted correctly — this is inherent, not a gap.
+
+### Therefore the prod-grade plan (Flink-aligned)
+1. **Allow a residual time-range filter** on the stream×stream join (currently rejected);
+   apply it to matches (post-equi-join filter on the output, or a `JoinFilter`).
+2. **Extract `(left_ts_col, right_ts_col, lowerBound, upperBound)`** from the condition
+   (`right.ts BETWEEN left.ts + L AND left.ts + U`, or the `>=`/`<=` conjunction form).
+3. **Evict (Flink rule):** drop left rows when `right_watermark > left.ts + upperBound`;
+   drop right rows when `left_watermark > right.ts − lowerBound`. Both watermarks come
+   from the existing min-merge.
+4. If no time-range condition → keep unbounded (documented, = Spark default) — never
+   silently drop matches.
+
+### Known prerequisite
+A streaming interval-join query (`withWatermark` both sides + aliased time-range `expr`)
+currently fails to resolve before reaching the rewriter (batch interval joins work).
+Fix that resolution path first, then implement eviction.
+
+## What shipped (inner equi-join, unbounded — = Spark default)
 - `StreamJoinExec` buffers each side's batches; when a batch arrives on one side it is
   joined against the **accumulated** other-side batches via DataFusion `HashJoinExec`
   (`CollectLeft`), so each pair is emitted exactly once (when the second row arrives).
