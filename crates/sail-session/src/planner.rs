@@ -42,6 +42,7 @@ use sail_logical_plan::streaming::limit::StreamLimitNode;
 use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
+use sail_logical_plan::streaming::stream_join::StreamJoinNode;
 use sail_logical_plan::streaming::watermark::WatermarkNode;
 use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 use sail_physical_plan::barrier::BarrierExec;
@@ -60,6 +61,7 @@ use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
+use sail_physical_plan::streaming::stream_join::StreamJoinExec;
 use sail_physical_plan::streaming::watermark::WatermarkExec;
 use sail_physical_plan::streaming::window_accum::WindowAccumExec;
 use sail_plan::catalog::CatalogCommandNode;
@@ -417,6 +419,45 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 data_schema,
                 node.event_time_col.clone(),
                 node.delay_micros,
+            )?)
+        } else if let Some(node) = node.as_any().downcast_ref::<StreamJoinNode>() {
+            let [left, right] = physical_inputs else {
+                return internal_err!("StreamJoinExec requires exactly two physical inputs");
+            };
+            let [left_logical, right_logical] = logical_inputs else {
+                return internal_err!("StreamJoinExec requires exactly two logical inputs");
+            };
+            // Inputs are flow-event streams; the join runs on the decoded data, so build
+            // the equi-key expressions against each side's data schema.
+            let left_data = Arc::new(
+                sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema(
+                    left_logical.schema().inner(),
+                )?,
+            );
+            let right_data = Arc::new(
+                sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema(
+                    right_logical.schema().inner(),
+                )?,
+            );
+            let left_df = Arc::new(datafusion_common::DFSchema::try_from(left_data.as_ref().clone())?);
+            let right_df =
+                Arc::new(datafusion_common::DFSchema::try_from(right_data.as_ref().clone())?);
+            let on = node
+                .on
+                .iter()
+                .map(|(l, r)| {
+                    let lp = planner.create_physical_expr(l, &left_df, session_state)?;
+                    let rp = planner.create_physical_expr(r, &right_df, session_state)?;
+                    Ok((lp, rp))
+                })
+                .collect::<datafusion_common::Result<Vec<_>>>()?;
+            Arc::new(StreamJoinExec::try_new(
+                left.clone(),
+                right.clone(),
+                on,
+                node.join_type,
+                left_data,
+                right_data,
             )?)
         } else if let Some(node) = node.as_any().downcast_ref::<CatalogCommandNode>() {
             let schema = node.schema().inner().clone();

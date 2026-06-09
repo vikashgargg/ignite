@@ -31,14 +31,14 @@ use sail_common_datafusion::streaming::event::FlowEvent;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct StaticBatchExec {
+pub(crate) struct StaticBatchExec {
     batches: Vec<RecordBatch>,
     schema: SchemaRef,
     properties: Arc<PlanProperties>,
 }
 
 impl StaticBatchExec {
-    fn new(batches: Vec<RecordBatch>, schema: SchemaRef) -> Self {
+    pub(crate) fn new(batches: Vec<RecordBatch>, schema: SchemaRef) -> Self {
         let props = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(schema.clone()),
             datafusion::physical_expr::Partitioning::UnknownPartitioning(1),

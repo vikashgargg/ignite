@@ -6,5 +6,6 @@ pub mod limit;
 pub mod memory_sink;
 pub mod source_adapter;
 pub mod source_wrapper;
+pub mod stream_join;
 pub mod watermark;
 pub mod window_accum;

@@ -27,6 +27,7 @@ use sail_logical_plan::streaming::limit::StreamLimitNode;
 use sail_logical_plan::streaming::memory_sink::MemorySinkNode;
 use sail_logical_plan::streaming::source_adapter::StreamSourceAdapterNode;
 use sail_logical_plan::streaming::source_wrapper::StreamSourceWrapperNode;
+use sail_logical_plan::streaming::stream_join::StreamJoinNode;
 use sail_logical_plan::streaming::watermark::WatermarkNode;
 use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 
@@ -225,17 +226,66 @@ impl TreeNodeRewriter for StreamingRewriter {
                 // loudly instead of returning wrong results; see
                 // docs/design/streaming-stream-join.md. Stream × static joins (one
                 // bounded side) still work via the per-micro-batch path.
+                let left_data_schema = try_from_flow_event_schema(join.left.schema().inner())?;
+                let right_data_schema = try_from_flow_event_schema(join.right.schema().inner())?;
+
                 if contains_stream_source(&join.left) && contains_stream_source(&join.right) {
-                    return not_impl_err!(
-                        "stream-stream join is not yet supported (needs stateful \
-                         watermark-bounded join state); join a stream with a static/bounded \
-                         table instead. See docs/design/streaming-stream-join.md"
-                    );
+                    // Stateful stream × stream join (see docs/design/streaming-stream-join.md).
+                    // First version: inner equi-join, no residual filter.
+                    if join.join_type != datafusion_expr::JoinType::Inner || join.filter.is_some() {
+                        return not_impl_err!(
+                            "stream-stream join: only inner equi-join without a residual \
+                             filter is supported yet (got {:?}, filter={})",
+                            join.join_type,
+                            join.filter.is_some()
+                        );
+                    }
+                    // Build data-only projections only to derive the join output schema.
+                    let data_only = |input: &Arc<LogicalPlan>,
+                                     schema: &datafusion::arrow::datatypes::Schema|
+                     -> Result<LogicalPlan> {
+                        let filter = LogicalPlan::Filter(Filter::try_new(
+                            col(RETRACTED_FIELD_NAME).eq(lit(false)),
+                            Arc::clone(input),
+                        )?);
+                        let cols: Vec<_> = schema
+                            .fields()
+                            .iter()
+                            .map(|f| col(f.name().as_str()))
+                            .collect();
+                        Ok(LogicalPlan::Projection(Projection::try_new(
+                            cols,
+                            Arc::new(filter),
+                        )?))
+                    };
+                    let trial = Join::try_new(
+                        Arc::new(data_only(&join.left, &left_data_schema)?),
+                        Arc::new(data_only(&join.right, &right_data_schema)?),
+                        join.on.clone(),
+                        join.filter.clone(),
+                        join.join_type,
+                        join.join_constraint,
+                        join.null_equality,
+                        join.null_aware,
+                    )?;
+                    let flow_schema = Arc::new(datafusion_common::DFSchema::try_from(Arc::new(
+                        sail_common_datafusion::streaming::event::schema::to_flow_event_schema(
+                            trial.schema.as_arrow(),
+                        ),
+                    ))?);
+                    return Ok(Transformed::yes(LogicalPlan::Extension(Extension {
+                        node: Arc::new(StreamJoinNode::new(
+                            Arc::clone(&join.left),
+                            Arc::clone(&join.right),
+                            join.on.clone(),
+                            join.filter.clone(),
+                            join.join_type,
+                            flow_schema,
+                        )),
+                    })));
                 }
                 // Per-micro-batch join (stream × static): strip flow-event columns from
                 // both sides, run the original join on data-only schemas, re-add columns.
-                let left_data_schema = try_from_flow_event_schema(join.left.schema().inner())?;
-                let right_data_schema = try_from_flow_event_schema(join.right.schema().inner())?;
 
                 let left_cols: Vec<_> = left_data_schema
                     .fields()
