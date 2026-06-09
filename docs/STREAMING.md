@@ -34,7 +34,7 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 | Projection / Filter | ✅ | flow-event schema threaded through |
 | Stateless window (rank/lag/row_number) | ✅ | per-micro-batch |
 | Aggregation — append | ✅ | stateless per-micro-batch |
-| Aggregation — **event-time window** | ✅ | **fixed 2026-06-09** via marker-based watermarks: `WatermarkExec` emits `FlowMarker::Watermark`, `WindowAccumExec` evicts windows on watermark advance (emit-once + bounded retention). `withWatermark(...).groupBy(window(...)).count()` produces per-window counts. (Reading the window *struct* back over Spark Connect still hits a `Timestamp(Nanosecond)` cast issue — separate follow-up; `count` reads fine.) Without a watermark, continuous aggregation correctly rejects with a pipeline-breaking `AggregateExec`. |
+| Aggregation — **event-time window** | ✅ | **works 2026-06-09** via marker-based watermarks: `WatermarkExec` emits `FlowMarker::Watermark`; `WindowAccumExec` evicts windows on watermark advance (emit-once + bounded retention). `withWatermark(...).groupBy(window(...)).count()` → `SELECT *` returns `struct<window:struct<start,end>,count>` with correct contiguous windows + counts, fully consumable from a Spark client (window bounds cast to micros). Without a watermark, continuous aggregation correctly rejects (pipeline-breaking `AggregateExec`). Cosmetic: SQL column is named `window(timestamp, …)` not `window`. |
 | Deduplication | ✅ | `StreamDeduplicateNode` (watermark-aware) |
 | Union / Repartition / Limit | ✅ | repartition is a no-op in micro-batch |
 | Join — stream × static | ✅ | per-micro-batch |
