@@ -231,55 +231,67 @@ impl TreeNodeRewriter for StreamingRewriter {
 
                 if contains_stream_source(&join.left) && contains_stream_source(&join.right) {
                     // Stateful stream × stream join (see docs/design/streaming-stream-join.md).
-                    // First version: inner equi-join, no residual filter.
-                    if join.join_type != datafusion_expr::JoinType::Inner || join.filter.is_some() {
+                    // Inner equi-join, optionally with a residual time-range (interval) filter.
+                    if join.join_type != datafusion_expr::JoinType::Inner {
                         return not_impl_err!(
-                            "stream-stream join: only inner equi-join without a residual \
-                             filter is supported yet (got {:?}, filter={})",
-                            join.join_type,
-                            join.filter.is_some()
+                            "stream-stream join: only inner join is supported yet (got {:?})",
+                            join.join_type
                         );
                     }
                     // Build data-only projections only to derive the join output schema.
-                    let data_only = |input: &Arc<LogicalPlan>,
-                                     schema: &datafusion::arrow::datatypes::Schema|
-                     -> Result<LogicalPlan> {
-                        let filter = LogicalPlan::Filter(Filter::try_new(
-                            col(RETRACTED_FIELD_NAME).eq(lit(false)),
-                            Arc::clone(input),
-                        )?);
-                        let cols: Vec<_> = schema
-                            .fields()
-                            .iter()
-                            .map(|f| col(f.name().as_str()))
-                            .collect();
-                        Ok(LogicalPlan::Projection(Projection::try_new(
-                            cols,
-                            Arc::new(filter),
-                        )?))
+                    // Output flow schema = marker/retracted ++ left data cols ++ right data
+                    // cols, preserving each input's relation qualifier (e.g. `a`/`b`) so the
+                    // consuming plan can resolve qualified column references. The two input
+                    // flow schemas start with [_marker, _retracted, <qualified data...>].
+                    let left_df = join.left.schema();
+                    let right_df = join.right.schema();
+                    let mut qfields: Vec<(
+                        Option<datafusion_common::TableReference>,
+                        std::sync::Arc<datafusion::arrow::datatypes::Field>,
+                    )> = vec![
+                        (None, left_df.field(0).clone()),
+                        (None, left_df.field(1).clone()),
+                    ];
+                    for (q, f) in left_df.iter().skip(2) {
+                        qfields.push((q.cloned(), f.clone()));
+                    }
+                    for (q, f) in right_df.iter().skip(2) {
+                        qfields.push((q.cloned(), f.clone()));
+                    }
+                    let flow_schema = Arc::new(datafusion_common::DFSchema::new_with_metadata(
+                        qfields,
+                        std::collections::HashMap::new(),
+                    )?);
+                    // Derive the interval-join time columns + bounds directly from the
+                    // residual filter (the interval condition); these drive state eviction.
+                    // If not a recognizable bounded interval, state stays unbounded (Spark
+                    // default) but matches are still correct (the filter is applied).
+                    // Strip relation qualifiers: streaming data schemas are unqualified and
+                    // `#N` ids are unique, so `a."#2"` from an explicit join condition must
+                    // become `"#2"` for the node's expressions to resolve downstream.
+                    let on: Vec<(Expr, Expr)> = join
+                        .on
+                        .iter()
+                        .map(|(l, r)| (strip_qualifiers(l), strip_qualifiers(r)))
+                        .collect();
+                    let filter = join.filter.as_ref().map(strip_qualifiers);
+                    let bounds = filter
+                        .as_ref()
+                        .and_then(|f| extract_interval_bounds(f, &left_data_schema, &right_data_schema));
+                    let (left_event_time, right_event_time, interval_bounds) = match bounds {
+                        Some((l, r, lo, hi)) => (Some(l), Some(r), Some((lo, hi))),
+                        None => (None, None, None),
                     };
-                    let trial = Join::try_new(
-                        Arc::new(data_only(&join.left, &left_data_schema)?),
-                        Arc::new(data_only(&join.right, &right_data_schema)?),
-                        join.on.clone(),
-                        join.filter.clone(),
-                        join.join_type,
-                        join.join_constraint,
-                        join.null_equality,
-                        join.null_aware,
-                    )?;
-                    let flow_schema = Arc::new(datafusion_common::DFSchema::try_from(Arc::new(
-                        sail_common_datafusion::streaming::event::schema::to_flow_event_schema(
-                            trial.schema.as_arrow(),
-                        ),
-                    ))?);
                     return Ok(Transformed::yes(LogicalPlan::Extension(Extension {
                         node: Arc::new(StreamJoinNode::new(
                             Arc::clone(&join.left),
                             Arc::clone(&join.right),
-                            join.on.clone(),
-                            join.filter.clone(),
+                            on,
+                            filter,
                             join.join_type,
+                            left_event_time,
+                            right_event_time,
+                            interval_bounds,
                             flow_schema,
                         )),
                     })));
@@ -561,6 +573,114 @@ fn contains_stream_source(plan: &LogicalPlan) -> bool {
         Ok(TreeNodeRecursion::Continue)
     });
     found
+}
+
+/// Extract the interval-join time columns and bounds from a residual time-range filter
+/// of the canonical (Spark/Flink) form `right_ts >= left_ts + L AND right_ts <= left_ts + U`
+/// — a match requires `right.ts ∈ [left.ts + L, left.ts + U]`. Returns
+/// `(left_ts_col, right_ts_col, lower_micros, upper_micros)`, or `None` if the filter is
+/// not a recognizable bounded interval condition (then the join keeps unbounded state,
+/// matching Spark's default; matches stay correct since the filter is still applied).
+fn extract_interval_bounds(
+    filter: &Expr,
+    left_schema: &datafusion::arrow::datatypes::Schema,
+    right_schema: &datafusion::arrow::datatypes::Schema,
+) -> Option<(String, String, i64, i64)> {
+    use datafusion_expr::Operator;
+    let mut conj: Vec<&Expr> = vec![];
+    collect_conjuncts(filter, &mut conj);
+    let (mut lower, mut upper) = (None::<i64>, None::<i64>);
+    let (mut left_ts, mut right_ts) = (None::<String>, None::<String>);
+    for c in conj {
+        let Expr::BinaryExpr(be) = c else { continue };
+        let is_lower = matches!(be.op, Operator::GtEq | Operator::Gt);
+        let is_upper = matches!(be.op, Operator::LtEq | Operator::Lt);
+        if !is_lower && !is_upper {
+            continue;
+        }
+        // Canonical form: `right_ts CMP left_ts (+/- duration)`.
+        let Expr::Column(cmp) = be.left.as_ref() else { continue };
+        let Some((other_name, offset)) = parse_col_offset(be.right.as_ref()) else { continue };
+        if right_schema.field_with_name(&cmp.name).is_err()
+            || left_schema.field_with_name(&other_name).is_err()
+        {
+            continue;
+        }
+        right_ts = Some(cmp.name.clone());
+        left_ts = Some(other_name);
+        if is_lower {
+            lower = Some(offset);
+        } else {
+            upper = Some(offset);
+        }
+    }
+    match (left_ts, right_ts, lower, upper) {
+        (Some(l), Some(r), Some(lo), Some(hi)) => Some((l, r, lo, hi)),
+        _ => None,
+    }
+}
+
+/// Strip relation qualifiers from all column references in an expression. The streaming
+/// data schemas are unqualified and internal `#N` ids are globally unique, so a
+/// qualified `a."#2"` from an explicit join condition must become `"#2"` to resolve.
+fn strip_qualifiers(e: &Expr) -> Expr {
+    e.clone()
+        .transform(|n| {
+            Ok::<_, datafusion_common::DataFusionError>(match n {
+                Expr::Column(c) => Transformed::yes(Expr::Column(datafusion_common::Column::new(
+                    None::<datafusion_common::TableReference>,
+                    c.name,
+                ))),
+                other => Transformed::no(other),
+            })
+        })
+        .map(|t| t.data)
+        .unwrap_or_else(|_| e.clone())
+}
+
+/// Flatten a conjunction (`a AND b AND c`) into its conjuncts.
+fn collect_conjuncts<'a>(e: &'a Expr, out: &mut Vec<&'a Expr>) {
+    if let Expr::BinaryExpr(be) = e {
+        if be.op == datafusion_expr::Operator::And {
+            collect_conjuncts(&be.left, out);
+            collect_conjuncts(&be.right, out);
+            return;
+        }
+    }
+    out.push(e);
+}
+
+/// Parse `col` or `col +/- <duration literal>` → `(col_name, offset_micros)`.
+fn parse_col_offset(e: &Expr) -> Option<(String, i64)> {
+    match e {
+        Expr::Column(c) => Some((c.name.clone(), 0)),
+        Expr::BinaryExpr(be) => {
+            let Expr::Column(c) = be.left.as_ref() else { return None };
+            let micros = duration_literal_micros(be.right.as_ref())?;
+            match be.op {
+                datafusion_expr::Operator::Plus => Some((c.name.clone(), micros)),
+                datafusion_expr::Operator::Minus => Some((c.name.clone(), -micros)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Convert a duration/interval literal to microseconds.
+fn duration_literal_micros(e: &Expr) -> Option<i64> {
+    use datafusion_common::ScalarValue;
+    let Expr::Literal(sv, _) = e else { return None };
+    match sv {
+        ScalarValue::DurationMicrosecond(Some(v)) => Some(*v),
+        ScalarValue::DurationMillisecond(Some(v)) => Some(v.checked_mul(1_000)?),
+        ScalarValue::DurationSecond(Some(v)) => Some(v.checked_mul(1_000_000)?),
+        ScalarValue::DurationNanosecond(Some(v)) => Some(v / 1_000),
+        ScalarValue::IntervalDayTime(Some(i)) => {
+            Some((i.days as i64).checked_mul(86_400_000_000)? + (i.milliseconds as i64) * 1_000)
+        }
+        _ => None,
+    }
 }
 
 /// Searches the plan subtree for a `WatermarkNode` and returns `(event_time_col, delay_micros)`.

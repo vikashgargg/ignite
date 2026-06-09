@@ -9,6 +9,7 @@ use datafusion::physical_expr::LexOrdering;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, ExtensionPlanner, PhysicalPlanner};
+use datafusion_common::tree_node::TreeNode;
 use datafusion_common::{internal_datafusion_err, internal_err, DFSchema, ToDFSchema};
 use datafusion_expr::{Expr, LogicalPlan, UserDefinedLogicalNode};
 use datafusion_physical_expr::{create_physical_sort_exprs, Partitioning};
@@ -442,15 +443,55 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             let left_df = Arc::new(datafusion_common::DFSchema::try_from(left_data.as_ref().clone())?);
             let right_df =
                 Arc::new(datafusion_common::DFSchema::try_from(right_data.as_ref().clone())?);
+            // The join `on`/`filter` come from an explicit equality condition, so their
+            // column refs are relation-qualified (e.g. `a."#2"`), but each side's data
+            // schema is unqualified. Internal `#N` ids are globally unique, so strip the
+            // relation qualifier before resolving against the (unqualified) schemas.
+            let strip_quals = |e: &datafusion_expr::Expr| -> datafusion_expr::Expr {
+                e.clone()
+                    .transform(|node| {
+                        Ok(match node {
+                            datafusion_expr::Expr::Column(c) => datafusion_common::tree_node::Transformed::yes(
+                                datafusion_expr::Expr::Column(datafusion_common::Column::new(
+                                    None::<datafusion_common::TableReference>,
+                                    c.name,
+                                )),
+                            ),
+                            other => datafusion_common::tree_node::Transformed::no(other),
+                        })
+                    })
+                    .map(|t| t.data)
+                    .unwrap_or_else(|_| e.clone())
+            };
             let on = node
                 .on
                 .iter()
                 .map(|(l, r)| {
-                    let lp = planner.create_physical_expr(l, &left_df, session_state)?;
-                    let rp = planner.create_physical_expr(r, &right_df, session_state)?;
+                    let lp = planner.create_physical_expr(&strip_quals(l), &left_df, session_state)?;
+                    let rp = planner.create_physical_expr(&strip_quals(r), &right_df, session_state)?;
                     Ok((lp, rp))
                 })
                 .collect::<datafusion_common::Result<Vec<_>>>()?;
+            // Residual (interval) filter is built against the inner-join output schema
+            // (left data columns ++ right data columns) and applied to matched pairs.
+            let mut out_fields = left_data.fields().iter().cloned().collect::<Vec<_>>();
+            out_fields.extend(right_data.fields().iter().cloned());
+            let out_schema = datafusion::arrow::datatypes::Schema::new(out_fields);
+            let out_df = Arc::new(datafusion_common::DFSchema::try_from(out_schema)?);
+            let filter = node
+                .filter
+                .as_ref()
+                .map(|f| planner.create_physical_expr(&strip_quals(f), &out_df, session_state))
+                .transpose()?;
+            // Resolve event-time column indices (for interval-join state eviction).
+            let left_ts_idx = node
+                .left_event_time
+                .as_ref()
+                .and_then(|c| left_data.index_of(c).ok());
+            let right_ts_idx = node
+                .right_event_time
+                .as_ref()
+                .and_then(|c| right_data.index_of(c).ok());
             Arc::new(StreamJoinExec::try_new(
                 left.clone(),
                 right.clone(),
@@ -458,6 +499,10 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 node.join_type,
                 left_data,
                 right_data,
+                filter,
+                node.interval_bounds,
+                left_ts_idx,
+                right_ts_idx,
             )?)
         } else if let Some(node) = node.as_any().downcast_ref::<CatalogCommandNode>() {
             let schema = node.schema().inner().clone();

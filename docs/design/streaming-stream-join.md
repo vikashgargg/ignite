@@ -7,6 +7,26 @@ joins + residual filter, interval-join time bounds. Other join shapes still fail
 with `not_impl_err`. Builds on the marker-based watermark foundation
 ([streaming-watermark.md](streaming-watermark.md)).
 
+## ✅ Interval join SHIPPED 2026-06-10 (bounded state, Flink-aligned)
+`StreamJoinExec` now supports the **interval join**: an inner equi-join with a residual
+time-range condition. Verified (pyspark): `a.join(b, "a.ka=b.kb AND b.tb BETWEEN a.ta-2s
+AND a.ta+2s")` → matches satisfy the key **and** the time window; state is **bounded** by
+evicting per the Flink rule (`bounds=(-2s,+2s)`, event-time indices resolved, confirmed).
+
+- **Residual filter applied** to matched pairs (post-equi-join filter on the output) —
+  qualified column refs (`a."#2"`) are stripped to unqualified internal ids; the output
+  schema preserves the input relation qualifiers so the consuming plan resolves.
+- **Bounds extracted** from the filter (`extract_interval_bounds`): canonical
+  `right_ts CMP left_ts ± <duration>` → `(lower, upper)` micros (handles
+  `DurationMicrosecond` / `IntervalDayTime`).
+- **Eviction (Flink rule):** drop left rows when `right_wm > left.ts + upper`, right rows
+  when `left_wm > right.ts - lower`, via the watermark min-merge. No recognizable bound →
+  unbounded (= Spark default), matches still correct.
+- Plain inner equi-join (no filter) keeps unbounded state (= Spark), still correct.
+
+Remaining follow-ups: outer joins (emit unmatched on eviction); session/processing-time;
+push the time filter into the hash join for efficiency.
+
 ## Bounded state = interval join (grounded in Spark/Flink, 2026-06-09 research)
 **Eviction requires a time-range join condition** — confirmed against both engines:
 

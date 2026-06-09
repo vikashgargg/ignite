@@ -17,20 +17,33 @@ pub struct StreamJoinNode {
     right: Arc<LogicalPlan>,
     /// Equi-join key pairs `(left_expr, right_expr)`.
     pub on: Vec<(Expr, Expr)>,
-    /// Optional residual (non-equi) filter applied to matched pairs.
+    /// Optional residual (non-equi) filter applied to matched pairs — e.g. the
+    /// interval-join time-range condition.
     pub filter: Option<Expr>,
     pub join_type: JoinType,
+    /// Event-time columns (resolved names) per side, present when that side has a
+    /// `withWatermark`. Used together with `interval_bounds` to evict state.
+    pub left_event_time: Option<String>,
+    pub right_event_time: Option<String>,
+    /// Interval-join bounds `(lower_micros, upper_micros)` extracted from the time-range
+    /// filter: a match requires `right.ts ∈ [left.ts + lower, left.ts + upper]`. When set
+    /// (with both event-time columns), `StreamJoinExec` evicts state per the Flink rule.
+    pub interval_bounds: Option<(i64, i64)>,
     /// Flow-event output schema (marker/retracted + the join's data columns).
     schema: DFSchemaRef,
 }
 
 impl StreamJoinNode {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         left: Arc<LogicalPlan>,
         right: Arc<LogicalPlan>,
         on: Vec<(Expr, Expr)>,
         filter: Option<Expr>,
         join_type: JoinType,
+        left_event_time: Option<String>,
+        right_event_time: Option<String>,
+        interval_bounds: Option<(i64, i64)>,
         schema: DFSchemaRef,
     ) -> Self {
         Self {
@@ -39,6 +52,9 @@ impl StreamJoinNode {
             on,
             filter,
             join_type,
+            left_event_time,
+            right_event_time,
+            interval_bounds,
             schema,
         }
     }
@@ -58,6 +74,9 @@ impl PartialEq for StreamJoinNode {
             && self.on == other.on
             && self.filter == other.filter
             && self.join_type == other.join_type
+            && self.left_event_time == other.left_event_time
+            && self.right_event_time == other.right_event_time
+            && self.interval_bounds == other.interval_bounds
             && self.schema == other.schema
     }
 }
@@ -70,6 +89,9 @@ impl Hash for StreamJoinNode {
         self.right.hash(state);
         self.filter.hash(state);
         self.join_type.hash(state);
+        self.left_event_time.hash(state);
+        self.right_event_time.hash(state);
+        self.interval_bounds.hash(state);
         self.schema.hash(state);
     }
 }
@@ -141,6 +163,9 @@ impl UserDefinedLogicalNodeCore for StreamJoinNode {
             on,
             filter,
             join_type: self.join_type,
+            left_event_time: self.left_event_time.clone(),
+            right_event_time: self.right_event_time.clone(),
+            interval_bounds: self.interval_bounds,
             schema: self.schema.clone(),
         })
     }

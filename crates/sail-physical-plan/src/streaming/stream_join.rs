@@ -56,10 +56,18 @@ pub struct StreamJoinExec {
     right_data_schema: SchemaRef,
     /// Join output data schema (left ++ right columns).
     output_data_schema: SchemaRef,
+    /// Residual (interval) filter applied to matched pairs, against the output schema.
+    filter: Option<PhysicalExprRef>,
+    /// Interval bounds `(lower_micros, upper_micros)` for state eviction (Flink rule).
+    interval_bounds: Option<(i64, i64)>,
+    /// Event-time column index in each side's data schema (for eviction).
+    left_ts_idx: Option<usize>,
+    right_ts_idx: Option<usize>,
     properties: Arc<PlanProperties>,
 }
 
 impl StreamJoinExec {
+    #[expect(clippy::too_many_arguments)]
     pub fn try_new(
         left: Arc<dyn ExecutionPlan>,
         right: Arc<dyn ExecutionPlan>,
@@ -67,6 +75,10 @@ impl StreamJoinExec {
         join_type: JoinType,
         left_data_schema: SchemaRef,
         right_data_schema: SchemaRef,
+        filter: Option<PhysicalExprRef>,
+        interval_bounds: Option<(i64, i64)>,
+        left_ts_idx: Option<usize>,
+        right_ts_idx: Option<usize>,
     ) -> Result<Self> {
         // Compute the join output data schema with a trial join over empty inputs.
         let output_data_schema = {
@@ -100,6 +112,10 @@ impl StreamJoinExec {
             left_data_schema,
             right_data_schema,
             output_data_schema,
+            filter,
+            interval_bounds,
+            left_ts_idx,
+            right_ts_idx,
             properties,
         })
     }
@@ -147,6 +163,54 @@ async fn run_join(
         }
     }
     Ok(out)
+}
+
+/// Apply the residual (interval) filter to a join-output batch.
+fn apply_filter(batch: RecordBatch, filter: &PhysicalExprRef) -> Result<RecordBatch> {
+    let n = batch.num_rows();
+    let value = filter.evaluate(&batch)?;
+    let array = value.into_array(n)?;
+    let mask = array
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::BooleanArray>()
+        .ok_or_else(|| {
+            datafusion_common::DataFusionError::Internal(
+                "stream join filter did not evaluate to a boolean".to_string(),
+            )
+        })?;
+    Ok(datafusion::arrow::compute::filter_record_batch(&batch, mask)?)
+}
+
+/// Evict buffered rows whose event-time (`ts_idx`, microseconds) is `< threshold`;
+/// they can no longer match (Flink interval-join cleanup). Rows with a null/uncomparable
+/// timestamp are kept (conservative).
+fn evict_older_than(
+    batches: Vec<RecordBatch>,
+    ts_idx: usize,
+    threshold: i64,
+) -> Vec<RecordBatch> {
+    use datafusion::arrow::array::{Array, BooleanBuilder, TimestampMicrosecondArray};
+    let mut out = Vec::with_capacity(batches.len());
+    for b in batches {
+        let Some(ts) = b
+            .column(ts_idx)
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+        else {
+            out.push(b);
+            continue;
+        };
+        let mut mask = BooleanBuilder::with_capacity(ts.len());
+        for i in 0..ts.len() {
+            mask.append_value(ts.is_null(i) || ts.value(i) >= threshold);
+        }
+        match datafusion::arrow::compute::filter_record_batch(&b, &mask.finish()) {
+            Ok(f) if f.num_rows() > 0 => out.push(f),
+            Ok(_) => {}
+            Err(_) => out.push(b),
+        }
+    }
+    out
 }
 
 /// Build a `FlowEvent::Data` (append-only, all `retracted = false`).
@@ -202,6 +266,10 @@ impl ExecutionPlan for StreamJoinExec {
             self.join_type,
             self.left_data_schema.clone(),
             self.right_data_schema.clone(),
+            self.filter.clone(),
+            self.interval_bounds,
+            self.left_ts_idx,
+            self.right_ts_idx,
         )?))
     }
 
@@ -226,6 +294,10 @@ impl ExecutionPlan for StreamJoinExec {
         let join_type = self.join_type;
         let left_schema = self.left_data_schema.clone();
         let right_schema = self.right_data_schema.clone();
+        let filter = self.filter.clone();
+        let interval_bounds = self.interval_bounds;
+        let left_ts_idx = self.left_ts_idx;
+        let right_ts_idx = self.right_ts_idx;
 
         let init: JoinState = (
             merged,
@@ -244,6 +316,7 @@ impl ExecutionPlan for StreamJoinExec {
             let on = on.clone();
             let left_schema = left_schema.clone();
             let right_schema = right_schema.clone();
+            let filter = filter.clone();
             async move {
                 loop {
                     if let Some(ev) = buf.pop_front() {
@@ -299,7 +372,22 @@ impl ExecutionPlan for StreamJoinExec {
                                 }
                                 Ok(out) => {
                                     for b in out {
-                                        buf.push_back(data_event(b));
+                                        // Apply the residual (interval) time-range filter to matches.
+                                        let b = match &filter {
+                                            Some(f) => match apply_filter(b, f) {
+                                                Ok(fb) => fb,
+                                                Err(e) => {
+                                                    return Some((
+                                                        Err(e),
+                                                        (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx),
+                                                    ))
+                                                }
+                                            },
+                                            None => b,
+                                        };
+                                        if b.num_rows() > 0 {
+                                            buf.push_back(data_event(b));
+                                        }
                                     }
                                 }
                             }
@@ -325,6 +413,26 @@ impl ExecutionPlan for StreamJoinExec {
                                             timestamp: t,
                                         }));
                                     }
+                                }
+                            }
+                            // Interval-join state eviction (Flink rule): a left row can
+                            // no longer match once right_wm > left.ts + upper; a right row
+                            // once left_wm > right.ts - lower. Only when bounds + the
+                            // event-time columns are known; otherwise state is unbounded.
+                            if let Some((lower, upper)) = interval_bounds {
+                                if let (Some(rw), Some(idx)) = (rwm, left_ts_idx) {
+                                    left_buf = evict_older_than(
+                                        std::mem::take(&mut left_buf),
+                                        idx,
+                                        rw - upper,
+                                    );
+                                }
+                                if let (Some(lw), Some(idx)) = (lwm, right_ts_idx) {
+                                    right_buf = evict_older_than(
+                                        std::mem::take(&mut right_buf),
+                                        idx,
+                                        lw + lower,
+                                    );
                                 }
                             }
                         }
