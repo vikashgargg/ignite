@@ -43,7 +43,12 @@ open issues (next work, not latency-tuning):
 - **Aggregation without a watermark** → a pipeline-breaking `AggregateExec` is planned,
   which is invalid on unbounded input (`Cannot execute pipeline breaking queries`).
   Stateful streaming aggregation **requires** a watermark (→ `WindowAccumExec`).
-- **Windowed aggregation WITH `withWatermark`** errors `event-time column 'timestamp'
+- ~~**Windowed aggregation WITH `withWatermark`** errors `event-time column not found`~~
+  **FIXED 2026-06-09** via marker-based watermarks (`WatermarkExec` + `WindowAccumExec`
+  watermark-driven eviction; resolver maps the event-time column to its internal name).
+  Windowed-stream latency can now be measured (after the nanosecond window-struct
+  serialization follow-up). Original diagnosis kept below:
+- (historical) errored `event-time column 'timestamp'
   not found in input schema ["__common_expr_1"]`. **Root cause (precise):** the
   streaming rewrite runs *after* DataFusion's logical optimizer, which has already
   rewritten `window('timestamp')` into an upstream projection (CSE'd to

@@ -34,7 +34,7 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 | Projection / Filter | ✅ | flow-event schema threaded through |
 | Stateless window (rank/lag/row_number) | ✅ | per-micro-batch |
 | Aggregation — append | ✅ | stateless per-micro-batch |
-| Aggregation — **event-time window** | 🟡 | `WindowAccumExec` exists, but **continuous** `withWatermark(...).groupBy(window(...))` errors `event-time column not found in input schema ["__common_expr_1"]`: the logical optimizer (runs before the streaming rewrite) folds `window('timestamp')` into an upstream projection and drops the raw `timestamp`, so the stateful operator can't find it. Fix = preserve event-time col for `WindowAccumExec` (or consume the precomputed window struct). Without a watermark, continuous aggregation hits a pipeline-breaking `AggregateExec` (correctly rejected). |
+| Aggregation — **event-time window** | ✅ | **fixed 2026-06-09** via marker-based watermarks: `WatermarkExec` emits `FlowMarker::Watermark`, `WindowAccumExec` evicts windows on watermark advance (emit-once + bounded retention). `withWatermark(...).groupBy(window(...)).count()` produces per-window counts. (Reading the window *struct* back over Spark Connect still hits a `Timestamp(Nanosecond)` cast issue — separate follow-up; `count` reads fine.) Without a watermark, continuous aggregation correctly rejects with a pipeline-breaking `AggregateExec`. |
 | Deduplication | ✅ | `StreamDeduplicateNode` (watermark-aware) |
 | Union / Repartition / Limit | ✅ | repartition is a no-op in micro-batch |
 | Join — stream × static | ✅ | per-micro-batch |
@@ -44,7 +44,7 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 ## Semantics
 | Capability | Status | Notes |
 |---|---|---|
-| Event-time watermarks | ✅ | drives window aggregation + dedup eviction |
+| Event-time watermarks | ✅ | **marker-based** (`WatermarkExec` emits in-band `FlowMarker::Watermark`; Flink-style) — drives windowed-aggregation eviction; multi-input min-merge is the future hook for stream-stream joins |
 | Output mode — append | ✅ | default |
 | Output mode — **complete / update** | 🟡 | `output_mode` is intentionally ignored (proto/plan.rs); the sink picks append-vs-upsert. Not driven by query semantics → not Spark-equivalent for complete-mode aggregations. |
 | `availableNow` / `once` triggers | ✅ | end-to-end: trigger → `bounded` flag → rewriter → `StreamSourceWrapperNode` → `StreamSource::scan(bounded)`. The **rate** source now scans available rows + `EndOfData` and **the query terminates** (verified: `availableNow` terminates in ~0s vs continuous runs forever). Bounded reads for **Kafka/socket** are the remaining per-source follow-up. |
