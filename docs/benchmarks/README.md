@@ -4,6 +4,12 @@ All numbers are reproducible, same-machine/same-cluster, identical data + SQL,
 vs **real Apache Spark** (not estimates). Scripts are dual-engine
 (`scripts/tpch_distributed.py`, `scripts/clickbench.py`).
 
+**Production validation (real data, same-machine head-to-head) ✅:**
+[PRODUCTION_VALIDATION.md](PRODUCTION_VALIDATION.md) — 3M real NYC-taxi rows vs Spark
+3.5.3: **6/6 queries identical**, **1.48× faster even in debug**, **6.2× less memory**
+(157 MB vs 980 MB), **sub-ms streaming latency** sustained. Concrete real-data backing
+for the Spark-replacement / fewer-resources / Flink-class-streaming claims.
+
 ## Summary
 
 | Benchmark | Scale | Setup | Vajra | Apache Spark 3.5.3 | Speedup |
