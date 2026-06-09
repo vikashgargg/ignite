@@ -1,10 +1,20 @@
 # Design: stateful stream–stream join
 
-Status: **design (ready to build)**. Today stream×stream joins are guarded with a clear
-`not_impl_err` (the per-micro-batch path silently produced 0 cross-batch matches);
-stream×static joins still work. This is the plan for the real, watermark-bounded
-operator. Builds on the marker-based watermark foundation
+Status: **inner equi-join SHIPPED 2026-06-09** (`StreamJoinNode` + `StreamJoinExec`,
+verified: correct cross-batch matches, no duplicates, watermark min-merge). Remaining
+follow-ups: **watermark-based state eviction** (buffers are currently unbounded), outer
+joins + residual filter, interval-join time bounds. Other join shapes still fail loud
+with `not_impl_err`. Builds on the marker-based watermark foundation
 ([streaming-watermark.md](streaming-watermark.md)).
+
+## What shipped
+- `StreamJoinExec` buffers each side's batches; when a batch arrives on one side it is
+  joined against the **accumulated** other-side batches via DataFusion `HashJoinExec`
+  (`CollectLeft`), so each pair is emitted exactly once (when the second row arrives).
+- Operator watermark = **min(left_wm, right_wm)**, forwarded as it advances.
+- Rewriter detects stream×stream (`contains_stream_source` both sides) → `StreamJoinNode`
+  for inner equi-join without residual filter. Planner does 2-input wiring + builds the
+  equi-key exprs against each side's decoded data schema.
 
 ## Why it's a major feature
 A correct stream×stream join is a **2-input stateful operator** — the largest in the
