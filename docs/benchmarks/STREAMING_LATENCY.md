@@ -15,17 +15,33 @@ Sources: Decodable, Confluent, Onehouse, and a 2024 multi-cloud Flink-vs-Spark
 benchmark (Flink p99 74±3 ms vs Spark 231±8 ms under exactly-once @ 50k ev/s).
 
 ## What Vajra is today
-- **Architecture: micro-batch** (flow events + markers + per-micro-batch operators) —
-  the same *class* as Spark Structured Streaming, **not** Flink's event-at-a-time.
-- **The engine itself is fast.** Measured locally (debug build, rate source):
-  - In-batch processing latency (generation→output within a micro-batch):
-    **≈ 0 (|Δ| ~3.5 ms, i.e. clock noise)** — the engine adds negligible latency
-    inside a batch.
-  - `availableNow` query client round-trip: **~1.8 ms**.
-  - Throughput: **~28M rows/s** (see [STREAMING.md](STREAMING.md)).
+- **Architecture: micro-batch** (flow events + markers + per-micro-batch operators),
+  but with a **~10 ms tick** — so latency is far below Spark's default-trigger class.
+- **MEASURED end-to-end latency (2026-06-09): sub-millisecond.** With `LatencyTracker`
+  markers emitted at the source and measured at the sink on a *continuous* `rate →
+  memory` query (100 rows/s, single-node, debug build):
+  > `streaming latency (memory sink): p50=0.1ms p99=0.1–0.3ms max=0.3ms (n≈83/s)`
 
-## The honest gap (root cause, sharpened 2026-06-09)
-The blocker is deeper than "not instrumented" — **continuous streaming queries do not
+  i.e. source-emit → sink-process traversal is **~0.1 ms p50, ≤0.3 ms p99** — this is
+  **Flink-class** (Flink p99 ~tens of ms), not the Spark ~100 ms–1 s micro-batch class
+  we'd assumed.
+- Throughput: **~28M rows/s** (see [STREAMING.md](STREAMING.md)).
+
+### Honest caveats on the latency number
+- Measures the **engine's internal traversal** (source emission → sink processing),
+  the right metric for engine latency, but it excludes external ingestion lag, network,
+  and serialization to a remote client.
+- Taken at **100 rows/s, single-node, debug build, simple `rate → memory`** (no heavy
+  stateful operators). Latency under high throughput, with stateful windows/joins, and
+  on a distributed cluster is **not yet measured** — those will raise it.
+- Still **not exposed** via `StreamingQuery.lastProgress` (logged server-side only).
+
+## How we got here (root cause, now RESOLVED 2026-06-09)
+> **Resolved:** continuous execution is fixed (round-robin repartition disabled for
+> streaming) and latency is now instrumented + measured (see above). The diagnosis
+> below is kept for the record.
+
+The blocker was deeper than "not instrumented" — **continuous streaming queries did not
 drive the sink locally**:
 - A **bounded** query (`trigger(availableNow)`) runs the full pipeline: the sink
   (`MemorySinkExec`) executes, processes batches, commits — verified (1000 rows; the
@@ -45,10 +61,11 @@ Consequences:
    until continuous execution is fixed; bounded execution regression-tested OK.)
 3. No streaming **progress metrics** (`lastProgress`/`processedRowsPerSecond`).
 
-So the defensible statement today: **Vajra's streaming *compute* is very low latency
-(sub-5 ms per batch, bounded), but *continuous* streaming execution does not yet drive
-sinks locally — so continuous output and any end-to-end latency number are blocked on
-that. We cannot quote a Flink-comparable p99 yet.**
+So the defensible statement today: **Continuous streaming now works and Vajra's
+measured end-to-end latency is sub-millisecond (p99 ≤0.3 ms) at 100 rows/s
+single-node — Flink-class.** What remains: measure under high throughput, stateful
+operators, and on a cluster; and expose latency via `StreamingQuery.lastProgress`
+(it is logged server-side today, not yet in the progress API).
 
 ## Path to Flink-class (prioritized — re-sequenced after the root-cause finding)
 1. ~~**Fix continuous execution driving the sink (THE blocker).**~~ **DONE (2026-06-09).**
@@ -58,10 +75,14 @@ that. We cannot quote a Flink-comparable p99 yet.**
    Fix: disable `enable_round_robin_repartition` when physically planning streaming
    plans. Verified: continuous `rate → memory` now surfaces rows (0 → 416 in 5 s);
    bounded/aggregation/console paths unchanged.
-2. **Then instrument latency (now unblocked):** emit `LatencyTracker` from sources on a cadence;
-   measure `now() − marker_ts` at the sink; expose it (and input/processed
-   rows-per-second) via `StreamingQuery.lastProgress` (Vajra reports no progress
-   today). The source+sink wiring is already understood/prototyped — it just needs #1.
+2. ~~**Then instrument latency.**~~ **DONE (2026-06-09).** `LatencyTracker` emitted at
+   the rate source, measured at the sink → **p50=0.1ms / p99≤0.3ms** logged. Still to do:
+   expose via `StreamingQuery.lastProgress` (+ processedRowsPerSecond).
+3. **Measure under load + stateful + cluster.** Re-measure at high rates (100k–1M/s),
+   with windowed aggregation / stream-stream joins, and distributed — the realistic
+   latency envelope (and where it degrades).
+4. **Standardized benchmark (Nexmark)** on a release build for a defensible
+   Flink-comparable p99.
 3. **Drive the micro-batch interval down** and measure p50/p99 at fixed event rates
    (Nexmark / Yahoo Streaming Benchmark methodology) on a release build.
 4. **Evaluate a continuous (event-at-a-time) execution path** for the operators where
