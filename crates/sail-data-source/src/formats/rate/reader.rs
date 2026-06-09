@@ -270,7 +270,18 @@ impl ExecutionPlan for RateSourceExec {
                 });
                 Box::pin(output)
             };
-        let output = output.map(|x| Ok(FlowEvent::append_only_data(x?)));
+        // Emit a LatencyTracker marker before each data batch so downstream operators
+        // (and sinks) can measure end-to-end latency as now() - emission timestamp.
+        let output = output.flat_map(|x| {
+            futures::stream::iter(vec![
+                Ok(FlowEvent::Marker(FlowMarker::LatencyTracker {
+                    source: "rate".to_string(),
+                    id: 0,
+                    timestamp: chrono::Utc::now(),
+                })),
+                x.map(FlowEvent::append_only_data),
+            ])
+        });
         let stream = Box::pin(FlowEventStreamAdapter::new(
             self.projected_schema.clone(),
             output,
