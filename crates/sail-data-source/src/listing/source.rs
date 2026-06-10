@@ -267,6 +267,10 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         // durably persist it (durable streaming sink — see docs/design/streaming-exactly-once.md).
         // Durable for availableNow/once triggers; continuous needs per-batch commit (follow-up).
         let streaming = is_flow_event_schema(&input.schema());
+        // Original flow-event input + its partition count, captured before the single-partition
+        // decode below, so a multi-partition streaming write can fan into N parallel sinks.
+        let flow_input = Arc::clone(&input);
+        let n_parts = input.properties().output_partitioning().partition_count();
         let input: Arc<dyn ExecutionPlan> = if streaming {
             Arc::new(crate::streaming_decode::FlowEventToDataExec::try_new(input)?)
         } else {
@@ -340,6 +344,27 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             file_extension,
             file_output_mode: FileOutputMode::Automatic,
         };
+        // Parallel streaming write: fan the N-partition flow-event source into N independent
+        // single-partition sinks (one file per source partition), driven concurrently. This
+        // sidesteps DataFusion `DataSinkExec`'s single-partition requirement and gives ~N×
+        // write throughput. See docs/design/streaming-parallelism.md (Phase 1).
+        if streaming && n_parts > 1 {
+            let mut children: Vec<Arc<dyn ExecutionPlan>> = Vec::with_capacity(n_parts);
+            for i in 0..n_parts {
+                let part = Arc::new(crate::streaming_decode::PartitionSelectExec::new(
+                    Arc::clone(&flow_input),
+                    i,
+                ));
+                let data_i = Arc::new(crate::streaming_decode::FlowEventToDataExec::try_new(part)?);
+                let sink_i = format
+                    .create_writer_physical_plan(data_i, ctx, conf.clone(), sort_order.clone())
+                    .await?;
+                children.push(sink_i);
+            }
+            return Ok(Arc::new(
+                crate::streaming_decode::ParallelStreamSinkExec::new(children),
+            ));
+        }
         let writer = format
             .create_writer_physical_plan(input, ctx, conf, sort_order)
             .await?;

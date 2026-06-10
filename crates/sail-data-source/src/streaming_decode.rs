@@ -11,13 +11,14 @@ use std::any::Any;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch};
-use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::arrow::datatypes::{Schema, SchemaRef};
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
-use datafusion::physical_expr::EquivalenceProperties;
-use datafusion::physical_plan::execution_plan::EmissionType;
+use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
+use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
-use datafusion_common::{plan_err, Result};
+use datafusion_common::{internal_err, plan_err, DataFusionError, Result};
+use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use sail_common_datafusion::streaming::event::schema::{
     try_from_flow_event_schema, MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
@@ -194,6 +195,184 @@ impl ExecutionPlan for EmptySinkAdapterExec {
                     Err(e) => { yield Err(e); return; }
                 }
             }
+        };
+        Ok(Box::pin(RecordBatchStreamAdapter::new(empty, out)))
+    }
+}
+
+/// Exposes a single partition `index` of a multi-partition input as its only (partition 0)
+/// output. Used to fan a multi-partition streaming source into N independent single-partition
+/// write pipelines (one file per source partition) — see docs/design/streaming-parallelism.md.
+#[derive(Debug)]
+pub struct PartitionSelectExec {
+    input: Arc<dyn ExecutionPlan>,
+    index: usize,
+    properties: Arc<PlanProperties>,
+}
+
+impl PartitionSelectExec {
+    pub fn new(input: Arc<dyn ExecutionPlan>, index: usize) -> Self {
+        let properties = Arc::new(PlanProperties::new(
+            EquivalenceProperties::new(input.schema()),
+            Partitioning::UnknownPartitioning(1),
+            input.properties().emission_type,
+            input.properties().boundedness,
+        ));
+        Self {
+            input,
+            index,
+            properties,
+        }
+    }
+}
+
+impl DisplayAs for PartitionSelectExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "PartitionSelectExec: index={}", self.index)
+    }
+}
+
+impl ExecutionPlan for PartitionSelectExec {
+    fn name(&self) -> &str {
+        "PartitionSelectExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if children.len() != 1 {
+            return plan_err!("PartitionSelectExec requires exactly one child");
+        }
+        Ok(Arc::new(PartitionSelectExec::new(
+            children.remove(0),
+            self.index,
+        )))
+    }
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        if partition != 0 {
+            return internal_err!("PartitionSelectExec: invalid partition {partition}");
+        }
+        // Map our single output partition to the selected input partition.
+        self.input.execute(self.index, context)
+    }
+}
+
+/// Drives N independent (single-partition) child sink pipelines **concurrently** — one per
+/// source partition — and presents one empty-schema completion stream to the streaming
+/// driver. This is the parallel streaming file sink: it sidesteps DataFusion `DataSinkExec`'s
+/// single-partition requirement by giving each child exactly one partition, so N files are
+/// written in parallel (one per source partition). Completes only after **all** children
+/// finish (all-N `EndOfData`), so the driver's exactly-once offset/state commit is unaffected.
+#[derive(Debug)]
+pub struct ParallelStreamSinkExec {
+    children: Vec<Arc<dyn ExecutionPlan>>,
+    properties: Arc<PlanProperties>,
+}
+
+impl ParallelStreamSinkExec {
+    pub fn new(children: Vec<Arc<dyn ExecutionPlan>>) -> Self {
+        let empty = Arc::new(Schema::empty());
+        let boundedness = children
+            .first()
+            .map(|c| c.properties().boundedness)
+            .unwrap_or(Boundedness::Bounded);
+        let properties = Arc::new(PlanProperties::new(
+            EquivalenceProperties::new(empty),
+            Partitioning::UnknownPartitioning(1),
+            EmissionType::Both,
+            boundedness,
+        ));
+        Self {
+            children,
+            properties,
+        }
+    }
+}
+
+impl DisplayAs for ParallelStreamSinkExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "ParallelStreamSinkExec: partitions={}", self.children.len())
+    }
+}
+
+impl ExecutionPlan for ParallelStreamSinkExec {
+    fn name(&self) -> &str {
+        "ParallelStreamSinkExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        self.children.iter().collect()
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(Arc::new(ParallelStreamSinkExec::new(children)))
+    }
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        if partition != 0 {
+            return internal_err!("ParallelStreamSinkExec: invalid partition {partition}");
+        }
+        // Start every child sink (each single-partition) and drain it on its own task so the
+        // N writers run on separate cores. Each child emits a count row when its file is
+        // durable; we discard those and emit a single empty batch once ALL children finish.
+        let mut handles = Vec::with_capacity(self.children.len());
+        for child in &self.children {
+            let mut stream = child.execute(0, context.clone())?;
+            handles.push(tokio::spawn(async move {
+                while let Some(item) = stream.next().await {
+                    item?;
+                }
+                Ok::<(), DataFusionError>(())
+            }));
+        }
+        let empty = Arc::new(Schema::empty());
+        let empty_out = empty.clone();
+        let out = async_stream::stream! {
+            let mut futs: FuturesUnordered<_> = handles.into_iter().collect();
+            while let Some(joined) = futs.next().await {
+                match joined {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => { yield Err(e); return; }
+                    Err(e) => {
+                        yield Err(DataFusionError::Execution(format!(
+                            "ParallelStreamSinkExec writer task panicked: {e}"
+                        )));
+                        return;
+                    }
+                }
+            }
+            yield Ok(RecordBatch::new_empty(empty_out.clone()));
         };
         Ok(Box::pin(RecordBatchStreamAdapter::new(empty, out)))
     }

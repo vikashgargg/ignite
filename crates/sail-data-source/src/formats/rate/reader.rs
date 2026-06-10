@@ -275,14 +275,20 @@ impl ExecutionPlan for RateSourceExec {
             let rows = (self.options.rows_per_second / self.options.num_partitions).max(1);
             // Write-ahead: stage the end offset this batch reaches. The runner promotes
             // it to committed only after the output is durable (exactly-once recovery).
-            if let Some(loc) = &self.checkpoint_location {
-                write_staged_offset(loc, self.options.start_offset + rows);
+            // Single-partition only — multi-partition offset recovery needs the checkpoint
+            // coordinator (docs/design/streaming-parallelism.md, Phase 3).
+            if self.options.num_partitions == 1 {
+                if let Some(loc) = &self.checkpoint_location {
+                    write_staged_offset(loc, self.options.start_offset + rows);
+                }
             }
+            // Partition p emits disjoint, globally-contiguous values: start at p, stride by N.
             let mut generator = BatchGenerator::try_new(
                 Arc::clone(&self.time_zone),
                 &self.projection,
                 self.projected_schema.clone(),
-                self.options.start_offset,
+                self.options.start_offset + partition,
+                self.options.num_partitions,
             )?;
             let events = futures::stream::iter(vec![
                 generator.generate(rows).map(FlowEvent::append_only_data),
@@ -311,11 +317,13 @@ impl ExecutionPlan for RateSourceExec {
                 let batches_per_second = rows_per_second.min(1_000);
                 let batch_size = rows_per_second / batches_per_second;
                 let interval = Duration::from_secs(1) / (batches_per_second as u32);
+                // Partition p emits disjoint, globally-contiguous values: start at p, stride by N.
                 let generator = BatchGenerator::try_new(
                     Arc::clone(&self.time_zone),
                     &self.projection,
                     self.projected_schema.clone(),
-                    self.options.start_offset,
+                    self.options.start_offset + partition,
+                    self.options.num_partitions,
                 )?;
                 let output = futures::stream::unfold(generator, move |mut generator| async move {
                     // The interval does not take into account the time it takes to generate data,
@@ -358,6 +366,11 @@ enum BatchGeneratorAction {
 
 struct BatchGenerator {
     offset: usize,
+    /// Step between successive values. For an N-partition source each partition strides by
+    /// N starting at its index, so partitions emit disjoint, globally-contiguous values
+    /// (Spark rate-source semantics): partition p → p, p+N, p+2N, … `stride == 1` for the
+    /// single-partition case (unchanged behavior).
+    stride: usize,
     projected_schema: SchemaRef,
     time_zone: Arc<str>,
     actions: Vec<BatchGeneratorAction>,
@@ -369,6 +382,7 @@ impl BatchGenerator {
         projection: &[usize],
         projected_schema: SchemaRef,
         start_offset: usize,
+        stride: usize,
     ) -> Result<Self> {
         let mut actions = vec![];
         let mut timestamp_index = None;
@@ -398,6 +412,7 @@ impl BatchGenerator {
         }
         Ok(Self {
             offset: start_offset,
+            stride: stride.max(1),
             projected_schema,
             time_zone,
             actions,
@@ -416,7 +431,7 @@ impl BatchGenerator {
                 }
                 BatchGeneratorAction::Value => {
                     let values = (0..batch_size)
-                        .map(|i| (self.offset + i) as i64)
+                        .map(|i| (self.offset + i * self.stride) as i64)
                         .collect::<Vec<_>>();
                     let array = Int64Array::from(values);
                     columns.push(Arc::new(array) as _);
@@ -426,7 +441,7 @@ impl BatchGenerator {
                 }
             }
         }
-        self.offset += batch_size;
+        self.offset += batch_size * self.stride;
         RecordBatch::try_new(self.projected_schema.clone(), columns)
             .map_err(|e| arrow_datafusion_err!(e))
     }
