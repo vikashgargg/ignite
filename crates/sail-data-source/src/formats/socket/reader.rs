@@ -67,6 +67,8 @@ impl StreamSource for SocketStreamSource {
         // Bounded (availableNow/once) reads are not meaningful for a socket source;
         // it runs continuously. Tracked in docs/STREAMING.md.
         _bounded: bool,
+        // Socket has no replayable offsets; ignored.
+        _checkpoint_location: Option<&str>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()

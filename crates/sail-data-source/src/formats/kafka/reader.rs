@@ -78,6 +78,8 @@ impl StreamSource for KafkaStreamSource {
         // Bounded (availableNow/once) reads are not yet implemented for Kafka; the
         // source runs continuously. Tracked in docs/STREAMING.md.
         _bounded: bool,
+        // Kafka offset commit/restore is a follow-up (native partition offsets).
+        _checkpoint_location: Option<&str>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()

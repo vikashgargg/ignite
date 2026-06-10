@@ -26,6 +26,10 @@ pub struct StreamSourceWrapperNode {
     /// When true (trigger `availableNow`/`once`), the source scans available data
     /// then ends its stream so the query terminates.
     bounded: bool,
+    /// Streaming `checkpointLocation`, when set. Lets the source restore its committed
+    /// offset on start and stage the new offset, for exactly-once recovery
+    /// (see docs/design/streaming-exactly-once.md).
+    checkpoint_location: Option<String>,
 }
 
 impl PartialEq for StreamSourceWrapperNode {
@@ -36,6 +40,7 @@ impl PartialEq for StreamSourceWrapperNode {
             && self.filters == other.filters
             && self.fetch == other.fetch
             && self.bounded == other.bounded
+            && self.checkpoint_location == other.checkpoint_location
     }
 }
 
@@ -49,6 +54,7 @@ impl Hash for StreamSourceWrapperNode {
         self.filters.hash(state);
         self.fetch.hash(state);
         self.bounded.hash(state);
+        self.checkpoint_location.hash(state);
     }
 }
 
@@ -61,6 +67,7 @@ impl StreamSourceWrapperNode {
         filters: Vec<Expr>,
         fetch: Option<usize>,
         bounded: bool,
+        checkpoint_location: Option<String>,
     ) -> Result<Self> {
         let schema = match &names {
             Some(names) => rename_schema(&source.data_schema(), names)?,
@@ -90,6 +97,7 @@ impl StreamSourceWrapperNode {
             filters,
             fetch,
             bounded,
+            checkpoint_location,
         })
     }
 
@@ -99,6 +107,10 @@ impl StreamSourceWrapperNode {
 
     pub fn bounded(&self) -> bool {
         self.bounded
+    }
+
+    pub fn checkpoint_location(&self) -> Option<&str> {
+        self.checkpoint_location.as_deref()
     }
 
     pub fn names(&self) -> Option<&Vec<String>> {

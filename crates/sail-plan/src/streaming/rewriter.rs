@@ -38,6 +38,8 @@ use sail_logical_plan::streaming::window_accum::WindowAccumNode;
 struct StreamingRewriter {
     /// Trigger `availableNow`/`once`: stream sources scan available data then stop.
     bounded: bool,
+    /// Streaming `checkpointLocation`, threaded to sources for offset recovery.
+    checkpoint_location: Option<String>,
 }
 
 impl StreamingRewriter {
@@ -372,6 +374,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                                 filters.clone(),
                                 *fetch,
                                 self.bounded,
+                                self.checkpoint_location.clone(),
                             )?),
                         })))
                     } else {
@@ -529,8 +532,15 @@ pub fn is_streaming_plan(plan: &LogicalPlan) -> Result<bool> {
 /// all logical commands are executed. An error will be returned if the plan
 /// contains logical command nodes or nodes that should be eliminated by the
 /// optimizer (e.g. subquery).
-pub fn rewrite_streaming_plan(plan: LogicalPlan, bounded: bool) -> Result<LogicalPlan> {
-    let node = plan.rewrite(&mut StreamingRewriter { bounded })?;
+pub fn rewrite_streaming_plan(
+    plan: LogicalPlan,
+    bounded: bool,
+    checkpoint_location: Option<String>,
+) -> Result<LogicalPlan> {
+    let node = plan.rewrite(&mut StreamingRewriter {
+        bounded,
+        checkpoint_location,
+    })?;
     let plan = node.data;
 
     if is_flow_event_schema(plan.schema().inner()) {

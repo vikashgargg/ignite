@@ -69,17 +69,61 @@ impl StreamSource for RateStreamSource {
         _filters: &[Expr],
         _limit: Option<usize>,
         bounded: bool,
+        checkpoint_location: Option<&str>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()
             .unwrap_or_else(|| (0..self.schema.fields.len()).collect());
+        // Restore: resume from the last committed offset (exactly-once recovery), so a
+        // restart replays from where the previous run committed rather than from 0.
+        let mut options = self.options.clone();
+        if let Some(loc) = checkpoint_location {
+            if let Some(committed) = read_committed_offset(loc) {
+                options.start_offset = committed;
+            }
+        }
         Ok(Arc::new(RateSourceExec::try_new(
-            self.options.clone(),
+            options,
             Arc::clone(&self.schema),
             projection,
             bounded,
+            checkpoint_location.map(str::to_string),
         )?))
     }
+}
+
+/// Path of the durably-committed source offset within a checkpoint location.
+fn committed_offset_path(checkpoint_location: &str) -> std::path::PathBuf {
+    std::path::Path::new(checkpoint_location)
+        .join("sources")
+        .join("0")
+        .join("committed")
+}
+
+/// Path of the staged (written-ahead, not-yet-committed) source offset.
+fn staged_offset_path(checkpoint_location: &str) -> std::path::PathBuf {
+    std::path::Path::new(checkpoint_location)
+        .join("sources")
+        .join("0")
+        .join("staged")
+}
+
+/// Read the last durably-committed row offset, if any.
+pub fn read_committed_offset(checkpoint_location: &str) -> Option<usize> {
+    std::fs::read_to_string(committed_offset_path(checkpoint_location))
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+}
+
+/// Stage (write-ahead) the end offset reached by the current batch. The runner promotes
+/// this to `committed` only after the batch's output is durable — see
+/// `StreamingQuery::run` and docs/design/streaming-exactly-once.md.
+fn write_staged_offset(checkpoint_location: &str, offset: usize) {
+    let path = staged_offset_path(checkpoint_location);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, offset.to_string());
 }
 
 #[derive(Debug)]
@@ -91,6 +135,9 @@ pub struct RateSourceExec {
     projection: Vec<usize>,
     /// Trigger `availableNow`/`once`: emit one batch of available rows then stop.
     bounded: bool,
+    /// Streaming `checkpointLocation`, when set — to stage the offset reached for
+    /// exactly-once recovery (the runner commits it after the output is durable).
+    checkpoint_location: Option<String>,
     properties: Arc<PlanProperties>,
 }
 
@@ -102,6 +149,7 @@ impl RateSourceExec {
         schema: SchemaRef,
         projection: Vec<usize>,
         bounded: bool,
+        checkpoint_location: Option<String>,
     ) -> Result<Self> {
         let time_zone = Self::infer_time_zone(&schema)?;
         let projected_schema = Arc::new(schema.project(&projection)?);
@@ -126,6 +174,7 @@ impl RateSourceExec {
             projected_schema,
             projection,
             bounded,
+            checkpoint_location,
             properties,
         })
     }
@@ -224,6 +273,11 @@ impl ExecutionPlan for RateSourceExec {
             // rows, then EndOfData, then end the stream so the query terminates
             // instead of running continuously.
             let rows = (self.options.rows_per_second / self.options.num_partitions).max(1);
+            // Write-ahead: stage the end offset this batch reaches. The runner promotes
+            // it to committed only after the output is durable (exactly-once recovery).
+            if let Some(loc) = &self.checkpoint_location {
+                write_staged_offset(loc, self.options.start_offset + rows);
+            }
             let mut generator = BatchGenerator::try_new(
                 Arc::clone(&self.time_zone),
                 &self.projection,
@@ -416,7 +470,7 @@ mod tests {
     // streaming query terminates. An unbounded source would hang this collect.
     #[tokio::test]
     async fn bounded_rate_source_terminates() {
-        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], true).unwrap();
+        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], true, None).unwrap();
         assert!(matches!(exec.properties().boundedness, Boundedness::Bounded));
         let stream = exec.execute(0, Arc::new(TaskContext::default())).unwrap();
         // The outer unwrap panics (failing the test) if the source does not terminate.
@@ -430,7 +484,7 @@ mod tests {
     // Default (continuous) rate source stays unbounded.
     #[tokio::test]
     async fn unbounded_rate_source_is_unbounded() {
-        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], false).unwrap();
+        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], false, None).unwrap();
         assert!(matches!(
             exec.properties().boundedness,
             Boundedness::Unbounded { .. }

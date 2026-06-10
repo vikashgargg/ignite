@@ -288,6 +288,7 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                     node.filters(),
                     node.fetch(),
                     node.bounded(),
+                    node.checkpoint_location(),
                 )
                 .await?;
             match node.names() {

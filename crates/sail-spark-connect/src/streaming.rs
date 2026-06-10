@@ -128,7 +128,11 @@ impl StreamingQuery {
         }
         let mut batch_id: u64 = initial_batch_id;
         let ui_id_stop = ui_id.clone();
+        let commit_location = checkpoint_location.clone();
         let task = async move {
+            // Whether the stream ran to completion without error — the durability signal
+            // for committing source offsets (exactly-once recovery).
+            let mut clean = true;
             while let Some(x) = stream.next().await {
                 match x {
                     Ok(_) => {
@@ -149,18 +153,49 @@ impl StreamingQuery {
                         batch_id += 1;
                     }
                     Err(e) => {
+                        clean = false;
                         let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
                         let _ = error.send(Some(cause.into()));
                     }
                 }
             }
+            clean
         };
         tokio::select! {
             _ = signal => {}
-            _ = task => {}
+            clean = task => {
+                // The stream completed (e.g. availableNow/once). If it ran without error,
+                // the output is durable, so commit the sources' staged offsets
+                // (write-ahead → committed) — exactly-once recovery on the next run.
+                if clean {
+                    if let Some(ref loc) = commit_location {
+                        commit_source_offsets(loc);
+                    }
+                }
+            }
         }
         web_ui::mark_stopped(&ui_id_stop).await;
         let _ = stopped.send(true);
+    }
+}
+
+/// Promote every source's staged (write-ahead) offset to committed (atomic rename),
+/// once the batch output is durable. This is the commit step of the offset WAL →
+/// commit-log protocol (Spark `MicroBatchExecution` model) — see
+/// docs/design/streaming-exactly-once.md.
+fn commit_source_offsets(checkpoint_location: &str) {
+    let sources_dir = PathBuf::from(checkpoint_location).join("sources");
+    let Ok(entries) = std::fs::read_dir(&sources_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let staged = entry.path().join("staged");
+        if staged.exists() {
+            let committed = entry.path().join("committed");
+            if let Err(e) = std::fs::rename(&staged, &committed) {
+                warn!("Failed to commit source offset {staged:?}: {e}");
+            }
+        }
     }
 }
 

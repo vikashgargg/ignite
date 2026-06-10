@@ -46,6 +46,9 @@ pub trait StreamSource: Send + Sync + fmt::Debug {
         filters: &[Expr],
         limit: Option<usize>,
         bounded: bool,
+        // Streaming `checkpointLocation`, when set — for offset commit/restore
+        // (exactly-once recovery). Sources that don't support it may ignore it.
+        checkpoint_location: Option<&str>,
     ) -> Result<Arc<dyn ExecutionPlan>>;
 }
 

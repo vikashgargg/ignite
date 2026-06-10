@@ -949,6 +949,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     Arc::new(schema),
                     projection,
                     bounded,
+                    // Distributed offset recovery (carrying checkpoint location through the
+                    // proto) is a follow-up; single-node recovery uses it directly.
+                    None,
                 )?))
             }
             NodeKind::TextSink(gen::TextSinkExecNode {
