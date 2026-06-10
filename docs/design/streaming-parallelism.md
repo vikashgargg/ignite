@@ -119,6 +119,24 @@ sink** that bypasses `DataSinkExec`'s single-partition rule:
   `WindowAccumExec`/`StreamJoinExec`** (per-partition keyed state) + **watermark min-merge
   WITH idleness detection** (idle input must not stall windows). Document **key-skew**
   handling (partial-agg / salting).
+  - **Step 1 ✅ (merged):** `StreamExchangeExec` (hash data, broadcast markers), unit-tested.
+  - **Step 2 ⛔ (attempted, reverted — needs focused debugging):** wired multi-partition
+    `WindowAccumExec` (per-partition state op-id) + planner inserts
+    `WatermarkExec → StreamExchange(hash keys) → WindowAccum(N) → CoalescePartitions(N→1)`,
+    gated to keyed aggs at `target_partitions`. **It compiles + does not regress** no-key /
+    batch, but two issues block it:
+    1. **Pre-existing (not parallelism):** keyed windowed agg with an *inline-expression*
+       key (`value % 10`) fails `?table?.#1` column resolution; a *pre-projected column*
+       key works. Fails identically at N=1 — independent of parallelism. Root cause is in
+       the rewriter/resolver qualifier handling, not the planner's `create_physical_expr`
+       (stripping qualifiers there did not fix it). **Fix this first, separately.**
+    2. **Step-2 integration bug:** with a column key, the parallel path *runs without error
+       but emits 0 windows* — window emission breaks through the exchange/coalesce. Suspect
+       the broadcast **watermark not reaching the window instances** through the exchange,
+       or `CoalescePartitionsExec` not draining the unbounded flow-event partitions. Needs a
+       focused debug (likely a dedicated marker-aware coalesce, mirroring the exchange).
+  - **Conclusion:** the exchange primitive is sound; step-2 integration is a real, multi-bug
+    effort. Do not ship until both are fixed and the gate (parallel == single) passes.
 - **Phase 3 — CheckpointCoordinator** (Chandy–Lamport, aligned barriers): trigger → align →
   ack → single commit wired to the existing offset-WAL + state-commit, so **exactly-once
   survives parallelism**.
