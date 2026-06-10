@@ -33,6 +33,9 @@ pub struct WindowAccumNode {
     /// Schema of just the data columns (aggregate output schema).
     #[educe(PartialOrd(ignore))]
     pub data_schema: DFSchemaRef,
+    /// Streaming `checkpointLocation`, when set — for operator-state snapshot/restore
+    /// (stateful exactly-once recovery; see docs/design/streaming-exactly-once.md).
+    pub checkpoint_location: Option<String>,
 }
 
 impl WindowAccumNode {
@@ -44,6 +47,7 @@ impl WindowAccumNode {
         delay_micros: i64,
         output_schema: DFSchemaRef,
         data_schema: DFSchemaRef,
+        checkpoint_location: Option<String>,
     ) -> Self {
         Self {
             input: Arc::new(input),
@@ -53,6 +57,7 @@ impl WindowAccumNode {
             delay_micros,
             output_schema,
             data_schema,
+            checkpoint_location,
         }
     }
 
@@ -120,6 +125,7 @@ impl UserDefinedLogicalNodeCore for WindowAccumNode {
             self.delay_micros,
             self.output_schema.clone(),
             self.data_schema.clone(),
+            self.checkpoint_location.clone(),
         ))
     }
 }

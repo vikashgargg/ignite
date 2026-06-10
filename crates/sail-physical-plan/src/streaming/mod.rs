@@ -3,6 +3,7 @@ pub mod dedup;
 pub mod filter;
 pub mod limit;
 pub mod source_adapter;
+pub mod state_io;
 pub mod stream_join;
 pub mod watermark;
 pub mod window_accum;

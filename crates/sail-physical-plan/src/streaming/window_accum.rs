@@ -165,6 +165,9 @@ pub struct WindowAccumExec {
     final_group_by: Arc<PhysicalGroupBy>,
     event_time_col: String,
     delay_micros: i64,
+    /// Streaming `checkpointLocation`, when set — snapshot the open-window partial state
+    /// on `EndOfData` and restore it on the next run (stateful exactly-once recovery).
+    checkpoint_location: Option<String>,
     properties: Arc<PlanProperties>,
 }
 
@@ -176,6 +179,7 @@ impl WindowAccumExec {
         data_input_schema: SchemaRef,
         event_time_col: String,
         delay_micros: i64,
+        checkpoint_location: Option<String>,
     ) -> Result<Self> {
         let agg_output_schema = {
             let empty = Arc::new(EmptyExec::new(data_input_schema.clone()));
@@ -236,6 +240,7 @@ impl WindowAccumExec {
             final_group_by: Arc::new(final_group_by),
             event_time_col,
             delay_micros,
+            checkpoint_location,
             properties,
         })
     }
@@ -284,6 +289,7 @@ impl ExecutionPlan for WindowAccumExec {
             self.data_input_schema.clone(),
             self.event_time_col.clone(),
             self.delay_micros,
+            self.checkpoint_location.clone(),
         )?))
     }
 
@@ -322,7 +328,19 @@ impl ExecutionPlan for WindowAccumExec {
             VecDeque<FlowEvent>,
             Arc<TaskContext>,
         );
-        let init: UnfoldState = (input_stream, AccumState::new(), VecDeque::new(), context);
+        // Restore operator state (open-window partials + watermark + emitted ends) from
+        // the last committed snapshot, for stateful exactly-once recovery across runs.
+        let mut acc = AccumState::new();
+        if let Some(loc) = &self.checkpoint_location {
+            let (batches, meta) = crate::streaming::state_io::restore_state(loc, "window-0");
+            acc.pending_rows = batches;
+            if let Some((wm, ends)) = meta.split_first() {
+                acc.watermark_micros = (*wm != i64::MIN).then_some(*wm);
+                acc.emitted_ends = ends.iter().copied().collect();
+            }
+        }
+        let checkpoint_location = self.checkpoint_location.clone();
+        let init: UnfoldState = (input_stream, acc, VecDeque::new(), context);
 
         let event_stream = stream::unfold(init, move |(mut input, mut acc, mut buf, ctx)| {
             let group_exprs = Arc::clone(&group_exprs);
@@ -330,6 +348,7 @@ impl ExecutionPlan for WindowAccumExec {
             let data_schema = data_schema.clone();
             let partial_schema = partial_schema.clone();
             let final_group_by = Arc::clone(&final_group_by);
+            let checkpoint_location = checkpoint_location.clone();
             async move {
                 loop {
                     // First drain the output buffer.
@@ -393,19 +412,36 @@ impl ExecutionPlan for WindowAccumExec {
                             }));
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::EndOfData))) => {
-                            // Stream ending: flush all remaining windows (emit everything).
-                            if let Err(e) = finalize_and_emit(
-                                &mut acc,
-                                &final_group_by,
-                                &aggr_exprs,
-                                &partial_schema,
-                                Some(i64::MAX),
-                                &mut buf,
-                                ctx.clone(),
-                            )
-                            .await
-                            {
-                                return Some((Err(e), (input, acc, buf, ctx)));
+                            if let Some(loc) = &checkpoint_location {
+                                // Checkpointed run (availableNow/once): SNAPSHOT the open-window
+                                // partial state (write-ahead) so windows spanning runs complete
+                                // correctly — the runner commits it after the output is durable.
+                                // (Do NOT flush; open windows carry over to the next run.)
+                                let mut meta =
+                                    vec![acc.watermark_micros.unwrap_or(i64::MIN)];
+                                meta.extend(acc.emitted_ends.iter().copied());
+                                crate::streaming::state_io::stage_state(
+                                    loc,
+                                    "window-0",
+                                    &partial_schema,
+                                    &acc.pending_rows,
+                                    &meta,
+                                );
+                            } else {
+                                // No checkpoint: flush all remaining windows (terminal).
+                                if let Err(e) = finalize_and_emit(
+                                    &mut acc,
+                                    &final_group_by,
+                                    &aggr_exprs,
+                                    &partial_schema,
+                                    Some(i64::MAX),
+                                    &mut buf,
+                                    ctx.clone(),
+                                )
+                                .await
+                                {
+                                    return Some((Err(e), (input, acc, buf, ctx)));
+                                }
                             }
                             buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
                         }

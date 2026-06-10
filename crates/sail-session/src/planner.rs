@@ -421,6 +421,7 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 data_schema,
                 node.event_time_col.clone(),
                 node.delay_micros,
+                node.checkpoint_location.clone(),
             )?)
         } else if let Some(node) = node.as_any().downcast_ref::<StreamJoinNode>() {
             let [left, right] = physical_inputs else {

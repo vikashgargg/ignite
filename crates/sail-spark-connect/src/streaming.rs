@@ -184,16 +184,27 @@ impl StreamingQuery {
 /// commit-log protocol (Spark `MicroBatchExecution` model) — see
 /// docs/design/streaming-exactly-once.md.
 fn commit_source_offsets(checkpoint_location: &str) {
-    let sources_dir = PathBuf::from(checkpoint_location).join("sources");
-    let Ok(entries) = std::fs::read_dir(&sources_dir) else {
+    // Source offsets: `<loc>/sources/<id>/staged` (file) -> `committed`.
+    promote_staged(&PathBuf::from(checkpoint_location).join("sources"), false);
+    // Operator state: `<loc>/state/<op>/staged` (dir) -> `committed`.
+    promote_staged(&PathBuf::from(checkpoint_location).join("state"), true);
+}
+
+/// Promote every `<root>/<id>/staged` to `committed` (atomic rename), once the batch
+/// output is durable — the commit step of the offset/state WAL protocol.
+fn promote_staged(root: &std::path::Path, is_dir: bool) {
+    let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let staged = entry.path().join("staged");
         if staged.exists() {
             let committed = entry.path().join("committed");
+            if is_dir {
+                let _ = std::fs::remove_dir_all(&committed);
+            }
             if let Err(e) = std::fs::rename(&staged, &committed) {
-                warn!("Failed to commit source offset {staged:?}: {e}");
+                warn!("Failed to commit {staged:?}: {e}");
             }
         }
     }

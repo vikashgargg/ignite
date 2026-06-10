@@ -193,6 +193,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                                 )
                             )?),
                             agg_output_schema,
+                            self.checkpoint_location.clone(),
                         )),
                     })));
                 }
