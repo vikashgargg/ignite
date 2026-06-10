@@ -155,11 +155,17 @@ this is **independent of parallelism** (reproduces at N=1) and of the key form:
 keyed windowed aggs, so it is blocked until keyed windowed aggregation is correct.
 
 **Required fix (dedicated, tests-first), in order:**
-1. Rewriter: `strip_qualifiers` on agg group/aggr exprs (fixes the crash; matches join path).
-2. `WindowAccumExec`: fix multi-group (window + key) aggregation so keys are preserved and
-   counts are complete — gate with `keyed windowed result == Spark` (differential test).
-3. *Then* Phase 2 step 2 (parallelize the now-correct keyed windowed agg) + marker-aware
-   coalesce. The strip fix was reverted (not shipped) to avoid enabling a silently-wrong path.
+1. ✅ **Done (2026-06-11):** Rewriter `strip_qualifiers` on agg group/aggr exprs (fixes the
+   inline-expression-key crash; matches join path).
+2. ✅ **Done (2026-06-11):** `WindowAccumExec` keyed-window correctness. Root cause was
+   `window_emit_mask`: `emitted.insert(window_end)` per row suppressed every group row after
+   the first for a given window end → only `k=0` emitted, counts ~1/K. Fixed to test
+   membership without mutating (all group rows of a newly-closed window emit together), then
+   record ends after. Verified: all keys present, exactly K rows/window, keyed total ≈
+   no-key total (counts complete); no-key + windowed exactly-once + batch unaffected.
+3. **Next — Phase 2 step 2:** parallelize the now-correct keyed windowed agg (multi-partition
+   `WindowAccumExec` + keyed `StreamExchangeExec` + **marker-aware coalesce** to fix the
+   0-output bug) with the `parallel == single` differential gate.
 - **Phase 3 — CheckpointCoordinator** (Chandy–Lamport, aligned barriers): trigger → align →
   ack → single commit wired to the existing offset-WAL + state-commit, so **exactly-once
   survives parallelism**.
