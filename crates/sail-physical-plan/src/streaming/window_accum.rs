@@ -122,12 +122,6 @@ impl AccumState {
         }
     }
 
-    fn push(&mut self, batch: RecordBatch) {
-        if batch.num_rows() > 0 {
-            self.pending_rows.push(batch);
-        }
-    }
-
     /// Advance the watermark (monotonic).
     fn set_watermark(&mut self, micros: i64) {
         self.watermark_micros = Some(self.watermark_micros.map_or(micros, |c| c.max(micros)));
@@ -152,6 +146,13 @@ pub struct WindowAccumExec {
     aggr_exprs: Vec<Arc<AggregateFunctionExpr>>,
     data_input_schema: SchemaRef,
     agg_output_schema: SchemaRef,
+    /// `Partial`-mode aggregate output schema (group cols + partial state cols). Each
+    /// incoming batch is pre-aggregated to this; partials are merged with `Final` mode
+    /// only when a window closes (incremental aggregation — store one partial per
+    /// window, never re-aggregate raw rows; see docs/design/streaming-watermark.md).
+    partial_schema: SchemaRef,
+    /// `Final`-mode group-by: column refs into the partial schema's group columns.
+    final_group_by: Arc<PhysicalGroupBy>,
     event_time_col: String,
     delay_micros: i64,
     properties: Arc<PlanProperties>,
@@ -178,6 +179,34 @@ impl WindowAccumExec {
             )?;
             trial.schema()
         };
+        // Partial-mode schema (group cols + partial state cols) for incremental pre-agg.
+        let partial_schema = {
+            let empty = Arc::new(EmptyExec::new(data_input_schema.clone()));
+            let trial = AggregateExec::try_new(
+                AggregateMode::Partial,
+                group_exprs.clone(),
+                aggr_exprs.clone(),
+                vec![None; aggr_exprs.len()],
+                empty,
+                data_input_schema.clone(),
+            )?;
+            trial.schema()
+        };
+        // Final-mode group-by references the group columns (which lead the partial
+        // schema) by position, since Final consumes partial state, not raw data.
+        let num_group_cols = group_exprs.expr().len();
+        let final_group_by = PhysicalGroupBy::new_single(
+            (0..num_group_cols)
+                .map(|i| {
+                    let name = partial_schema.field(i).name().clone();
+                    (
+                        Arc::new(datafusion::physical_plan::expressions::Column::new(&name, i))
+                            as Arc<dyn datafusion::physical_expr::PhysicalExpr>,
+                        name,
+                    )
+                })
+                .collect(),
+        );
         let flow_schema = Arc::new(to_flow_event_schema(&agg_output_schema));
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(flow_schema),
@@ -193,6 +222,8 @@ impl WindowAccumExec {
             aggr_exprs,
             data_input_schema,
             agg_output_schema,
+            partial_schema,
+            final_group_by: Arc::new(final_group_by),
             event_time_col,
             delay_micros,
             properties,
@@ -259,6 +290,8 @@ impl ExecutionPlan for WindowAccumExec {
         let aggr_exprs = self.aggr_exprs.clone();
         let data_schema = self.data_input_schema.clone();
         let agg_schema = self.agg_output_schema.clone();
+        let partial_schema = self.partial_schema.clone();
+        let final_group_by = Arc::clone(&self.final_group_by);
         let in_stream = self.input.execute(partition, context.clone())?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -285,6 +318,8 @@ impl ExecutionPlan for WindowAccumExec {
             let group_exprs = Arc::clone(&group_exprs);
             let aggr_exprs = aggr_exprs.clone();
             let data_schema = data_schema.clone();
+            let partial_schema = partial_schema.clone();
+            let final_group_by = Arc::clone(&final_group_by);
             async move {
                 loop {
                     // First drain the output buffer.
@@ -296,7 +331,23 @@ impl ExecutionPlan for WindowAccumExec {
                         None => return None,
                         Some(Err(e)) => return Some((Err(e), (input, acc, buf, ctx))),
                         Some(Ok(FlowEvent::Data { batch, .. })) => {
-                            acc.push(batch);
+                            // Incremental pre-aggregation: reduce the batch to partial
+                            // state (one row per window-group) immediately, instead of
+                            // buffering raw rows. Keeps state O(#open windows), not O(#rows).
+                            if batch.num_rows() > 0 {
+                                match run_partial_aggregate(
+                                    vec![batch],
+                                    &group_exprs,
+                                    &aggr_exprs,
+                                    &data_schema,
+                                    ctx.clone(),
+                                )
+                                .await
+                                {
+                                    Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
+                                    Ok(mut partials) => acc.pending_rows.append(&mut partials),
+                                }
+                            }
                             // No output yet; loop to read next event.
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::Watermark { source, timestamp }))) => {
@@ -304,12 +355,14 @@ impl ExecutionPlan for WindowAccumExec {
                             // (end ≤ watermark), exactly once, then drop their rows.
                             acc.set_watermark(timestamp.timestamp_micros());
                             let wm = acc.watermark_micros;
-                            let batches = acc.pending_rows.clone();
-                            match run_aggregate(
-                                batches,
-                                &group_exprs,
+                            // Merge the accumulated partial states (Final mode) — cheap:
+                            // O(#open windows), not O(#buffered rows).
+                            let partials = acc.pending_rows.clone();
+                            match run_final_aggregate(
+                                partials,
+                                &final_group_by,
                                 &aggr_exprs,
-                                &data_schema,
+                                &partial_schema,
                                 ctx.clone(),
                             )
                             .await
@@ -363,8 +416,9 @@ impl ExecutionPlan for WindowAccumExec {
     }
 }
 
-/// Run the GROUP BY aggregate on `batches` and return all output batches.
-async fn run_aggregate(
+/// `Partial`-mode pre-aggregation of `batches` → partial state rows (one per
+/// window-group). Run per incoming batch so we never buffer raw rows.
+async fn run_partial_aggregate(
     batches: Vec<RecordBatch>,
     group_exprs: &PhysicalGroupBy,
     aggr_exprs: &[Arc<AggregateFunctionExpr>],
@@ -376,12 +430,44 @@ async fn run_aggregate(
     }
     let static_input = Arc::new(StaticBatchExec::new(batches, data_schema.clone()));
     let agg = AggregateExec::try_new(
-        AggregateMode::Single,
+        AggregateMode::Partial,
         group_exprs.clone(),
         aggr_exprs.to_vec(),
         vec![None; aggr_exprs.len()],
         static_input,
         data_schema.clone(),
+    )?;
+    let mut stream = agg.execute(0, context)?;
+    let mut out = vec![];
+    while let Some(batch) = stream.next().await {
+        let batch = batch?;
+        if batch.num_rows() > 0 {
+            out.push(batch);
+        }
+    }
+    Ok(out)
+}
+
+/// `Final`-mode merge of accumulated partial states → final aggregate results.
+/// `final_group_by` references the group columns of `partial_schema` by position.
+async fn run_final_aggregate(
+    partials: Vec<RecordBatch>,
+    final_group_by: &PhysicalGroupBy,
+    aggr_exprs: &[Arc<AggregateFunctionExpr>],
+    partial_schema: &SchemaRef,
+    context: Arc<TaskContext>,
+) -> Result<Vec<RecordBatch>> {
+    if partials.is_empty() {
+        return Ok(vec![]);
+    }
+    let static_input = Arc::new(StaticBatchExec::new(partials, partial_schema.clone()));
+    let agg = AggregateExec::try_new(
+        AggregateMode::Final,
+        final_group_by.clone(),
+        aggr_exprs.to_vec(),
+        vec![None; aggr_exprs.len()],
+        static_input,
+        partial_schema.clone(),
     )?;
     let mut stream = agg.execute(0, context)?;
     let mut out = vec![];
