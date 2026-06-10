@@ -60,6 +60,21 @@ by reusing persistent accumulators — Flink's `AggregateFunction` style — a f
 Latency stays sub-ms; memory bounded. The earlier ~28M rows/s figure is **bounded/batch**
 throughput (`availableNow` count), a different measurement.
 
+## 4. Endurance / stability (medium soak) ✅
+Reliability is Flink's core strength and was our only unvalidated dimension. Sustained
+soaks on the release build, sampling RSS + latency over time:
+
+| Soak | Duration | RSS over time | Latency | Result |
+|---|--:|---|---|---|
+| Windowed agg @~275k/s | **6 min** | **flat 64 MB** (every 30 s sample) | **p99 0.1 ms** throughout (one 1.0 ms blip) | stable ✅ |
+| Interval join @50k/s/side (state-isolated) | **4 min** | **52–60 MB** (drifts *down* as eviction reclaims) | — | stable ✅ |
+
+**No memory leak (RSS flat), no latency drift, no crash/stall, query stayed active** — the
+three things that break streaming products over time but pass short tests. This is a
+*medium* soak (minutes), not a 24 h endurance run or a kill-and-recover test — those remain
+the bar before claiming full reliability parity with Flink — but it's solid positive
+evidence that the stateful operators are stable and bounded under sustained load.
+
 ## Flink head-to-head readiness (scoped to our product goal)
 - **Ready now (measured, real):** Flink-class **latency** + **bounded state** + **low memory**
   on supported queries (windowed aggregation, interval join). A scoped head-to-head on
@@ -67,8 +82,9 @@ throughput (`availableNow` count), a different measurement.
 - **Throughput:** windowed agg now ~275k/s (10.2× after incremental agg + Final throttle),
   sub-ms, bounded memory — a scoped throughput comparison is reasonable. Remaining headroom
   to the ~436k/s stateless ceiling via persistent accumulators is a follow-up.
-- **Not ready / deferred:** **endurance** (24 h soak) and **failure recovery** (Flink's
-  strengths) — untested, so we do **not** claim reliability superiority yet.
+- **Reliability:** medium soaks (6 min windowed, 4 min join) show **stable, bounded, no
+  leak/drift/crash** — positive evidence. Full parity claim still needs a **24 h soak** +
+  **kill-and-recover** test (deferred).
 - **Recommended first comparison:** release build, single node, generator-based, **one
   windowed-agg + one interval-join query**, reporting **latency + peak RSS** vs Flink local —
   explicitly scoped, not a full Nexmark or reliability claim.
