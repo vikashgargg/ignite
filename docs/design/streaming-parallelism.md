@@ -81,6 +81,27 @@ A flow-event stream carries control markers (`Watermark`, `Checkpoint{id}`, `End
   before snapshotting (preserves the exactly-once we already built).
 - **EndOfData**: the driver/coalesce completes only after **all N** inputs signal it.
 
+## Phase 1 root-cause (confirmed 2026-06-10)
+Tracing the multi-partition stateless write end-to-end:
+- The source emits N partitions; `FilterExec`, `FlowEventToDataExec`, `EmptySinkAdapterExec`
+  all **preserve** partitioning; Vajra's `create_writer` does **not** reject multi-partition.
+- **The hard stop is DataFusion's `DataSinkExec`** — `datafusion-datasource/src/sink.rs:103`:
+  *"DataSinkExec requires its input to have a single partition."* For batch the optimizer
+  coalesces N→1; for an **unbounded (streaming) multi-partition** input it rejects →
+  surfaced as `cannot write streaming data to listing table`. (Memory sink doesn't reject —
+  it just coalesces N→1 single-threaded, the Phase-0 regression.)
+
+**So Phase 1 ≠ tweak the existing sink.** It needs a **dedicated parallel streaming file
+sink** that bypasses `DataSinkExec`'s single-partition rule:
+- `output_partitioning() == 1` (driver unchanged — sees one completion stream).
+- `execute(0)` spawns **N writer tasks**; task `i` runs `input.execute(i)`, decodes
+  flow-events, writes **its own file** (`part-i.parquet`) via the Arrow/Parquet writer,
+  tracks per-partition `EndOfData`.
+- Completes only when **all N** tasks finish (all-N `EndOfData`) → then the driver's
+  offset/state commit fires (exactly-once unaffected — commit still after all durable).
+- Tests first: N-file output == 1-file output (same rows, no loss/dup); `availableNow`
+  waits for all N; cost-gate (don't engage below CPU-bound).
+
 ## Build phases (re-sequenced around reuse + the exchange primitive)
 - **Phase 0: measure + root-cause.** ✅ Done — multi-partition regresses; cause known.
 - **Phase 1 — flow-event exchange primitive + parallel stateless path.** Wrap the existing
