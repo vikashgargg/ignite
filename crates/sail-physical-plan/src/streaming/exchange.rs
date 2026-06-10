@@ -31,6 +31,8 @@ use tokio_stream::wrappers::ReceiverStream;
 const CHANNEL_CAPACITY: usize = 16;
 
 type BatchResult = Result<RecordBatch>;
+/// Per-output-partition receivers, taken by `execute`; lazily initialized on first call.
+type SharedReceivers = Arc<Mutex<Option<Vec<Option<Receiver<BatchResult>>>>>>;
 
 #[derive(Debug)]
 pub struct StreamExchangeExec {
@@ -39,7 +41,7 @@ pub struct StreamExchangeExec {
     hash_keys: Vec<PhysicalExprRef>,
     partition_count: usize,
     /// Lazily-initialized receivers, one per output partition (taken by `execute`).
-    state: Arc<Mutex<Option<Vec<Option<Receiver<BatchResult>>>>>>,
+    state: SharedReceivers,
     properties: Arc<PlanProperties>,
 }
 
