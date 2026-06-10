@@ -29,14 +29,47 @@ Local release build, stateless `rate → filter → memory`, `rowsPerSecond=80M`
 So parallelism isn't "almost working" — it's architecturally single-stream. This is the
 build.
 
-## Design (grounded in references)
-- **DataFusion `RepartitionExec`** (docs.rs): maps N→M partitions by a `Partitioning`
-  scheme (`RoundRobinBatch`, `Hash`); output partitions pull from per-(in,out) channels.
-  We reuse the *pattern*, but markers need special handling (below).
-- **Spark Structured Streaming / Flink:** stateless ops parallelize freely (one task per
-  partition, one output file per task — no coalesce); stateful ops use a **keyed** exchange
-  (hash by key) so each task owns disjoint state, with **watermark = min across input
-  channels** and **aligned checkpoint barriers**.
+## Architecture (v2, post-review) — reuse the engine we already have
+**Vajra already ships a distributed shuffle** (`sail-execution`: `ShuffleWriteExec`,
+`ShuffleReadExec`, `RepartitionExec` with `Partitioning::Hash`/`RoundRobinBatch`, job-graph
+planner, task runner, spill). Streaming currently **bypasses** it (`sail-plan/src/lib.rs`
+disables repartition for streaming "so the pipeline runs unbroken").
+
+**Decision: do NOT build a bespoke parallel driver. Make the existing partitioned-execution
+machinery flow-event/marker-aware, and express parallelism in the PLAN.** The streaming
+driver stays thin (drives the sink's N partitions via `execute(i)`). Consequence —
+**intra-node parallelism is the single-node case of distributed execution: scale-up and
+scale-out are one mechanism.** (On-goal: one engine, reuse mature DataFusion/Apache
+machinery; distributed streaming later for nearly free.)
+
+### Grounded references
+- **DataFusion `RepartitionExec`** (docs.rs): N→M by `Partitioning` (`RoundRobinBatch`,
+  `Hash`); **bounded** per-(in,out) channels (preserves our memory edge). Reuse + wrap for
+  markers.
+- **Flink:** keyed exchange + **watermark = min across inputs with idleness detection**
+  (`withIdleness` — else an idle input stalls all windows); **Chandy–Lamport / aligned
+  checkpoint barriers** via a **CheckpointCoordinator**; **credit-based flow control**.
+- **Spark:** stateless parallelizes freely (one output file per task, no coalesce);
+  stateful uses a hash (shuffle) exchange; skew handled via partial-agg/salting.
+
+### Non-negotiable principles (protect the differentiators)
+1. **Cost-based, not always-on.** Phase 0 showed 1 big-batch partition (28.9M/s) **beats**
+   4 small-batch partitions (8.18M/s). Repartition only when a single core is CPU-bound;
+   otherwise bigger batches on one core win (no shuffle, ordering kept, less memory). Never
+   trade per-core efficiency (our real edge) for per-node vanity numbers.
+2. **Bounded + backpressured exchange** (credit-based) — an unbounded buffer would destroy
+   the 7.5–16× memory win, which is *the* differentiator.
+3. **Markers are control-plane:** data is routed (round-robin / hash-by-key); markers are
+   **broadcast**; watermark = **min with idleness**; checkpoint = **barrier-aligned via a
+   coordinator**; `EndOfData` = all-N. Get this wrong and stateful correctness/exactly-once
+   silently breaks.
+
+### Advancements (toward outperforming both, not just parity)
+- **Unified scale-up == scale-out** (one exchange for intra-node and distributed) — leaner
+  than engines that maintain separate paths.
+- **NUMA / core-affinity for partition workers** — a native, no-JVM advantage.
+- Later: **unaligned checkpoints** (low latency under backpressure) + **reactive
+  autoscaling** (load-adaptive parallelism).
 
 ### The marker rule (the crux for flow-events)
 A flow-event stream carries control markers (`Watermark`, `Checkpoint{id}`, `EndOfData`,
@@ -48,20 +81,32 @@ A flow-event stream carries control markers (`Watermark`, `Checkpoint{id}`, `End
   before snapshotting (preserves the exactly-once we already built).
 - **EndOfData**: the driver/coalesce completes only after **all N** inputs signal it.
 
-## Build phases
-- **Phase 0 (this doc): measure + root-cause.** ✅ Done — multi-partition regresses; cause known.
-- **Phase 1 — parallel stateless sink + driver (no keyed state, no exactly-once risk):**
-  multi-partition file sink (one writer/file per partition, Spark-style) + driver executes
-  all N partitions concurrently; per-partition `EndOfData`. Target: stateless `source →
-  map/filter → write` scales ~N×. *This is the safe first build — it does not touch the
-  stateful exactly-once operators.*
-- **Phase 2 — keyed exchange** (hash-by-key `StreamRepartitionExec`, markers broadcast).
-- **Phase 3 — multi-partition stateful operators** (`WindowAccumExec`/`StreamJoinExec`,
-  per-partition keyed state) + **watermark min-merge**.
-- **Phase 4 — checkpoint barrier alignment** so exactly-once survives parallelism.
+## Build phases (re-sequenced around reuse + the exchange primitive)
+- **Phase 0: measure + root-cause.** ✅ Done — multi-partition regresses; cause known.
+- **Phase 1 — flow-event exchange primitive + parallel stateless path.** Wrap the existing
+  `RepartitionExec` as a **marker-aware `StreamExchangeExec`** (route data round-robin,
+  **broadcast** markers, all-N `EndOfData`) + make the **stateless sink multi-partition**
+  (reuse DataFusion's per-partition sink — one file per partition). Gate parallelism behind
+  a **cost check** (only when single-core CPU-bound). Target: stateless `source →
+  map/filter → write` scales ~N× *when CPU-bound*. No stateful/exactly-once risk.
+- **Phase 2 — keyed (hash) exchange** for stateful ops + **multi-partition
+  `WindowAccumExec`/`StreamJoinExec`** (per-partition keyed state) + **watermark min-merge
+  WITH idleness detection** (idle input must not stall windows). Document **key-skew**
+  handling (partial-agg / salting).
+- **Phase 3 — CheckpointCoordinator** (Chandy–Lamport, aligned barriers): trigger → align →
+  ack → single commit wired to the existing offset-WAL + state-commit, so **exactly-once
+  survives parallelism**.
+- **Phase 4 — unify with distributed** (same exchange over the network shuffle) +
+  observability (per-partition throughput, watermark lag, backpressure, checkpoint
+  align-time). Later: unaligned checkpoints, reactive autoscaling, NUMA affinity.
 
-## Correctness gates (write tests first)
-- Stateless N-partition output = single-partition output (same rows, no loss/dup).
-- `availableNow` terminates only after all N partitions reach `EndOfData`.
-- Stateful (Phase 3): windows still emit **once** with correct counts under hash exchange.
-- Exactly-once (Phase 4): kill-restart across N partitions → no gap/dup.
+## Correctness gates (write tests FIRST — this is exactly-once-adjacent)
+- Stateless N-partition output == single-partition output (same rows, no loss/dup); order
+  contract documented (repartition breaks row order).
+- `availableNow` terminates only after **all N** partitions reach `EndOfData`.
+- Parallelism is **not** engaged below the CPU-bound threshold (perf regression guard —
+  don't lose to the 1-big-batch case).
+- Stateful (P2): windows emit **once** with correct counts under hash exchange; **idle
+  partition does not stall** watermark/window close.
+- Exactly-once (P3): kill-restart across N partitions → no gap/dup; commit is atomic across
+  all partitions (single coordinator cut).
