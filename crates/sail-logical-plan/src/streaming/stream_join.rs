@@ -29,6 +29,9 @@ pub struct StreamJoinNode {
     /// filter: a match requires `right.ts ∈ [left.ts + lower, left.ts + upper]`. When set
     /// (with both event-time columns), `StreamJoinExec` evicts state per the Flink rule.
     pub interval_bounds: Option<(i64, i64)>,
+    /// Streaming `checkpointLocation`, when set — for join-buffer state snapshot/restore
+    /// (stateful exactly-once recovery; see docs/design/streaming-exactly-once.md).
+    pub checkpoint_location: Option<String>,
     /// Flow-event output schema (marker/retracted + the join's data columns).
     schema: DFSchemaRef,
 }
@@ -44,6 +47,7 @@ impl StreamJoinNode {
         left_event_time: Option<String>,
         right_event_time: Option<String>,
         interval_bounds: Option<(i64, i64)>,
+        checkpoint_location: Option<String>,
         schema: DFSchemaRef,
     ) -> Self {
         Self {
@@ -55,6 +59,7 @@ impl StreamJoinNode {
             left_event_time,
             right_event_time,
             interval_bounds,
+            checkpoint_location,
             schema,
         }
     }
@@ -77,6 +82,7 @@ impl PartialEq for StreamJoinNode {
             && self.left_event_time == other.left_event_time
             && self.right_event_time == other.right_event_time
             && self.interval_bounds == other.interval_bounds
+            && self.checkpoint_location == other.checkpoint_location
             && self.schema == other.schema
     }
 }
@@ -92,6 +98,7 @@ impl Hash for StreamJoinNode {
         self.left_event_time.hash(state);
         self.right_event_time.hash(state);
         self.interval_bounds.hash(state);
+        self.checkpoint_location.hash(state);
         self.schema.hash(state);
     }
 }
@@ -166,6 +173,7 @@ impl UserDefinedLogicalNodeCore for StreamJoinNode {
             left_event_time: self.left_event_time.clone(),
             right_event_time: self.right_event_time.clone(),
             interval_bounds: self.interval_bounds,
+            checkpoint_location: self.checkpoint_location.clone(),
             schema: self.schema.clone(),
         })
     }

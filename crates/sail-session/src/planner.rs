@@ -505,6 +505,7 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 node.interval_bounds,
                 left_ts_idx,
                 right_ts_idx,
+                node.checkpoint_location.clone(),
             )?)
         } else if let Some(node) = node.as_any().downcast_ref::<CatalogCommandNode>() {
             let schema = node.schema().inner().clone();

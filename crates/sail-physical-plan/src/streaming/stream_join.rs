@@ -63,6 +63,9 @@ pub struct StreamJoinExec {
     /// Event-time column index in each side's data schema (for eviction).
     left_ts_idx: Option<usize>,
     right_ts_idx: Option<usize>,
+    /// Streaming `checkpointLocation`, when set — snapshot the buffered join state on
+    /// `EndOfData` and restore it on the next run (stateful exactly-once recovery).
+    checkpoint_location: Option<String>,
     properties: Arc<PlanProperties>,
 }
 
@@ -79,6 +82,7 @@ impl StreamJoinExec {
         interval_bounds: Option<(i64, i64)>,
         left_ts_idx: Option<usize>,
         right_ts_idx: Option<usize>,
+        checkpoint_location: Option<String>,
     ) -> Result<Self> {
         // Compute the join output data schema with a trial join over empty inputs.
         let output_data_schema = {
@@ -116,6 +120,7 @@ impl StreamJoinExec {
             interval_bounds,
             left_ts_idx,
             right_ts_idx,
+            checkpoint_location,
             properties,
         })
     }
@@ -270,6 +275,7 @@ impl ExecutionPlan for StreamJoinExec {
             self.interval_bounds,
             self.left_ts_idx,
             self.right_ts_idx,
+            self.checkpoint_location.clone(),
         )?))
     }
 
@@ -298,14 +304,30 @@ impl ExecutionPlan for StreamJoinExec {
         let interval_bounds = self.interval_bounds;
         let left_ts_idx = self.left_ts_idx;
         let right_ts_idx = self.right_ts_idx;
+        let checkpoint_location = self.checkpoint_location.clone();
 
+        // Restore buffered join state (+ watermarks) from the last committed snapshot,
+        // for stateful exactly-once recovery across runs.
+        let (mut left0, mut right0) = (vec![], vec![]);
+        let (mut lwm0, mut rwm0, mut last_wm0) = (None, None, None);
+        if let Some(loc) = &checkpoint_location {
+            let (lb, meta) = crate::streaming::state_io::restore_state(loc, "join-0-left");
+            let (rb, _) = crate::streaming::state_io::restore_state(loc, "join-0-right");
+            left0 = lb;
+            right0 = rb;
+            if let [lwm, rwm, last] = meta[..] {
+                lwm0 = (lwm != i64::MIN).then_some(lwm);
+                rwm0 = (rwm != i64::MIN).then_some(rwm);
+                last_wm0 = (last != i64::MIN).then_some(last);
+            }
+        }
         let init: JoinState = (
             merged,
-            vec![],
-            vec![],
-            None,
-            None,
-            None,
+            left0,
+            right0,
+            lwm0,
+            rwm0,
+            last_wm0,
             VecDeque::new(),
             context,
         );
@@ -317,6 +339,7 @@ impl ExecutionPlan for StreamJoinExec {
             let left_schema = left_schema.clone();
             let right_schema = right_schema.clone();
             let filter = filter.clone();
+            let checkpoint_location = checkpoint_location.clone();
             async move {
                 loop {
                     if let Some(ev) = buf.pop_front() {
@@ -435,6 +458,26 @@ impl ExecutionPlan for StreamJoinExec {
                                     );
                                 }
                             }
+                        }
+                        Some((_, Ok(FlowEvent::Marker(FlowMarker::EndOfData)))) => {
+                            // Stream ending (availableNow/once): snapshot the buffered join
+                            // state write-ahead so it survives a restart (the runner commits
+                            // it after the output is durable). Idempotent — the last
+                            // EndOfData (after both inputs end) holds the complete state.
+                            if let Some(loc) = &checkpoint_location {
+                                let meta = vec![
+                                    lwm.unwrap_or(i64::MIN),
+                                    rwm.unwrap_or(i64::MIN),
+                                    last_wm.unwrap_or(i64::MIN),
+                                ];
+                                crate::streaming::state_io::stage_state(
+                                    loc, "join-0-left", &left_schema, &left_buf, &meta,
+                                );
+                                crate::streaming::state_io::stage_state(
+                                    loc, "join-0-right", &right_schema, &right_buf, &[],
+                                );
+                            }
+                            buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
                         }
                         Some((_, Ok(other))) => {
                             buf.push_back(other);

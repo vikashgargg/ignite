@@ -295,6 +295,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                             left_event_time,
                             right_event_time,
                             interval_bounds,
+                            self.checkpoint_location.clone(),
                             flow_schema,
                         )),
                     })));
