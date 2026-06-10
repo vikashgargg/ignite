@@ -228,6 +228,7 @@ impl ExecutionPlan for RateSourceExec {
                 Arc::clone(&self.time_zone),
                 &self.projection,
                 self.projected_schema.clone(),
+                self.options.start_offset,
             )?;
             let events = futures::stream::iter(vec![
                 generator.generate(rows).map(FlowEvent::append_only_data),
@@ -260,6 +261,7 @@ impl ExecutionPlan for RateSourceExec {
                     Arc::clone(&self.time_zone),
                     &self.projection,
                     self.projected_schema.clone(),
+                    self.options.start_offset,
                 )?;
                 let output = futures::stream::unfold(generator, move |mut generator| async move {
                     // The interval does not take into account the time it takes to generate data,
@@ -312,6 +314,7 @@ impl BatchGenerator {
         time_zone: Arc<str>,
         projection: &[usize],
         projected_schema: SchemaRef,
+        start_offset: usize,
     ) -> Result<Self> {
         let mut actions = vec![];
         let mut timestamp_index = None;
@@ -340,7 +343,7 @@ impl BatchGenerator {
             }
         }
         Ok(Self {
-            offset: 0,
+            offset: start_offset,
             projected_schema,
             time_zone,
             actions,
@@ -405,6 +408,7 @@ mod tests {
         RateReadOptions {
             rows_per_second: 5,
             num_partitions: 1,
+            start_offset: 0,
         }
     }
 

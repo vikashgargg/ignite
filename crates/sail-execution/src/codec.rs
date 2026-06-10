@@ -938,6 +938,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     num_partitions: usize::try_from(num_partitions).map_err(|_| {
                         plan_datafusion_err!("invalid number of partitions for rate source")
                     })?,
+                    // Distributed offset recovery (carrying start_offset through the proto)
+                    // is a follow-up; single-node recovery uses the option directly.
+                    start_offset: 0,
                 };
                 let projection = self.try_decode_projection(&projection)?;
                 let schema = self.try_decode_schema(&schema)?;

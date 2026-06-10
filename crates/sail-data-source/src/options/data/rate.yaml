@@ -20,6 +20,30 @@
         - option.rowsPerSecond
       parser: crate::options::parsers::parse_usize
 
+- key: start_offset
+  description: |
+    The starting row offset. Row N has value N and a timestamp derived from N, so
+    resuming from a committed offset replays the exact same data — the foundation for
+    exactly-once checkpoint recovery. Defaults to 0 (start from the beginning).
+  default:
+    value: "0"
+    parser: crate::options::parsers::parse_usize
+  supported: true
+  rust_type: usize
+  scopes:
+    - read
+  origins:
+    - type: option
+      keys:
+        - start_offset
+        - startOffset
+      parser: crate::options::parsers::parse_usize
+    - type: table_property
+      keys:
+        - option.start_offset
+        - option.startOffset
+      parser: crate::options::parsers::parse_usize
+
 - key: ramp_up_time
   description: |
     The time in seconds to ramp up to the number of rows per second.
