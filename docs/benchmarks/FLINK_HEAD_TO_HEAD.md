@@ -1,4 +1,4 @@
-# Vajra vs Flink — head-to-head (Phase 1: local de-risk)
+# Vajra vs Flink — head-to-head (Phase 1 local + Phase 2 AWS)
 
 Phase 1 validates the comparison harness locally and yields **directional** numbers
 before a credible EKS single-node run (Phase 2). Setup: 8-core MacBook Air, Flink 1.17.2
@@ -62,8 +62,40 @@ On the 4 pillars, as a combined batch+streaming engine: **performance** ✅ (win
 Vajra stands as a credible Flink-class streaming engine *and* a proven Spark-class batch
 engine in one native binary.
 
+## Phase 2 — AWS (real Linux hardware, both engines same node) — DONE 2026-06-10
+
+Ran on an **AWS c7g.2xlarge** (8 vCPU Graviton/aarch64, 15 GB), Ubuntu 22.04, **Vajra
+release container (from this branch) + Flink 1.18.1, parallelism = 1, both on the same
+node**. Instance torn down immediately (~$0.17 total).
+
+| Workload | Vajra | Flink 1.18 | Read |
+|---|--:|--:|---|
+| **Stateless** (gen → filter) | **9.04M/s** | 6.73M/s | **Vajra ~1.34×** |
+| **Windowed agg** (1s count) | **3.37M/s** (stable) | ~0.93M/s (0.74–1.34M, noisy) | **Vajra ~3×** |
+| **Memory** | **42 MB** | 667–730 MB | **Vajra ~16×** |
+
+**On identical hardware, single-threaded, Vajra beats Flink on all three** — including
+windowed agg (the opposite of what the local Mac run suggested; the local Flink windowed
+4.65M was a transient-burst measurement, the instance 40s-steady reading is more reliable).
+Vajra's windowed throughput was **stable**; Flink's fluctuated (internal buffering), but
+even Flink's best (1.34M) is below Vajra's 3.37M.
+
+### The one caveat that matters (and reframes the optimization)
+**parallelism = 1 means single-threaded.** Vajra's streaming operators are currently
+**single-partition** (use 1 core regardless of node size); Flink parallelizes across cores
+(`parallelism=N`). So:
+- **Per-core efficiency: Vajra dominates** (~1.3–3× throughput, ~16× memory).
+- **Per-node max throughput: Flink would likely overtake** at `parallelism=8` by using all
+  cores, since Vajra streaming doesn't yet parallelize within a node.
+
+So Vajra's real throughput gap is **intra-node streaming parallelism** (partition streaming
+operators across cores) — **not** the windowed-agg per-batch overhead, and **not** per-core
+speed. That re-prioritizes the optimization: **parallelize streaming operators** > persistent
+accumulators. (Other caveats: Flink proctime vs Vajra event-time favors Flink — yet Vajra
+still wins; different generators; Flink latency not measured on-instance — Vajra sub-ms stands.)
+
 ## Next
-- **Phase 2 (EKS, one large node, tear down):** rerun on real hardware with matched
-  parallelism + event-time on both for cleaner, publishable numbers. Direction is already
-  clear; Phase 2 refines magnitudes.
-- Measure Flink latency (latency markers) for a like-for-like latency row.
+- **Highest-leverage throughput lever:** intra-node streaming parallelism (multi-partition
+  streaming operators) — closes the only place Flink can win (multi-core scaling).
+- Persistent accumulators: still optional/minor (windowed per-core already beats Flink).
+- Measure Flink latency markers for a like-for-like latency row.
