@@ -50,7 +50,7 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 | `availableNow` / `once` triggers | ✅ | end-to-end: trigger → `bounded` flag → rewriter → `StreamSourceWrapperNode` → `StreamSource::scan(bounded)`. The **rate** source now scans available rows + `EndOfData` and **the query terminates** (verified: `availableNow` terminates in ~0s vs continuous runs forever). Bounded reads for **Kafka/socket** are the remaining per-source follow-up. |
 | `processingTime` / `continuous` interval pacing | ⬜ | trigger captured + logged; interval pacing not yet honored (source-driven). |
 | `mapGroupsWithState` / `flatMapGroupsWithState` | ⬜ | arbitrary keyed state not exposed |
-| Checkpoint + recovery | ✅ | offsets/state persisted; recovery on restart |
+| Checkpoint + recovery | 🟡 | **Verified 2026-06-10:** a `checkpointLocation` query persists a **batch-id counter** to `<loc>/offsets/`; a real process **restart resumes** it (logs `resuming from batch N`, no crash, query continues) — batch-id *continuity* works. **NOT yet exactly-once:** the offset files hold only `{batchId, timestamp}` — **source offsets and operator state are not checkpointed**, so a restart reprocesses from the source start and stateful results (window accumulators, join buffers, in-memory sink) are lost. True exactly-once recovery (source-offset + state restore) is the key remaining reliability gap vs Flink/Spark. |
 | `dropDuplicatesWithinWatermark` | 🟡 | dedup exists; verify exact Spark semantics |
 
 ## Prioritized roadmap to "master of streaming"
