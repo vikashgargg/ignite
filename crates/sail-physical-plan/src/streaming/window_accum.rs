@@ -623,11 +623,20 @@ fn window_emit_mask(
 ) -> Option<BooleanArray> {
     let wm = watermark_micros?;
     let ends = window_end_micros(batch)?;
+    // A window is emitted exactly once *across finalize calls* — but a keyed window has
+    // MANY rows per window end (one per group key), and ALL of them must emit together the
+    // first time the window closes. So test membership without mutating, then record the
+    // newly-closed ends afterward. (Using `emitted.insert(e)` in the loop would suppress
+    // every group row after the first for a given window end — collapsing keyed windows.)
     let mut b = BooleanBuilder::with_capacity(ends.len());
-    for end in ends {
-        // `insert` returns true only for a not-yet-emitted window end.
-        let emit = end.is_some_and(|e| e <= wm && emitted.insert(e));
+    for end in &ends {
+        let emit = end.is_some_and(|e| e <= wm && !emitted.contains(&e));
         b.append_value(emit);
+    }
+    for end in ends.into_iter().flatten() {
+        if end <= wm {
+            emitted.insert(end);
+        }
     }
     Some(b.finish())
 }

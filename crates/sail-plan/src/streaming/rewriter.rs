@@ -163,14 +163,20 @@ impl TreeNodeRewriter for StreamingRewriter {
                 if let Some((event_time_col, delay_micros)) = watermark_info {
                     // Stateful event-time window aggregation via WindowAccumNode.
                     // The physical planner will map this to WindowAccumExec.
-                    let _data_schema_ref =
-                        Arc::new(datafusion_common::DFSchema::try_from(data_schema.clone())?);
+                    // Streaming data schemas are unqualified; strip relation qualifiers from
+                    // the group/aggregate exprs (e.g. `?table?."#1"` → `"#1"`) so an
+                    // inline-expression group key (`value % 10`) resolves against the data
+                    // schema — same as the stream-join path. Detection ran on the original.
+                    let group_expr: Vec<Expr> =
+                        agg.group_expr.iter().map(strip_qualifiers).collect();
+                    let aggr_expr: Vec<Expr> =
+                        agg.aggr_expr.iter().map(strip_qualifiers).collect();
                     // Compute what the aggregate output schema would be.
                     let agg_output_schema = {
                         let trial = Aggregate::try_new(
                             Arc::new(data_only.clone()),
-                            agg.group_expr.clone(),
-                            agg.aggr_expr.clone(),
+                            group_expr.clone(),
+                            aggr_expr.clone(),
                         )?;
                         trial.schema.clone()
                     };
@@ -181,8 +187,8 @@ impl TreeNodeRewriter for StreamingRewriter {
                             // schema in the physical planner. `data_only` above is used
                             // only to derive the aggregate output schema.
                             (*streaming_input).clone(),
-                            agg.group_expr.clone(),
-                            agg.aggr_expr.clone(),
+                            group_expr,
+                            aggr_expr,
                             event_time_col,
                             delay_micros,
                             Arc::new(datafusion_common::DFSchema::try_from(
