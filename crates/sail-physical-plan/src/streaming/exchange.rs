@@ -160,6 +160,91 @@ impl ExecutionPlan for StreamExchangeExec {
     }
 }
 
+/// Fan-in (N→1) merge of flow-event partitions for the streaming sink, the symmetric
+/// partner of `StreamExchangeExec`. It drains **all** input partitions concurrently (one
+/// tokio task each) into a shared bounded channel, so it cannot deadlock against the
+/// exchange's bounded per-partition channels (the cause of the earlier 0-output: a generic
+/// coalesce that didn't pull every partition left the exchange's broadcast blocked). The
+/// merged stream ends once every input partition is exhausted (all-N `EndOfData`). Markers
+/// flow through as ordinary flow-event batches; the sink skips them.
+#[derive(Debug)]
+pub struct StreamCoalesceExec {
+    input: Arc<dyn ExecutionPlan>,
+    properties: Arc<PlanProperties>,
+}
+
+impl StreamCoalesceExec {
+    pub fn new(input: Arc<dyn ExecutionPlan>) -> Self {
+        let properties = Arc::new(PlanProperties::new(
+            EquivalenceProperties::new(input.schema()),
+            Partitioning::UnknownPartitioning(1),
+            input.properties().emission_type,
+            input.properties().boundedness,
+        ));
+        Self { input, properties }
+    }
+}
+
+impl DisplayAs for StreamCoalesceExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "StreamCoalesceExec")
+    }
+}
+
+impl ExecutionPlan for StreamCoalesceExec {
+    fn name(&self) -> &str {
+        "StreamCoalesceExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if children.len() != 1 {
+            return internal_err!("StreamCoalesceExec requires exactly one child");
+        }
+        Ok(Arc::new(StreamCoalesceExec::new(children.remove(0))))
+    }
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        if partition != 0 {
+            return internal_err!("StreamCoalesceExec: invalid partition {partition}");
+        }
+        let n = self.input.properties().output_partitioning().partition_count();
+        let schema = self.input.schema();
+        let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY.max(n));
+        for i in 0..n {
+            let mut stream = self.input.execute(i, context.clone())?;
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                while let Some(item) = stream.next().await {
+                    if tx.send(item).await.is_err() {
+                        break; // consumer dropped
+                    }
+                }
+            });
+        }
+        drop(tx); // the receiver ends once all N producer tasks finish
+        let stream = ReceiverStream::new(rx);
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
+    }
+}
+
 /// Is this a marker batch (the `_marker` column has any non-null entry)? Marker batches are
 /// broadcast; data batches are hash-routed.
 fn is_marker_batch(batch: &RecordBatch) -> bool {

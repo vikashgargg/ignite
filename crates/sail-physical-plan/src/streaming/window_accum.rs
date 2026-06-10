@@ -222,9 +222,13 @@ impl WindowAccumExec {
                 .collect(),
         );
         let flow_schema = Arc::new(to_flow_event_schema(&agg_output_schema));
+        // One independent instance per input partition: each owns a disjoint key subset
+        // (via the upstream keyed StreamExchangeExec) and closes its windows on the
+        // broadcast watermark. Pass the input partition count through.
+        let n_partitions = input.properties().output_partitioning().partition_count();
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(flow_schema),
-            datafusion::physical_expr::Partitioning::UnknownPartitioning(1),
+            datafusion::physical_expr::Partitioning::UnknownPartitioning(n_partitions),
             EmissionType::Incremental,
             Boundedness::Unbounded {
                 requires_infinite_memory: false,
@@ -298,8 +302,9 @@ impl ExecutionPlan for WindowAccumExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        if partition != 0 {
-            return internal_err!("WindowAccumExec: invalid partition {partition}");
+        let n = self.properties.output_partitioning().partition_count();
+        if partition >= n {
+            return internal_err!("WindowAccumExec: invalid partition {partition} (have {n})");
         }
 
         let group_exprs = Arc::clone(&self.group_exprs);
@@ -330,9 +335,11 @@ impl ExecutionPlan for WindowAccumExec {
         );
         // Restore operator state (open-window partials + watermark + emitted ends) from
         // the last committed snapshot, for stateful exactly-once recovery across runs.
+        // Per-partition state id so each parallel instance snapshots/restores independently.
+        let state_op_id = format!("window-{partition}");
         let mut acc = AccumState::new();
         if let Some(loc) = &self.checkpoint_location {
-            let (batches, meta) = crate::streaming::state_io::restore_state(loc, "window-0");
+            let (batches, meta) = crate::streaming::state_io::restore_state(loc, &state_op_id);
             acc.pending_rows = batches;
             if let Some((wm, ends)) = meta.split_first() {
                 acc.watermark_micros = (*wm != i64::MIN).then_some(*wm);
@@ -349,6 +356,7 @@ impl ExecutionPlan for WindowAccumExec {
             let partial_schema = partial_schema.clone();
             let final_group_by = Arc::clone(&final_group_by);
             let checkpoint_location = checkpoint_location.clone();
+            let state_op_id = state_op_id.clone();
             async move {
                 loop {
                     // First drain the output buffer.
@@ -422,7 +430,7 @@ impl ExecutionPlan for WindowAccumExec {
                                 meta.extend(acc.emitted_ends.iter().copied());
                                 crate::streaming::state_io::stage_state(
                                     loc,
-                                    "window-0",
+                                    &state_op_id,
                                     &partial_schema,
                                     &acc.pending_rows,
                                     &meta,

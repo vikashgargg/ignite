@@ -62,6 +62,7 @@ use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
+use sail_physical_plan::streaming::exchange::{StreamCoalesceExec, StreamExchangeExec};
 use sail_physical_plan::streaming::stream_join::StreamJoinExec;
 use sail_physical_plan::streaming::watermark::WatermarkExec;
 use sail_physical_plan::streaming::window_accum::WindowAccumExec;
@@ -397,6 +398,30 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                     Ok((phys, name))
                 })
                 .collect::<datafusion_common::Result<_>>()?;
+            // Intra-node parallelism (docs/design/streaming-parallelism.md, Phase 2).
+            // Cost-based gate: only parallelize KEYED windowed aggregation (a group key
+            // beyond the window); window-only has one group per window and gains nothing.
+            let window_parallelism = if node.group_exprs.len() > 1 {
+                session_state.config().target_partitions().max(1)
+            } else {
+                1
+            };
+            // Hash keys = the GROUP-BY keys (group_exprs after the window at index 0).
+            // Hashing by keys (not the window struct) is correct — same key -> same
+            // partition, and each window for that key is handled within one partition via the
+            // broadcast watermark. Shift Column indices by the flow-event prefix
+            // (`_marker`,`_retracted` = 2) + rename to the flow-event field, since the
+            // exchange runs on the flow-event input while group exprs target the data schema.
+            let window_hash_keys: Vec<Arc<dyn datafusion_physical_expr::PhysicalExpr>> =
+                if window_parallelism > 1 {
+                    group_exprs
+                        .iter()
+                        .skip(1)
+                        .map(|(e, _)| shift_physical_columns(Arc::clone(e), 2, &input.schema()))
+                        .collect::<datafusion_common::Result<_>>()?
+                } else {
+                    vec![]
+                };
             let physical_group_by =
                 datafusion::physical_plan::aggregates::PhysicalGroupBy::new_single(group_exprs);
             // Build physical aggregate function expressions.
@@ -414,15 +439,31 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                         Ok(agg_expr)
                     })
                     .collect::<datafusion_common::Result<_>>()?;
-            Arc::new(WindowAccumExec::try_new(
-                input.clone(),
+            // Parallel keyed path: hash the (watermarked) input by group key into N
+            // partitions, run N independent window instances, then merge for the sink.
+            let window_input: Arc<dyn ExecutionPlan> = if window_parallelism > 1 {
+                Arc::new(StreamExchangeExec::try_new(
+                    input.clone(),
+                    window_hash_keys,
+                    window_parallelism,
+                )?)
+            } else {
+                input.clone()
+            };
+            let window: Arc<dyn ExecutionPlan> = Arc::new(WindowAccumExec::try_new(
+                window_input,
                 physical_group_by,
                 aggr_exprs,
                 data_schema,
                 node.event_time_col.clone(),
                 node.delay_micros,
                 node.checkpoint_location.clone(),
-            )?)
+            )?);
+            if window_parallelism > 1 {
+                Arc::new(StreamCoalesceExec::new(window))
+            } else {
+                window
+            }
         } else if let Some(node) = node.as_any().downcast_ref::<StreamJoinNode>() {
             let [left, right] = physical_inputs else {
                 return internal_err!("StreamJoinExec requires exactly two physical inputs");
@@ -543,6 +584,30 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
         };
         Ok(Some(plan))
     }
+}
+
+/// Retarget a physical expression's `Column`s onto a different schema by shifting their
+/// index by `by` and renaming to the target schema's field at the new index. Moves
+/// data-schema group-key exprs onto the flow-event input schema (offset 2 for
+/// `_marker`/`_retracted`) for the streaming keyed exchange.
+fn shift_physical_columns(
+    expr: Arc<dyn datafusion_physical_expr::PhysicalExpr>,
+    by: usize,
+    target: &datafusion::arrow::datatypes::Schema,
+) -> datafusion_common::Result<Arc<dyn datafusion_physical_expr::PhysicalExpr>> {
+    use datafusion::common::tree_node::{Transformed, TreeNode};
+    use datafusion::physical_expr::expressions::Column;
+    expr.transform_down(|e| {
+        if let Some(c) = e.as_any().downcast_ref::<Column>() {
+            let idx = c.index() + by;
+            let name = target.field(idx).name();
+            Ok(Transformed::yes(Arc::new(Column::new(name, idx))
+                as Arc<dyn datafusion_physical_expr::PhysicalExpr>))
+        } else {
+            Ok(Transformed::no(e))
+        }
+    })
+    .map(|t| t.data)
 }
 
 fn plan_explicit_partitioning(
