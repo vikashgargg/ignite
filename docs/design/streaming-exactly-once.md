@@ -11,11 +11,33 @@ deterministically from it (row N has value N + a timestamp derived from N — ve
 `startOffset=1000` → values 1000,1001,…). That's the foundational primitive the recovery
 loop uses to replay the exact same data after a restart.
 
-## Model (grounded in Spark Structured Streaming / Flink)
-Both engines checkpoint, per micro-batch/epoch: **(1) source offsets** (the input range
-consumed) and **(2) operator state** (aggregation accumulators, join buffers). On restart
-they restore both and resume — replaying uncommitted input exactly once. Without a
-time-range/offset abstraction the state is unbounded and recovery impossible.
+## Model (grounded in Spark / Flink / Fluss — researched 2026-06-10)
+- **Spark Structured Streaming** (micro-batch — Vajra's model): a checkpoint dir with an
+  **`offsets/` WAL** (the offset range of batch N, written *before* processing) and a
+  **`commits/` log** (written *after* batch N is durable in the sink). Recovery: resume
+  from the latest `offsets/`; if `commits/N` is missing, **reprocess batch N**; sinks must
+  be **idempotent**. [ref: Spark internals]
+- **Flink**: checkpoint **barriers** + **`TwoPhaseCommitSinkFunction`** — the sink
+  *pre-commits* (flush in an open transaction) on the barrier and *commits* only when the
+  coordinator confirms all operators snapshotted. Exactly-once needs a **transactional sink**.
+- **Apache Fluss**: the state snapshot is **tagged with the next-unread log offset** — the
+  exact replay point; restart compares checkpoint offsets vs log-end and replays the delta.
+
+**Unifying principle: the committed (source offset + operator state) must be tied to
+*durable sink output*.** That's what makes replay exactly-once rather than at-least/at-most.
+
+### Critical-path consequence for Vajra (important)
+End-to-end exactly-once is **gated by a durable/transactional sink**, which Vajra does not
+have yet (memory sink = in-process/non-durable; file/listing sink rejects streaming input
+— see STREAMING.md). So the honest sequencing is:
+1. **Durable sink** (file/Delta streaming write, idempotent or 2-phase) — *prerequisite*.
+2. **Source-offset commit coordination** (offsets WAL + commits log, below).
+3. **Operator-state snapshot/restore**.
+
+Until #1 exists, the achievable robust milestone is **resume-from-offset** (a restart
+replays from the last *generated* offset instead of from 0 — at-least-once with an
+idempotent sink), not strict exactly-once. The `startOffset` primitive (landed) + the
+offset WAL below deliver that; strict exactly-once follows once the sink lands.
 
 Vajra already has the right substrate: the **flow-event marker** stream
 ([streaming-watermark.md](streaming-watermark.md)) and a per-batch checkpoint writer in
