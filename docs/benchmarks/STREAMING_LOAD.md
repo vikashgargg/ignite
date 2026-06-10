@@ -34,25 +34,39 @@ RocksDB needed at our target scale.
 (a sink property; Flink sinking to memory grows too), *not* join state. With state isolated,
 memory is flat.
 
-## 3. Throughput — honestly source-limited (not the engine)
-Requesting `rowsPerSecond=1,000,000`, the windowed agg ingested only **~27k rows/s**
-(586k rows over 22 s; per-window counts 14k–78k). The **rate source** is the bottleneck:
-its micro-batch model caps at ~1000 batches/s and per-batch overhead limits effective
-continuous ingestion to ~27k/s — the **engine is far from saturated** (that's why latency
-stays sub-ms). The earlier ~28M rows/s figure is **bounded/batch** throughput
-(`availableNow` count), a different measurement.
+## 3. Throughput — diagnosed + fixed (windowed-agg was the bottleneck, now 6.5×)
+Initial reading: windowed agg ingested only ~27k rows/s. **Diagnosis** (the important
+part): raw `rate → memory` does **436k rows/s** and `rate → filter → memory` ~424k/s — so
+the source and stateless engine are *not* the bottleneck. The cap was **`WindowAccumExec`
+re-aggregating *all* buffered raw rows on every watermark** (O(pending) per batch,
+quadratic within a window).
 
-**Action item:** to measure the engine's continuous-throughput *ceiling* (and for a
-throughput-focused Flink comparison), the rate source needs larger batches per tick
-(fewer, bigger batches at high rates). This is the #1 prerequisite for a throughput benchmark.
+**Fix (production best-practice — Flink `AggregateFunction` / Spark stateful / DataFusion
+two-phase):** incrementally pre-aggregate each batch to **partial state** on arrival (one
+partial per window-group, not raw rows), and merge with `Final` mode only when a window
+closes.
+
+| Windowed agg, continuous | Before | After (incremental) |
+|---|--:|--:|
+| Throughput (release) | ~27k rows/s | **~177k rows/s (6.5×)** |
+| Throughput (debug) | ~27k/s | ~94k/s |
+| Latency | sub-ms | **sub-ms (unchanged)** |
+| Peak RSS | bounded | **68 MB (bounded)** |
+
+Remaining headroom toward the ~436k/s stateless ceiling is per-watermark `Final`-merge +
+per-batch plan-construction overhead — addressable by throttling the merge to window-close
+cadence (Flink emits on trigger, not per element). The earlier ~28M rows/s figure is
+**bounded/batch** throughput (`availableNow` count), a different measurement.
 
 ## Flink head-to-head readiness (scoped to our product goal)
 - **Ready now (measured, real):** Flink-class **latency** + **bounded state** + **low memory**
   on supported queries (windowed aggregation, interval join). A scoped head-to-head on
   *latency + memory* for these queries is defensible.
-- **Not ready / deferred:** continuous **throughput** comparison (fix the rate source first);
-  **endurance** (24 h soak) and **failure recovery** (Flink's strengths) — untested, so we
-  do **not** claim reliability superiority yet.
+- **Throughput:** windowed agg now ~177k/s (6.5× after the incremental-agg fix), sub-ms,
+  bounded memory — a scoped throughput comparison is now reasonable. Further headroom
+  (toward ~436k/s) via Final-merge throttling is a follow-up.
+- **Not ready / deferred:** **endurance** (24 h soak) and **failure recovery** (Flink's
+  strengths) — untested, so we do **not** claim reliability superiority yet.
 - **Recommended first comparison:** release build, single node, generator-based, **one
   windowed-agg + one interval-join query**, reporting **latency + peak RSS** vs Flink local —
   explicitly scoped, not a full Nexmark or reliability claim.
