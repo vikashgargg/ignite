@@ -111,7 +111,16 @@ struct AccumState {
     /// Window ends already emitted, so a window is emitted exactly once (and late
     /// rows that would re-open a closed window are not re-emitted).
     emitted_ends: HashSet<i64>,
+    /// Watermark at the last `Final` merge. The `Partial` pre-aggregation runs per batch
+    /// (incremental), but the `Final` merge + emit only needs to run when windows can
+    /// close — we throttle it to `FINAL_THROTTLE_MICROS` of watermark advance (Flink
+    /// emits on trigger, not per element), cutting per-batch aggregate overhead.
+    last_final_wm: Option<i64>,
 }
+
+/// Re-run the `Final` merge + emit at most once per this much watermark advance.
+/// Bounds emit latency to this (windowed agg already carries a watermark delay).
+const FINAL_THROTTLE_MICROS: i64 = 200_000; // 200 ms
 
 impl AccumState {
     fn new() -> Self {
@@ -119,6 +128,7 @@ impl AccumState {
             pending_rows: vec![],
             watermark_micros: None,
             emitted_ends: HashSet::new(),
+            last_final_wm: None,
         }
     }
 
@@ -351,59 +361,57 @@ impl ExecutionPlan for WindowAccumExec {
                             // No output yet; loop to read next event.
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::Watermark { source, timestamp }))) => {
-                            // Watermark advanced: emit windows that have now closed
-                            // (end ≤ watermark), exactly once, then drop their rows.
                             acc.set_watermark(timestamp.timestamp_micros());
                             let wm = acc.watermark_micros;
-                            // Merge the accumulated partial states (Final mode) — cheap:
-                            // O(#open windows), not O(#buffered rows).
-                            let partials = acc.pending_rows.clone();
-                            match run_final_aggregate(
-                                partials,
-                                &final_group_by,
-                                &aggr_exprs,
-                                &partial_schema,
-                                ctx.clone(),
-                            )
-                            .await
-                            {
-                                Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
-                                Ok(agg_batches) => {
-                                    for agg_batch in agg_batches {
-                                        if let Some(mask) =
-                                            window_emit_mask(&agg_batch, wm, &mut acc.emitted_ends)
-                                        {
-                                            match compute::filter_record_batch(&agg_batch, &mask) {
-                                                Ok(filtered) if filtered.num_rows() > 0 => {
-                                                    let len = filtered.num_rows();
-                                                    let retracted = {
-                                                        let mut b =
-                                                            BooleanBuilder::with_capacity(len);
-                                                        b.append_n(len, false);
-                                                        b.finish()
-                                                    };
-                                                    buf.push_back(FlowEvent::Data {
-                                                        batch: filtered,
-                                                        retracted,
-                                                    });
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
+                            // Throttle the Final merge/emit (Partial pre-agg already ran per
+                            // batch): only when the watermark advanced past the threshold —
+                            // windows still emit exactly once, within the threshold of close.
+                            let should_final = match (wm, acc.last_final_wm) {
+                                (Some(w), Some(last)) => w - last >= FINAL_THROTTLE_MICROS,
+                                (Some(_), None) => true,
+                                _ => false,
+                            };
+                            if should_final {
+                                acc.last_final_wm = wm;
+                                if let Err(e) = finalize_and_emit(
+                                    &mut acc,
+                                    &final_group_by,
+                                    &aggr_exprs,
+                                    &partial_schema,
+                                    wm,
+                                    &mut buf,
+                                    ctx.clone(),
+                                )
+                                .await
+                                {
+                                    return Some((Err(e), (input, acc, buf, ctx)));
                                 }
                             }
-                            // Bound state: keep only rows whose window is still open.
-                            acc.pending_rows =
-                                retain_open_window_rows(std::mem::take(&mut acc.pending_rows), wm);
                             buf.push_back(FlowEvent::Marker(FlowMarker::Watermark {
                                 source,
                                 timestamp,
                             }));
                         }
+                        Some(Ok(FlowEvent::Marker(FlowMarker::EndOfData))) => {
+                            // Stream ending: flush all remaining windows (emit everything).
+                            if let Err(e) = finalize_and_emit(
+                                &mut acc,
+                                &final_group_by,
+                                &aggr_exprs,
+                                &partial_schema,
+                                Some(i64::MAX),
+                                &mut buf,
+                                ctx.clone(),
+                            )
+                            .await
+                            {
+                                return Some((Err(e), (input, acc, buf, ctx)));
+                            }
+                            buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
+                        }
                         Some(Ok(other)) => {
-                            // Watermark drives eviction now; other markers (Checkpoint,
-                            // EndOfData, LatencyTracker) pass through.
+                            // Watermark drives eviction; other markers (Checkpoint,
+                            // LatencyTracker) pass through.
                             buf.push_back(other);
                         }
                     }
@@ -414,6 +422,40 @@ impl ExecutionPlan for WindowAccumExec {
         let flow_stream = Box::pin(FlowEventStreamAdapter::new(agg_schema, event_stream));
         Ok(Box::pin(EncodedFlowEventStream::new(flow_stream)))
     }
+}
+
+/// Merge accumulated partial states (`Final` mode), emit windows that have closed
+/// (`end ≤ emit_wm`) exactly once, and drop their partials to bound state.
+async fn finalize_and_emit(
+    acc: &mut AccumState,
+    final_group_by: &PhysicalGroupBy,
+    aggr_exprs: &[Arc<AggregateFunctionExpr>],
+    partial_schema: &SchemaRef,
+    emit_wm: Option<i64>,
+    buf: &mut VecDeque<FlowEvent>,
+    context: Arc<TaskContext>,
+) -> Result<()> {
+    let partials = acc.pending_rows.clone();
+    let agg_batches =
+        run_final_aggregate(partials, final_group_by, aggr_exprs, partial_schema, context).await?;
+    for agg_batch in agg_batches {
+        if let Some(mask) = window_emit_mask(&agg_batch, emit_wm, &mut acc.emitted_ends) {
+            if let Ok(filtered) = compute::filter_record_batch(&agg_batch, &mask) {
+                if filtered.num_rows() > 0 {
+                    let len = filtered.num_rows();
+                    let mut b = BooleanBuilder::with_capacity(len);
+                    b.append_n(len, false);
+                    buf.push_back(FlowEvent::Data {
+                        batch: filtered,
+                        retracted: b.finish(),
+                    });
+                }
+            }
+        }
+    }
+    // Bound state: keep only partials whose window is still open.
+    acc.pending_rows = retain_open_window_rows(std::mem::take(&mut acc.pending_rows), emit_wm);
+    Ok(())
 }
 
 /// `Partial`-mode pre-aggregation of `batches` → partial state rows (one per
