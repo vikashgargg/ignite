@@ -137,6 +137,29 @@ sink** that bypasses `DataSinkExec`'s single-partition rule:
        focused debug (likely a dedicated marker-aware coalesce, mirroring the exchange).
   - **Conclusion:** the exchange primitive is sound; step-2 integration is a real, multi-bug
     effort. Do not ship until both are fixed and the gate (parallel == single) passes.
+
+### ⚠️ Deeper prerequisite found (2026-06-11): keyed windowed aggregation is broken
+Investigating the inline-expression-key resolution error led to a bigger discovery — **keyed
+windowed aggregation (`groupBy(window, key).count()`) does not produce correct results**, and
+this is **independent of parallelism** (reproduces at N=1) and of the key form:
+- **Resolution crash** for inline-expression keys (`value % 10` → `?table?.#1` not found).
+  A one-line rewriter fix (`strip_qualifiers` on the agg group/aggr exprs, matching the
+  stream-join path) removes the crash — but is **not enough**, because:
+- **Wrong results for *all* keyed windows** (column keys too): the distinct group key
+  **collapses to a single value (k=0)** and counts are **severely under-reported** (~5–10% of
+  rows). The `final_group_by` remap looks correct, so the bug is deeper in the partial
+  aggregate / window-struct grouping / emission path of `WindowAccumExec`.
+
+**Implication:** Vajra's windowed aggregation today is correct for the **window-only** case
+(`groupBy(window).count()`) but **not** for the **keyed** case. Phase 2 parallelism *targets*
+keyed windowed aggs, so it is blocked until keyed windowed aggregation is correct.
+
+**Required fix (dedicated, tests-first), in order:**
+1. Rewriter: `strip_qualifiers` on agg group/aggr exprs (fixes the crash; matches join path).
+2. `WindowAccumExec`: fix multi-group (window + key) aggregation so keys are preserved and
+   counts are complete — gate with `keyed windowed result == Spark` (differential test).
+3. *Then* Phase 2 step 2 (parallelize the now-correct keyed windowed agg) + marker-aware
+   coalesce. The strip fix was reverted (not shipped) to avoid enabling a silently-wrong path.
 - **Phase 3 — CheckpointCoordinator** (Chandy–Lamport, aligned barriers): trigger → align →
   ack → single commit wired to the existing offset-WAL + state-commit, so **exactly-once
   survives parallelism**.
