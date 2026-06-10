@@ -46,25 +46,27 @@ two-phase):** incrementally pre-aggregate each batch to **partial state** on arr
 partial per window-group, not raw rows), and merge with `Final` mode only when a window
 closes.
 
-| Windowed agg, continuous | Before | After (incremental) |
-|---|--:|--:|
-| Throughput (release) | ~27k rows/s | **~177k rows/s (6.5×)** |
-| Throughput (debug) | ~27k/s | ~94k/s |
-| Latency | sub-ms | **sub-ms (unchanged)** |
-| Peak RSS | bounded | **68 MB (bounded)** |
+| Windowed agg, continuous (release) | Throughput | Notes |
+|---|--:|---|
+| Before (buffer + re-aggregate all per watermark) | ~27k rows/s | O(pending)/batch |
+| Incremental (Partial per batch + Final per watermark) | ~177k rows/s (6.5×) | |
+| **+ Final throttled to emit cadence (200 ms)** | **~275k rows/s (10.2×)** | p50 0.0 / p99 0.1 / max 0.6 ms; **69 MB** |
 
-Remaining headroom toward the ~436k/s stateless ceiling is per-watermark `Final`-merge +
-per-batch plan-construction overhead — addressable by throttling the merge to window-close
-cadence (Flink emits on trigger, not per element). The earlier ~28M rows/s figure is
-**bounded/batch** throughput (`availableNow` count), a different measurement.
+`Partial` pre-aggregation runs per batch (incremental, one partial per window-group);
+`Final` merge + emit is throttled to ≥200 ms of watermark advance (Flink emits on trigger,
+not per element) with a full flush on `EndOfData`. **~275k rows/s is ~63% of the 436k/s
+stateless ceiling**; the remaining gap is per-batch `Partial` plan construction (eliminable
+by reusing persistent accumulators — Flink's `AggregateFunction` style — a follow-up).
+Latency stays sub-ms; memory bounded. The earlier ~28M rows/s figure is **bounded/batch**
+throughput (`availableNow` count), a different measurement.
 
 ## Flink head-to-head readiness (scoped to our product goal)
 - **Ready now (measured, real):** Flink-class **latency** + **bounded state** + **low memory**
   on supported queries (windowed aggregation, interval join). A scoped head-to-head on
   *latency + memory* for these queries is defensible.
-- **Throughput:** windowed agg now ~177k/s (6.5× after the incremental-agg fix), sub-ms,
-  bounded memory — a scoped throughput comparison is now reasonable. Further headroom
-  (toward ~436k/s) via Final-merge throttling is a follow-up.
+- **Throughput:** windowed agg now ~275k/s (10.2× after incremental agg + Final throttle),
+  sub-ms, bounded memory — a scoped throughput comparison is reasonable. Remaining headroom
+  to the ~436k/s stateless ceiling via persistent accumulators is a follow-up.
 - **Not ready / deferred:** **endurance** (24 h soak) and **failure recovery** (Flink's
   strengths) — untested, so we do **not** claim reliability superiority yet.
 - **Recommended first comparison:** release build, single node, generator-based, **one
