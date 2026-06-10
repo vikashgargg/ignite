@@ -43,6 +43,28 @@ Vajra already has the right substrate: the **flow-event marker** stream
 ([streaming-watermark.md](streaming-watermark.md)) and a per-batch checkpoint writer in
 `StreamingQuery::run` (`crates/sail-spark-connect/src/streaming.rs`).
 
+## The missing piece: a micro-batch execution coordinator (key finding 2026-06-10)
+Investigation showed offset commit/restore **cannot be cleanly wired onto the current
+pieces**: the rate source's execute `TaskContext` is opaque, and `StreamingQuery::run` is a
+**poll-loop** that sees only the (empty) sink output — no handle to the source offset, and
+the distributed codec serializes the plan (handles don't survive). Exactly-once is
+therefore a **coordinator** feature (Spark's `MicroBatchExecution`), not plumbing.
+
+**`MicroBatchCoordinator` (to build), per batch/epoch:**
+1. Read the last committed offset from `commits/`.
+2. Plan the batch's offset range; **write `offsets/N` (WAL)** *before* running.
+3. Build + run the batch plan with the source bounded to that range (the `startOffset`
+   primitive — landed — sets the source's resume point).
+4. When the sink reports the output **durable** (the durable file sink — landed — + a
+   manifest commit), **write `commits/N`**.
+5. On restart: resume from the latest `commits/`; if `offsets/N` has no `commits/N`,
+   re-run batch N (idempotent sink discards the duplicate).
+
+This needs a **source-offset abstraction** (a source reports its end offset + accepts a
+start offset — rate has `startOffset`; generalize a `StreamSource::{committed_offset,
+with_start_offset}` trait) and a **sink-durability signal** (the manifest commit). Both
+primitives exist; the coordinator + the trait are the focused build.
+
 ## Plan
 
 ### A. Source-offset recovery (stateless exactly-once) — foundational
