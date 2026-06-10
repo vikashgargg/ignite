@@ -163,9 +163,23 @@ keyed windowed aggs, so it is blocked until keyed windowed aggregation is correc
    membership without mutating (all group rows of a newly-closed window emit together), then
    record ends after. Verified: all keys present, exactly K rows/window, keyed total ≈
    no-key total (counts complete); no-key + windowed exactly-once + batch unaffected.
-3. **Next — Phase 2 step 2:** parallelize the now-correct keyed windowed agg (multi-partition
-   `WindowAccumExec` + keyed `StreamExchangeExec` + **marker-aware coalesce** to fix the
-   0-output bug) with the `parallel == single` differential gate.
+3. ✅ **Done (2026-06-11) — Phase 2 step 2:** parallel keyed windowed aggregation.
+   Multi-partition `WindowAccumExec` + planner inserts `Watermark → StreamExchange(hash keys,
+   broadcast markers, N) → WindowAccum(N) → StreamCoalesceExec(N→1)`, gated to keyed aggs at
+   `target_partitions`. The **marker-aware `StreamCoalesceExec`** (drains all N partitions
+   concurrently) fixed the 0-output — DataFusion's generic coalesce left the exchange's
+   bounded broadcast channels blocked. **Verified correct:** per-`(window,key)` counts
+   exactly uniform (`value%5` → 3530×5, spread 0.00), all keys, no split. **Throughput**
+   (keyed windowed, `value%100`, rate 5M): parallelism 1→372k/s, 8→**951k/s (~2.55×)**.
+
+### Why ~2.55×, not ~8× (and the next lever)
+The keyed window **aggregation** parallelizes across N cores, but the **source (1 partition)
+and the exchange's single distributor task (read + hash + route)** are serial — so the serial
+front-end caps the speedup. To approach linear scaling: a **multi-partition source** feeding
+**per-partition distributors** (so hashing/routing also parallelizes), i.e. push the keyed
+exchange closer to the source. That's the next throughput lever; correctness + the operator
+infrastructure (exchange/coalesce/multi-partition stateful) are now in place and also pave
+the way to **distributed** streaming (same exchange over the network shuffle).
 - **Phase 3 — CheckpointCoordinator** (Chandy–Lamport, aligned barriers): trigger → align →
   ack → single commit wired to the existing offset-WAL + state-commit, so **exactly-once
   survives parallelism**.
