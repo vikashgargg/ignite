@@ -262,9 +262,16 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             logical_schema: _,
             declared_schema: _,
         } = info;
-        if is_flow_event_schema(&input.schema()) {
-            return plan_err!("cannot write streaming data to listing table");
-        }
+        // Streaming write: the input is a flow-event stream. Decode it to a plain data
+        // stream (skip markers, strip flow-event fields) so the normal file writer can
+        // durably persist it (durable streaming sink — see docs/design/streaming-exactly-once.md).
+        // Durable for availableNow/once triggers; continuous needs per-batch commit (follow-up).
+        let streaming = is_flow_event_schema(&input.schema());
+        let input: Arc<dyn ExecutionPlan> = if streaming {
+            Arc::new(crate::streaming_decode::FlowEventToDataExec::try_new(input)?)
+        } else {
+            input
+        };
         if bucket_by.is_some() {
             return not_impl_err!("bucketing for writing listing table format");
         }
@@ -333,8 +340,17 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             file_extension,
             file_output_mode: FileOutputMode::Automatic,
         };
-        format
+        let writer = format
             .create_writer_physical_plan(input, ctx, conf, sort_order)
-            .await
+            .await?;
+        if streaming {
+            // The streaming-query sink contract expects an empty-schema output; the file
+            // writer emits a count row. Adapt it (draining triggers the durable writes).
+            Ok(Arc::new(crate::streaming_decode::EmptySinkAdapterExec::new(
+                writer,
+            )))
+        } else {
+            Ok(writer)
+        }
     }
 }
