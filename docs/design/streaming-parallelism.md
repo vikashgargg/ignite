@@ -104,12 +104,17 @@ sink** that bypasses `DataSinkExec`'s single-partition rule:
 
 ## Build phases (re-sequenced around reuse + the exchange primitive)
 - **Phase 0: measure + root-cause.** ✅ Done — multi-partition regresses; cause known.
-- **Phase 1 — flow-event exchange primitive + parallel stateless path.** Wrap the existing
-  `RepartitionExec` as a **marker-aware `StreamExchangeExec`** (route data round-robin,
-  **broadcast** markers, all-N `EndOfData`) + make the **stateless sink multi-partition**
-  (reuse DataFusion's per-partition sink — one file per partition). Gate parallelism behind
-  a **cost check** (only when single-core CPU-bound). Target: stateless `source →
-  map/filter → write` scales ~N× *when CPU-bound*. No stateful/exactly-once risk.
+- **Phase 1 — parallel stateless file sink.** ✅ **Done 2026-06-10.** `PartitionSelectExec`
+  (input partition i → partition 0) + `ParallelStreamSinkExec` (drive N single-partition
+  DataFusion sinks concurrently on tokio tasks, one file per source partition, all-N
+  `EndOfData`); `create_writer` fans into N sinks when streaming + N>1. Also fixed a
+  pre-existing rate-source bug (all partitions emitted identical values → now stride-by-N,
+  Spark round-robin). **Verified:** NP=4 parquet → 4 files, output == NP=1, no loss/dup,
+  exactly-once + batch unaffected. **Throughput:** write-to-disk is **I/O-bound**, so the
+  NP gain is modest (~1.12× debug) — consistent with the cost-based principle. The real
+  parallelism win is the **stateful** operators (Phase 2–3), where Flink scales and we don't
+  yet. (The marker-aware `StreamExchangeExec` is deferred to Phase 2, where keyed routing
+  actually needs it; Phase 1 rode the source's native N partitions, no exchange required.)
 - **Phase 2 — keyed (hash) exchange** for stateful ops + **multi-partition
   `WindowAccumExec`/`StreamJoinExec`** (per-partition keyed state) + **watermark min-merge
   WITH idleness detection** (idle input must not stall windows). Document **key-skew**
