@@ -186,17 +186,20 @@ impl FileSourceExec {
     pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
         let data_schema = input.schema();
         let output_schema = Arc::new(to_flow_event_schema(&data_schema));
-        // Single output partition: `execute` drains *all* input partitions concurrently into
-        // one flow-event stream. This is correct regardless of how DataFusion split the files
-        // (whole-file or row-group byte-range) — every partition is read to completion, then a
-        // single `EndOfData`. (Exposing N output partitions instead loses data: the downstream
-        // sink can cancel a row-group-split partition before it drains. Fully-parallel sink
-        // output needs aligned multi-partition `EndOfData` termination — a tracked follow-up,
-        // the streaming throughput lever.) Read I/O is still concurrent via `select_all`, and
-        // windowed-aggregation parallelism is unaffected (the keyed exchange repartitions).
+        // One output partition per input file group (whole files — row-group splitting is
+        // disabled for streaming scans, see sail-plan/src/lib.rs). Each partition emits its
+        // files' rows then its own `EndOfData`; the parallel sink writes one file per partition
+        // concurrently, and completes only after all-N `EndOfData` (Flink-style per-split
+        // readers). Verified safe at whole-file granularity (the row-group-split path that lost
+        // data is now disabled).
+        let n = input
+            .properties()
+            .output_partitioning()
+            .partition_count()
+            .max(1);
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(output_schema),
-            Partitioning::UnknownPartitioning(1),
+            Partitioning::UnknownPartitioning(n),
             EmissionType::Both,
             Boundedness::Bounded,
         ));
@@ -246,22 +249,11 @@ impl ExecutionPlan for FileSourceExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        if partition != 0 {
-            return plan_err!("{} only has one partition", self.name());
-        }
-        // Read every input partition concurrently (parallel I/O) and merge into one stream, so
-        // all files'/splits' rows are drained before the single `EndOfData`.
-        let n = self
-            .input
-            .properties()
-            .output_partitioning()
-            .partition_count()
-            .max(1);
-        let mut streams = Vec::with_capacity(n);
-        for p in 0..n {
-            streams.push(self.input.execute(p, Arc::clone(&context))?);
-        }
-        let data_stream = futures::stream::select_all(streams);
+        // Partition `partition` reads its whole-file group split and emits that split's rows
+        // then its own `EndOfData`. Whole-file granularity (row-group splitting disabled for
+        // streaming) keeps this correct; the parallel sink drains all partitions to all-N
+        // `EndOfData` before completing.
+        let data_stream = self.input.execute(partition, context)?;
         let events = data_stream
             .map(|r| r.map(FlowEvent::append_only_data))
             .chain(futures::stream::once(async {

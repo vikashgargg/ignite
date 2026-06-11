@@ -77,6 +77,12 @@ pub async fn resolve_and_execute_plan_with_options(
         // affecting existing streaming operators.)
         let mut config = session_state.config().clone();
         config.options_mut().optimizer.enable_round_robin_repartition = false;
+        // Streaming file sources read at whole-file granularity. Row-group byte-range
+        // splitting (`repartition_file_scans`, active when target_partitions > file count)
+        // produces split partitions that the streaming read/sink path drains incorrectly —
+        // disable it so each partition is a whole file group (the verified-correct regime),
+        // enabling safe parallel-per-file source/sink fan-out.
+        config.options_mut().optimizer.repartition_file_scans = false;
         let streaming_state = SessionStateBuilder::new_from_existing(session_state.clone())
             .with_config(config)
             .build();
