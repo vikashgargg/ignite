@@ -2,7 +2,7 @@
 
 > *Sanskrit: thunderbolt + diamond — speed of lightning, hardness of diamond.*
 
-**Vajra is a Rust-native Apache Spark engine. Drop in your existing PySpark code. No JVM. No Hadoop. One binary.**
+**Vajra is a Rust-native unified batch + streaming engine — Apache Spark's batch *and* Flink-class streaming in one binary. Drop in your existing PySpark code. No JVM. No Hadoop. One binary.**
 
 [![CI](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml/badge.svg)](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml)
 [![Release](https://img.shields.io/github/v/release/vikashgargg/ignite)](https://github.com/vikashgargg/ignite/releases)
@@ -54,8 +54,9 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | **Structured Streaming — Kafka source** | ✅ | ❌ | **✅** |
 | **Structured Streaming — foreachBatch** | ✅ | ❌ | **✅** |
 | **Structured Streaming — memory sink** | ✅ | ❌ | **✅** |
-| **Streaming checkpoint + recovery** | ✅ | ❌ (issue open) | **✅** |
-| **Streaming event-time windows (executor)** | ✅ | ❌ | **✅** |
+| **Streaming exactly-once (stateless + stateful), crash-verified** | ✅ | ❌ (issue open) | **✅** |
+| **Streaming event-time windows + watermarks (keyed, parallel)** | ✅ | ❌ | **✅** |
+| **Streaming stream-stream / interval joins** | ✅ | ❌ | **✅** |
 | **Streaming stateful deduplication** | ✅ | ❌ | **✅** |
 | **Theta sketch aggregates (KMV)** | ✅ | partial | **✅** |
 | **Vortex data source (skeleton)** | ✅ | ✅ v0.6.0 | **✅ skeleton** |
@@ -118,6 +119,37 @@ TPC-H SF-100 — 22/22 PASS — Vajra 347s / 51.7GiB  vs  Spark 1099s / 115GiB
                             (~3.2× faster, ~2.2× less RAM — measured on EKS)
 ClickBench 100M (distributed, EKS) — 43/43 PASS — Vajra 377.9s
 ```
+
+### Streaming — Flink-class, in the same binary
+
+Vajra is also a real-time streaming engine. Measured head-to-head vs **Apache Flink 1.18**
+on identical AWS Graviton hardware (single node, parallelism 1 — directional, not published;
+see [docs/benchmarks/FLINK_HEAD_TO_HEAD.md](docs/benchmarks/FLINK_HEAD_TO_HEAD.md)):
+
+| Streaming dimension | Vajra | Flink 1.18 | Read |
+|---|--:|--:|---|
+| Stateless throughput | **9.0M rows/s** | 6.7M/s | Vajra ~1.34× |
+| Windowed-agg throughput | **3.4M rows/s** | ~0.9M/s | Vajra ~3× |
+| Latency at high throughput | **sub-ms** (simultaneous) | ms | Vajra ≈ Flink |
+| Memory | **~42 MB** | ~700 MB | Vajra ~16× less |
+
+- **Exactly-once** (Spark `MicroBatchExecution` / `StateStore` model): stateless **and**
+  stateful (windowed agg + stream joins), verified under **clean restart and hard
+  crash (SIGKILL)** — no loss, no duplicates. See
+  [docs/benchmarks/STREAMING_FAILURE_RECOVERY.md](docs/benchmarks/STREAMING_FAILURE_RECOVERY.md).
+- **Operators:** event-time tumbling windows + watermarks, keyed windowed aggregation,
+  stream-stream / interval joins, stateful deduplication, durable file sink.
+- **Intra-node parallelism:** keyed windowed aggregation scales across cores via a
+  marker-aware keyed exchange (~2.55× on 8 cores; near-linear is the next lever).
+- **All-in-one validated:** a single sweep covering batch + every streaming operator +
+  exactly-once + the combined flow (batch SQL reading streaming-written output) passes
+  **12/12** — [docs/benchmarks/ALL_IN_ONE_VALIDATION.md](docs/benchmarks/ALL_IN_ONE_VALIDATION.md).
+
+> **The combined-engine claim, honestly:** per **core**, Vajra beats Flink on streaming
+> throughput, memory, and latency, and is Spark-class on batch — in one no-JVM binary.
+> Flink still wins per-**node** max throughput via multi-core scaling (Vajra's streaming
+> operators parallelize but the source/distributor front-end is being parallelized next).
+> Distributed streaming and a continuous-mode exactly-once coordinator are on the roadmap.
 
 ---
 
