@@ -154,6 +154,60 @@ impl TreeNodeRewriter for StreamingRewriter {
                 // Criteria: (1) group_by contains a window() alias ("window" or "session_window"),
                 // AND (2) there is a WatermarkNode somewhere in the input subtree.
                 let is_window_group = has_event_time_window_group(&agg.group_expr);
+
+                // `dropDuplicates`/`DISTINCT` is planned as an Aggregate that just keeps the
+                // first row per group key — either `aggr=[]` (full-row distinct) or
+                // `aggr=[first_value(col), ...]` (`dropDuplicates(subset)`). A global aggregate
+                // over an unbounded stream is pipeline-breaking; this is really **stateful
+                // deduplication** (Spark `dropDuplicates` / Flink keyed dedup), so route it to
+                // `StreamDeduplicateNode` (one row per key, all columns retained).
+                // `aggr=[]` (full-row DISTINCT) or `aggr=[first_value(col), ...]`
+                // (`dropDuplicates(subset)`); group keys must be plain columns.
+                let is_dedup_aggregate = !is_window_group
+                    && agg.aggr_expr.iter().all(is_first_value_agg)
+                    && agg
+                        .group_expr
+                        .iter()
+                        .all(|e| matches!(strip_qualifiers(e), Expr::Column(_)));
+                if is_dedup_aggregate {
+                    let key_cols: Vec<String> = agg
+                        .group_expr
+                        .iter()
+                        .filter_map(|e| match strip_qualifiers(e) {
+                            Expr::Column(c) => Some(c.name),
+                            _ => None,
+                        })
+                        .collect();
+                    // Keyed stateful dedup over the flow-event stream (markers preserved).
+                    let dedup = LogicalPlan::Extension(Extension {
+                        node: Arc::new(StreamDeduplicateNode::new(
+                            Arc::clone(&streaming_input),
+                            key_cols,
+                        )),
+                    });
+                    // Reconstruct the Aggregate's output schema from the deduped first row
+                    // (`first_value(c)` ⇒ `col(c)`), re-adding the flow-event columns so the
+                    // parent projection resolves unchanged.
+                    // Match the Aggregate's output field *qualifiers* too (e.g. `?table?.#0`),
+                    // so the parent projection — which still references the qualified names —
+                    // resolves against this reconstruction.
+                    let mut proj: Vec<Expr> =
+                        vec![col(MARKER_FIELD_NAME), col(RETRACTED_FIELD_NAME)];
+                    let n_group = agg.group_expr.len();
+                    for (i, g) in agg.group_expr.iter().enumerate() {
+                        let (q, f) = agg.schema.qualified_field(i);
+                        proj.push(strip_qualifiers(g).alias_qualified(q.cloned(), f.name()));
+                    }
+                    for (j, a) in agg.aggr_expr.iter().enumerate() {
+                        let (q, f) = agg.schema.qualified_field(n_group + j);
+                        let inner = first_value_inner(a).cloned().unwrap_or_else(|| a.clone());
+                        proj.push(strip_qualifiers(&inner).alias_qualified(q.cloned(), f.name()));
+                    }
+                    return Ok(Transformed::yes(LogicalPlan::Projection(
+                        Projection::try_new(proj, Arc::new(dedup))?,
+                    )));
+                }
+
                 let watermark_info = if is_window_group {
                     find_watermark_info(&streaming_input)
                 } else {
@@ -641,6 +695,22 @@ fn extract_interval_bounds(
 /// Strip relation qualifiers from all column references in an expression. The streaming
 /// data schemas are unqualified and internal `#N` ids are globally unique, so a
 /// qualified `a."#2"` from an explicit join condition must become `"#2"` to resolve.
+/// Is this aggregate expression `first_value(...)`? `dropDuplicates(subset)` is planned as
+/// `Aggregate(group=[keys], aggr=[first_value(col), ...])` — keep the first row per key.
+fn is_first_value_agg(e: &Expr) -> bool {
+    matches!(e, Expr::AggregateFunction(af) if af.func.name().eq_ignore_ascii_case("first_value"))
+}
+
+/// The column argument of a `first_value(col)` aggregate, if any.
+fn first_value_inner(e: &Expr) -> Option<&Expr> {
+    match e {
+        Expr::AggregateFunction(af) if af.func.name().eq_ignore_ascii_case("first_value") => {
+            af.params.args.first()
+        }
+        _ => None,
+    }
+}
+
 fn strip_qualifiers(e: &Expr) -> Expr {
     e.clone()
         .transform(|n| {

@@ -4,7 +4,7 @@ A single sweep validating Vajra as one batch+streaming engine after the session'
 (keyed-windowed fix, Phase-2 parallelism, exactly-once, crash recovery). Local, debug build,
 current `HEAD`. Harness: `/tmp/allinone.py`.
 
-## Result: 11 / 12 pass
+## Result: 12 / 12 pass (dropDuplicates fixed 2026-06-11)
 
 | Area | Test | Result |
 |---|---|---|
@@ -13,7 +13,7 @@ current `HEAD`. Harness: `/tmp/allinone.py`.
 | | windowed agg, no key | ✅ |
 | | **windowed agg, keyed** (the session's fix) | ✅ all keys present |
 | | stream-stream join | ✅ matches all distinct |
-| | **`dropDuplicates`** | ❌ **pre-existing gap** (below) |
+| | **`dropDuplicates`** (all-cols + subset) | ✅ **fixed** (was a pre-existing gap) |
 | **Reliability** | exactly-once (availableNow ×2 → contiguous, no dup) | ✅ |
 | **Combined** | batch SQL reads the streaming-written parquet | ✅ |
 

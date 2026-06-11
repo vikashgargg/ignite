@@ -42,8 +42,13 @@ impl StreamDeduplicateExec {
             EquivalenceProperties::new(flow_schema),
             datafusion::physical_expr::Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
+            // Matches Spark `dropDuplicates()` (no watermark): the query runs, accumulating
+            // the seen-keys set — the unbounded-state risk is the user's, exactly as in
+            // Spark. `requires_infinite_memory: true` would make DataFusion's sanity checker
+            // refuse to execute it. Watermark-bounded eviction (`dropDuplicatesWithinWatermark`,
+            // evict keys below the watermark) is the follow-up for guaranteed-bounded state.
             Boundedness::Unbounded {
-                requires_infinite_memory: true,
+                requires_infinite_memory: false,
             },
         ));
         Ok(Self {
@@ -110,8 +115,14 @@ impl ExecutionPlan for StreamDeduplicateExec {
             .key_cols
             .iter()
             .map(|name| {
+                // Streaming data schemas are unqualified; a key may carry a relation
+                // qualifier (`?table?.#0`) — match the unqualified suffix as a fallback.
                 self.data_schema
                     .index_of(name.as_str())
+                    .or_else(|_| {
+                        let unq = name.rsplit('.').next().unwrap_or(name.as_str());
+                        self.data_schema.index_of(unq)
+                    })
                     .map_err(|_| plan_datafusion_err!("dedup key '{}' not found in schema", name))
             })
             .collect::<Result<_>>()?;
