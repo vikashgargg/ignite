@@ -79,10 +79,34 @@ stripped by `FlowEventToDataExec` before the runner). So:
   ordering (Spark `MicroBatchExecution` offset-log/commit-log protocol), so the file log
   commits only after each micro-batch's output is durable, with no race.
 
-This is a substantial, **high-blast-radius** runner-core build (affects all streaming, incl. the
-working `availableNow` path) needing a **SIGKILL-mid-continuous-run crash gate** (restart → no
-loss, no duplicate) — the same "continuous-EO + checkpoint barrier alignment" roadmap item.
-Best done as a dedicated, carefully-gated effort, not folded into a quick poll loop.
+### LOCKED design (2026-06-12) — Spark micro-batch **re-plan loop**, reusing proven EO
+Chosen over Flink barrier-snapshotting because it **reuses Vajra's crash-tested machinery**
+with no new EO protocol:
+- **Each trigger = a fresh *bounded* micro-batch.** Re-resolve+execute the plan with
+  `bounded=true` (so the source lists, processes only *new* files via the metadata log, emits
+  `EndOfData`, and the runner's existing `commit_source_offsets`-on-clean-end commits it).
+- **State + offset continuity for free**: stateful operators already `restore_state` at
+  execute start and snapshot on `EndOfData` (confirmed in `window_accum.rs`/`state_io.rs`);
+  the source restores the committed processed-files set. So each micro-batch resumes from the
+  previous one's committed checkpoint — **state continuity + per-batch exactly-once +
+  crash-EO, by construction** (no new commit-cadence, no race).
+- **Low blast radius — scope to the `ProcessingTime` trigger only.** `AvailableNow`/`Once`
+  (bounded) and the default-trigger path stay **byte-identical** (no existing test uses
+  `ProcessingTime`), so the all-in-one suite is the blast-radius guard.
+
+**Plumbing:** `runner.execute(ctx, plan)` re-executes a physical plan, but the file list is
+baked at plan time → must **re-plan** per trigger. So `StreamingQuery` (continuous variant)
+holds `(ctx.clone(), config, spec_plan, checkpoint)` + interval and loops:
+`resolve_and_execute_plan_with_options(bounded=true) → runner.execute → consume to EndOfData →
+(commit on clean end) → sleep(interval)` until the stop signal. Bounded path unchanged.
+
+**Gate (all must pass):** all-in-one 12/12 (default trigger unaffected); availableNow EO; a
+`ProcessingTime` continuous query ingests files added between triggers; graceful stop →
+restart → no reprocess; **SIGKILL mid-continuous → restart → no loss, no duplicate**.
+
+> Status: design locked + de-risked (reuses proven EO/state recovery; ProcessingTime-scoped =
+> low blast radius). Implementation is a contained streaming-lifecycle refactor
+> (`StreamingQuery` + `plan_executor`), to be done with the full gate above.
 
 ## Throughput note
 Parallel split reading (done) is the main lever to **beat** Flink/Spark: file/row-group splits
