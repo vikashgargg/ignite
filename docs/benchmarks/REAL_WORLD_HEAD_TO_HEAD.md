@@ -41,9 +41,13 @@ benchmark is possible:
    not via that SQL path. **P2.**
 3. **No `recentProgress.processedRowsPerSecond`** over Spark Connect — streaming progress
    metrics aren't exposed, so throughput/lag can't be read the Spark way. **P2.**
-4. **Container binds `127.0.0.1`** inside the container → needs `--network host` on Linux
-   (Docker `-p` can't reach it). A `--host 0.0.0.0` flag would fix deployment ergonomics.
-   **P2.**
+4. ~~**Container binds `127.0.0.1`**~~ — **CORRECTED (not a defect):** the image's
+   `CMD` already binds `0.0.0.0` (`server --ip 0.0.0.0 --port 50051`), and the bare binary
+   keeps a secure loopback default (`--ip`, default `127.0.0.1`) — the right prod-grade
+   design (container boundary is the isolation, like k8s pods). The earlier loopback was a
+   benchmark-harness error: the `docker run … server --port 50051` invocation *overrode* the
+   `CMD` and dropped `--ip 0.0.0.0`. Verified: default `CMD` is reachable via `-p` without
+   `--network host`.
 
 ## Not yet run (deferred with the gaps above)
 - **Stream-stream join** and **mixed batch+streaming** head-to-head — gated on the file-source
