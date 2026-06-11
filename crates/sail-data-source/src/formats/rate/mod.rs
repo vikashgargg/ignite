@@ -43,6 +43,7 @@ impl TableFormat for RateTableFormat {
             bucket_by,
             sort_order,
             options,
+            is_streaming: _,
         } = info;
         if !constraints.deref().is_empty() {
             return plan_err!("the rate table format does not support constraints");

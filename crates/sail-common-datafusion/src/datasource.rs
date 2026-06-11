@@ -185,6 +185,9 @@ pub struct SourceInfo {
     /// The layers of options for the data source.
     /// A later layer can override earlier ones.
     pub options: Vec<OptionLayer>,
+    /// True when this source backs a streaming read (`spark.readStream`). File-based
+    /// formats use this to produce a streaming `StreamSource` instead of a batch table.
+    pub is_streaming: bool,
 }
 
 /// Information required to create a data writer.

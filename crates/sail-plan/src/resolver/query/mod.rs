@@ -66,14 +66,15 @@ impl PlanResolver<'_> {
         let plan = match plan.node {
             QueryNode::Read {
                 read_type,
-                is_streaming: _,
+                is_streaming,
             } => match read_type {
                 spec::ReadType::NamedTable(table) => {
                     self.resolve_query_read_named_table(*table, state).await?
                 }
                 spec::ReadType::Udtf(udtf) => self.resolve_query_read_udtf(*udtf, state).await?,
                 spec::ReadType::DataSource(source) => {
-                    self.resolve_query_read_data_source(*source, state).await?
+                    self.resolve_query_read_data_source(*source, is_streaming, state)
+                        .await?
                 }
                 spec::ReadType::DynamicTable(table) => {
                     self.resolve_query_read_dynamic_table(*table, state).await?

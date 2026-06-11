@@ -42,6 +42,7 @@ impl TableFormat for KafkaTableFormat {
             bucket_by,
             sort_order,
             options,
+            is_streaming: _,
         } = info;
         if !constraints.deref().is_empty() {
             return plan_err!("the kafka table format does not support constraints");

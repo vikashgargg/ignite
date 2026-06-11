@@ -347,6 +347,7 @@ async fn build_iceberg_provider(
         bucket_by: _,
         sort_order: _,
         options,
+        is_streaming: _,
     } = info;
 
     let table_url = IcebergTableFormat::parse_table_url(paths).await?;

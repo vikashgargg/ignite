@@ -230,6 +230,7 @@ impl ExtensionPlanner for ExtensionPhysicalPlanner {
                         bucket_by: None,
                         sort_order: vec![],
                         options: vec![],
+                        is_streaming: false,
                     };
                     let registry = session_state.extension::<TableFormatRegistry>()?;
                     let source = registry

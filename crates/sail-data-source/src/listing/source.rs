@@ -121,6 +121,7 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             bucket_by: _,
             sort_order,
             options,
+            is_streaming,
         } = info;
 
         let read_format = T::read(ctx, options)?;
@@ -238,9 +239,17 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         // The schema must be set after the listing options, otherwise it will panic.
         let config = config.with_schema(schema);
         let config = crate::listing::utils::rewrite_listing_partitions(config, ctx).await?;
-        Ok(provider_as_source(Arc::new(
-            ListingTable::try_new(config)?.with_constraints(constraints),
-        )))
+        let listing_table = Arc::new(ListingTable::try_new(config)?.with_constraints(constraints));
+        if is_streaming {
+            // `spark.readStream` over files: wrap the batch listing table as a streaming source.
+            let data_schema = datafusion::datasource::TableProvider::schema(listing_table.as_ref());
+            return Ok(provider_as_source(Arc::new(
+                sail_common_datafusion::streaming::source::StreamSourceTableProvider::new(Arc::new(
+                    crate::formats::file_stream::FileStreamSource::new(listing_table, data_schema),
+                )),
+            )));
+        }
+        Ok(provider_as_source(listing_table))
     }
 
     async fn create_writer(

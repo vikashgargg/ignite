@@ -109,6 +109,7 @@ impl PlanResolver<'_> {
                 bucket_by: None,
                 sort_order: vec![],
                 options: vec![],
+                is_streaming: false,
             };
             let registry = self.ctx.extension::<TableFormatRegistry>()?;
             let table_format = registry.get(&format)?;

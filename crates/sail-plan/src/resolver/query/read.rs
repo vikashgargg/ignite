@@ -55,7 +55,9 @@ impl PlanResolver<'_> {
                     paths: vec![path.as_ref().to_string()],
                     predicates: vec![],
                 };
-                let plan = self.resolve_query_read_data_source(source, state).await?;
+                let plan = self
+                    .resolve_query_read_data_source(source, false, state)
+                    .await?;
                 return if let Some(table_sample) = sample {
                     self.apply_table_sample(plan, table_sample, state).await
                 } else {
@@ -118,6 +120,7 @@ impl PlanResolver<'_> {
                             items: temporal_options,
                         },
                     ],
+                    is_streaming: false,
                 };
                 let registry = self.ctx.extension::<TableFormatRegistry>()?;
                 let table_source = registry
@@ -438,6 +441,7 @@ impl PlanResolver<'_> {
     pub(super) async fn resolve_query_read_data_source(
         &self,
         source: spec::ReadDataSource,
+        is_streaming: bool,
         state: &mut PlanResolverState,
     ) -> PlanResult<LogicalPlan> {
         let spec::ReadDataSource {
@@ -471,6 +475,7 @@ impl PlanResolver<'_> {
             options: vec![OptionLayer::OptionList {
                 items: options.into_iter().collect(),
             }],
+            is_streaming,
         };
         let registry = self.ctx.extension::<TableFormatRegistry>()?;
         let table_source = registry

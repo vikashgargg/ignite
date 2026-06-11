@@ -569,6 +569,7 @@ impl PlanResolver<'_> {
                         options: vec![OptionLayer::TablePropertyList {
                             items: properties.to_vec(),
                         }],
+                        is_streaming: false,
                     };
                     let schema = table_format
                         .infer_schema(&self.ctx.state(), info)
@@ -649,6 +650,7 @@ impl PlanResolver<'_> {
             bucket_by: None,
             sort_order: vec![],
             options: vec![],
+            is_streaming: false,
         };
         let schema = match table_format.infer_schema(&self.ctx.state(), info).await {
             Ok(schema) => schema,
