@@ -599,6 +599,13 @@ pub fn rewrite_streaming_plan(
     bounded: bool,
     checkpoint_location: Option<String>,
 ) -> Result<LogicalPlan> {
+    // Systemic qualifier normalization: streaming operators decode flow events into the
+    // **unqualified** data schema, while the resolver tags columns with a synthetic
+    // relation (`?table?`). That mismatch has bitten window aggregation, dedup, and joins
+    // individually. Strip relation qualifiers once, up front — safe because the resolver's
+    // internal `#N` column ids are globally unique (no cross-relation ambiguity) — so every
+    // downstream streaming operator sees consistent, unqualified columns.
+    let plan = strip_plan_qualifiers(plan)?;
     let node = plan.rewrite(&mut StreamingRewriter {
         bounded,
         checkpoint_location,
@@ -709,6 +716,19 @@ fn first_value_inner(e: &Expr) -> Option<&Expr> {
         }
         _ => None,
     }
+}
+
+/// Strip relation qualifiers from every column reference in every node of a plan (the
+/// streaming counterpart to per-operator stripping). Bottom-up so each node is rebuilt
+/// against its already-normalized children. Safe given globally-unique `#N` column ids.
+fn strip_plan_qualifiers(plan: LogicalPlan) -> Result<LogicalPlan> {
+    use datafusion_common::tree_node::TreeNode;
+    plan.transform_up(|p| {
+        let exprs: Vec<Expr> = p.expressions().iter().map(strip_qualifiers).collect();
+        let inputs: Vec<LogicalPlan> = p.inputs().into_iter().cloned().collect();
+        Ok(Transformed::yes(p.with_new_exprs(exprs, inputs)?))
+    })
+    .map(|t| t.data)
 }
 
 fn strip_qualifiers(e: &Expr) -> Expr {
