@@ -10,7 +10,7 @@ file/row-group splits) + Vajra's flow-event streaming.
 |---|---|---|
 | Read parquet/CSV/JSON as a stream | ✅ done | `FileStreamSource` wraps the batch reader |
 | Correct over multiple files | ✅ done | reads all input partitions |
-| **Parallel split reading** | ✅ **done (prod-grade)** | `FileSourceExec` preserves `ListingTable` partitioning — one flow-event partition per file/row-group split, each with its own `EndOfData` (Flink `SplitEnumerator` / Spark file-task parallelism). Verified 1M→500k with 16 parallel partitions. |
+| **Parallel split reading** | ⚠️ **corrected to concurrent-read, single-output** | Profiling (20M, par=8) caught a silent **data-loss** bug: exposing N output partitions let the downstream sink cancel a **row-group-split** partition before it drained (par≤file-count was fine; par>files split files → loss). Fixed: `FileSourceExec` now drains **all** input partitions **concurrently** (`select_all`) into **one** output + a single `EndOfData` — correct at any parallelism (par=1 & par=8 both read all 10M). Concurrent read I/O kept; windowed-agg parallelism unaffected (keyed exchange). Fully-parallel **sink** output is the throughput lever below. |
 | **Cross-run exactly-once** (processed-files log) | ✅ **done** | re-run processes 0 new; add-files → only new; WAL commit verified |
 | **Continuous new-file polling** | ⬜ designed (below) | currently `availableNow`/one-shot only |
 | Schema evolution / merge | ⬜ future | |
@@ -53,6 +53,14 @@ set** instead of a row offset:
    processes **0** new files; (b) add files between runs → only new ones processed;
    (c) SIGKILL mid-run → restart reprocesses only the uncommitted batch's files, no loss;
    (d) combined with the file-sink commit log, no duplicate output.
+
+## Build plan — THROUGHPUT LEVER: aligned multi-partition EndOfData (next)
+Profiling found stateless ETL scaling flattens early and that exposing N source-output
+partitions loses data because the bounded-query **termination cancels split partitions before
+they drain**. The lever: make the framework terminate a bounded multi-partition stream **only
+after every partition's `EndOfData`** (aligned, like Flink barrier alignment), so the source
+can expose N partitions → the parallel sink writes N files concurrently → near-linear. This is
+the same alignment needed for correct multi-partition event-time watermarks.
 
 ## Build plan — continuous new-file polling (after the log)
 For a non-`availableNow` trigger: a poll loop (interval = trigger) that re-lists the dir,

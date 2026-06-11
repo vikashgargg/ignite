@@ -186,16 +186,17 @@ impl FileSourceExec {
     pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
         let data_schema = input.schema();
         let output_schema = Arc::new(to_flow_event_schema(&data_schema));
-        let partitioning = Partitioning::UnknownPartitioning(
-            input
-                .properties()
-                .output_partitioning()
-                .partition_count()
-                .max(1),
-        );
+        // Single output partition: `execute` drains *all* input partitions concurrently into
+        // one flow-event stream. This is correct regardless of how DataFusion split the files
+        // (whole-file or row-group byte-range) — every partition is read to completion, then a
+        // single `EndOfData`. (Exposing N output partitions instead loses data: the downstream
+        // sink can cancel a row-group-split partition before it drains. Fully-parallel sink
+        // output needs aligned multi-partition `EndOfData` termination — a tracked follow-up,
+        // the streaming throughput lever.) Read I/O is still concurrent via `select_all`, and
+        // windowed-aggregation parallelism is unaffected (the keyed exchange repartitions).
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(output_schema),
-            partitioning,
+            Partitioning::UnknownPartitioning(1),
             EmissionType::Both,
             Boundedness::Bounded,
         ));
@@ -245,10 +246,22 @@ impl ExecutionPlan for FileSourceExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        // Each partition reads its own file-group split (parallel I/O) and emits that split's
-        // data batches followed by its own `EndOfData`. The framework terminates a bounded
-        // query only after every partition's `EndOfData` (same contract as the rate source).
-        let data_stream = self.input.execute(partition, context)?;
+        if partition != 0 {
+            return plan_err!("{} only has one partition", self.name());
+        }
+        // Read every input partition concurrently (parallel I/O) and merge into one stream, so
+        // all files'/splits' rows are drained before the single `EndOfData`.
+        let n = self
+            .input
+            .properties()
+            .output_partitioning()
+            .partition_count()
+            .max(1);
+        let mut streams = Vec::with_capacity(n);
+        for p in 0..n {
+            streams.push(self.input.execute(p, Arc::clone(&context))?);
+        }
+        let data_stream = futures::stream::select_all(streams);
         let events = data_stream
             .map(|r| r.map(FlowEvent::append_only_data))
             .chain(futures::stream::once(async {
