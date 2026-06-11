@@ -20,29 +20,30 @@ current `HEAD`. Harness: `/tmp/allinone.py`.
 **Core product is solid:** batch correctness, the just-fixed keyed windowed aggregation,
 joins, exactly-once, and the all-in-one flow (batch reading streaming output) all pass.
 
-## The one gap — streaming `dropDuplicates` (pre-existing, root-caused)
-Both forms fail (not touched this session):
-1. **`dropDuplicates()` (all columns)** → `No field named "?table?"."#0"` — the same
-   **qualifier-resolution** bug class fixed for windowed agg, but in the
-   `Distinct → StreamDeduplicateNode` path (key columns resolved against the unqualified
-   data schema).
-2. **`dropDuplicates([subset])`** → `Cannot execute pipeline breaking queries, AggregateExec
-   Partial`. **Root cause:** `resolve_and_execute_plan` runs the streaming rewriter on the
-   **already-optimized** plan (`session_state.optimize` first), so DataFusion's
-   `ReplaceDistinctWithAggregate` logical rule has already rewritten the `Distinct` into a
-   **global `Aggregate`** before the streaming rewriter can route it to
-   `StreamDeduplicateNode`. The rewriter then treats it as a (non-windowed) streaming
-   aggregate → pipeline-breaking on unbounded input.
+## `dropDuplicates` — FIXED (2026-06-11)
+The actual root cause (confirmed via the optimized-plan dump): the resolver plans
+`dropDuplicates` as an **`Aggregate`**, not a `Distinct` — so the rewriter's `Distinct` path
+was dead. `dropDuplicates()` → `Aggregate(group=[all cols], aggr=[])`; `dropDuplicates([k])`
+→ `Aggregate(group=[k], aggr=[first_value(all cols)])`. The rewriter routed both to a global
+(pipeline-breaking) aggregate, with the qualifier bug on top.
 
-### Fix (focused follow-up — touches the plan pipeline, so not rushed)
-- Preserve `Distinct` for streaming: detect streaming **before** `optimize`, or run a
-  streaming-specific logical optimizer that **disables `ReplaceDistinctWithAggregate`**
-  (and any rule that breaks streaming-operator routing), so `Distinct`/`DistinctOn` reaches
-  `StreamDeduplicateNode`.
-- Apply the qualifier strip in the `Distinct → dedup` path (same pattern as the windowed-agg
-  fix).
-- Gate with a differential: streaming `dropDuplicates()` and `dropDuplicates([k])` →
-  correct distinct output.
+**Fix:**
+1. Rewriter detects the **dedup-aggregate** pattern (`aggr=[]` or all-`first_value`, group
+   keys plain columns) and routes to `StreamDeduplicateNode` over the **flow-event stream**,
+   reconstructing the aggregate's output schema from the deduped first row
+   (`first_value(c) ⇒ col(c)`), with **`alias_qualified`** so field qualifiers match and the
+   parent projection resolves.
+2. `StreamDeduplicateExec` boundedness `requires_infinite_memory: false` — matches Spark
+   `dropDuplicates()` without a watermark (runs, accumulating seen-keys; the sanity checker
+   otherwise refuses). Watermark-bounded eviction (`dropDuplicatesWithinWatermark`) is the
+   follow-up for guaranteed-bounded state.
+
+**Verified:** `dropDuplicates()` (all cols) and `dropDuplicates([k])` (subset) → correct
+distinct output, all columns retained; all-in-one sweep **12/12**; clippy clean.
+
+> Note: this is the third manifestation of the pervasive `?table?` qualifier mismatch
+> (windowed agg, then dedup). A **systemic streaming qualifier-strip** would prevent future
+> recurrences — a candidate cleanup.
 
 ## Conclusion
 The combined batch+streaming product validates cleanly on its core capabilities (11/12).
