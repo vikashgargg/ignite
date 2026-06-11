@@ -52,6 +52,28 @@ guarantee, not a live bug.
 3. Crash-harness gate: inject a crash in the durable→commit window (or simulate an orphan) →
    verify the replay produces no duplicate (orphan ignored, same batch-id overwritten).
 
+## Implementation findings (2026-06-11 — traced the write path)
+- **The sink discards file paths.** `ParallelStreamSinkExec` has each child write one file and
+  emit a *count* row (then discarded); DataFusion's file writer returns **row counts, not
+  paths**. A correct manifest must list **exactly the files this batch wrote**, so the sink
+  must **report its written paths** to the runner — there is no path to harvest today.
+- **Discovery is NOT a valid shortcut.** Diffing `<output>` against prior manifests to find
+  "this batch's files" includes a crashed run's **orphans** in the replay's manifest → they
+  become "committed" → duplicate. (Same flaw bites a post-write rename-to-deterministic-name.)
+- **`batch_id` is known only post-plan.** It's derived from the committed offset log in
+  `StreamingQuery::new`, *after* the sink plan (with its fixed path) is built — so a
+  deterministic `batch_id`-keyed filename can't be set at plan time without re-planning.
+- **Two viable correct approaches (each a real build, each with a wrinkle to resolve):**
+  1. **Sink reports paths** → runner writes `<output>/_vajra_metadata/<batchId>` from the
+     reported set (Spark `FileStreamSink`). Wrinkle: thread paths out of the
+     count-emitting sink + the output path into the runner.
+  2. **Atomic per-batch staging dir**: write to `<output>/_staging-<runId>/` (hidden →
+     reader-excluded), then a single atomic dir rename to a committed location at commit.
+     Wrinkle: a *visible* committed subdir risks Hive partition-inference; a flat layout
+     needs N-file atomicity.
+- **Crash-test gate before "done":** SIGKILL after files durable, before commit → restart →
+  **no duplicate** in the output (orphans ignored / overwritten).
+
 ## Risk / priority note
 The window is **few-ms and empirically unhittable**; this is a correctness-*completeness*
 item. It touches the **shared read path** (gated, but still), so it warrants a careful,
