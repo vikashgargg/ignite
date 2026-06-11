@@ -62,10 +62,27 @@ after every partition's `EndOfData`** (aligned, like Flink barrier alignment), s
 can expose N partitions → the parallel sink writes N files concurrently → near-linear. This is
 the same alignment needed for correct multi-partition event-time watermarks.
 
-## Build plan — continuous new-file polling (after the log)
-For a non-`availableNow` trigger: a poll loop (interval = trigger) that re-lists the dir,
-emits new files as flow-event micro-batches, never emitting `EndOfData` (the query runs
-continuously). Reuses the metadata log from above for new-file detection + recovery.
+## Build plan — continuous new-file polling (grounded findings, 2026-06-12)
+For a non-`availableNow` trigger: a poll loop (interval = trigger) that re-lists the dir, emits
+new files as flow-event micro-batches, never emitting `EndOfData`. **Scope finding (traced the
+runner):** this is NOT just a poll loop — Vajra uses a **continuous-dataflow** model (one plan
+runs forever, à la Flink), and `StreamingQuery::run` commits source offsets **only on clean
+stream-end** (`commit_source_offsets` fires when the stream `task` resolves; markers are
+stripped by `FlowEventToDataExec` before the runner). So:
+- A naive poll loop gives **at-least-once on crash** (the processed-files log commits only on
+  graceful stop) — **below Spark**, which is exactly-once per batch.
+- Committing the file log per micro-batch naively **races**: the source would stage poll N+1's
+  files before the runner commits poll N → files marked processed before their output is
+  durable → loss on crash.
+- **Prod-grade requires continuous exactly-once**: in-stream checkpoint **barriers** (Flink
+  asynchronous barrier snapshotting) delineating micro-batches + a stage→durable→commit→next
+  ordering (Spark `MicroBatchExecution` offset-log/commit-log protocol), so the file log
+  commits only after each micro-batch's output is durable, with no race.
+
+This is a substantial, **high-blast-radius** runner-core build (affects all streaming, incl. the
+working `availableNow` path) needing a **SIGKILL-mid-continuous-run crash gate** (restart → no
+loss, no duplicate) — the same "continuous-EO + checkpoint barrier alignment" roadmap item.
+Best done as a dedicated, carefully-gated effort, not folded into a quick poll loop.
 
 ## Throughput note
 Parallel split reading (done) is the main lever to **beat** Flink/Spark: file/row-group splits
