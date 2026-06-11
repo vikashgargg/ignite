@@ -88,9 +88,17 @@ impl FileSourceExec {
     pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
         let data_schema = input.schema();
         let output_schema = Arc::new(to_flow_event_schema(&data_schema));
+        // Preserve the batch reader's partitioning so file reading stays parallel across
+        // cores (DataFusion `ListingTable` enumerates file/row-group splits into
+        // `target_partitions` partitions — the streaming equivalent of Flink's
+        // `SplitEnumerator` fanning splits to parallel source readers, and Spark's
+        // file-task parallelism). Each partition emits its own `EndOfData`.
+        let partitioning = Partitioning::UnknownPartitioning(
+            input.properties().output_partitioning().partition_count().max(1),
+        );
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(output_schema),
-            Partitioning::UnknownPartitioning(1),
+            partitioning,
             EmissionType::Both,
             // The available file set is finite; the stream ends after `EndOfData`.
             Boundedness::Bounded,
@@ -141,18 +149,11 @@ impl ExecutionPlan for FileSourceExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        if partition != 0 {
-            return plan_err!("{} only has one partition", self.name());
-        }
-        // Read every input partition (one per file group) and concatenate, so the single
-        // flow-event output carries all files' rows before the lone `EndOfData` marker.
-        let n = self.input.properties().output_partitioning().partition_count();
-        let mut streams = Vec::with_capacity(n);
-        for p in 0..n {
-            streams.push(self.input.execute(p, Arc::clone(&context))?);
-        }
-        let data_stream = futures::stream::iter(streams).flatten();
-        // data batches -> append-only flow events, then a single EndOfData marker.
+        // Each partition reads its own file-group split (parallel I/O) and emits that
+        // split's data batches followed by its own `EndOfData`. The streaming framework
+        // terminates a bounded query only after every partition's `EndOfData` (same
+        // contract as the multi-partition rate source).
+        let data_stream = self.input.execute(partition, context)?;
         let events = data_stream
             .map(|r| r.map(FlowEvent::append_only_data))
             .chain(futures::stream::once(async {
