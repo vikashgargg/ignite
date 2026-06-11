@@ -11,7 +11,7 @@ file/row-group splits) + Vajra's flow-event streaming.
 | Read parquet/CSV/JSON as a stream | ✅ done | `FileStreamSource` wraps the batch reader |
 | Correct over multiple files | ✅ done | reads all input partitions |
 | **Parallel split reading** | ✅ **done (prod-grade)** | `FileSourceExec` preserves `ListingTable` partitioning — one flow-event partition per file/row-group split, each with its own `EndOfData` (Flink `SplitEnumerator` / Spark file-task parallelism). Verified 1M→500k with 16 parallel partitions. |
-| **Cross-run exactly-once** (processed-files log) | ⬜ designed (below) | a re-run must not reprocess already-committed files |
+| **Cross-run exactly-once** (processed-files log) | ✅ **done** | re-run processes 0 new; add-files → only new; WAL commit verified |
 | **Continuous new-file polling** | ⬜ designed (below) | currently `availableNow`/one-shot only |
 | Schema evolution / merge | ⬜ future | |
 | `maxFilesPerTrigger` backpressure | ⬜ future | |

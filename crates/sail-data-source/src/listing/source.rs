@@ -224,6 +224,22 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             .with_file_sort_order(vec![sort_order])
             .with_table_partition_cols(partition_by);
 
+        if is_streaming {
+            // `spark.readStream` over files: a streaming source that re-lists the directory,
+            // reads only files not yet committed (cross-run exactly-once), and reads them in
+            // parallel — built on the same listing config as the batch reader.
+            return Ok(provider_as_source(Arc::new(
+                sail_common_datafusion::streaming::source::StreamSourceTableProvider::new(Arc::new(
+                    crate::formats::file_stream::FileStreamSource::new(
+                        urls,
+                        listing_options,
+                        schema,
+                        constraints,
+                    ),
+                )),
+            )));
+        }
+
         let config = ListingTableConfig::new_with_multi_paths(urls);
         let config = if listing_options.table_partition_cols.is_empty() {
             config
@@ -240,15 +256,6 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         let config = config.with_schema(schema);
         let config = crate::listing::utils::rewrite_listing_partitions(config, ctx).await?;
         let listing_table = Arc::new(ListingTable::try_new(config)?.with_constraints(constraints));
-        if is_streaming {
-            // `spark.readStream` over files: wrap the batch listing table as a streaming source.
-            let data_schema = datafusion::datasource::TableProvider::schema(listing_table.as_ref());
-            return Ok(provider_as_source(Arc::new(
-                sail_common_datafusion::streaming::source::StreamSourceTableProvider::new(Arc::new(
-                    crate::formats::file_stream::FileStreamSource::new(listing_table, data_schema),
-                )),
-            )));
-        }
         Ok(provider_as_source(listing_table))
     }
 
