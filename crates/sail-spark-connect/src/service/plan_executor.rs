@@ -339,9 +339,9 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
                 let stream = ctx
                     .extension::<JobService>()?
                     .runner()
-                    .execute(&ctx, plan)
+                    .execute(&ctx, plan.clone())
                     .await?;
-                Ok(stream)
+                Ok((plan, stream))
             })
         });
         spark.start_streaming_query_continuous(
@@ -366,8 +366,8 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
             checkpoint_location.clone(),
         )
         .await?;
-        let stream = service.runner().execute(ctx, plan).await?;
-        spark.start_streaming_query(query_name.clone(), info, stream, checkpoint_location)?
+        let stream = service.runner().execute(ctx, plan.clone()).await?;
+        spark.start_streaming_query(query_name.clone(), info, plan, stream, checkpoint_location)?
     };
     let result = WriteStreamOperationStartResult {
         query_id: Some(id.into()),
@@ -415,9 +415,16 @@ pub(crate) async fn handle_execute_streaming_query_command(
                 is_active: status.is_active,
             }))
         }
-        Command::LastProgress(true) | Command::RecentProgress(true) => {
+        Command::LastProgress(true) => {
+            let progress = spark.streaming_query_recent_progress(&query_id.clone().into())?;
             Some(ResultType::RecentProgress(RecentProgressResult {
-                recent_progress_json: vec![],
+                recent_progress_json: progress.into_iter().last().into_iter().collect(),
+            }))
+        }
+        Command::RecentProgress(true) => {
+            let progress = spark.streaming_query_recent_progress(&query_id.clone().into())?;
+            Some(ResultType::RecentProgress(RecentProgressResult {
+                recent_progress_json: progress,
             }))
         }
         Command::Stop(true) => {

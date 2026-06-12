@@ -1,9 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::{PlanType, StringifiedPlan};
+use datafusion::physical_plan::ExecutionPlan;
 use futures::StreamExt;
 use log::warn;
 use sail_common_datafusion::error::CommonErrorCause;
@@ -14,6 +16,9 @@ use crate::error::{SparkError, SparkResult, SparkThrowable};
 use crate::spark::connect;
 use crate::web_ui;
 
+/// Keep the last N micro-batch progress reports (Spark default is 100).
+const MAX_RECENT_PROGRESS: usize = 100;
+
 pub struct StreamingQuery {
     name: String,
     info: Vec<StringifiedPlan>,
@@ -21,29 +26,93 @@ pub struct StreamingQuery {
     stopped: watch::Receiver<bool>,
     signal: Option<oneshot::Sender<()>>,
     awaitable: bool,
+    /// Ring buffer of recent `StreamingQueryProgress` JSON reports (newest last), written by
+    /// the run loop per micro-batch and read by `lastProgress`/`recentProgress`.
+    progress: Arc<Mutex<VecDeque<String>>>,
 }
 
-/// Produces a fresh (bounded) micro-batch stream by re-planning + executing the query — used
-/// for continuous (`ProcessingTime`) triggers, where each trigger is a fresh availableNow-style
+/// An executed micro-batch: its physical plan (for reading leaf-scan row metrics) + output stream.
+pub type PlannedStream = (Arc<dyn ExecutionPlan>, SendableRecordBatchStream);
+
+/// Produces a fresh (bounded) micro-batch (plan + stream) by re-planning + executing the query —
+/// used for continuous (`ProcessingTime`) triggers, where each trigger is a fresh availableNow-style
 /// micro-batch that reuses the proven offset/state commit + recovery (Spark `MicroBatchExecution`
 /// re-plan model). See docs/design/streaming-file-source.md.
 pub type MakeStream = Box<
     dyn Fn() -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = SparkResult<SendableRecordBatchStream>> + Send>,
+            Box<dyn std::future::Future<Output = SparkResult<PlannedStream>> + Send>,
         > + Send
         + Sync,
 >;
 
 /// How `StreamingQuery::run` drives execution.
 enum StreamDriver {
-    /// `availableNow`/`once` (bounded): consume a single pre-built stream, then stop.
-    Once(SendableRecordBatchStream),
+    /// `availableNow`/`once` (bounded): consume a single pre-built (plan, stream), then stop.
+    Once(Arc<dyn ExecutionPlan>, SendableRecordBatchStream),
     /// `ProcessingTime` (continuous): re-plan + execute a bounded micro-batch each `interval`,
     /// committing after each, until stopped.
     Continuous {
         make_stream: MakeStream,
         interval: Duration,
     },
+}
+
+/// Sum the output rows of the plan's leaf nodes (sources/scans) — `numInputRows` for one
+/// micro-batch. Leaf scans (e.g. the parquet scan under the streaming file source) record
+/// `output_rows` via DataFusion metrics; sources without metrics contribute 0.
+///
+/// Leaves are deduplicated by `Arc` identity: the parallel streaming sink fans the *same*
+/// source `Arc` into N writer children, so a naive walk would count it N times.
+fn count_input_rows(plan: &Arc<dyn ExecutionPlan>) -> u64 {
+    fn walk(plan: &Arc<dyn ExecutionPlan>, seen: &mut std::collections::HashSet<*const ()>) -> u64 {
+        let id = Arc::as_ptr(plan) as *const ();
+        if !seen.insert(id) {
+            return 0; // already counted this shared node
+        }
+        let children = plan.children();
+        if children.is_empty() {
+            return plan.metrics().and_then(|m| m.output_rows()).unwrap_or(0) as u64;
+        }
+        children.iter().map(|c| walk(c, seen)).sum()
+    }
+    walk(plan, &mut std::collections::HashSet::new())
+}
+
+/// Build a Spark `StreamingQueryProgress`-shaped JSON for one micro-batch (the fields the
+/// PySpark `StreamingQueryProgress`/`SourceProgress`/`SinkProgress` parsers require).
+fn progress_json(
+    id: &str,
+    run_id: &str,
+    name: &str,
+    batch_id: u64,
+    num_input_rows: u64,
+    duration_ms: u128,
+    source_desc: &str,
+    sink_desc: &str,
+) -> String {
+    let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let rate = if duration_ms > 0 {
+        (num_input_rows as f64) * 1000.0 / (duration_ms as f64)
+    } else {
+        0.0
+    };
+    let name_json = if name.is_empty() {
+        "null".to_string()
+    } else {
+        format!("{name:?}")
+    };
+    format!(
+        "{{\"id\":{id:?},\"runId\":{run_id:?},\"name\":{name_json},\"timestamp\":{timestamp:?},\
+         \"batchId\":{batch_id},\"batchDuration\":{duration_ms},\
+         \"durationMs\":{{\"triggerExecution\":{duration_ms}}},\"eventTime\":{{}},\
+         \"stateOperators\":[],\
+         \"sources\":[{{\"description\":{source_desc:?},\"startOffset\":null,\"endOffset\":null,\
+         \"latestOffset\":null,\"numInputRows\":{num_input_rows},\
+         \"inputRowsPerSecond\":{rate:.1},\"processedRowsPerSecond\":{rate:.1}}}],\
+         \"sink\":{{\"description\":{sink_desc:?},\"numOutputRows\":{num_input_rows}}},\
+         \"numInputRows\":{num_input_rows},\"inputRowsPerSecond\":{rate:.1},\
+         \"processedRowsPerSecond\":{rate:.1}}}"
+    )
 }
 
 /// Consume one (bounded) micro-batch stream to completion. Writes the per-batch offset marker
@@ -97,18 +166,30 @@ fn read_latest_batch_id(offsets_dir: &Path) -> Option<u64> {
 
 impl StreamingQuery {
     pub fn new(
+        query_id: String,
+        run_id: String,
         name: String,
         info: Vec<StringifiedPlan>,
+        plan: Arc<dyn ExecutionPlan>,
         stream: SendableRecordBatchStream,
         checkpoint_location: Option<String>,
     ) -> Self {
-        Self::spawn(name, info, StreamDriver::Once(stream), checkpoint_location)
+        Self::spawn(
+            query_id,
+            run_id,
+            name,
+            info,
+            StreamDriver::Once(plan, stream),
+            checkpoint_location,
+        )
     }
 
     /// Continuous (`ProcessingTime`) query: re-plan + execute a bounded micro-batch every
     /// `interval`, committing after each (reusing the availableNow exactly-once + state
     /// recovery), until stopped.
     pub fn new_continuous(
+        query_id: String,
+        run_id: String,
         name: String,
         info: Vec<StringifiedPlan>,
         make_stream: MakeStream,
@@ -116,6 +197,8 @@ impl StreamingQuery {
         checkpoint_location: Option<String>,
     ) -> Self {
         Self::spawn(
+            query_id,
+            run_id,
             name,
             info,
             StreamDriver::Continuous {
@@ -127,6 +210,8 @@ impl StreamingQuery {
     }
 
     fn spawn(
+        query_id: String,
+        run_id: String,
         name: String,
         info: Vec<StringifiedPlan>,
         driver: StreamDriver,
@@ -155,6 +240,9 @@ impl StreamingQuery {
         let (error_tx, error_rx) = watch::channel(None);
         let (stopped_tx, stopped_rx) = watch::channel(false);
         let ui_id_run = ui_id.clone();
+        let progress = Arc::new(Mutex::new(VecDeque::new()));
+        let progress_run = Arc::clone(&progress);
+        let name_run = name.clone();
         tokio::spawn(async move {
             Self::run(
                 signal_rx,
@@ -164,6 +252,10 @@ impl StreamingQuery {
                 checkpoint_location,
                 initial_batch_id,
                 ui_id_run,
+                query_id,
+                run_id,
+                name_run,
+                progress_run,
             )
             .await;
         });
@@ -174,7 +266,16 @@ impl StreamingQuery {
             stopped: stopped_rx,
             signal: Some(signal_tx),
             awaitable: true,
+            progress,
         }
+    }
+
+    /// Recent micro-batch progress reports as JSON (newest last) — `lastProgress`/`recentProgress`.
+    pub fn recent_progress(&self) -> Vec<String> {
+        self.progress
+            .lock()
+            .map(|p| p.iter().cloned().collect())
+            .unwrap_or_default()
     }
 
     pub fn status(&self) -> StreamingQueryStatus {
@@ -196,6 +297,7 @@ impl StreamingQuery {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn run(
         signal: oneshot::Receiver<()>,
         error: watch::Sender<Option<SparkThrowable>>,
@@ -204,6 +306,10 @@ impl StreamingQuery {
         checkpoint_location: Option<String>,
         initial_batch_id: u64,
         ui_id: String,
+        query_id: String,
+        run_id: String,
+        name: String,
+        progress: Arc<Mutex<VecDeque<String>>>,
     ) {
         let offsets_dir = checkpoint_location.as_deref().map(|loc| {
             let mut p = PathBuf::from(loc);
@@ -219,9 +325,29 @@ impl StreamingQuery {
             log::info!("Streaming checkpoint recovery: resuming from batch {initial_batch_id}");
         }
         let mut batch_id: u64 = initial_batch_id;
+        let mut mb_id: u64 = 0; // micro-batch (trigger) index, for progress reporting
+
+        let record = |plan: &Arc<dyn ExecutionPlan>, mb_id: u64, duration_ms: u128| {
+            if let Ok(mut p) = progress.lock() {
+                p.push_back(progress_json(
+                    &query_id,
+                    &run_id,
+                    &name,
+                    mb_id,
+                    count_input_rows(plan),
+                    duration_ms,
+                    "streaming source",
+                    "streaming sink",
+                ));
+                while p.len() > MAX_RECENT_PROGRESS {
+                    p.pop_front();
+                }
+            }
+        };
 
         match driver {
-            StreamDriver::Once(stream) => {
+            StreamDriver::Once(plan, stream) => {
+                let t0 = std::time::Instant::now();
                 tokio::select! {
                     _ = signal => {}
                     clean = consume_stream(stream, &offsets_dir, &mut batch_id, &ui_id, &error) => {
@@ -232,6 +358,7 @@ impl StreamingQuery {
                             if let Some(ref loc) = checkpoint_location {
                                 commit_source_offsets(loc);
                             }
+                            record(&plan, mb_id, t0.elapsed().as_millis());
                         }
                     }
                 }
@@ -246,12 +373,13 @@ impl StreamingQuery {
                 // end), so a crash replays only the uncommitted micro-batch — exactly-once.
                 let mut signal = signal;
                 loop {
+                    let t0 = std::time::Instant::now();
                     let made = tokio::select! {
                         _ = &mut signal => break,
                         m = make_stream() => m,
                     };
-                    let stream = match made {
-                        Ok(s) => s,
+                    let (plan, stream) = match made {
+                        Ok(ps) => ps,
                         Err(e) => {
                             let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
                             let _ = error.send(Some(cause.into()));
@@ -266,6 +394,8 @@ impl StreamingQuery {
                         if let Some(ref loc) = checkpoint_location {
                             commit_source_offsets(loc);
                         }
+                        record(&plan, mb_id, t0.elapsed().as_millis());
+                        mb_id += 1;
                     } else {
                         break; // error already reported
                     }
@@ -398,6 +528,15 @@ impl StreamingQueryManager {
             )));
         };
         Ok(query.status())
+    }
+
+    pub fn recent_progress(&self, id: &StreamingQueryId) -> SparkResult<Vec<String>> {
+        let Some(query) = self.queries.get(id) else {
+            return Err(SparkError::invalid(format!(
+                "streaming query not found: {id:?}"
+            )));
+        };
+        Ok(query.recent_progress())
     }
 
     pub fn get_query_error(&self, id: &StreamingQueryId) -> SparkResult<Option<SparkThrowable>> {

@@ -205,6 +205,7 @@ impl SparkSession {
         &self,
         name: String,
         info: Vec<StringifiedPlan>,
+        plan: std::sync::Arc<dyn datafusion::physical_plan::ExecutionPlan>,
         stream: SendableRecordBatchStream,
         checkpoint_location: Option<String>,
     ) -> SparkResult<StreamingQueryId> {
@@ -220,7 +221,15 @@ impl SparkSession {
             run_id: uuid::Uuid::new_v4().to_string(),
         };
         let mut state = self.state.lock()?;
-        let query = StreamingQuery::new(name, info, stream, checkpoint_location);
+        let query = StreamingQuery::new(
+            id.query_id.clone(),
+            id.run_id.clone(),
+            name,
+            info,
+            plan,
+            stream,
+            checkpoint_location,
+        );
         state.streaming_queries.add_query(id.clone(), query);
         Ok(id)
     }
@@ -242,6 +251,8 @@ impl SparkSession {
         };
         let mut state = self.state.lock()?;
         let query = StreamingQuery::new_continuous(
+            id.query_id.clone(),
+            id.run_id.clone(),
             name,
             info,
             make_stream,
@@ -273,6 +284,14 @@ impl SparkSession {
     ) -> SparkResult<StreamingQueryStatus> {
         let state = self.state.lock()?;
         state.streaming_queries.get_query_status(id)
+    }
+
+    pub(crate) fn streaming_query_recent_progress(
+        &self,
+        id: &StreamingQueryId,
+    ) -> SparkResult<Vec<String>> {
+        let state = self.state.lock()?;
+        state.streaming_queries.recent_progress(id)
     }
 
     pub(crate) fn get_streaming_query_exception(
