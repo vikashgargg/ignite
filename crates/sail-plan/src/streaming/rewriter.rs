@@ -179,10 +179,15 @@ impl TreeNodeRewriter for StreamingRewriter {
                         })
                         .collect();
                     // Keyed stateful dedup over the flow-event stream (markers preserved).
+                    // If the input carries a watermark, dedup state is bounded (evict keys
+                    // older than the watermark, drop late rows) — Spark dropDuplicates +
+                    // withWatermark / dropDuplicatesWithinWatermark.
+                    let event_time_col = find_watermark_info(&streaming_input).map(|(c, _)| c);
                     let dedup = LogicalPlan::Extension(Extension {
-                        node: Arc::new(StreamDeduplicateNode::new(
+                        node: Arc::new(StreamDeduplicateNode::new_with_watermark(
                             Arc::clone(&streaming_input),
                             key_cols,
+                            event_time_col,
                         )),
                     });
                     // Reconstruct the Aggregate's output schema from the deduped first row
@@ -508,8 +513,15 @@ impl TreeNodeRewriter for StreamingRewriter {
                         (input, key_cols)
                     }
                 };
+                // Bounded dedup state when the input carries a watermark (evict keys older
+                // than the watermark, drop late rows).
+                let event_time_col = find_watermark_info(&input).map(|(c, _)| c);
                 Ok(Transformed::yes(LogicalPlan::Extension(Extension {
-                    node: Arc::new(StreamDeduplicateNode::new(input, key_cols)),
+                    node: Arc::new(StreamDeduplicateNode::new_with_watermark(
+                        input,
+                        key_cols,
+                        event_time_col,
+                    )),
                 })))
             }
             LogicalPlan::Explain(explain) => {

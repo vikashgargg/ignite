@@ -369,6 +369,7 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             Arc::new(StreamDeduplicateExec::try_new(
                 input.clone(),
                 node.key_cols.clone(),
+                node.event_time_col.clone(),
                 data_schema,
             )?)
         } else if let Some(node) = node.as_any().downcast_ref::<WindowAccumNode>() {

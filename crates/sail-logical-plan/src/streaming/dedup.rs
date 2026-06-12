@@ -17,6 +17,9 @@ pub struct StreamDeduplicateNode {
     input: Arc<LogicalPlan>,
     /// Column names used as the deduplication key.
     pub key_cols: Vec<String>,
+    /// Event-time column for watermark-bounded eviction (`dropDuplicatesWithinWatermark` /
+    /// dropDuplicates with a watermark). `None` = unbounded state (Spark `dropDuplicates()`).
+    pub event_time_col: Option<String>,
     /// Output schema — same as input (flow-event schema, preserved unchanged).
     #[educe(PartialOrd(ignore))]
     schema: DFSchemaRef,
@@ -24,10 +27,21 @@ pub struct StreamDeduplicateNode {
 
 impl StreamDeduplicateNode {
     pub fn new(input: Arc<LogicalPlan>, key_cols: Vec<String>) -> Self {
+        Self::new_with_watermark(input, key_cols, None)
+    }
+
+    /// With a watermark event-time column, dedup state is bounded (keys older than the
+    /// watermark are evicted, late rows dropped).
+    pub fn new_with_watermark(
+        input: Arc<LogicalPlan>,
+        key_cols: Vec<String>,
+        event_time_col: Option<String>,
+    ) -> Self {
         let schema = input.schema().clone();
         Self {
             input,
             key_cols,
+            event_time_col,
             schema,
         }
     }
