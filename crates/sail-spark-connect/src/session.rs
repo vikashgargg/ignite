@@ -225,6 +225,33 @@ impl SparkSession {
         Ok(id)
     }
 
+    /// Start a continuous (`ProcessingTime`) streaming query: re-plan + execute a bounded
+    /// micro-batch every `interval` (Spark micro-batch model), reusing the availableNow
+    /// exactly-once + state recovery.
+    pub(crate) fn start_streaming_query_continuous(
+        &self,
+        name: String,
+        info: Vec<StringifiedPlan>,
+        make_stream: crate::streaming::MakeStream,
+        interval: std::time::Duration,
+        checkpoint_location: Option<String>,
+    ) -> SparkResult<StreamingQueryId> {
+        let id = StreamingQueryId {
+            query_id: uuid::Uuid::new_v4().to_string(),
+            run_id: uuid::Uuid::new_v4().to_string(),
+        };
+        let mut state = self.state.lock()?;
+        let query = StreamingQuery::new_continuous(
+            name,
+            info,
+            make_stream,
+            interval,
+            checkpoint_location,
+        );
+        state.streaming_queries.add_query(id.clone(), query);
+        Ok(id)
+    }
+
     pub(crate) fn stop_streaming_query(&self, id: &StreamingQueryId) -> SparkResult<()> {
         let mut state = self.state.lock()?;
         state.streaming_queries.stop_query(id)?;

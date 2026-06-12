@@ -23,6 +23,68 @@ pub struct StreamingQuery {
     awaitable: bool,
 }
 
+/// Produces a fresh (bounded) micro-batch stream by re-planning + executing the query — used
+/// for continuous (`ProcessingTime`) triggers, where each trigger is a fresh availableNow-style
+/// micro-batch that reuses the proven offset/state commit + recovery (Spark `MicroBatchExecution`
+/// re-plan model). See docs/design/streaming-file-source.md.
+pub type MakeStream = Box<
+    dyn Fn() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = SparkResult<SendableRecordBatchStream>> + Send>,
+        > + Send
+        + Sync,
+>;
+
+/// How `StreamingQuery::run` drives execution.
+enum StreamDriver {
+    /// `availableNow`/`once` (bounded): consume a single pre-built stream, then stop.
+    Once(SendableRecordBatchStream),
+    /// `ProcessingTime` (continuous): re-plan + execute a bounded micro-batch each `interval`,
+    /// committing after each, until stopped.
+    Continuous {
+        make_stream: MakeStream,
+        interval: Duration,
+    },
+}
+
+/// Consume one (bounded) micro-batch stream to completion. Writes the per-batch offset marker
+/// and returns whether it ran without error (the durability signal for committing offsets).
+async fn consume_stream(
+    mut stream: SendableRecordBatchStream,
+    offsets_dir: &Option<PathBuf>,
+    batch_id: &mut u64,
+    ui_id: &str,
+    error: &watch::Sender<Option<SparkThrowable>>,
+) -> bool {
+    let mut clean = true;
+    while let Some(x) = stream.next().await {
+        match x {
+            Ok(_) => {
+                if let Some(dir) = offsets_dir {
+                    let offset_file = dir.join(batch_id.to_string());
+                    let payload = format!(
+                        "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis())
+                            .unwrap_or(0)
+                    );
+                    if let Err(e) = std::fs::write(&offset_file, payload) {
+                        warn!("Failed to write checkpoint offset {batch_id}: {e}");
+                    }
+                }
+                web_ui::increment_batch(ui_id).await;
+                *batch_id += 1;
+            }
+            Err(e) => {
+                clean = false;
+                let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
+                let _ = error.send(Some(cause.into()));
+            }
+        }
+    }
+    clean
+}
+
 fn read_latest_batch_id(offsets_dir: &Path) -> Option<u64> {
     std::fs::read_dir(offsets_dir)
         .ok()?
@@ -38,6 +100,36 @@ impl StreamingQuery {
         name: String,
         info: Vec<StringifiedPlan>,
         stream: SendableRecordBatchStream,
+        checkpoint_location: Option<String>,
+    ) -> Self {
+        Self::spawn(name, info, StreamDriver::Once(stream), checkpoint_location)
+    }
+
+    /// Continuous (`ProcessingTime`) query: re-plan + execute a bounded micro-batch every
+    /// `interval`, committing after each (reusing the availableNow exactly-once + state
+    /// recovery), until stopped.
+    pub fn new_continuous(
+        name: String,
+        info: Vec<StringifiedPlan>,
+        make_stream: MakeStream,
+        interval: Duration,
+        checkpoint_location: Option<String>,
+    ) -> Self {
+        Self::spawn(
+            name,
+            info,
+            StreamDriver::Continuous {
+                make_stream,
+                interval,
+            },
+            checkpoint_location,
+        )
+    }
+
+    fn spawn(
+        name: String,
+        info: Vec<StringifiedPlan>,
+        driver: StreamDriver,
         checkpoint_location: Option<String>,
     ) -> Self {
         let initial_batch_id = checkpoint_location
@@ -68,7 +160,7 @@ impl StreamingQuery {
                 signal_rx,
                 error_tx,
                 stopped_tx,
-                stream,
+                driver,
                 checkpoint_location,
                 initial_batch_id,
                 ui_id_run,
@@ -108,7 +200,7 @@ impl StreamingQuery {
         signal: oneshot::Receiver<()>,
         error: watch::Sender<Option<SparkThrowable>>,
         stopped: watch::Sender<bool>,
-        mut stream: SendableRecordBatchStream,
+        driver: StreamDriver,
         checkpoint_location: Option<String>,
         initial_batch_id: u64,
         ui_id: String,
@@ -127,54 +219,66 @@ impl StreamingQuery {
             log::info!("Streaming checkpoint recovery: resuming from batch {initial_batch_id}");
         }
         let mut batch_id: u64 = initial_batch_id;
-        let ui_id_stop = ui_id.clone();
-        let commit_location = checkpoint_location.clone();
-        let task = async move {
-            // Whether the stream ran to completion without error — the durability signal
-            // for committing source offsets (exactly-once recovery).
-            let mut clean = true;
-            while let Some(x) = stream.next().await {
-                match x {
-                    Ok(_) => {
-                        if let Some(ref dir) = offsets_dir {
-                            let offset_file = dir.join(batch_id.to_string());
-                            let payload = format!(
-                                "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
-                                std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_millis())
-                                    .unwrap_or(0)
-                            );
-                            if let Err(e) = std::fs::write(&offset_file, payload) {
-                                warn!("Failed to write checkpoint offset {batch_id}: {e}");
+
+        match driver {
+            StreamDriver::Once(stream) => {
+                tokio::select! {
+                    _ = signal => {}
+                    clean = consume_stream(stream, &offsets_dir, &mut batch_id, &ui_id, &error) => {
+                        // The micro-batch completed (availableNow/once). If clean, the output is
+                        // durable, so commit the sources' staged offsets (write-ahead →
+                        // committed) — exactly-once recovery on the next run.
+                        if clean {
+                            if let Some(ref loc) = checkpoint_location {
+                                commit_source_offsets(loc);
                             }
                         }
-                        web_ui::increment_batch(&ui_id).await;
-                        batch_id += 1;
-                    }
-                    Err(e) => {
-                        clean = false;
-                        let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
-                        let _ = error.send(Some(cause.into()));
                     }
                 }
             }
-            clean
-        };
-        tokio::select! {
-            _ = signal => {}
-            clean = task => {
-                // The stream completed (e.g. availableNow/once). If it ran without error,
-                // the output is durable, so commit the sources' staged offsets
-                // (write-ahead → committed) — exactly-once recovery on the next run.
-                if clean {
-                    if let Some(ref loc) = commit_location {
-                        commit_source_offsets(loc);
+            StreamDriver::Continuous {
+                make_stream,
+                interval,
+            } => {
+                // Spark micro-batch model: each trigger is a fresh bounded micro-batch that
+                // re-plans (picking up new files) and reuses the availableNow commit + state
+                // recovery. Each micro-batch commits only after its output is durable (clean
+                // end), so a crash replays only the uncommitted micro-batch — exactly-once.
+                let mut signal = signal;
+                loop {
+                    let made = tokio::select! {
+                        _ = &mut signal => break,
+                        m = make_stream() => m,
+                    };
+                    let stream = match made {
+                        Ok(s) => s,
+                        Err(e) => {
+                            let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
+                            let _ = error.send(Some(cause.into()));
+                            break;
+                        }
+                    };
+                    let clean = tokio::select! {
+                        _ = &mut signal => break,
+                        c = consume_stream(stream, &offsets_dir, &mut batch_id, &ui_id, &error) => c,
+                    };
+                    if clean {
+                        if let Some(ref loc) = checkpoint_location {
+                            commit_source_offsets(loc);
+                        }
+                    } else {
+                        break; // error already reported
+                    }
+                    // Wait for the next trigger (interruptible by stop).
+                    tokio::select! {
+                        _ = &mut signal => break,
+                        _ = tokio::time::sleep(interval) => {}
                     }
                 }
             }
         }
-        web_ui::mark_stopped(&ui_id_stop).await;
+
+        web_ui::mark_stopped(&ui_id).await;
         let _ = stopped.send(true);
     }
 }

@@ -276,6 +276,29 @@ pub(crate) async fn handle_execute_sql_command(
     ))
 }
 
+/// Parse a Spark `processingTime` interval (e.g. "5 seconds", "1 second", "500 milliseconds",
+/// "2 minutes") into a `Duration`. Defaults to 1s if unparseable; never zero (avoids a busy loop).
+fn parse_processing_interval(s: &str) -> std::time::Duration {
+    let lower = s.trim().to_lowercase();
+    let mut parts = lower.split_whitespace();
+    let n: u64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(1);
+    let unit = parts.next().unwrap_or("seconds");
+    let d = if unit.starts_with("ms") || unit.starts_with("millisecond") {
+        std::time::Duration::from_millis(n)
+    } else if unit.starts_with("min") {
+        std::time::Duration::from_secs(n.saturating_mul(60))
+    } else if unit.starts_with("hour") || unit == "h" {
+        std::time::Duration::from_secs(n.saturating_mul(3600))
+    } else {
+        std::time::Duration::from_secs(n) // seconds (default)
+    };
+    if d.is_zero() {
+        std::time::Duration::from_millis(1)
+    } else {
+        d
+    }
+}
+
 pub(crate) async fn handle_execute_write_stream_operation_start(
     ctx: &SessionContext,
     start: WriteStreamOperationStart,
@@ -287,16 +310,55 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
     let reattachable = metadata.reattachable;
     let query_name = start.query_name.clone();
     let checkpoint_location = start.options.get("checkpointLocation").cloned();
-    // `availableNow`/`once` triggers request bounded execution: scan available data
-    // and terminate, rather than running continuously.
-    let bounded = matches!(
-        start.trigger,
-        Some(write_stream_operation_start::Trigger::AvailableNow(_))
-            | Some(write_stream_operation_start::Trigger::Once(_))
-    );
-    let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
-    let (plan, info) =
-        resolve_and_execute_plan_with_options(
+    // `availableNow`/`once` → bounded run-once. An explicit `processingTime` trigger →
+    // CONTINUOUS micro-batch execution: re-plan + run a fresh bounded micro-batch every
+    // interval (Spark `MicroBatchExecution` model), reusing the availableNow exactly-once +
+    // state recovery. The default (no trigger) keeps the existing continuous-dataflow path.
+    let processing_interval = match &start.trigger {
+        Some(write_stream_operation_start::Trigger::ProcessingTimeInterval(s)) => {
+            Some(parse_processing_interval(s))
+        }
+        _ => None,
+    };
+    let id = if let Some(interval) = processing_interval {
+        let config = spark.plan_config()?;
+        let ctx_owned = ctx.clone();
+        let start_owned = start.clone();
+        let cp = checkpoint_location.clone();
+        let make_stream: crate::streaming::MakeStream = Box::new(move || {
+            let ctx = ctx_owned.clone();
+            let config = config.clone();
+            let start = start_owned.clone();
+            let cp = cp.clone();
+            Box::pin(async move {
+                // Each trigger is a fresh availableNow-style bounded micro-batch (bounded=true):
+                // picks up new data, processes only what's uncommitted, commits on clean end.
+                let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
+                let (plan, _info) =
+                    resolve_and_execute_plan_with_options(&ctx, config, plan, true, cp).await?;
+                let stream = ctx
+                    .extension::<JobService>()?
+                    .runner()
+                    .execute(&ctx, plan)
+                    .await?;
+                Ok(stream)
+            })
+        });
+        spark.start_streaming_query_continuous(
+            query_name.clone(),
+            vec![],
+            make_stream,
+            interval,
+            checkpoint_location,
+        )?
+    } else {
+        let bounded = matches!(
+            start.trigger,
+            Some(write_stream_operation_start::Trigger::AvailableNow(_))
+                | Some(write_stream_operation_start::Trigger::Once(_))
+        );
+        let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
+        let (plan, info) = resolve_and_execute_plan_with_options(
             ctx,
             spark.plan_config()?,
             plan,
@@ -304,8 +366,9 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
             checkpoint_location.clone(),
         )
         .await?;
-    let stream = service.runner().execute(ctx, plan).await?;
-    let id = spark.start_streaming_query(query_name.clone(), info, stream, checkpoint_location)?;
+        let stream = service.runner().execute(ctx, plan).await?;
+        spark.start_streaming_query(query_name.clone(), info, stream, checkpoint_location)?
+    };
     let result = WriteStreamOperationStartResult {
         query_id: Some(id.into()),
         name: query_name,
