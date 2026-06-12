@@ -247,11 +247,20 @@ impl PlanResolver<'_> {
                 argument_display_names
             };
         let service = self.ctx.extension::<PlanService>()?;
-        let name = service.plan_formatter().function_to_string(
-            &function_name,
-            argument_display_names.iter().map(|x| x.as_str()).collect(),
-            is_distinct,
-        )?;
+        // `window`/`session_window` produce a struct column that Spark names exactly `window`/
+        // `session_window` (so `df.window.start` / `SELECT window.start` resolve), not the call
+        // display `window(ts, 1 second)`. Preserve the Spark column name.
+        let name = if canonical_function_name == "window"
+            || canonical_function_name == "session_window"
+        {
+            canonical_function_name.clone()
+        } else {
+            service.plan_formatter().function_to_string(
+                &function_name,
+                argument_display_names.iter().map(|x| x.as_str()).collect(),
+                is_distinct,
+            )?
+        };
 
         // Extract metadata from UDF if it implements return_field_from_args
         let metadata = if let expr::Expr::ScalarFunction(ScalarFunction {
