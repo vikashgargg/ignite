@@ -36,9 +36,9 @@ benchmark is possible:
 1. **No file-source streaming** — `spark.readStream.parquet(...)` fails with *"streaming
    query must write data to a sink"*. Only `rate`/Kafka sources work today. **Blocks**
    file-based streaming ETL (and the clean bounded-file throughput method). **P1.**
-2. **`SELECT window.start` in SQL** over a windowed result fails (*"attribute window.start
-   missing from the schema"*) — the window struct is accessible via the DataFrame API but
-   not via that SQL path. **P2.**
+2. ~~**`SELECT window.start` in SQL** fails~~ — **FIXED (2026-06-12):** the windowed-agg
+   struct column is now named `window` (Spark convention) instead of the call display, so
+   `window.start` resolves via SQL and DataFrame (batch + streaming).
 3. **No `recentProgress.processedRowsPerSecond`** over Spark Connect — streaming progress
    metrics aren't exposed, so throughput/lag can't be read the Spark way. **P2.**
 4. ~~**Container binds `127.0.0.1`**~~ — **CORRECTED (not a defect):** the image's
