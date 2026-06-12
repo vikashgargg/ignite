@@ -54,6 +54,9 @@ pub struct FileStreamSource {
     listing_options: ListingOptions,
     schema: SchemaRef,
     constraints: Constraints,
+    /// `maxFilesPerTrigger`: cap new files processed per micro-batch (backpressure). The rest
+    /// are picked up by later triggers. `None` = no cap (Spark default).
+    max_files_per_trigger: Option<usize>,
 }
 
 impl FileStreamSource {
@@ -62,12 +65,14 @@ impl FileStreamSource {
         listing_options: ListingOptions,
         schema: SchemaRef,
         constraints: Constraints,
+        max_files_per_trigger: Option<usize>,
     ) -> Self {
         Self {
             urls,
             listing_options,
             schema,
             constraints,
+            max_files_per_trigger,
         }
     }
 }
@@ -84,43 +89,49 @@ impl StreamSource for FileStreamSource {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
-        bounded: bool,
+        // The file source behaves the same per micro-batch; continuous (`ProcessingTime`) is
+        // driven by the runner re-plan loop, so `bounded` is not needed here.
+        _bounded: bool,
         checkpoint_location: Option<&str>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        if !bounded {
-            log::warn!(
-                "streaming file source: processing currently-available files once; \
-                 continuous new-file polling is not yet implemented — use trigger(availableNow=True)"
-            );
-        }
-
         // Already-committed files (cross-run exactly-once: never reprocess these).
         let seen: HashSet<String> = checkpoint_location
             .map(read_committed_files)
             .unwrap_or_default();
-        // `processed` accumulates seen ∪ new, keyed by the store-relative object path
+        // Collect NEW files (not yet committed), with mod time, for deterministic ordering +
+        // `maxFilesPerTrigger` backpressure. Identifier = the store-relative object path
         // (stable across runs and object stores).
-        let mut processed = seen;
-        let mut new_urls: Vec<ListingTableUrl> = vec![];
+        let mut new_files: Vec<(chrono::DateTime<chrono::Utc>, String, ListingTableUrl)> = vec![];
         for base in &self.urls {
             let store = state.runtime_env().object_store(base)?;
             let mut files = base.list_all_files(state, store.as_ref(), "").await?;
             while let Some(meta) = files.next().await {
                 let meta = meta?;
                 let id = meta.location.as_ref().to_string();
-                if processed.insert(id) {
+                if !seen.contains(&id) {
                     // Reconstruct a full URL store-agnostically: base scheme+authority + the
                     // object path (works for file://, s3://, gs://, …).
                     let mut prefix = base.object_store().as_str().to_string();
                     if !prefix.ends_with('/') {
                         prefix.push('/');
                     }
-                    new_urls.push(ListingTableUrl::parse(format!(
-                        "{prefix}{}",
-                        meta.location.as_ref()
-                    ))?);
+                    let url = ListingTableUrl::parse(format!("{prefix}{}", meta.location.as_ref()))?;
+                    new_files.push((meta.last_modified, id, url));
                 }
             }
+        }
+        // Deterministic FIFO: oldest files first (Spark `latestFirst=false` default), tie-broken
+        // by path — so `maxFilesPerTrigger` takes a stable prefix and later triggers continue.
+        new_files.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        if let Some(max) = self.max_files_per_trigger {
+            new_files.truncate(max);
+        }
+        // `processed` = committed ∪ the files taken this micro-batch (only these get committed).
+        let mut processed = seen;
+        let mut new_urls: Vec<ListingTableUrl> = Vec::with_capacity(new_files.len());
+        for (_, id, url) in new_files {
+            processed.insert(id);
+            new_urls.push(url);
         }
 
         let data_plan: Arc<dyn ExecutionPlan> = if new_urls.is_empty() {

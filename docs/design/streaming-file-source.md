@@ -14,7 +14,7 @@ file/row-group splits) + Vajra's flow-event streaming.
 | **Cross-run exactly-once** (processed-files log) | ✅ **done** | re-run processes 0 new; add-files → only new; WAL commit verified |
 | **Continuous new-file polling** | ✅ **done (prod-grade)** | `ProcessingTime` trigger → micro-batch re-plan loop; SIGKILL-mid-continuous crash-EO verified (no loss/dup) |
 | Schema evolution / merge | ⬜ future | |
-| `maxFilesPerTrigger` backpressure | ⬜ future | |
+| `maxFilesPerTrigger` backpressure | ✅ **done** | cap new files/micro-batch (FIFO by mod-time), backlog drained in slices; verified 8 files @2/trigger → no loss/dup |
 
 ## Reference design
 - **Spark `FileStreamSource`**: a per-source **metadata log** (`<ck>/sources/<id>/`) records,

@@ -124,6 +124,22 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             is_streaming,
         } = info;
 
+        // `maxFilesPerTrigger` (streaming backpressure): cap new files per micro-batch.
+        // Read by reference (latest layer/item wins) before `options` is consumed below.
+        let max_files_per_trigger: Option<usize> = if is_streaming {
+            options.iter().rev().find_map(|layer| match layer {
+                OptionLayer::OptionList { items } | OptionLayer::TablePropertyList { items } => {
+                    items
+                        .iter()
+                        .rev()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("maxFilesPerTrigger"))
+                        .and_then(|(_, v)| v.parse::<usize>().ok())
+                }
+                _ => None,
+            })
+        } else {
+            None
+        };
         let read_format = T::read(ctx, options)?;
         let urls = crate::url::resolve_listing_urls(ctx, paths).await?;
         let file_format = read_format.create_read_format(None)?;
@@ -235,6 +251,7 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                         listing_options,
                         schema,
                         constraints,
+                        max_files_per_trigger,
                     ),
                 )),
             )));
