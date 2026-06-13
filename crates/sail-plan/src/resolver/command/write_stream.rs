@@ -145,6 +145,13 @@ impl PlanResolver<'_> {
                 transform: None,
             })
             .collect();
+        // The checkpoint location enables the `_spark_metadata` sink-side exactly-once commit
+        // log (file/path sinks only). Passed to the file writer via a reserved option, which it
+        // strips. See `sail_data_source::streaming_sink_log`.
+        let checkpoint = options
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("checkpointLocation"))
+            .map(|(_, v)| v.clone());
         let mut builder = WritePlanBuilder::new()
             .with_partition_by(partition_by)
             .with_cluster_by(clustering_columns)
@@ -153,14 +160,23 @@ impl PlanResolver<'_> {
             .with_mode(WriteMode::Append {
                 error_if_absent: false,
             });
+        let enable_commit_log = |builder: WritePlanBuilder| match &checkpoint {
+            Some(cp) => builder.with_options(vec![(
+                sail_common_datafusion::datasource::STREAM_CHECKPOINT_OPTION.to_string(),
+                cp.clone(),
+            )]),
+            None => builder,
+        };
         match sink_destination {
             None => {
-                builder = builder.with_target(WriteTarget::DataSource);
+                builder = enable_commit_log(builder.with_target(WriteTarget::DataSource));
             }
             Some(WriteStreamSinkDestination::Path { path }) => {
-                builder = builder
-                    .with_target(WriteTarget::DataSource)
-                    .with_options(vec![("path".to_string(), path)]);
+                builder = enable_commit_log(
+                    builder
+                        .with_target(WriteTarget::DataSource)
+                        .with_options(vec![("path".to_string(), path)]),
+                );
             }
             Some(WriteStreamSinkDestination::Table { table }) => {
                 builder = builder.with_target(WriteTarget::Table {

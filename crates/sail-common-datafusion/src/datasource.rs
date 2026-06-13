@@ -242,6 +242,24 @@ pub fn find_path_in_options(options: &[OptionLayer]) -> Option<String> {
     find("path").or_else(|| find("location"))
 }
 
+/// Reserved sink option carrying the streaming checkpoint location to the file writer. Its
+/// presence enables the `_spark_metadata` sink-side exactly-once commit log (see
+/// `sail_data_source::streaming_sink_log`). Stripped before options reach the format writer.
+pub const STREAM_CHECKPOINT_OPTION: &str = "__vajra_stream_checkpoint";
+
+/// Extract (and remove) a reserved option key from the option layers, returning its value if any.
+pub fn take_option(options: &mut [OptionLayer], key: &str) -> Option<String> {
+    let mut found = None;
+    for layer in options.iter_mut() {
+        if let OptionLayer::OptionList { items } = layer {
+            if let Some(pos) = items.iter().position(|(k, _)| k.eq_ignore_ascii_case(key)) {
+                found = Some(items.remove(pos).1);
+            }
+        }
+    }
+    found
+}
+
 /// The kind of row-level DML command being executed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RowLevelCommand {

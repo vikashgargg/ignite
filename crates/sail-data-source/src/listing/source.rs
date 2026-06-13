@@ -7,14 +7,16 @@ use async_trait::async_trait;
 use datafusion::arrow::datatypes::{DataType, Schema};
 use datafusion::catalog::Session;
 use datafusion::datasource::file_format::FileFormat;
-use datafusion::datasource::listing::{ListingOptions, ListingTable, ListingTableConfig};
+use datafusion::datasource::listing::{
+    ListingOptions, ListingTable, ListingTableConfig, ListingTableUrl,
+};
 use datafusion::datasource::physical_plan::{FileOutputMode, FileSinkConfig};
 use datafusion::datasource::provider_as_source;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::TableSource;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_common::parsers::CompressionTypeVariant;
-use datafusion_common::{internal_err, not_impl_err, plan_err, GetExt, Result};
+use datafusion_common::{internal_err, not_impl_err, plan_err, DataFusionError, GetExt, Result};
 use datafusion_datasource::file_compression_type::FileCompressionType;
 use sail_common_datafusion::datasource::{
     find_path_in_options, get_partition_columns_and_file_schema, OptionLayer, SinkInfo, SourceInfo,
@@ -257,7 +259,14 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             )));
         }
 
-        let config = ListingTableConfig::new_with_multi_paths(urls);
+        // Sink-side exactly-once: honor a `_spark_metadata` commit log if present, reading only
+        // committed files (explicit file URLs) instead of listing the directory (which would
+        // expose orphan/partial files from a crashed-then-retried micro-batch).
+        let batch_urls = match committed_urls_if_logged(ctx, &urls).await? {
+            Some(committed) => committed,
+            None => urls,
+        };
+        let config = ListingTableConfig::new_with_multi_paths(batch_urls);
         let config = if listing_options.table_partition_cols.is_empty() {
             config
                 .with_listing_options(listing_options)
@@ -291,10 +300,17 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             partition_by,
             bucket_by,
             sort_order,
-            options,
+            mut options,
             logical_schema: _,
             declared_schema: _,
         } = info;
+        // Sink-side exactly-once: a streaming file write with a checkpoint location uses the
+        // `_spark_metadata` commit log. The reserved option is consumed here (stripped before the
+        // format writer sees it). See `crate::streaming_sink_log`.
+        let commit_log_checkpoint = sail_common_datafusion::datasource::take_option(
+            &mut options,
+            sail_common_datafusion::datasource::STREAM_CHECKPOINT_OPTION,
+        );
         // Streaming write: the input is a flow-event stream. Decode it to a plain data
         // stream (skip markers, strip flow-event fields) so the normal file writer can
         // durably persist it (durable streaming sink — see docs/design/streaming-exactly-once.md).
@@ -365,17 +381,55 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                 ext
             }
         };
+        // With the commit log enabled, this batch's data files go into a per-batch subdirectory
+        // `<base>/<batchId>/` so committing only needs to list that bounded subdir; the commit
+        // log itself lives at `<base>/_spark_metadata`. `batch_id` is derived from the same
+        // checkpoint offset log the streaming driver uses, so the two stay in lockstep.
+        let commit_ctx: Option<(u64, object_store::path::Path)> = match &commit_log_checkpoint {
+            Some(cp) if streaming => {
+                let batch_id = next_batch_id(cp);
+                let base_store_path = table_paths
+                    .first()
+                    .map(|u| u.prefix().clone())
+                    .unwrap_or_default();
+                Some((batch_id, base_store_path))
+            }
+            _ => None,
+        };
+        let (sink_original_url, sink_table_paths) = match &commit_ctx {
+            Some((batch_id, _)) => {
+                let sub = format!("{path}{batch_id}{}", object_store::path::DELIMITER);
+                let tp = crate::url::resolve_listing_urls(ctx, vec![sub.clone()]).await?;
+                (sub, tp)
+            }
+            None => (path.clone(), table_paths.clone()),
+        };
         let conf = FileSinkConfig {
-            original_url: path,
-            object_store_url,
+            original_url: sink_original_url,
+            object_store_url: object_store_url.clone(),
             file_group: Default::default(),
-            table_paths,
+            table_paths: sink_table_paths,
             output_schema: input.schema(),
             table_partition_cols,
             insert_op: InsertOp::Append,
             keep_partition_by_columns: false,
             file_extension,
             file_output_mode: FileOutputMode::Automatic,
+        };
+        // Wrap a finished streaming write pipeline in the commit-log exec when enabled, else adapt
+        // to the empty-schema completion stream the streaming driver expects.
+        let finalize = |writer: Arc<dyn ExecutionPlan>| -> Arc<dyn ExecutionPlan> {
+            match &commit_ctx {
+                Some((batch_id, base)) => Arc::new(
+                    crate::streaming_decode::StreamingSinkCommitExec::new(
+                        writer,
+                        object_store_url.clone(),
+                        base.clone(),
+                        *batch_id,
+                    ),
+                ),
+                None => Arc::new(crate::streaming_decode::EmptySinkAdapterExec::new(writer)),
+            }
         };
         // Parallel streaming write: fan the N-partition flow-event source into N independent
         // single-partition sinks (one file per source partition), driven concurrently. This
@@ -394,9 +448,8 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                     .await?;
                 children.push(sink_i);
             }
-            return Ok(Arc::new(
-                crate::streaming_decode::ParallelStreamSinkExec::new(children),
-            ));
+            let parallel = Arc::new(crate::streaming_decode::ParallelStreamSinkExec::new(children));
+            return Ok(finalize(parallel));
         }
         let writer = format
             .create_writer_physical_plan(input, ctx, conf, sort_order)
@@ -404,11 +457,60 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         if streaming {
             // The streaming-query sink contract expects an empty-schema output; the file
             // writer emits a count row. Adapt it (draining triggers the durable writes).
-            Ok(Arc::new(crate::streaming_decode::EmptySinkAdapterExec::new(
-                writer,
-            )))
+            Ok(finalize(writer))
         } else {
             Ok(writer)
         }
     }
+}
+
+/// The next micro-batch id for a streaming query, derived from its committed offset log at
+/// `<checkpoint>/offsets` — the same convention the streaming driver uses, so the sink's commit
+/// log and the driver's offset/state commit stay in lockstep. Returns 0 when no batch has been
+/// committed yet.
+fn next_batch_id(checkpoint: &str) -> u64 {
+    let dir = std::path::Path::new(checkpoint).join("offsets");
+    std::fs::read_dir(&dir)
+        .ok()
+        .and_then(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().to_str().and_then(|s| s.parse::<u64>().ok()))
+                .max()
+        })
+        .map(|m| m + 1)
+        .unwrap_or(0)
+}
+
+/// Sink-side exactly-once on the read path: if any `base` directory carries a `_spark_metadata`
+/// commit log, expand it to the explicit set of **committed** output files (reconstructing full
+/// URLs store-agnostically, like the streaming file source), so the reader sees only committed
+/// data and never the orphan/partial files of a crashed-then-retried micro-batch. Returns `None`
+/// when no base is governed by a commit log (the caller then lists directories as usual).
+async fn committed_urls_if_logged(
+    ctx: &dyn Session,
+    base_urls: &[ListingTableUrl],
+) -> Result<Option<Vec<ListingTableUrl>>> {
+    let mut out: Vec<ListingTableUrl> = vec![];
+    let mut any_logged = false;
+    for base in base_urls {
+        let store = ctx.runtime_env().object_store(base)?;
+        let base_path = base.prefix().clone();
+        let committed = crate::streaming_sink_log::read_committed_files(&store, &base_path)
+            .await
+            .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+        match committed {
+            Some(rel_paths) => {
+                any_logged = true;
+                let mut prefix = base.object_store().as_str().to_string();
+                if !prefix.ends_with('/') {
+                    prefix.push('/');
+                }
+                for p in rel_paths {
+                    out.push(ListingTableUrl::parse(format!("{prefix}{}", p.as_ref()))?);
+                }
+            }
+            None => out.push(base.clone()),
+        }
+    }
+    Ok(any_logged.then_some(out))
 }

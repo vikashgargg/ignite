@@ -104,17 +104,39 @@ impl StreamSource for FileStreamSource {
         let mut new_files: Vec<(chrono::DateTime<chrono::Utc>, String, ListingTableUrl)> = vec![];
         for base in &self.urls {
             let store = state.runtime_env().object_store(base)?;
+            // Reconstruct a full URL store-agnostically: base scheme+authority + the object path
+            // (works for file://, s3://, gs://, …).
+            let mut prefix = base.object_store().as_str().to_string();
+            if !prefix.ends_with('/') {
+                prefix.push('/');
+            }
+            // If the input directory is itself the output of a streaming file sink, honor its
+            // `_spark_metadata` commit log: the available files are exactly the committed ones
+            // (orphan/partial files of a crashed batch are invisible). Newly committed batches
+            // appear in later triggers. Otherwise fall back to plain directory listing.
+            let committed = crate::streaming_sink_log::read_committed_with_mtime(
+                &store,
+                &base.prefix().clone(),
+            )
+            .await
+            .map_err(|e| datafusion_common::DataFusionError::ObjectStore(Box::new(e)))?;
+            if let Some(committed) = committed {
+                for (rel, mtime_ms) in committed {
+                    let id = rel.as_ref().to_string();
+                    if !seen.contains(&id) {
+                        let url = ListingTableUrl::parse(format!("{prefix}{}", rel.as_ref()))?;
+                        let mtime = chrono::DateTime::from_timestamp_millis(mtime_ms)
+                            .unwrap_or_default();
+                        new_files.push((mtime, id, url));
+                    }
+                }
+                continue;
+            }
             let mut files = base.list_all_files(state, store.as_ref(), "").await?;
             while let Some(meta) = files.next().await {
                 let meta = meta?;
                 let id = meta.location.as_ref().to_string();
                 if !seen.contains(&id) {
-                    // Reconstruct a full URL store-agnostically: base scheme+authority + the
-                    // object path (works for file://, s3://, gs://, …).
-                    let mut prefix = base.object_store().as_str().to_string();
-                    if !prefix.ends_with('/') {
-                        prefix.push('/');
-                    }
                     let url = ListingTableUrl::parse(format!("{prefix}{}", meta.location.as_ref()))?;
                     new_files.push((meta.last_modified, id, url));
                 }

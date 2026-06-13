@@ -75,7 +75,7 @@ impl SinkFileStatus {
 
 /// `<base>/_spark_metadata`
 fn metadata_dir(base: &StorePath) -> StorePath {
-    base.child(METADATA_DIR)
+    base.clone().join(METADATA_DIR)
 }
 
 /// `<base>/_spark_metadata/<batch_id>[.compact]`
@@ -85,7 +85,7 @@ fn batch_file(base: &StorePath, batch_id: u64, compact: bool) -> StorePath {
     } else {
         batch_id.to_string()
     };
-    metadata_dir(base).child(name)
+    metadata_dir(base).join(name)
 }
 
 /// Serialize a metadata file body: the `v1` header then one JSON [`SinkFileStatus`] per line.
@@ -117,6 +117,46 @@ pub async fn has_metadata_log(
     Ok(listing.next().await.transpose()?.is_some())
 }
 
+/// `<base>/<batch_id>` — the per-batch data subdirectory.
+fn batch_dir(base: &StorePath, batch_id: u64) -> StorePath {
+    base.clone().join(batch_id.to_string())
+}
+
+/// Remove every file under `<base>/<batch_id>/`. Called before (re)writing a batch so a retried
+/// batch starts from a clean subdirectory: orphan files from a crashed earlier attempt of the
+/// *same* batch are deleted before the (idempotent) metadata commit lists the directory.
+pub async fn clean_batch_dir(
+    store: &Arc<dyn ObjectStore>,
+    base: &StorePath,
+    batch_id: u64,
+) -> object_store::Result<()> {
+    let prefix = batch_dir(base, batch_id);
+    let mut listing = store.list(Some(&prefix));
+    let mut paths = vec![];
+    while let Some(meta) = listing.next().await.transpose()? {
+        paths.push(meta.location);
+    }
+    for p in paths {
+        store.delete(&p).await?;
+    }
+    Ok(())
+}
+
+/// List the data files a batch wrote — the contents of `<base>/<batch_id>/`.
+pub async fn list_batch_files(
+    store: &Arc<dyn ObjectStore>,
+    base: &StorePath,
+    batch_id: u64,
+) -> object_store::Result<Vec<ObjectMeta>> {
+    let prefix = batch_dir(base, batch_id);
+    let mut listing = store.list(Some(&prefix));
+    let mut out = vec![];
+    while let Some(meta) = listing.next().await.transpose()? {
+        out.push(meta);
+    }
+    Ok(out)
+}
+
 /// Commit micro-batch `batch_id` by atomically writing its metadata file. `metas` are the output
 /// files the batch wrote (typically the contents of `<base>/<batch_id>/`). This single atomic
 /// write is the commit point: until it lands, the batch is uncommitted and its files are orphan.
@@ -130,7 +170,7 @@ pub async fn commit_batch(
     metas: &[ObjectMeta],
 ) -> object_store::Result<()> {
     let adds: Vec<SinkFileStatus> = metas.iter().map(SinkFileStatus::add).collect();
-    let is_compaction = (batch_id + 1) % COMPACT_INTERVAL == 0;
+    let is_compaction = (batch_id + 1).is_multiple_of(COMPACT_INTERVAL);
     let (target, entries) = if is_compaction {
         // Roll the prior live set forward with this batch's adds into a single compact file.
         let mut live = read_live_entries(store, base, Some(batch_id)).await?;
@@ -215,6 +255,25 @@ pub async fn read_committed_files(
     ))
 }
 
+/// Like [`read_committed_files`] but pairs each committed file with its recorded modification
+/// time (epoch ms) — for the streaming file *source* to read another stream's committed output
+/// in deterministic file order (FIFO) while picking up newly committed batches each trigger.
+pub async fn read_committed_with_mtime(
+    store: &Arc<dyn ObjectStore>,
+    base: &StorePath,
+) -> object_store::Result<Option<Vec<(StorePath, i64)>>> {
+    if !has_metadata_log(store, base).await? {
+        return Ok(None);
+    }
+    let live = read_live_entries(store, base, None).await?;
+    Ok(Some(
+        live.into_iter()
+            .map(|e| (StorePath::from(e.path), e.modification_time))
+            .collect(),
+    ))
+}
+
+#[expect(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use object_store::memory::InMemory;

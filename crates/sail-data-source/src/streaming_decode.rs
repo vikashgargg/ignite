@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch};
 use datafusion::arrow::datatypes::{Schema, SchemaRef};
+use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
@@ -20,6 +21,7 @@ use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{internal_err, plan_err, DataFusionError, Result};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use object_store::path::Path as StorePath;
 use sail_common_datafusion::streaming::event::schema::{
     try_from_flow_event_schema, MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
 };
@@ -371,6 +373,133 @@ impl ExecutionPlan for ParallelStreamSinkExec {
                         return;
                     }
                 }
+            }
+            yield Ok(RecordBatch::new_empty(empty_out.clone()));
+        };
+        Ok(Box::pin(RecordBatchStreamAdapter::new(empty, out)))
+    }
+}
+
+/// Sink-side exactly-once commit wrapper. Its child is the streaming file write pipeline,
+/// configured to write its data into the per-batch subdirectory `<base>/<batch_id>/`. On
+/// execute it:
+///   1. cleans `<base>/<batch_id>/` (idempotent retry: removes orphan files from a crashed
+///      earlier attempt of this same batch);
+///   2. drains the child to completion (all writes durable);
+///   3. lists the per-batch subdirectory and atomically writes the `_spark_metadata/<batch_id>`
+///      commit log — the commit point that makes the batch's output visible to readers.
+///
+/// A crash before step 3 leaves the batch uncommitted (no metadata file); on restart the source
+/// replays it, step 1 wipes the partial output, and the metadata write is idempotent. This is
+/// Vajra's `FileStreamSink.addBatch`. See `crate::streaming_sink_log`.
+#[derive(Debug)]
+pub struct StreamingSinkCommitExec {
+    input: Arc<dyn ExecutionPlan>,
+    object_store_url: ObjectStoreUrl,
+    base: StorePath,
+    batch_id: u64,
+    properties: Arc<PlanProperties>,
+}
+
+impl StreamingSinkCommitExec {
+    pub fn new(
+        input: Arc<dyn ExecutionPlan>,
+        object_store_url: ObjectStoreUrl,
+        base: StorePath,
+        batch_id: u64,
+    ) -> Self {
+        let empty = Arc::new(Schema::empty());
+        let properties = Arc::new(PlanProperties::new(
+            EquivalenceProperties::new(empty),
+            Partitioning::UnknownPartitioning(1),
+            EmissionType::Both,
+            input.properties().boundedness,
+        ));
+        Self {
+            input,
+            object_store_url,
+            base,
+            batch_id,
+            properties,
+        }
+    }
+}
+
+impl DisplayAs for StreamingSinkCommitExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "StreamingSinkCommitExec: batch_id={}", self.batch_id)
+    }
+}
+
+impl ExecutionPlan for StreamingSinkCommitExec {
+    fn name(&self) -> &str {
+        "StreamingSinkCommitExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if children.len() != 1 {
+            return plan_err!("StreamingSinkCommitExec requires exactly one child");
+        }
+        Ok(Arc::new(StreamingSinkCommitExec::new(
+            children.remove(0),
+            self.object_store_url.clone(),
+            self.base.clone(),
+            self.batch_id,
+        )))
+    }
+
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        if partition != 0 {
+            return internal_err!("StreamingSinkCommitExec: invalid partition {partition}");
+        }
+        let store = context.runtime_env().object_store(&self.object_store_url)?;
+        let input = Arc::clone(&self.input);
+        let base = self.base.clone();
+        let batch_id = self.batch_id;
+        let ctx = context.clone();
+        let empty = Arc::new(Schema::empty());
+        let empty_out = empty.clone();
+        let out = async_stream::stream! {
+            // 1. Clean the per-batch subdir before any write (idempotent retry).
+            if let Err(e) = crate::streaming_sink_log::clean_batch_dir(&store, &base, batch_id).await {
+                yield Err(e.into());
+                return;
+            }
+            // 2. Drain the child write pipeline to completion (writes become durable).
+            let mut input_stream = match input.execute(0, ctx) {
+                Ok(s) => s,
+                Err(e) => { yield Err(e); return; }
+            };
+            while let Some(item) = input_stream.next().await {
+                if let Err(e) = item { yield Err(e); return; }
+            }
+            // 3. List what the batch wrote and atomically commit the metadata log.
+            let metas = match crate::streaming_sink_log::list_batch_files(&store, &base, batch_id).await {
+                Ok(m) => m,
+                Err(e) => { yield Err(e.into()); return; }
+            };
+            if let Err(e) = crate::streaming_sink_log::commit_batch(&store, &base, batch_id, &metas).await {
+                yield Err(e.into());
+                return;
             }
             yield Ok(RecordBatch::new_empty(empty_out.clone()));
         };

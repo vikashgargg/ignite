@@ -117,6 +117,15 @@ fn progress_json(
 
 /// Consume one (bounded) micro-batch stream to completion. Writes the per-batch offset marker
 /// and returns whether it ran without error (the durability signal for committing offsets).
+///
+/// Crash-recovery note: the sink-side `_spark_metadata` commit log closes the dominant duplicate
+/// windows — a crash during or just after the output write replays batch N, which idempotently
+/// overwrites `<out>/<N>/` + `_spark_metadata/<N>` (see `sail_data_source::streaming_sink_log`).
+/// One residual micro-window remains (crash in the gap between writing this marker and promoting
+/// the source offsets): the replay is then numbered N+1 and could duplicate. Closing it requires
+/// a write-ahead per-batch source-range log with range-based replay (Spark `MicroBatchExecution`'s
+/// offset/commit WAL) — tracked in docs/STREAMING.md. Reordering the marker alone only trades the
+/// duplicate for a silent-loss window, so it is intentionally left as-is.
 async fn consume_stream(
     mut stream: SendableRecordBatchStream,
     offsets_dir: &Option<PathBuf>,
