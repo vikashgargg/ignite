@@ -28,6 +28,9 @@ parquet-variant-compute = { workspace = true }
 parquet-variant-json = { workspace = true }
 tokio = { workspace = true }
 serde_arrow = { workspace = true }
+object_store = { workspace = true }
+url = { workspace = true }
+bytes = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

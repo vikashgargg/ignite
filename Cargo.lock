@@ -7204,6 +7204,7 @@ name = "sail-common-datafusion"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "chrono",
  "datafusion",
  "datafusion-common",
@@ -7212,6 +7213,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "lexical-core",
+ "object_store",
  "parquet-variant-compute",
  "parquet-variant-json",
  "pin-project-lite",
@@ -7231,6 +7233,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-prost-build",
+ "url",
 ]
 
 [[package]]
