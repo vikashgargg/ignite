@@ -112,7 +112,8 @@ pub async fn bootstrap_new_table(
     )
     .with_bootstrap(true)
     .with_row_lineage_start_row_id(row_lineage_start_row_id)
-    .with_write_path_mode(WritePathMode::Absolute);
+    .with_write_path_mode(WritePathMode::Absolute)
+    .with_snapshot_properties(commit_info.snapshot_properties.clone());
 
     let action_commit = producer
         .commit(BootstrapOperation)
@@ -266,7 +267,8 @@ pub async fn bootstrap_first_snapshot(
     )
     .with_bootstrap(true)
     .with_row_lineage_start_row_id(row_lineage_start_row_id)
-    .with_write_path_mode(WritePathMode::Absolute);
+    .with_write_path_mode(WritePathMode::Absolute)
+    .with_snapshot_properties(commit_info.snapshot_properties.clone());
 
     let action_commit = producer
         .commit(BootstrapOperation)

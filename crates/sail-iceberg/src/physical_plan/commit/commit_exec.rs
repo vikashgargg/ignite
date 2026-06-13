@@ -53,15 +53,40 @@ use crate::utils::get_object_store_from_context;
 use crate::utils::metadata::metadata_files_for_version;
 const MAX_COMMIT_RETRIES: usize = 5;
 
+/// Snapshot-summary key recording the streaming micro-batch id committed by this snapshot, and
+/// the owning query's app id. Used for idempotent exactly-once streaming commits: a replayed
+/// batch whose id is `<=` the table's last committed id (for the same app) is skipped. Mirrors
+/// Flink's `flink.max-committed-checkpoint-id` / Spark Iceberg streaming committer.
+pub const STREAM_BATCH_ID_PROP: &str = "vajra.streaming.batch-id";
+pub const STREAM_APP_ID_PROP: &str = "vajra.streaming.app-id";
+
+/// Identifies a streaming micro-batch commit for idempotent exactly-once.
+#[derive(Debug, Clone)]
+pub struct StreamingCommit {
+    pub batch_id: u64,
+    pub app_id: String,
+}
+
 #[derive(Debug)]
 pub struct IcebergCommitExec {
     input: Arc<dyn ExecutionPlan>,
     table_url: Url,
+    /// When set, this commit is a streaming micro-batch: record `batch_id` in the snapshot summary
+    /// and skip the commit if that batch was already committed (idempotent replay).
+    streaming_commit: Option<StreamingCommit>,
     cache: Arc<PlanProperties>,
 }
 
 impl IcebergCommitExec {
     pub fn new(input: Arc<dyn ExecutionPlan>, table_url: Url) -> Self {
+        Self::new_with_streaming(input, table_url, None)
+    }
+
+    pub fn new_with_streaming(
+        input: Arc<dyn ExecutionPlan>,
+        table_url: Url,
+        streaming_commit: Option<StreamingCommit>,
+    ) -> Self {
         let schema = Arc::new(Schema::new(vec![Field::new(
             "count",
             DataType::UInt64,
@@ -76,8 +101,21 @@ impl IcebergCommitExec {
         Self {
             input,
             table_url,
+            streaming_commit,
             cache,
         }
+    }
+
+    /// Read the last committed streaming batch id for `app_id` from a snapshot summary.
+    fn committed_batch_id(summary: &crate::spec::snapshots::Summary, app_id: &str) -> Option<u64> {
+        if summary.additional_properties.get(STREAM_APP_ID_PROP).map(String::as_str) != Some(app_id)
+        {
+            return None;
+        }
+        summary
+            .additional_properties
+            .get(STREAM_BATCH_ID_PROP)
+            .and_then(|v| v.parse::<u64>().ok())
     }
 
     pub fn table_url(&self) -> &Url {
@@ -238,9 +276,10 @@ impl ExecutionPlan for IcebergCommitExec {
         if children.len() != 1 {
             return internal_err!("IcebergCommitExec requires exactly one child");
         }
-        Ok(Arc::new(Self::new(
+        Ok(Arc::new(Self::new_with_streaming(
             Arc::clone(&children[0]),
             self.table_url.clone(),
+            self.streaming_commit.clone(),
         )))
     }
 
@@ -264,6 +303,7 @@ impl ExecutionPlan for IcebergCommitExec {
 
         let table_url = self.table_url.clone();
         let schema = self.schema();
+        let streaming_commit = self.streaming_commit.clone();
         let future = async move {
             let object_store = get_object_store_from_context(&context, &table_url)?;
             let store_ctx = StoreContext::new(object_store.clone(), &table_url)?;
@@ -297,6 +337,14 @@ impl ExecutionPlan for IcebergCommitExec {
                 )
             })?;
 
+            // Record the streaming micro-batch id in the snapshot summary so a replayed batch can
+            // be recognized and skipped (idempotent exactly-once).
+            let mut snapshot_properties = std::collections::HashMap::new();
+            if let Some(sc) = &streaming_commit {
+                snapshot_properties.insert(STREAM_BATCH_ID_PROP.to_string(), sc.batch_id.to_string());
+                snapshot_properties.insert(STREAM_APP_ID_PROP.to_string(), sc.app_id.clone());
+            }
+
             let commit_info = IcebergCommitInfo {
                 table_uri: commit_meta.table_uri,
                 row_count: commit_meta.row_count,
@@ -309,6 +357,7 @@ impl ExecutionPlan for IcebergCommitExec {
                 operation: commit_meta.operation,
                 schema: commit_meta.schema,
                 partition_spec: commit_meta.partition_spec,
+                snapshot_properties,
             };
 
             // Load table metadata JSON if exists; for overwrite on new table we bootstrap
@@ -405,6 +454,25 @@ impl ExecutionPlan for IcebergCommitExec {
                     DataFusionError::Plan("No current snapshot in table metadata".to_string())
                 })?;
 
+                // Idempotent exactly-once: if this streaming micro-batch (or an earlier one) was
+                // already committed to the table, skip — a crashed-then-replayed batch must not
+                // append its data twice. The committed id lives in the current snapshot summary.
+                if let Some(sc) = &streaming_commit {
+                    if let Some(committed) = Self::committed_batch_id(snapshot.summary(), &sc.app_id)
+                    {
+                        if committed >= sc.batch_id {
+                            log::info!(
+                                "Iceberg streaming commit: batch {} already committed (table at {}), skipping",
+                                sc.batch_id,
+                                committed
+                            );
+                            let array = Arc::new(UInt64Array::from(vec![0u64]));
+                            let batch = RecordBatch::try_new(schema, vec![array])?;
+                            return Ok(batch);
+                        }
+                    }
+                }
+
                 let current_version = metadata_file_version_from_path(&latest_meta).unwrap_or(0);
                 let next_version = current_version + 1;
 
@@ -436,7 +504,8 @@ impl ExecutionPlan for IcebergCommitExec {
                             .fast_append()
                             .with_store_context(store_ctx.clone())
                             .with_manifest_metadata(manifest_meta)
-                            .with_row_lineage_start_row_id(row_lineage_start_row_id);
+                            .with_row_lineage_start_row_id(row_lineage_start_row_id)
+                            .set_snapshot_properties(commit_info.snapshot_properties.clone());
                         for df in commit_info.data_files.clone().into_iter() {
                             action.add_file(df);
                         }

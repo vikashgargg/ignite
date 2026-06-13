@@ -111,7 +111,8 @@ impl TransactionAction for FastAppendAction {
             self.store_ctx.clone(),
             self.manifest_metadata.clone(),
         )
-        .with_row_lineage_start_row_id(self.row_lineage_start_row_id);
+        .with_row_lineage_start_row_id(self.row_lineage_start_row_id)
+        .with_snapshot_properties(self.snapshot_properties.clone());
         snapshot_producer.validate_added_data_files(&self.added_data_files)?;
 
         if self.check_duplicate {

@@ -31,4 +31,8 @@ pub struct IcebergCommitInfo {
     pub schema: Option<Schema>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partition_spec: Option<PartitionSpec>,
+    /// Extra entries merged into the committed snapshot's summary. Used by the streaming sink to
+    /// record the micro-batch id for idempotent exactly-once commits.
+    #[serde(default)]
+    pub snapshot_properties: std::collections::HashMap<String, String>,
 }

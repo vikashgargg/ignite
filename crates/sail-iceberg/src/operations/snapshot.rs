@@ -10,7 +10,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
 use object_store::ObjectStoreExt;
@@ -43,6 +43,9 @@ pub struct SnapshotProducer<'a> {
     /// When set, only parent files whose partition values are in this set are removed.
     /// Files with other partition values are kept (dynamic partition overwrite semantics).
     pub partition_filter: Option<HashSet<Vec<Option<Literal>>>>,
+    /// Extra key/value entries merged into the new snapshot's summary (e.g. the streaming
+    /// micro-batch id used for idempotent exactly-once commits).
+    pub snapshot_properties: HashMap<String, String>,
 }
 
 impl<'a> SnapshotProducer<'a> {
@@ -61,7 +64,14 @@ impl<'a> SnapshotProducer<'a> {
             is_bootstrap: false,
             row_lineage_start_row_id: None,
             partition_filter: None,
+            snapshot_properties: HashMap::new(),
         }
+    }
+
+    /// Merge extra entries into the new snapshot's summary (e.g. streaming batch id).
+    pub fn with_snapshot_properties(mut self, props: HashMap<String, String>) -> Self {
+        self.snapshot_properties = props;
+        self
     }
 
     pub fn with_partition_filter(mut self, filter: HashSet<Vec<Option<Literal>>>) -> Self {
@@ -94,11 +104,16 @@ impl<'a> SnapshotProducer<'a> {
     pub async fn commit(self, op: impl SnapshotProduceOperation) -> Result<ActionCommit, String> {
         let timestamp_ms = crate::utils::timestamp::monotonic_timestamp_ms();
         let is_overwrite = op.operation() == Operation::Overwrite.as_str();
-        let summary = if is_overwrite {
+        let mut summary = if is_overwrite {
             crate::spec::snapshots::Summary::new(Operation::Overwrite)
         } else {
             crate::spec::snapshots::Summary::new(Operation::Append)
         };
+        // Merge caller-supplied summary entries (e.g. the streaming micro-batch id, which a
+        // streaming sink reads back for idempotent exactly-once commits).
+        for (k, v) in &self.snapshot_properties {
+            summary = summary.with_property(k, v);
+        }
 
         // Build manifest metadata: prefer caller-provided metadata derived from table schema/spec
         // Fall back to deriving from the current transaction snapshot if not provided

@@ -87,7 +87,7 @@ impl TableFormat for IcebergTableFormat {
             partition_by,
             bucket_by,
             sort_order,
-            options,
+            mut options,
             logical_schema: _,
             declared_schema: _,
         } = info;
@@ -95,6 +95,40 @@ impl TableFormat for IcebergTableFormat {
         if bucket_by.is_some() {
             return not_impl_err!("bucketing for Iceberg format");
         }
+
+        // Streaming write: a flow-event input + checkpoint location. Each micro-batch decodes the
+        // stream, appends an Iceberg snapshot, and records its batch id in the snapshot summary for
+        // idempotent exactly-once (a replayed batch is skipped). See `IcebergCommitExec`.
+        let checkpoint = sail_common_datafusion::datasource::take_option(
+            &mut options,
+            sail_common_datafusion::datasource::STREAM_CHECKPOINT_OPTION,
+        );
+        let streaming = sail_common_datafusion::streaming::event::schema::is_flow_event_schema(
+            &input.schema(),
+        );
+        if streaming && checkpoint.is_none() {
+            return not_impl_err!(
+                "streaming write to Iceberg requires a checkpointLocation (exactly-once)"
+            );
+        }
+        let (input, mode, streaming_commit) = if let (true, Some(cp)) = (streaming, &checkpoint) {
+            let batch_id = sail_data_source::formats::file_stream::current_batch_id(cp);
+            let decoded: Arc<dyn ExecutionPlan> =
+                Arc::new(sail_data_source::streaming_decode::FlowEventToDataExec::try_new(input)?);
+            // Streaming output mode is append (Spark Structured Streaming default for files/tables).
+            (
+                decoded,
+                PhysicalSinkMode::Append,
+                Some(
+                    crate::physical_plan::commit::commit_exec::StreamingCommit {
+                        batch_id,
+                        app_id: cp.clone(),
+                    },
+                ),
+            )
+        } else {
+            (input, mode, None)
+        };
 
         let table_url = Self::parse_table_url(vec![path]).await?;
         let (options, table_properties) = split_iceberg_write_options_and_table_properties(options);
@@ -182,9 +216,19 @@ impl TableFormat for IcebergTableFormat {
                 .collect::<Vec<_>>()
         });
 
-        let builder = IcebergPlanBuilder::new(input, table_config, mode, physical_sort, ctx);
+        let is_streaming_write = streaming_commit.is_some();
+        let builder = IcebergPlanBuilder::new(input, table_config, mode, physical_sort, ctx)
+            .with_streaming_commit(streaming_commit);
         let exec = builder.build().await?;
-        Ok(exec)
+        if is_streaming_write {
+            // The streaming-query sink contract expects an empty-schema completion stream; the
+            // Iceberg commit emits a count row. Adapt it (draining drives the per-batch commit).
+            Ok(Arc::new(
+                sail_data_source::streaming_decode::EmptySinkAdapterExec::new(exec),
+            ))
+        } else {
+            Ok(exec)
+        }
     }
 
     async fn alter_table_properties(

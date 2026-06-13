@@ -39,6 +39,9 @@ pub struct IcebergPlanBuilder<'a> {
     table_config: IcebergTableConfig,
     sink_mode: PhysicalSinkMode,
     sort_order: Option<Vec<PhysicalSortExpr>>,
+    /// When set, this is a streaming micro-batch write: the commit records the batch id for
+    /// idempotent exactly-once.
+    streaming_commit: Option<crate::physical_plan::commit::commit_exec::StreamingCommit>,
     #[expect(unused)]
     session: &'a dyn Session,
 }
@@ -56,8 +59,18 @@ impl<'a> IcebergPlanBuilder<'a> {
             table_config,
             sink_mode,
             sort_order,
+            streaming_commit: None,
             session,
         }
+    }
+
+    /// Mark this as a streaming micro-batch write with the given idempotency key.
+    pub fn with_streaming_commit(
+        mut self,
+        streaming_commit: Option<crate::physical_plan::commit::commit_exec::StreamingCommit>,
+    ) -> Self {
+        self.streaming_commit = streaming_commit;
+        self
     }
 
     pub async fn build(self) -> Result<Arc<dyn ExecutionPlan>> {
@@ -147,9 +160,10 @@ impl<'a> IcebergPlanBuilder<'a> {
 
     fn add_commit_node(&self, input: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(Arc::new(
-            crate::physical_plan::commit::commit_exec::IcebergCommitExec::new(
+            crate::physical_plan::commit::commit_exec::IcebergCommitExec::new_with_streaming(
                 input,
                 self.table_config.table_url.clone(),
+                self.streaming_commit.clone(),
             ),
         ))
     }
