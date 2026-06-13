@@ -106,7 +106,7 @@ impl IcebergCommitExec {
         }
     }
 
-    /// Read the last committed streaming batch id for `app_id` from a snapshot summary.
+    /// Read the streaming batch id recorded in a single snapshot summary, if it belongs to `app_id`.
     fn committed_batch_id(summary: &crate::spec::snapshots::Summary, app_id: &str) -> Option<u64> {
         if summary.additional_properties.get(STREAM_APP_ID_PROP).map(String::as_str) != Some(app_id)
         {
@@ -116,6 +116,16 @@ impl IcebergCommitExec {
             .additional_properties
             .get(STREAM_BATCH_ID_PROP)
             .and_then(|v| v.parse::<u64>().ok())
+    }
+
+    /// The maximum streaming batch id committed by `app_id`, found by walking the **snapshot
+    /// ancestry** from the current snapshot up the parent chain (Flink
+    /// `IcebergFilesCommitter.getMaxCommittedCheckpointId`). Traversing ancestry — rather than
+    /// inspecting only the current snapshot — keeps idempotency correct when foreign snapshots
+    /// (e.g. a compaction or an unrelated append) are interleaved between micro-batches.
+    fn max_committed_batch_id(table_meta: &TableMetadata, app_id: &str) -> Option<u64> {
+        let current = table_meta.current_snapshot().map(|s| s.snapshot_id());
+        max_committed_batch_id_in(&table_meta.snapshots, current, app_id)
     }
 
     pub fn table_url(&self) -> &Url {
@@ -331,6 +341,15 @@ impl ExecutionPlan for IcebergCommitExec {
                 return Ok(batch);
             }
 
+            // Streaming append with no new data: do NOT commit an empty snapshot (avoids metadata
+            // bloat; the source offset still advances, so the batch is not reprocessed). Matches
+            // Flink, which skips empty commits.
+            if streaming_commit.is_some() && added_data_files.is_empty() {
+                let array = Arc::new(UInt64Array::from(vec![0u64]));
+                let batch = RecordBatch::try_new(schema, vec![array])?;
+                return Ok(batch);
+            }
+
             let commit_meta = commit_meta.ok_or_else(|| {
                 DataFusionError::Internal(
                     "missing commit_meta action from writer output".to_string(),
@@ -456,10 +475,10 @@ impl ExecutionPlan for IcebergCommitExec {
 
                 // Idempotent exactly-once: if this streaming micro-batch (or an earlier one) was
                 // already committed to the table, skip — a crashed-then-replayed batch must not
-                // append its data twice. The committed id lives in the current snapshot summary.
+                // append its data twice. Found by walking the snapshot ancestry (robust to
+                // interleaved foreign snapshots), Flink `getMaxCommittedCheckpointId`-style.
                 if let Some(sc) = &streaming_commit {
-                    if let Some(committed) = Self::committed_batch_id(snapshot.summary(), &sc.app_id)
-                    {
+                    if let Some(committed) = Self::max_committed_batch_id(&table_meta, &sc.app_id) {
                         if committed >= sc.batch_id {
                             log::info!(
                                 "Iceberg streaming commit: batch {} already committed (table at {}), skipping",
@@ -720,4 +739,79 @@ fn commit_conflict_error() -> DataFusionError {
     DataFusionError::Execution(format!(
         "Iceberg commit failed after {MAX_COMMIT_RETRIES} retries due to concurrent metadata updates"
     ))
+}
+
+/// Walk the snapshot ancestry from `current_id` up the parent chain and return the maximum
+/// streaming batch id committed by `app_id`. Pure over the snapshot list so it can be unit-tested
+/// independently of `TableMetadata`. Traversing ancestry (not just the current snapshot) is what
+/// keeps idempotency correct when a foreign snapshot (e.g. compaction, an unrelated append) is
+/// interleaved between streaming micro-batches — Flink `getMaxCommittedCheckpointId`.
+fn max_committed_batch_id_in(
+    snapshots: &[crate::spec::Snapshot],
+    current_id: Option<i64>,
+    app_id: &str,
+) -> Option<u64> {
+    let by_id: std::collections::HashMap<i64, &crate::spec::Snapshot> =
+        snapshots.iter().map(|s| (s.snapshot_id(), s)).collect();
+    let mut cursor = current_id;
+    let mut max_id: Option<u64> = None;
+    // Bound the walk by the snapshot count so a malformed parent cycle cannot loop forever.
+    for _ in 0..=snapshots.len() {
+        let Some(id) = cursor else { break };
+        let Some(snap) = by_id.get(&id) else { break };
+        if let Some(b) = IcebergCommitExec::committed_batch_id(snap.summary(), app_id) {
+            max_id = Some(max_id.map_or(b, |m| m.max(b)));
+        }
+        cursor = snap.parent_snapshot_id();
+    }
+    max_id
+}
+
+#[expect(clippy::expect_used)]
+#[cfg(test)]
+mod tests {
+    use crate::spec::snapshots::{Snapshot, SnapshotBuilder, Summary};
+    use crate::spec::Operation;
+
+    use super::{max_committed_batch_id_in, STREAM_APP_ID_PROP, STREAM_BATCH_ID_PROP};
+
+    fn snap(id: i64, parent: Option<i64>, app_batch: Option<(&str, u64)>) -> Snapshot {
+        let mut summary = Summary::new(Operation::Append);
+        if let Some((app, batch)) = app_batch {
+            summary = summary
+                .with_property(STREAM_APP_ID_PROP, app)
+                .with_property(STREAM_BATCH_ID_PROP, batch);
+        }
+        let mut b = SnapshotBuilder::new()
+            .with_snapshot_id(id)
+            .with_summary(summary);
+        if let Some(p) = parent {
+            b = b.with_parent_snapshot_id(p);
+        }
+        b.build().expect("snapshot")
+    }
+
+    #[test]
+    fn ancestry_traversal_survives_interleaved_foreign_snapshot() {
+        let app = "ck://q1";
+        // History (child -> parent): batch2 -> FOREIGN(compaction) -> batch1 -> batch0.
+        let snapshots = vec![
+            snap(0, None, Some((app, 0))),
+            snap(1, Some(0), Some((app, 1))),
+            snap(2, Some(1), None), // foreign snapshot (e.g. compaction): no streaming props
+            snap(3, Some(2), Some((app, 2))),
+        ];
+        // Current = the latest streaming snapshot; max committed batch id must be 2 even though a
+        // foreign snapshot sits between it and batch1 (a current-snapshot-only check would still
+        // see 2 here, but the foreign snapshot must not break the walk to earlier batches).
+        assert_eq!(max_committed_batch_id_in(&snapshots, Some(3), app), Some(2));
+        // Current = the foreign snapshot itself (e.g. a compaction left it current): must still
+        // find batch1 by walking past it — a current-only check would WRONGLY return None and
+        // re-commit an already-committed batch.
+        assert_eq!(max_committed_batch_id_in(&snapshots, Some(2), app), Some(1));
+        // Different app id -> nothing committed for us.
+        assert_eq!(max_committed_batch_id_in(&snapshots, Some(3), "other"), None);
+        // Empty table.
+        assert_eq!(max_committed_batch_id_in(&[], Some(3), app), None);
+    }
 }

@@ -109,8 +109,43 @@ impl<'a> SnapshotProducer<'a> {
         } else {
             crate::spec::snapshots::Summary::new(Operation::Append)
         };
+        // Standard Iceberg snapshot-summary metrics (spec-defined): downstream tooling, the
+        // `snapshots` metadata table, snapshot expiration, and incremental reads rely on these.
+        // `added-*` are the files/records this commit adds; `total-*` carry the running table
+        // totals forward (parent total + added for an append; the added set for a full overwrite,
+        // which replaces all files). Mirrors what Flink/Spark write.
+        let added_records: u64 = self.added_data_files.iter().map(|df| df.record_count).sum();
+        let added_files: u64 = self.added_data_files.len() as u64;
+        let added_files_size: u64 = self
+            .added_data_files
+            .iter()
+            .map(|df| df.file_size_in_bytes)
+            .sum();
+        let parent_total = |key: &str| -> u64 {
+            if is_overwrite {
+                return 0; // full overwrite replaces all existing files
+            }
+            self.tx
+                .snapshot()
+                .summary()
+                .additional_properties
+                .get(key)
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0)
+        };
+        summary = summary
+            .with_property("added-data-files", added_files)
+            .with_property("added-records", added_records)
+            .with_property("added-files-size", added_files_size)
+            .with_property("total-data-files", parent_total("total-data-files") + added_files)
+            .with_property("total-records", parent_total("total-records") + added_records)
+            .with_property(
+                "total-files-size",
+                parent_total("total-files-size") + added_files_size,
+            );
         // Merge caller-supplied summary entries (e.g. the streaming micro-batch id, which a
-        // streaming sink reads back for idempotent exactly-once commits).
+        // streaming sink reads back for idempotent exactly-once commits). Applied last so callers
+        // can override computed defaults if needed.
         for (k, v) in &self.snapshot_properties {
             summary = summary.with_property(k, v);
         }
