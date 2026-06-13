@@ -52,10 +52,38 @@ Continuous stream→Iceberg, new file every ~1.3 s, ~45 s:
 - Memory is ~5–10× lighter than a Spark JVM executor (consistent with the prior Flink head-to-head,
   docs/benchmarks/FLINK_HEAD_TO_HEAD.md).
 
+## Flink → Iceberg head-to-head (true streaming, same input, no workaround)
+Flink 1.18.1 (local cluster, parallelism 4, Java 8) + `iceberg-flink-runtime-1.18-1.6.1` +
+`flink-sql-parquet` + `flink-shaded-hadoop-2-uber`, HadoopCatalog, `state.checkpoint-storage:
+filesystem` (set at cluster level in `flink-conf.yaml` — *not* SQL `SET`, which silently doesn't
+apply and was why the streaming committer first wouldn't land any snapshot).
+
+**Fairness catch (important):** a first attempt fed Flink from a `datagen` `sequence` source and
+measured **117 s** for 1M. Isolating the source (datagen→blackhole, no Iceberg) was **112.5 s** —
+i.e. the datagen *source* was the bottleneck (~9k rows/s), not the sink. Reporting 117 s would have
+**handicapped Flink**. The honest test has *both* engines read the **same 1M-row parquet input** and
+write Iceberg:
+
+| 1M parquet → Iceberg (streaming, identical input) | Vajra | Flink 1.18 |
+|---|---|---|
+| Wallclock | **0.26 s** | 20.27 s |
+| Rows committed / correctness | 1,000,000, exactly-once | 1,000,000 (committed, 2 snapshots) |
+| Per-commit latency | p50 25 ms (release) | checkpoint-driven |
+| Process memory | ~90 MB (native server) | 2 JVMs (JobManager+TaskManager), ~GB |
+
+Flink's 20.27 s still carries real JVM + job-graph + checkpoint fixed overhead per job; Vajra runs
+as a persistent native server. Both are honest task wallclocks on identical input. Vajra also
+*validated* the full streaming committer path (1M rows, 58 snapshots in the per-checkpoint config).
+
+## Container (Apple Silicon / linux-arm64 Docker)
+`vajra:latest` (1.05 GB, built from `docker/Dockerfile`, `CARGO_JOBS=2`) run as a container; the
+Iceberg sink inside it wrote 1M rows (distinct) and held **exactly-once on re-run (no dup)**; table
+verified real on the host-mounted volume. Containerized deployment works.
+
 ## Honest gaps / not yet measured
-- **Flink → Iceberg** head-to-head not run (heavier Flink+Iceberg setup); only Spark Iceberg
-  measured here. The general (non-Iceberg) Flink comparison is in FLINK_HEAD_TO_HEAD.md.
 - Soak is short (~45 s–64 s), single node, local FS. A multi-hour soak and an object-store (S3)
-  run remain for full endurance/at-scale claims.
+  run remain for full endurance/at-scale claims (S3 is covered by the planned EKS run).
 - Throughput is single-partition streaming (per-core); multi-core streaming parallelism is a
   separate tracked item.
+- **Cluster (distributed Vajra)** Iceberg sink not yet run — the streaming checkpoint is consumed
+  at driver plan-time and the Iceberg commit exec's distributed-codec path needs wiring first.
