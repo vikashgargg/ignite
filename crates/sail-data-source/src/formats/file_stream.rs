@@ -171,10 +171,11 @@ impl StreamSource for FileStreamSource {
             table.scan(state, projection, filters, limit).await?
         };
 
-        // Write-ahead the new processed-files set; the runner promotes staged → committed
-        // after the batch output is durable (exactly-once recovery).
+        // Write-ahead the batch id + new processed-files set; the runner promotes staged →
+        // committed (single atomic rename) after the batch output is durable. Embedding the batch
+        // id makes recovery exact (see `SourceOffsetRecord`).
         if let Some(ck) = checkpoint_location {
-            write_staged_files(ck, &processed);
+            write_staged_files(ck, current_batch_id(ck), &processed);
         }
 
         Ok(Arc::new(FileSourceExec::try_new(data_plan)?))
@@ -185,24 +186,82 @@ fn sources_dir(checkpoint_location: &str) -> PathBuf {
     Path::new(checkpoint_location).join("sources").join("0")
 }
 
-/// Read the durably-committed set of processed object paths, if any.
-pub fn read_committed_files(checkpoint_location: &str) -> HashSet<String> {
-    std::fs::read_to_string(sources_dir(checkpoint_location).join("committed"))
-        .map(|s| {
-            s.lines()
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+/// The file source's offset record: the micro-batch id **and** the cumulative processed-files set,
+/// serialized as one unit. Keeping the batch id inside the record is what makes recovery exact:
+/// the runner commits a batch with a single atomic rename of `staged` → `committed`, so the batch
+/// number and the source position advance together. A crash before the rename leaves `staged`
+/// (batch N still in flight) → recovery reprocesses batch **N** (same number → the sink
+/// idempotently overwrites `_spark_metadata/N`); a crash after sees `committed` at N → the next
+/// batch is N+1. Neither a duplicate nor a silent-loss window remains. (Older checkpoints stored a
+/// bare newline list with no id; those are still read for the file set, falling back to the
+/// `<cp>/offsets` markers for numbering.)
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SourceOffsetRecord {
+    batch_id: u64,
+    files: Vec<String>,
 }
 
-/// Stage (write-ahead) the processed-files set; the runner commits it after the output is durable.
-fn write_staged_files(checkpoint_location: &str, files: &HashSet<String>) {
+fn read_record(checkpoint_location: &str, name: &str) -> Option<SourceOffsetRecord> {
+    let body = std::fs::read_to_string(sources_dir(checkpoint_location).join(name)).ok()?;
+    serde_json::from_str(&body).ok()
+}
+
+/// Read the durably-committed set of processed object paths, if any. Parses the JSON record,
+/// falling back to the legacy newline-list format for checkpoints written before the batch id was
+/// embedded.
+pub fn read_committed_files(checkpoint_location: &str) -> HashSet<String> {
+    let Ok(body) = std::fs::read_to_string(sources_dir(checkpoint_location).join("committed"))
+    else {
+        return HashSet::new();
+    };
+    match serde_json::from_str::<SourceOffsetRecord>(&body) {
+        Ok(rec) => rec.files.into_iter().collect(),
+        Err(_) => body
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect(),
+    }
+}
+
+/// Latest committed batch id from the driver's `<cp>/offsets` markers (the numbering fallback for
+/// non-file/non-replayable sources, and for fresh checkpoints).
+fn latest_offset_batch_id(checkpoint_location: &str) -> Option<u64> {
+    let dir = Path::new(checkpoint_location).join("offsets");
+    std::fs::read_dir(dir).ok().and_then(|rd| {
+        rd.filter_map(|e| e.ok())
+            .filter_map(|e| e.file_name().to_str().and_then(|s| s.parse::<u64>().ok()))
+            .max()
+    })
+}
+
+/// The micro-batch id this checkpoint is on — used by both the file source (to label its `staged`
+/// record) and the file sink (to name `<out>/<id>/` + `_spark_metadata/<id>`), so the two always
+/// agree. See [`SourceOffsetRecord`] for why this is exact under crashes.
+pub fn current_batch_id(checkpoint_location: &str) -> u64 {
+    if let Some(rec) = read_record(checkpoint_location, "staged") {
+        return rec.batch_id; // in-flight batch → reprocess at the same id
+    }
+    if let Some(rec) = read_record(checkpoint_location, "committed") {
+        return rec.batch_id + 1; // last fully committed → next id
+    }
+    latest_offset_batch_id(checkpoint_location)
+        .map(|n| n + 1)
+        .unwrap_or(0)
+}
+
+/// Stage (write-ahead) the batch id + processed-files set; the runner commits it (atomic rename
+/// `staged` → `committed`) after the output is durable.
+fn write_staged_files(checkpoint_location: &str, batch_id: u64, files: &HashSet<String>) {
     let dir = sources_dir(checkpoint_location);
     let _ = std::fs::create_dir_all(&dir);
-    let body = files.iter().cloned().collect::<Vec<_>>().join("\n");
-    let _ = std::fs::write(dir.join("staged"), body);
+    let rec = SourceOffsetRecord {
+        batch_id,
+        files: files.iter().cloned().collect(),
+    };
+    if let Ok(body) = serde_json::to_string(&rec) {
+        let _ = std::fs::write(dir.join("staged"), body);
+    }
 }
 
 /// Wraps a batch file-scan plan as a flow-event source: each data batch becomes an append-only
@@ -297,5 +356,48 @@ impl ExecutionPlan for FileSourceExec {
             events,
         ));
         Ok(Box::pin(EncodedFlowEventStream::new(stream)))
+    }
+}
+
+#[expect(clippy::unwrap_used)]
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Exercises the recovery numbering that closes the crash-mid-commit duplicate window: the
+    // batch id and processed-files set are committed as one atomic record, so an in-flight
+    // `staged` replays at the SAME id while a clean `committed` advances to the next.
+    #[test]
+    fn current_batch_id_reflects_atomic_offset_record() {
+        let dir = std::env::temp_dir().join(format!("vajra_fs_eo_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cp = dir.to_str().unwrap();
+
+        // Fresh checkpoint: batch 0.
+        assert_eq!(current_batch_id(cp), 0);
+
+        // Batch 0 committed -> next is 1.
+        let mut files: HashSet<String> = HashSet::new();
+        files.insert("a/0/f0.parquet".to_string());
+        write_staged_files(cp, 0, &files);
+        std::fs::rename(
+            sources_dir(cp).join("staged"),
+            sources_dir(cp).join("committed"),
+        )
+        .unwrap();
+        assert_eq!(current_batch_id(cp), 1);
+        assert_eq!(read_committed_files(cp), files);
+
+        // Batch 1 staged but NOT committed (crash mid-commit) -> reprocess at 1, not 2.
+        files.insert("a/1/f1.parquet".to_string());
+        write_staged_files(cp, 1, &files);
+        assert_eq!(current_batch_id(cp), 1);
+
+        // Legacy newline-list committed (no embedded id) is still read for the file set.
+        let _ = std::fs::remove_file(sources_dir(cp).join("staged"));
+        std::fs::write(sources_dir(cp).join("committed"), "x/old.parquet\n").unwrap();
+        assert!(read_committed_files(cp).contains("x/old.parquet"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

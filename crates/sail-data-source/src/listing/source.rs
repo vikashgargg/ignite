@@ -387,7 +387,12 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         // checkpoint offset log the streaming driver uses, so the two stay in lockstep.
         let commit_ctx: Option<(u64, object_store::path::Path)> = match &commit_log_checkpoint {
             Some(cp) if streaming => {
-                let batch_id = next_batch_id(cp);
+                // Derive the batch id from the file source's commit record so the sink's
+                // per-batch subdir + commit log advance in lockstep with the source offset (it
+                // falls back to the driver's offset markers for non-file sources). This is what
+                // makes a crashed batch replay at the *same* id and overwrite its log idempotently
+                // (see `crate::formats::file_stream::current_batch_id`).
+                let batch_id = crate::formats::file_stream::current_batch_id(cp);
                 let base_store_path = table_paths
                     .first()
                     .map(|u| u.prefix().clone())
@@ -462,23 +467,6 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             Ok(writer)
         }
     }
-}
-
-/// The next micro-batch id for a streaming query, derived from its committed offset log at
-/// `<checkpoint>/offsets` — the same convention the streaming driver uses, so the sink's commit
-/// log and the driver's offset/state commit stay in lockstep. Returns 0 when no batch has been
-/// committed yet.
-fn next_batch_id(checkpoint: &str) -> u64 {
-    let dir = std::path::Path::new(checkpoint).join("offsets");
-    std::fs::read_dir(&dir)
-        .ok()
-        .and_then(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter_map(|e| e.file_name().to_str().and_then(|s| s.parse::<u64>().ok()))
-                .max()
-        })
-        .map(|m| m + 1)
-        .unwrap_or(0)
 }
 
 /// Sink-side exactly-once on the read path: if any `base` directory carries a `_spark_metadata`

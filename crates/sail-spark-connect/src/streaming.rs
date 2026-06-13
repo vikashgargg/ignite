@@ -116,16 +116,15 @@ fn progress_json(
 }
 
 /// Consume one (bounded) micro-batch stream to completion. Writes the per-batch offset marker
-/// and returns whether it ran without error (the durability signal for committing offsets).
+/// (informational: UI/progress; numbering for non-file sources) and returns whether it ran
+/// without error (the durability signal for committing offsets).
 ///
-/// Crash-recovery note: the sink-side `_spark_metadata` commit log closes the dominant duplicate
-/// windows — a crash during or just after the output write replays batch N, which idempotently
-/// overwrites `<out>/<N>/` + `_spark_metadata/<N>` (see `sail_data_source::streaming_sink_log`).
-/// One residual micro-window remains (crash in the gap between writing this marker and promoting
-/// the source offsets): the replay is then numbered N+1 and could duplicate. Closing it requires
-/// a write-ahead per-batch source-range log with range-based replay (Spark `MicroBatchExecution`'s
-/// offset/commit WAL) — tracked in docs/STREAMING.md. Reordering the marker alone only trades the
-/// duplicate for a silent-loss window, so it is intentionally left as-is.
+/// Crash-recovery: for the file→file sink path the batch number is derived from the file source's
+/// commit record (`sail_data_source::formats::file_stream::current_batch_id`), which advances
+/// atomically with the source offset (one rename of `staged`→`committed` carrying both the id and
+/// the processed-files set). So a crash anywhere around commit replays the batch at the SAME id,
+/// idempotently overwriting `<out>/<N>/` + `_spark_metadata/<N>` — no duplicate and no silent-loss
+/// window (verified by the W3 simulation + SIGKILL gates).
 async fn consume_stream(
     mut stream: SendableRecordBatchStream,
     offsets_dir: &Option<PathBuf>,
