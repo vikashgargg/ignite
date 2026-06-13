@@ -1,0 +1,113 @@
+# Vajra — one engine for batch + streaming + realtime (Spark API, Flink-class streaming)
+
+**Vision.** One product, one API. Write Spark DataFrame/SQL (the "Spark coding way") and run it three ways
+on the same native engine:
+- **batch** — Spark-class (already shipped; ~30× faster than Spark 3.5 on TPC-H SF-1, head-to-head).
+- **streaming (micro-batch)** — Spark Structured Streaming-compatible (`readStream`/`writeStream`,
+  triggers, watermarks, checkpoints).
+- **realtime (Vajra realtime mode)** — Flink-class low-latency *continuous* execution of the same
+  streaming query, for tens-of-ms tail latency and per-event processing.
+
+This document is the honest gap analysis vs Apache Flink (the streaming gold standard) and the
+prioritized, prod-grade roadmap to become a true Spark **and** Flink replacement. We do **not** claim
+parity for anything not measured/implemented; gaps are named.
+
+Sources: Flink stateful-stream-processing & fault-tolerance docs
+(nightlies.apache.org/flink/flink-docs-release-1.18), Flink vs Spark Structured Streaming comparisons
+(confluent.io, onehouse.ai, decodable.co), DataFusion/Arrow execution model.
+
+---
+
+## 1. Flink feature matrix vs Vajra (honest status)
+
+Legend: ✅ done & evidenced · 🟡 partial · ⬜ gap.
+
+| # | Flink capability | Why it matters | Vajra status | Priority |
+|---|---|---|---|---|
+| F1 | **Continuous (event-at-a-time) pipelined execution**, tens-of-ms latency | Flink's defining property | 🟡 micro-batch flow-event model; sub-ms measured at high throughput but batch-cadence-bound | **P0 — "realtime mode"** |
+| F2 | **Distributed stateful streaming with operator parallelism** (sharded keyed state across the cluster) | Scale-out throughput | 🟡 single-partition per-core; keyed `StreamExchangeExec` + multi-partition `WindowAccumExec` exist locally; not distributed across nodes; streaming/Iceberg-commit not in distributed codec | **P0** |
+| F3 | **Checkpointing via Chandy-Lamport aligned barriers** (global consistent snapshot) | Distributed exactly-once | 🟡 per-source offset-WAL + per-operator state snapshot on EndOfData, driver-committed (works single-node micro-batch); no barrier-based coordinator | **P0 (with F2)** |
+| F4 | **Durable / object-store checkpoints** (S3, HDFS) | Cloud-native HA, k8s pod restart | ⬜ checkpoint offsets/commit-log use local `std::fs`; warehouse can be S3 but checkpoint can't | **P0** |
+| F5 | **Pluggable state backends incl. RocksDB** (state ≫ RAM, spill) | Large-state jobs | ⬜ in-memory `HashMap` + Arrow-IPC snapshot only | P1 |
+| F6 | **Savepoints** (deliberate snapshot for upgrade/rescale/replay) | Operability | ⬜ none | P1 |
+| F7 | **Event-time, watermarks, timers** | Correct out-of-order processing | ✅ `WatermarkExec` + event-time windows + watermark-bounded dedup; 🟡 user timers/`onTimer` | P1 (timers) |
+| F8 | **Windowing: tumbling/sliding/session + incremental agg** | Core analytics | ✅ tumbling/sliding/session + two-phase incremental agg (275k→ throughput work) | done |
+| F9 | **Stateful stream-stream joins (interval/windowed)** | Core analytics | ✅ inner equi + interval join with watermark-bounded eviction | 🟡 outer joins |
+| F10 | **Transactional / exactly-once sinks (2PC)** | End-to-end EO | 🟡 Iceberg idempotent ✅, file `_spark_metadata` ✅; Delta ⬜, Kafka sink ⬜ | P1 |
+| F11 | **Replayable sources w/ committed offsets (Kafka)** | End-to-end EO | 🟡 file source ✅ (atomic offset record); Kafka source has NO offset checkpoint | **P0 (Kafka)** |
+| F12 | **CEP / `ProcessFunction` / `KeyedProcessFunction`** | Pattern detection, custom state | ⬜ none | P2 |
+| F13 | **Backpressure + bounded buffers** | Stability under load | ✅ bounded mpsc exchange channels (memory-bounded) | done |
+| F14 | **Unaligned checkpoints, reactive/elastic rescale** | Advanced ops | ⬜ | P2 |
+
+**The features that make Flink "Flink" and that we must build to credibly claim parity: F1 (realtime
+continuous mode), F2+F3 (distributed stateful streaming + barrier checkpoints), F4 (object-store
+checkpoints), F11 (Kafka offset EO).** These are the P0s. Everything we ship is gated + measured before
+any parity claim.
+
+---
+
+## 2. Vajra realtime mode (the F1 design)
+
+Goal: run the *same* Spark-API streaming query with Flink-class latency, without forcing users to a new
+API. A query opts in via a trigger, mirroring Spark's `Trigger.Continuous` but backed by Vajra's
+flow-event engine:
+
+```python
+df.writeStream.format("iceberg").trigger(realtime=True)   # Vajra realtime mode
+df.writeStream.format("iceberg").trigger(processingTime="1 second")  # micro-batch (today)
+```
+
+Design (builds on the existing flow-event `FlowEvent::{Data,Marker}` model):
+- **Pipelined operators**: today operators emit per micro-batch; realtime mode keeps the same operator
+  graph but drives it with a *continuous* source loop that emits small flow-event batches at a high tick
+  (or per-record for low-rate sources), so records flow operator→operator without a batch barrier.
+  Reuse `StreamExchangeExec` (already broadcasts markers) for keyed routing.
+- **Latency markers**: `FlowMarker::LatencyTracker` already exists; realtime mode samples it to report
+  `processedRowsPerSecond` + p50/p99 in `recentProgress`.
+- **Commit cadence decoupled from latency**: data flows continuously; durable commits (Iceberg snapshot,
+  file `_spark_metadata`) still happen on a periodic *commit interval* (Flink-style), so low latency does
+  not mean a commit per record.
+- **Scope discipline (no workarounds)**: realtime mode is correct-or-off — if an operator in the plan
+  can't run continuously yet, the query rejects realtime mode with a named reason rather than silently
+  falling back to micro-batch.
+
+This is the unifying piece: **Spark API in, batch / micro-batch / realtime out — one engine.**
+
+---
+
+## 3. Spark & Flink compatibility (what "one-stop tool" means)
+
+**Spark compatibility (the API surface, already strong):** Spark Connect gRPC server; DataFrame + SQL;
+`spark.read`/`write` (parquet/csv/json/Delta/Iceberg); `readStream`/`writeStream`; triggers
+(`availableNow`/`once`/`processingTime`); `withWatermark`, `window`/`session_window`;
+`foreachBatch`; `StreamingQuery.recentProgress`/`lastProgress`. Differential-tested vs real Spark
+(105/105 scorecard; TPC-H/TPC-DS). → see `docs/` scorecards.
+
+**Flink compatibility (the *capabilities*, not the DataStream API):** Vajra does not expose Flink's
+Java DataStream API; instead it delivers Flink's *semantics* under the Spark API + realtime mode —
+event-time/watermarks (F7), stateful windows/joins (F8/F9), exactly-once (F3/F10), continuous latency
+(F1). A `docs/FLINK_COMPATIBILITY.md` will track each Flink capability → Vajra mechanism → evidence.
+
+---
+
+## 4. Prioritized prod-grade roadmap
+
+Each item: read the OSS reference design first, implement prod-grade (no workarounds), gate with
+crash/correctness tests + a measured head-to-head, then claim.
+
+1. **P0 — Object-store checkpoint (F4).** Make the streaming checkpoint (offset records, `_spark_metadata`,
+   operator-state snapshots) write through `object_store` (S3/GCS/local) instead of `std::fs`. Unblocks
+   cloud-native HA + the EKS story. Most bounded P0; do first.
+2. **P0 — Kafka source offset EO (F11).** Persist/restore per-partition Kafka offsets in the atomic offset
+   record (the file-source pattern) → end-to-end EO from the #1 production source.
+3. **P0 — Vajra realtime mode (F1).** Continuous low-latency execution path + `trigger(realtime=True)` +
+   latency metrics; reject plans that can't run continuously (named).
+4. **P0 — Distributed stateful streaming + barrier checkpoints (F2+F3).** Thread streaming through the
+   distributed codec (StageInput already carries `bounded`); a real `CheckpointCoordinator` with aligned
+   barriers wired to the offset/state WAL; reuse the existing shuffle.
+5. **P1 — Transactional sinks (F10): Delta (`Txn(appId,version)`), Kafka sink (2PC).**
+6. **P1 — RocksDB-class spillable state backend (F5)**; **savepoints (F6)**; **user timers (F7)**.
+7. **P2 — CEP/ProcessFunction (F12); unaligned checkpoints / reactive rescale (F14).**
+
+After each P0: a measured, fair head-to-head vs Flink (same input, no workarounds — see
+`docs/benchmarks/ICEBERG_SINK.md` for the standard) before any parity claim.
