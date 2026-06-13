@@ -142,6 +142,16 @@ pub(crate) async fn load_metadata_file_bytes(
         .map_err(|e| DataFusionError::External(Box::new(e)))
 }
 
+/// Whether a `version-hint.text` hint should be honored, given the highest metadata version
+/// actually present in the directory listing. The hint is a LOWER BOUND (Iceberg
+/// `HadoopTableOperations`): honor it only when it is at least the listed max — current, or ahead
+/// of a lagging eventually-consistent listing. A hint *below* the listed max is stale (a commit
+/// wrote a newer metadata file but crashed before updating the hint) and must be ignored, else
+/// the newly-committed snapshot is hidden and a streaming retry deadlocks against it.
+fn hint_is_current(hint_version: i32, listed_max_version: Option<i32>) -> bool {
+    listed_max_version.is_none_or(|lv| hint_version >= lv)
+}
+
 pub async fn find_latest_metadata_file(
     object_store: &Arc<dyn object_store::ObjectStore>,
     table_url: &Url,
@@ -201,25 +211,46 @@ pub async fn find_latest_metadata_file(
                     .then_with(|| left.1.cmp(&right.1))
             });
 
+            // `version-hint.text` is a LOWER BOUND, not the source of truth (Iceberg
+            // `HadoopTableOperations`): the actual latest is the highest metadata version present.
+            // A hint below the listed max is STALE — it happens when a commit wrote `v{N+1}` and
+            // crashed before updating the hint (still `vN`). Trusting it blindly would hide the
+            // just-committed snapshot and, on a streaming retry, deadlock the committer against the
+            // orphaned `v{N+1}` until it errors. So we honor the hint only when it is at least the
+            // listed max (current, or ahead of a lagging eventually-consistent listing); otherwise
+            // we use the highest version actually present.
+            let listed_max_version = files.last().map(|(v, _, _)| *v);
             if let Some(fname) = hinted_filename {
                 if let Some((version, path, _)) =
                     files.iter().rev().find(|(_, p, _)| p.ends_with(&fname))
                 {
-                    log::trace!(
-                        "find_latest_metadata_file: selected by filename hint version {} path={}",
-                        version,
-                        &path
+                    if hint_is_current(*version, listed_max_version) {
+                        log::trace!(
+                            "find_latest_metadata_file: selected by filename hint version {} path={}",
+                            version,
+                            &path
+                        );
+                        return Ok(path.clone());
+                    }
+                    log::warn!(
+                        "find_latest_metadata_file: ignoring stale filename hint {} (version {} < listed max {:?})",
+                        &fname, version, listed_max_version
                     );
-                    return Ok(path.clone());
                 }
             } else if let Some(hint) = hinted_version {
                 if let Some((version, path, _)) = files.iter().rev().find(|(v, _, _)| *v == hint) {
-                    log::trace!(
-                        "find_latest_metadata_file: selected by numeric hint version {} path={}",
-                        version,
-                        &path
+                    if hint_is_current(*version, listed_max_version) {
+                        log::trace!(
+                            "find_latest_metadata_file: selected by numeric hint version {} path={}",
+                            version,
+                            &path
+                        );
+                        return Ok(path.clone());
+                    }
+                    log::warn!(
+                        "find_latest_metadata_file: ignoring stale version hint {} (< listed max {:?})",
+                        hint, listed_max_version
                     );
-                    return Ok(path.clone());
                 }
             }
 
@@ -249,9 +280,22 @@ mod tests {
     use flate2::Compression;
 
     use super::{
-        decode_metadata_file, encode_metadata_file, metadata_file_extension_from_properties,
-        parse_metadata_file_name, MetadataFileCodec, MetadataFileName,
+        decode_metadata_file, encode_metadata_file, hint_is_current,
+        metadata_file_extension_from_properties, parse_metadata_file_name, MetadataFileCodec,
+        MetadataFileName,
     };
+
+    #[test]
+    fn version_hint_is_treated_as_a_lower_bound() {
+        // Hint equal to or ahead of the listed max is honored (current, or listing lagging).
+        assert!(hint_is_current(2, Some(2)));
+        assert!(hint_is_current(3, Some(2)));
+        assert!(hint_is_current(1, None));
+        // Hint BELOW the listed max is stale (crash after metadata write, before hint update) and
+        // must be ignored so the newer committed metadata is not hidden.
+        assert!(!hint_is_current(0, Some(2)));
+        assert!(!hint_is_current(1, Some(2)));
+    }
 
     #[test]
     fn parses_metadata_file_names() {
