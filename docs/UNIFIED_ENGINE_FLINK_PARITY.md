@@ -63,7 +63,7 @@ Legend: ✅ done & evidenced · 🟡 partial · ⬜ gap.
 | F1 | **Continuous (event-at-a-time) pipelined execution**, tens-of-ms latency | Flink's defining property | 🟡 micro-batch flow-event model; sub-ms measured at high throughput but batch-cadence-bound | **P0 — "realtime mode"** |
 | F2 | **Distributed stateful streaming with operator parallelism** (sharded keyed state across the cluster) | Scale-out throughput | 🟡 single-partition per-core; keyed `StreamExchangeExec` + multi-partition `WindowAccumExec` exist locally; not distributed across nodes; streaming/Iceberg-commit not in distributed codec | **P0** |
 | F3 | **Checkpointing via Chandy-Lamport aligned barriers** (global consistent snapshot) | Distributed exactly-once | 🟡 per-source offset-WAL + per-operator state snapshot on EndOfData, driver-committed (works single-node micro-batch); no barrier-based coordinator | **P0 (with F2)** |
-| F4 | **Durable / object-store checkpoints** (S3, HDFS) | Cloud-native HA, k8s pod restart | ⬜ checkpoint offsets/commit-log use local `std::fs`; warehouse can be S3 but checkpoint can't | **P0** |
+| F4 | **Durable / object-store checkpoints** (S3, HDFS) | Cloud-native HA, k8s pod restart | ✅ **done (2026-06-14):** all checkpoint state (offset markers, source offset record, operator-state blob) goes through `CheckpointStore` (object_store); commit = single atomic `put` (no rename). Verified on real S3 (stateless + stateful, EO across restart). | done |
 | F5 | **Pluggable state backends incl. RocksDB** (state ≫ RAM, spill) | Large-state jobs | ⬜ in-memory `HashMap` + Arrow-IPC snapshot only | P1 |
 | F6 | **Savepoints** (deliberate snapshot for upgrade/rescale/replay) | Operability | ⬜ none | P1 |
 | F7 | **Event-time, watermarks, timers** | Correct out-of-order processing | ✅ `WatermarkExec` + event-time windows + watermark-bounded dedup; 🟡 user timers/`onTimer` | P1 (timers) |
@@ -131,9 +131,10 @@ event-time/watermarks (F7), stateful windows/joins (F8/F9), exactly-once (F3/F10
 Each item: read the OSS reference design first, implement prod-grade (no workarounds), gate with
 crash/correctness tests + a measured head-to-head, then claim.
 
-1. **P0 — Object-store checkpoint (F4).** Make the streaming checkpoint (offset records, `_spark_metadata`,
-   operator-state snapshots) write through `object_store` (S3/GCS/local) instead of `std::fs`. Unblocks
-   cloud-native HA + the EKS story. Most bounded P0; do first.
+1. ~~**P0 — Object-store checkpoint (F4).**~~ ✅ **DONE 2026-06-14.** `CheckpointStore` (object_store);
+   all checkpoint state is single-object with an atomic-`put` commit (no rename); operator state is one
+   Arrow-IPC blob; operators restore async on first poll. Verified on real S3 (stateless + stateful, EO
+   across restart). Commits 9187582e → 37640fe3 → 47b9f10c.
 2. **P0 — Kafka source offset EO (F11).** Persist/restore per-partition Kafka offsets in the atomic offset
    record (the file-source pattern) → end-to-end EO from the #1 production source.
 3. **P0 — Vajra realtime mode (F1).** Continuous low-latency execution path + `trigger(realtime=True)` +
