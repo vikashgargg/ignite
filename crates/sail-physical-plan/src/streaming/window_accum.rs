@@ -21,6 +21,7 @@ use futures::{stream, StreamExt};
 use sail_common_datafusion::streaming::event::encoding::{
     DecodedFlowEventStream, EncodedFlowEventStream,
 };
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
@@ -116,6 +117,9 @@ struct AccumState {
     /// close — we throttle it to `FINAL_THROTTLE_MICROS` of watermark advance (Flink
     /// emits on trigger, not per element), cutting per-batch aggregate overhead.
     last_final_wm: Option<i64>,
+    /// Whether committed state has been restored yet (restore happens async on the first poll,
+    /// since `execute()` is sync but the checkpoint store is async).
+    restored: bool,
 }
 
 /// Re-run the `Final` merge + emit at most once per this much watermark advance.
@@ -129,6 +133,7 @@ impl AccumState {
             watermark_micros: None,
             emitted_ends: HashSet::new(),
             last_final_wm: None,
+            restored: false,
         }
     }
 
@@ -337,16 +342,14 @@ impl ExecutionPlan for WindowAccumExec {
         // the last committed snapshot, for stateful exactly-once recovery across runs.
         // Per-partition state id so each parallel instance snapshots/restores independently.
         let state_op_id = format!("window-{partition}");
-        let mut acc = AccumState::new();
-        if let Some(loc) = &self.checkpoint_location {
-            let (batches, meta) = crate::streaming::state_io::restore_state(loc, &state_op_id);
-            acc.pending_rows = batches;
-            if let Some((wm, ends)) = meta.split_first() {
-                acc.watermark_micros = (*wm != i64::MIN).then_some(*wm);
-                acc.emitted_ends = ends.iter().copied().collect();
-            }
-        }
-        let checkpoint_location = self.checkpoint_location.clone();
+        let acc = AccumState::new();
+        // Build the checkpoint store synchronously (no I/O); the actual restore is async and runs
+        // on the first poll below (execute() is sync). Per-partition state id so each parallel
+        // instance snapshots/restores independently.
+        let ck = self
+            .checkpoint_location
+            .as_deref()
+            .and_then(|l| CheckpointStore::from_location(l).ok());
         let init: UnfoldState = (input_stream, acc, VecDeque::new(), context);
 
         let event_stream = stream::unfold(init, move |(mut input, mut acc, mut buf, ctx)| {
@@ -355,9 +358,23 @@ impl ExecutionPlan for WindowAccumExec {
             let data_schema = data_schema.clone();
             let partial_schema = partial_schema.clone();
             let final_group_by = Arc::clone(&final_group_by);
-            let checkpoint_location = checkpoint_location.clone();
+            let ck = ck.clone();
             let state_op_id = state_op_id.clone();
             async move {
+                // Restore committed state on the first poll (open-window partials + watermark +
+                // emitted ends), for stateful exactly-once recovery across runs.
+                if !acc.restored {
+                    if let Some(ck) = &ck {
+                        let (batches, meta) =
+                            crate::streaming::state_io::restore_state(ck, &state_op_id).await;
+                        acc.pending_rows = batches;
+                        if let Some((wm, ends)) = meta.split_first() {
+                            acc.watermark_micros = (*wm != i64::MIN).then_some(*wm);
+                            acc.emitted_ends = ends.iter().copied().collect();
+                        }
+                    }
+                    acc.restored = true;
+                }
                 loop {
                     // First drain the output buffer.
                     if let Some(ev) = buf.pop_front() {
@@ -420,7 +437,7 @@ impl ExecutionPlan for WindowAccumExec {
                             }));
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::EndOfData))) => {
-                            if let Some(loc) = &checkpoint_location {
+                            if let Some(ck) = &ck {
                                 // Checkpointed run (availableNow/once): SNAPSHOT the open-window
                                 // partial state (write-ahead) so windows spanning runs complete
                                 // correctly — the runner commits it after the output is durable.
@@ -429,12 +446,13 @@ impl ExecutionPlan for WindowAccumExec {
                                     vec![acc.watermark_micros.unwrap_or(i64::MIN)];
                                 meta.extend(acc.emitted_ends.iter().copied());
                                 crate::streaming::state_io::stage_state(
-                                    loc,
+                                    ck,
                                     &state_op_id,
                                     &partial_schema,
                                     &acc.pending_rows,
                                     &meta,
-                                );
+                                )
+                                .await;
                             } else {
                                 // No checkpoint: flush all remaining windows (terminal).
                                 if let Err(e) = finalize_and_emit(

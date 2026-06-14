@@ -32,6 +32,7 @@ use futures::{stream, StreamExt};
 use sail_common_datafusion::streaming::event::encoding::{
     DecodedFlowEventStream, EncodedFlowEventStream,
 };
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
@@ -240,6 +241,7 @@ type JoinState = (
     Option<i64>,      // last emitted (min) watermark
     VecDeque<FlowEvent>,
     Arc<TaskContext>,
+    bool, // committed state restored yet (async restore on first poll)
 );
 
 impl ExecutionPlan for StreamJoinExec {
@@ -304,48 +306,65 @@ impl ExecutionPlan for StreamJoinExec {
         let interval_bounds = self.interval_bounds;
         let left_ts_idx = self.left_ts_idx;
         let right_ts_idx = self.right_ts_idx;
-        let checkpoint_location = self.checkpoint_location.clone();
-
-        // Restore buffered join state (+ watermarks) from the last committed snapshot,
-        // for stateful exactly-once recovery across runs.
-        let (mut left0, mut right0) = (vec![], vec![]);
-        let (mut lwm0, mut rwm0, mut last_wm0) = (None, None, None);
-        if let Some(loc) = &checkpoint_location {
-            let (lb, meta) = crate::streaming::state_io::restore_state(loc, "join-0-left");
-            let (rb, _) = crate::streaming::state_io::restore_state(loc, "join-0-right");
-            left0 = lb;
-            right0 = rb;
-            if let [lwm, rwm, last] = meta[..] {
-                lwm0 = (lwm != i64::MIN).then_some(lwm);
-                rwm0 = (rwm != i64::MIN).then_some(rwm);
-                last_wm0 = (last != i64::MIN).then_some(last);
-            }
-        }
+        // Build the checkpoint store synchronously (no I/O); committed join state is restored
+        // async on the first poll (execute() is sync). Buffers start empty + restored=false.
+        let ck = self
+            .checkpoint_location
+            .as_deref()
+            .and_then(|l| CheckpointStore::from_location(l).ok());
         let init: JoinState = (
             merged,
-            left0,
-            right0,
-            lwm0,
-            rwm0,
-            last_wm0,
+            vec![],
+            vec![],
+            None,
+            None,
+            None,
             VecDeque::new(),
             context,
+            false,
         );
 
         let event_stream = stream::unfold(init, move |state| {
-            let (mut merged, mut left_buf, mut right_buf, mut lwm, mut rwm, mut last_wm, mut buf, ctx) =
-                state;
+            let (
+                mut merged,
+                mut left_buf,
+                mut right_buf,
+                mut lwm,
+                mut rwm,
+                mut last_wm,
+                mut buf,
+                ctx,
+                mut restored,
+            ) = state;
             let on = on.clone();
             let left_schema = left_schema.clone();
             let right_schema = right_schema.clone();
             let filter = filter.clone();
-            let checkpoint_location = checkpoint_location.clone();
+            let ck = ck.clone();
             async move {
+                // Restore buffered join state (+ watermarks) on the first poll, for stateful
+                // exactly-once recovery across runs.
+                if !restored {
+                    if let Some(ck) = &ck {
+                        let (lb, meta) =
+                            crate::streaming::state_io::restore_state(ck, "join-0-left").await;
+                        let (rb, _) =
+                            crate::streaming::state_io::restore_state(ck, "join-0-right").await;
+                        left_buf = lb;
+                        right_buf = rb;
+                        if let [l, r, last] = meta[..] {
+                            lwm = (l != i64::MIN).then_some(l);
+                            rwm = (r != i64::MIN).then_some(r);
+                            last_wm = (last != i64::MIN).then_some(last);
+                        }
+                    }
+                    restored = true;
+                }
                 loop {
                     if let Some(ev) = buf.pop_front() {
                         return Some((
                             Ok(ev),
-                            (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx),
+                            (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
                         ));
                     }
                     match merged.next().await {
@@ -353,7 +372,7 @@ impl ExecutionPlan for StreamJoinExec {
                         Some((_, Err(e))) => {
                             return Some((
                                 Err(e),
-                                (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx),
+                                (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
                             ))
                         }
                         Some((side, Ok(FlowEvent::Data { batch, .. }))) => {
@@ -390,7 +409,7 @@ impl ExecutionPlan for StreamJoinExec {
                                 Err(e) => {
                                     return Some((
                                         Err(e),
-                                        (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx),
+                                        (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
                                     ))
                                 }
                                 Ok(out) => {
@@ -402,7 +421,7 @@ impl ExecutionPlan for StreamJoinExec {
                                                 Err(e) => {
                                                     return Some((
                                                         Err(e),
-                                                        (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx),
+                                                        (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
                                                     ))
                                                 }
                                             },
@@ -464,18 +483,20 @@ impl ExecutionPlan for StreamJoinExec {
                             // state write-ahead so it survives a restart (the runner commits
                             // it after the output is durable). Idempotent — the last
                             // EndOfData (after both inputs end) holds the complete state.
-                            if let Some(loc) = &checkpoint_location {
+                            if let Some(ck) = &ck {
                                 let meta = vec![
                                     lwm.unwrap_or(i64::MIN),
                                     rwm.unwrap_or(i64::MIN),
                                     last_wm.unwrap_or(i64::MIN),
                                 ];
                                 crate::streaming::state_io::stage_state(
-                                    loc, "join-0-left", &left_schema, &left_buf, &meta,
-                                );
+                                    ck, "join-0-left", &left_schema, &left_buf, &meta,
+                                )
+                                .await;
                                 crate::streaming::state_io::stage_state(
-                                    loc, "join-0-right", &right_schema, &right_buf, &[],
-                                );
+                                    ck, "join-0-right", &right_schema, &right_buf, &[],
+                                )
+                                .await;
                             }
                             buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
                         }

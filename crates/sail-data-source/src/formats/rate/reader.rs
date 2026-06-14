@@ -15,6 +15,7 @@ use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{arrow_datafusion_err, plan_err, Result};
 use futures::{Stream, StreamExt};
 use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
@@ -78,8 +79,10 @@ impl StreamSource for RateStreamSource {
         // restart replays from where the previous run committed rather than from 0.
         let mut options = self.options.clone();
         if let Some(loc) = checkpoint_location {
-            if let Some(committed) = read_committed_offset(loc) {
-                options.start_offset = committed;
+            if let Ok(ck) = CheckpointStore::from_location(loc) {
+                if let Some(committed) = read_committed_offset(&ck).await {
+                    options.start_offset = committed;
+                }
             }
         }
         Ok(Arc::new(RateSourceExec::try_new(
@@ -92,38 +95,19 @@ impl StreamSource for RateStreamSource {
     }
 }
 
-/// Path of the durably-committed source offset within a checkpoint location.
-fn committed_offset_path(checkpoint_location: &str) -> std::path::PathBuf {
-    std::path::Path::new(checkpoint_location)
-        .join("sources")
-        .join("0")
-        .join("committed")
+/// Read the last durably-committed row offset, if any (single-object `sources/0/committed`).
+pub async fn read_committed_offset(ck: &CheckpointStore) -> Option<usize> {
+    let bytes = ck.get("sources/0/committed").await.ok().flatten()?;
+    String::from_utf8_lossy(&bytes).trim().parse::<usize>().ok()
 }
 
-/// Path of the staged (written-ahead, not-yet-committed) source offset.
-fn staged_offset_path(checkpoint_location: &str) -> std::path::PathBuf {
-    std::path::Path::new(checkpoint_location)
-        .join("sources")
-        .join("0")
-        .join("staged")
-}
-
-/// Read the last durably-committed row offset, if any.
-pub fn read_committed_offset(checkpoint_location: &str) -> Option<usize> {
-    std::fs::read_to_string(committed_offset_path(checkpoint_location))
-        .ok()
-        .and_then(|s| s.trim().parse::<usize>().ok())
-}
-
-/// Stage (write-ahead) the end offset reached by the current batch. The runner promotes
-/// this to `committed` only after the batch's output is durable — see
+/// Stage (write-ahead) the end offset reached by the current batch as a single object. The runner
+/// promotes `sources/0/staged` → `committed` only after the batch's output is durable — see
 /// `StreamingQuery::run` and docs/design/streaming-exactly-once.md.
-fn write_staged_offset(checkpoint_location: &str, offset: usize) {
-    let path = staged_offset_path(checkpoint_location);
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let _ = std::fs::write(path, offset.to_string());
+async fn write_staged_offset(ck: &CheckpointStore, offset: usize) {
+    let _ = ck
+        .put("sources/0/staged", bytes::Bytes::from(offset.to_string()))
+        .await;
 }
 
 #[derive(Debug)]
@@ -273,15 +257,6 @@ impl ExecutionPlan for RateSourceExec {
             // rows, then EndOfData, then end the stream so the query terminates
             // instead of running continuously.
             let rows = (self.options.rows_per_second / self.options.num_partitions).max(1);
-            // Write-ahead: stage the end offset this batch reaches. The runner promotes
-            // it to committed only after the output is durable (exactly-once recovery).
-            // Single-partition only — multi-partition offset recovery needs the checkpoint
-            // coordinator (docs/design/streaming-parallelism.md, Phase 3).
-            if self.options.num_partitions == 1 {
-                if let Some(loc) = &self.checkpoint_location {
-                    write_staged_offset(loc, self.options.start_offset + rows);
-                }
-            }
             // Partition p emits disjoint, globally-contiguous values: start at p, stride by N.
             let mut generator = BatchGenerator::try_new(
                 Arc::clone(&self.time_zone),
@@ -290,10 +265,26 @@ impl ExecutionPlan for RateSourceExec {
                 self.options.start_offset + partition,
                 self.options.num_partitions,
             )?;
-            let events = futures::stream::iter(vec![
-                generator.generate(rows).map(FlowEvent::append_only_data),
-                Ok(FlowEvent::Marker(FlowMarker::EndOfData)),
-            ]);
+            // Write-ahead (in the async stream): stage the end offset this batch reaches. The
+            // runner promotes it to committed only after the output is durable (exactly-once).
+            // Single-partition only — multi-partition offset recovery needs the checkpoint
+            // coordinator (docs/design/streaming-parallelism.md, Phase 3).
+            let ck = if self.options.num_partitions == 1 {
+                self.checkpoint_location
+                    .as_deref()
+                    .and_then(|l| CheckpointStore::from_location(l).ok())
+            } else {
+                None
+            };
+            let staged_offset = self.options.start_offset + rows;
+            let data = generator.generate(rows).map(FlowEvent::append_only_data);
+            let events = async_stream::stream! {
+                if let Some(ck) = &ck {
+                    write_staged_offset(ck, staged_offset).await;
+                }
+                yield data;
+                yield Ok(FlowEvent::Marker(FlowMarker::EndOfData));
+            };
             let stream = Box::pin(FlowEventStreamAdapter::new(
                 self.projected_schema.clone(),
                 events,

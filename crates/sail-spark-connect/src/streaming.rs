@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::logical_expr::{PlanType, StringifiedPlan};
@@ -127,7 +128,7 @@ fn progress_json(
 /// window (verified by the W3 simulation + SIGKILL gates).
 async fn consume_stream(
     mut stream: SendableRecordBatchStream,
-    offsets_dir: &Option<PathBuf>,
+    ck: &Option<CheckpointStore>,
     batch_id: &mut u64,
     ui_id: &str,
     error: &watch::Sender<Option<SparkThrowable>>,
@@ -136,8 +137,7 @@ async fn consume_stream(
     while let Some(x) = stream.next().await {
         match x {
             Ok(_) => {
-                if let Some(dir) = offsets_dir {
-                    let offset_file = dir.join(batch_id.to_string());
+                if let Some(ck) = ck {
                     let payload = format!(
                         "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
                         std::time::SystemTime::now()
@@ -145,7 +145,10 @@ async fn consume_stream(
                             .map(|d| d.as_millis())
                             .unwrap_or(0)
                     );
-                    if let Err(e) = std::fs::write(&offset_file, payload) {
+                    if let Err(e) = ck
+                        .put(&format!("offsets/{batch_id}"), bytes::Bytes::from(payload))
+                        .await
+                    {
                         warn!("Failed to write checkpoint offset {batch_id}: {e}");
                     }
                 }
@@ -162,13 +165,13 @@ async fn consume_stream(
     clean
 }
 
-fn read_latest_batch_id(offsets_dir: &Path) -> Option<u64> {
-    std::fs::read_dir(offsets_dir)
+/// Latest committed batch id from the `offsets` markers in the checkpoint store.
+async fn latest_batch_id(ck: &CheckpointStore) -> Option<u64> {
+    ck.list("offsets")
+        .await
         .ok()?
-        .filter_map(|e| {
-            let name = e.ok()?.file_name();
-            name.to_str()?.parse::<u64>().ok()
-        })
+        .iter()
+        .filter_map(|s| s.parse::<u64>().ok())
         .max()
 }
 
@@ -225,16 +228,7 @@ impl StreamingQuery {
         driver: StreamDriver,
         checkpoint_location: Option<String>,
     ) -> Self {
-        let initial_batch_id = checkpoint_location
-            .as_deref()
-            .map(|loc| {
-                let offsets_dir = PathBuf::from(loc).join("offsets");
-                read_latest_batch_id(&offsets_dir)
-                    .map(|id| id + 1)
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-
+        // `initial_batch_id` is computed inside `run` (it needs async checkpoint-store I/O).
         let ui_id = uuid::Uuid::new_v4().to_string();
         {
             let id = ui_id.clone();
@@ -258,7 +252,6 @@ impl StreamingQuery {
                 stopped_tx,
                 driver,
                 checkpoint_location,
-                initial_batch_id,
                 ui_id_run,
                 query_id,
                 run_id,
@@ -312,23 +305,28 @@ impl StreamingQuery {
         stopped: watch::Sender<bool>,
         driver: StreamDriver,
         checkpoint_location: Option<String>,
-        initial_batch_id: u64,
         ui_id: String,
         query_id: String,
         run_id: String,
         name: String,
         progress: Arc<Mutex<VecDeque<String>>>,
     ) {
-        let offsets_dir = checkpoint_location.as_deref().map(|loc| {
-            let mut p = PathBuf::from(loc);
-            p.push("offsets");
-            p
-        });
-        if let Some(ref dir) = offsets_dir {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                warn!("Failed to create checkpoint offsets dir {:?}: {e}", dir);
-            }
-        }
+        // Checkpoint store (local FS, S3, or GCS); checkpoint I/O goes through it so streaming
+        // recovery survives a pod restart on object storage.
+        let ck: Option<CheckpointStore> = checkpoint_location
+            .as_deref()
+            .and_then(|loc| match CheckpointStore::from_location(loc) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    warn!("Failed to open checkpoint store {loc}: {e}");
+                    None
+                }
+            });
+        // Resume from the last committed batch id (the `offsets` markers exist iff committed).
+        let initial_batch_id = match &ck {
+            Some(ck) => latest_batch_id(ck).await.map(|n| n + 1).unwrap_or(0),
+            None => 0,
+        };
         if initial_batch_id > 0 {
             log::info!("Streaming checkpoint recovery: resuming from batch {initial_batch_id}");
         }
@@ -358,13 +356,13 @@ impl StreamingQuery {
                 let t0 = std::time::Instant::now();
                 tokio::select! {
                     _ = signal => {}
-                    clean = consume_stream(stream, &offsets_dir, &mut batch_id, &ui_id, &error) => {
+                    clean = consume_stream(stream, &ck, &mut batch_id, &ui_id, &error) => {
                         // The micro-batch completed (availableNow/once). If clean, the output is
                         // durable, so commit the sources' staged offsets (write-ahead →
                         // committed) — exactly-once recovery on the next run.
                         if clean {
-                            if let Some(ref loc) = checkpoint_location {
-                                commit_source_offsets(loc);
+                            if let Some(ck) = &ck {
+                                commit_source_offsets(ck).await;
                             }
                             record(&plan, mb_id, t0.elapsed().as_millis());
                         }
@@ -396,11 +394,11 @@ impl StreamingQuery {
                     };
                     let clean = tokio::select! {
                         _ = &mut signal => break,
-                        c = consume_stream(stream, &offsets_dir, &mut batch_id, &ui_id, &error) => c,
+                        c = consume_stream(stream, &ck, &mut batch_id, &ui_id, &error) => c,
                     };
                     if clean {
-                        if let Some(ref loc) = checkpoint_location {
-                            commit_source_offsets(loc);
+                        if let Some(ck) = &ck {
+                            commit_source_offsets(ck).await;
                         }
                         record(&plan, mb_id, t0.elapsed().as_millis());
                         mb_id += 1;
@@ -421,32 +419,25 @@ impl StreamingQuery {
     }
 }
 
-/// Promote every source's staged (write-ahead) offset to committed (atomic rename),
-/// once the batch output is durable. This is the commit step of the offset WAL →
-/// commit-log protocol (Spark `MicroBatchExecution` model) — see
-/// docs/design/streaming-exactly-once.md.
-fn commit_source_offsets(checkpoint_location: &str) {
-    // Source offsets: `<loc>/sources/<id>/staged` (file) -> `committed`.
-    promote_staged(&PathBuf::from(checkpoint_location).join("sources"), false);
-    // Operator state: `<loc>/state/<op>/staged` (dir) -> `committed`.
-    promote_staged(&PathBuf::from(checkpoint_location).join("state"), true);
-}
-
-/// Promote every `<root>/<id>/staged` to `committed` (atomic rename), once the batch
-/// output is durable — the commit step of the offset/state WAL protocol.
-fn promote_staged(root: &std::path::Path, is_dir: bool) {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let staged = entry.path().join("staged");
-        if staged.exists() {
-            let committed = entry.path().join("committed");
-            if is_dir {
-                let _ = std::fs::remove_dir_all(&committed);
+/// Promote every source's and operator's staged (write-ahead) artifact to committed, once the
+/// batch output is durable. This is the commit step of the offset/state WAL → commit-log protocol
+/// (Spark `MicroBatchExecution`). Each artifact is a single object, so a "commit" is one atomic
+/// `put` of `committed` (object stores have no rename) — works on `file://` and `s3://` alike.
+/// See docs/design/streaming-exactly-once.md.
+async fn commit_source_offsets(ck: &CheckpointStore) {
+    // Find every `sources/<id>/staged` and `state/<op>/staged`, promote each to its `committed`.
+    for root in ["sources", "state"] {
+        let staged = match ck.list_rel(root).await {
+            Ok(items) => items,
+            Err(e) => {
+                warn!("Failed to list {root} for commit: {e}");
+                continue;
             }
-            if let Err(e) = std::fs::rename(&staged, &committed) {
-                warn!("Failed to commit {staged:?}: {e}");
+        };
+        for rel in staged.into_iter().filter(|r| r.ends_with("/staged")) {
+            let committed = rel.trim_end_matches("staged").to_string() + "committed";
+            if let Err(e) = ck.promote(&rel, &committed).await {
+                warn!("Failed to commit {rel}: {e}");
             }
         }
     }

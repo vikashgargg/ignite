@@ -7544,12 +7544,14 @@ dependencies = [
 name = "sail-physical-plan"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "datafusion",
  "datafusion-common",
  "datafusion-expr",
  "futures",
  "lazy_static",
+ "object_store",
  "sail-catalog",
  "sail-common-datafusion",
  "sail-logical-plan",
@@ -7730,6 +7732,7 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "axum",
+ "bytes",
  "chrono",
  "datafusion",
  "fastrace",

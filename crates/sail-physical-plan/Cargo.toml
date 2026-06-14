@@ -19,3 +19,5 @@ futures = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 lazy_static = { workspace = true }
+bytes = { workspace = true }
+object_store = { workspace = true }

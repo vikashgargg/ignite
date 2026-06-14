@@ -129,6 +129,24 @@ impl CheckpointStore {
         Ok(out)
     }
 
+    /// Relative paths (under the checkpoint base) of all objects below `prefix_rel`, recursively.
+    /// Used by the commit step to find every `*/staged` artifact (one per source / operator) to
+    /// promote.
+    pub async fn list_rel(&self, prefix_rel: &str) -> Result<Vec<String>> {
+        use futures::StreamExt;
+        let prefix = self.child(prefix_rel);
+        let base_str = format!("{}/", self.base);
+        let mut out = vec![];
+        let mut listing = self.store.list(Some(&prefix));
+        while let Some(meta) = listing.next().await {
+            let meta = meta.map_err(|e| plan_datafusion_err!("checkpoint list {prefix_rel}: {e}"))?;
+            let full = meta.location.as_ref();
+            let rel = full.strip_prefix(&base_str).unwrap_or(full).to_string();
+            out.push(rel);
+        }
+        Ok(out)
+    }
+
     /// Delete an artifact; absent is not an error (idempotent).
     pub async fn delete(&self, rel: &str) -> Result<()> {
         match self.store.delete(&self.child(rel)).await {
