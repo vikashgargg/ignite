@@ -148,3 +148,23 @@ crash/correctness tests + a measured head-to-head, then claim.
 
 After each P0: a measured, fair head-to-head vs Flink (same input, no workarounds — see
 `docs/benchmarks/ICEBERG_SINK.md` for the standard) before any parity claim.
+
+## 5. Dependency edge — DataFusion 54.0.0 upgrade (own sprint)
+
+Vajra is on **DataFusion 53.1.0 / Arrow 58.1.0**. DataFusion **54.0.0** (released 2026-06-12) brings
+engine-core wins that flow straight into Vajra's batch *and* streaming without us writing them — the
+"leaner substrate" thesis paying off via the upstream:
+- **Repartition coalesce → up to 50% faster on skew** — directly speeds Vajra's keyed
+  `StreamExchangeExec` + the distributed shuffle (relevant to F2 parallel streaming).
+- **Parquet morsel-driven parallelism → ~2× faster scans on skewed data** — speeds the streaming
+  file source + batch reads.
+- Sort-merge join (near-unique 20–50×), join-key `DynComparator` (~5% TPC-H), redundant ORDER BY
+  pruning, sort/TopK pushdown via statistics, spilling nested-loop joins, `ahash`→`foldhash`.
+
+**Decision:** schedule as a **dedicated upgrade sprint**, not folded into a feature P0. It's a major
+version bump (breaking physical-plan/expr APIs + a likely Arrow bump) that ripples through the custom
+crates (`sail-physical-plan`, `sail-execution` codec, `sail-iceberg`, `sail-delta`) and needs the full
+regression (105/105 differential scorecard, TPC-H/DS, streaming all-in-one, the EO crash gates) before
+shipping. Doing it mid-feature would risk destabilizing the verified baseline. Track breaking changes
+from the DataFusion 54 upgrade guide. Sources: datafusion.apache.org/blog (54.0.0),
+github.com/apache/datafusion.
