@@ -20,12 +20,46 @@ use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{Message, Timestamp};
 use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
 use sail_common_datafusion::streaming::event::FlowEvent;
 use sail_common_datafusion::streaming::source::StreamSource;
 
 use crate::formats::kafka::options::KafkaReadOptions;
+
+/// Read committed per-(topic,partition) offsets from the checkpoint store (single object
+/// `sources/0/committed`, a JSON map `"topic:partition" -> next-offset`). The runner commits
+/// staged→committed via `CheckpointStore.promote` after the batch output is durable.
+async fn read_committed_offsets(
+    ck: &CheckpointStore,
+) -> std::collections::HashMap<(String, i32), i64> {
+    let Some(bytes) = ck.get("sources/0/committed").await.ok().flatten() else {
+        return std::collections::HashMap::new();
+    };
+    let map: std::collections::BTreeMap<String, i64> =
+        serde_json::from_slice(&bytes).unwrap_or_default();
+    map.into_iter()
+        .filter_map(|(k, v)| {
+            let (t, p) = k.rsplit_once(':')?;
+            Some(((t.to_string(), p.parse().ok()?), v))
+        })
+        .collect()
+}
+
+/// Stage (write-ahead) the per-(topic,partition) offsets reached by this micro-batch.
+async fn write_staged_offsets(
+    ck: &CheckpointStore,
+    offsets: &std::collections::HashMap<(String, i32), i64>,
+) {
+    let map: std::collections::BTreeMap<String, i64> = offsets
+        .iter()
+        .map(|((t, p), o)| (format!("{t}:{p}"), *o))
+        .collect();
+    if let Ok(body) = serde_json::to_vec(&map) {
+        let _ = ck.put("sources/0/staged", bytes::Bytes::from(body)).await;
+    }
+}
 
 /// Spark-compatible Kafka source schema (7 columns).
 pub fn kafka_data_schema() -> Schema {
@@ -75,11 +109,12 @@ impl StreamSource for KafkaStreamSource {
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
-        // Bounded (availableNow/once) reads are not yet implemented for Kafka; the
-        // source runs continuously. Tracked in docs/STREAMING.md.
-        _bounded: bool,
-        // Kafka offset commit/restore is a follow-up (native partition offsets).
-        _checkpoint_location: Option<&str>,
+        // `bounded` (availableNow/once, or each continuous re-plan micro-batch): read only
+        // `[committed_offset, current_end_offset)` per partition, then `EndOfData`.
+        bounded: bool,
+        // With a checkpoint location, per-(topic,partition) offsets are committed/restored via the
+        // CheckpointStore for exactly-once recovery (Spark `KafkaMicroBatchStream` model).
+        checkpoint_location: Option<&str>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()
@@ -88,6 +123,8 @@ impl StreamSource for KafkaStreamSource {
             self.options.clone(),
             Arc::clone(&self.schema),
             projection,
+            bounded,
+            checkpoint_location.map(str::to_string),
         )?))
     }
 }
@@ -102,6 +139,11 @@ pub struct KafkaSourceExec {
     original_schema: SchemaRef,
     projected_schema: SchemaRef,
     projection: Vec<usize>,
+    /// Bounded micro-batch read (availableNow/once or each continuous re-plan): read up to the
+    /// current end offsets, then `EndOfData`.
+    bounded: bool,
+    /// Streaming `checkpointLocation`, when set — restore/stage per-partition offsets for EO.
+    checkpoint_location: Option<String>,
     properties: Arc<PlanProperties>,
 }
 
@@ -110,22 +152,31 @@ impl KafkaSourceExec {
         options: KafkaReadOptions,
         schema: SchemaRef,
         projection: Vec<usize>,
+        bounded: bool,
+        checkpoint_location: Option<String>,
     ) -> Result<Self> {
         let projected_schema = Arc::new(schema.project(&projection)?);
         let output_schema = Arc::new(to_flow_event_schema(&projected_schema));
+        let boundedness = if bounded {
+            Boundedness::Bounded
+        } else {
+            Boundedness::Unbounded {
+                requires_infinite_memory: false,
+            }
+        };
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(output_schema),
             Partitioning::UnknownPartitioning(1),
             EmissionType::Both,
-            Boundedness::Unbounded {
-                requires_infinite_memory: false,
-            },
+            boundedness,
         ));
         Ok(Self {
             options,
             original_schema: schema,
             projected_schema,
             projection,
+            bounded,
+            checkpoint_location,
             properties,
         })
     }
@@ -202,6 +253,129 @@ impl ExecutionPlan for KafkaSourceExec {
         let projected_schema = self.projected_schema.clone();
         let max_batch = options.max_batch_size;
         let timeout = Duration::from_millis(options.fetch_timeout_ms);
+
+        // Bounded micro-batch read with exactly-once offsets (Spark `KafkaMicroBatchStream` model):
+        // assign + seek to committed (or earliest/latest) start offsets, read up to the current end
+        // offsets, stage the offsets reached, then `EndOfData`. The runner commits staged→committed
+        // (via CheckpointStore.promote) after the output is durable.
+        if self.bounded {
+            let checkpoint_location = self.checkpoint_location.clone();
+            let events = async_stream::stream! {
+                let mut cfg = ClientConfig::new();
+                cfg.set("bootstrap.servers", &options.bootstrap_servers);
+                cfg.set("group.id", &options.group_id);
+                cfg.set("enable.auto.commit", "false");
+                for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
+                let consumer: StreamConsumer = match cfg.create() {
+                    Ok(c) => c,
+                    Err(e) => { yield Err(exec_datafusion_err!("failed to create Kafka consumer: {e}")); return; }
+                };
+                let Some(topics_csv) = options.subscribe.clone() else {
+                    yield Err(exec_datafusion_err!("bounded/exactly-once Kafka read requires `subscribe` (explicit topics)"));
+                    return;
+                };
+                let topics: Vec<String> = topics_csv.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+
+                // Restore committed per-(topic,partition) offsets, if any.
+                let ck = checkpoint_location.as_deref().and_then(|l| CheckpointStore::from_location(l).ok());
+                let committed: std::collections::HashMap<(String, i32), i64> = match &ck {
+                    Some(ck) => read_committed_offsets(ck).await,
+                    None => std::collections::HashMap::new(),
+                };
+                let earliest = options.starting_offsets.eq_ignore_ascii_case("earliest");
+
+                // Resolve assignments (topic, partition, start offset, end=high watermark) in a SYNC
+                // step that returns owned data — so rdkafka's non-Send `Metadata` is never held
+                // across an await/yield in this stream.
+                let resolve = || -> std::result::Result<Vec<(String, i32, i64, i64)>, String> {
+                    let mut out = vec![];
+                    for topic in &topics {
+                        let md = consumer
+                            .fetch_metadata(Some(topic), timeout)
+                            .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
+                        let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
+                        for p in t.partitions() {
+                            let part = p.id();
+                            let (low, high) = consumer
+                                .fetch_watermarks(topic, part, timeout)
+                                .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
+                            let start = committed
+                                .get(&(topic.clone(), part))
+                                .copied()
+                                .unwrap_or(if earliest { low } else { high });
+                            out.push((topic.clone(), part, start, high));
+                        }
+                    }
+                    Ok(out)
+                };
+                let assignments = match resolve() {
+                    Ok(a) => a,
+                    Err(e) => { yield Err(exec_datafusion_err!("Kafka {e}")); return; }
+                };
+                let mut tpl = rdkafka::TopicPartitionList::new();
+                let mut ends: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
+                let mut next: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
+                for (topic, part, start, high) in assignments {
+                    if let Err(e) = tpl.add_partition_offset(&topic, part, rdkafka::Offset::Offset(start)) {
+                        yield Err(exec_datafusion_err!("Kafka assign({topic},{part}@{start}): {e}")); return;
+                    }
+                    ends.insert((topic.clone(), part), high);
+                    next.insert((topic, part), start);
+                }
+                if let Err(e) = consumer.assign(&tpl) {
+                    yield Err(exec_datafusion_err!("Kafka assign: {e}")); return;
+                }
+
+                // Read until every partition reaches its end offset (or no more messages).
+                let remaining = |next: &std::collections::HashMap<(String, i32), i64>| -> i64 {
+                    ends.iter().map(|(k, e)| (e - next.get(k).copied().unwrap_or(*e)).max(0)).sum()
+                };
+                let mut msg_stream = consumer.stream();
+                while remaining(&next) > 0 {
+                    let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
+                    while rows.len() < max_batch && remaining(&next) > 0 {
+                        match tokio::time::timeout(timeout, msg_stream.next()).await {
+                            Ok(Some(Ok(msg))) => {
+                                let tp = (msg.topic().to_string(), msg.partition());
+                                let end = ends.get(&tp).copied().unwrap_or(i64::MIN);
+                                if msg.offset() >= end { continue; } // past this batch's snapshot
+                                let (ts_ms, ts_type) = match msg.timestamp() {
+                                    Timestamp::NotAvailable => (-1i64, -1i32),
+                                    Timestamp::CreateTime(ms) => (ms, 0i32),
+                                    Timestamp::LogAppendTime(ms) => (ms, 1i32),
+                                };
+                                rows.push(KafkaRow {
+                                    key: msg.key().map(|k| k.to_vec()),
+                                    value: msg.payload().map(|v| v.to_vec()),
+                                    topic: msg.topic().to_string(),
+                                    partition: msg.partition(),
+                                    offset: msg.offset(),
+                                    timestamp_ms: ts_ms,
+                                    timestamp_type: ts_type,
+                                });
+                                next.insert(tp, msg.offset() + 1);
+                            }
+                            Ok(Some(Err(e))) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
+                            Ok(None) => break,
+                            Err(_) => break, // timeout: no more messages available right now
+                        }
+                    }
+                    if rows.is_empty() { break; }
+                    match build_batch(&full_schema, &projection, &rows) {
+                        Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                        Err(e) => { yield Err(e); return; }
+                    }
+                }
+
+                // Stage the offsets actually reached (write-ahead); runner commits after durable.
+                if let Some(ck) = &ck {
+                    write_staged_offsets(ck, &next).await;
+                }
+                yield Ok(FlowEvent::Marker(sail_common_datafusion::streaming::event::marker::FlowMarker::EndOfData));
+            };
+            let stream = Box::pin(FlowEventStreamAdapter::new(projected_schema, events));
+            return Ok(Box::pin(EncodedFlowEventStream::new(stream)));
+        }
 
         let output = async_stream::stream! {
             // Build rdkafka config.
