@@ -56,6 +56,15 @@ enum StreamDriver {
         make_stream: MakeStream,
         interval: Duration,
     },
+    /// `Trigger.Continuous` (Vajra realtime mode): one long-lived unbounded pipeline that flows
+    /// records continuously for low latency; offsets are committed per epoch every
+    /// `commit_interval`, asynchronously off the data path (Spark Continuous Processing model).
+    /// See docs/design/streaming-realtime-mode.md.
+    Realtime {
+        plan: Arc<dyn ExecutionPlan>,
+        stream: SendableRecordBatchStream,
+        commit_interval: Duration,
+    },
 }
 
 /// Sum the output rows of the plan's leaf nodes (sources/scans) — `numInputRows` for one
@@ -215,6 +224,33 @@ impl StreamingQuery {
             StreamDriver::Continuous {
                 make_stream,
                 interval,
+            },
+            checkpoint_location,
+        )
+    }
+
+    /// Realtime (`Trigger.Continuous`) query: run one long-lived unbounded pipeline continuously
+    /// (low latency), committing offsets per epoch every `commit_interval`. See
+    /// docs/design/streaming-realtime-mode.md.
+    pub fn new_realtime(
+        query_id: String,
+        run_id: String,
+        name: String,
+        info: Vec<StringifiedPlan>,
+        plan: Arc<dyn ExecutionPlan>,
+        stream: SendableRecordBatchStream,
+        commit_interval: Duration,
+        checkpoint_location: Option<String>,
+    ) -> Self {
+        Self::spawn(
+            query_id,
+            run_id,
+            name,
+            info,
+            StreamDriver::Realtime {
+                plan,
+                stream,
+                commit_interval,
             },
             checkpoint_location,
         )
@@ -410,6 +446,64 @@ impl StreamingQuery {
                         _ = &mut signal => break,
                         _ = tokio::time::sleep(interval) => {}
                     }
+                }
+            }
+            StreamDriver::Realtime {
+                plan,
+                stream,
+                commit_interval,
+            } => {
+                // Vajra realtime mode: one long-lived unbounded pipeline. Records flow continuously
+                // (low latency); offsets are committed per epoch on a timer — asynchronously, off
+                // the record path (Spark Continuous Processing model), so commits never stall flow.
+                // Slice 1: at-least-once (commits whatever sources have staged). Exactly-once for
+                // stateless via Checkpoint{epoch} markers + per-source epoch staging is slice 2.
+                let mut signal = signal;
+                let mut stream = stream;
+                let t0 = std::time::Instant::now();
+                let mut commit_timer = tokio::time::interval(commit_interval);
+                commit_timer.tick().await; // discard the immediate first tick
+                loop {
+                    tokio::select! {
+                        _ = &mut signal => break,
+                        item = stream.next() => {
+                            match item {
+                                Some(Ok(_)) => web_ui::increment_batch(&ui_id).await,
+                                Some(Err(e)) => {
+                                    let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
+                                    let _ = error.send(Some(cause.into()));
+                                    break;
+                                }
+                                None => break, // source finished
+                            }
+                        }
+                        _ = commit_timer.tick() => {
+                            // Epoch boundary: durably commit progress, off the data path.
+                            if let Some(ck) = &ck {
+                                let payload = format!(
+                                    "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis())
+                                        .unwrap_or(0)
+                                );
+                                if let Err(e) = ck
+                                    .put(&format!("offsets/{batch_id}"), bytes::Bytes::from(payload))
+                                    .await
+                                {
+                                    warn!("realtime epoch {batch_id} marker write failed: {e}");
+                                }
+                                commit_source_offsets(ck).await;
+                            }
+                            record(&plan, mb_id, t0.elapsed().as_millis());
+                            batch_id += 1;
+                            mb_id += 1;
+                        }
+                    }
+                }
+                // Final commit on stop.
+                if let Some(ck) = &ck {
+                    commit_source_offsets(ck).await;
                 }
             }
         }

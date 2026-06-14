@@ -320,7 +320,35 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
         }
         _ => None,
     };
-    let id = if let Some(interval) = processing_interval {
+    // `Trigger.Continuous` → Vajra realtime mode: one long-lived unbounded pipeline (low latency)
+    // with per-epoch offset commits. See docs/design/streaming-realtime-mode.md.
+    let realtime_interval = match &start.trigger {
+        Some(write_stream_operation_start::Trigger::ContinuousCheckpointInterval(s)) => {
+            Some(parse_processing_interval(s))
+        }
+        _ => None,
+    };
+    let id = if let Some(commit_interval) = realtime_interval {
+        // Build the pipeline UNBOUNDED (runs continuously, not re-planned per trigger).
+        let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
+        let (plan, info) = resolve_and_execute_plan_with_options(
+            ctx,
+            spark.plan_config()?,
+            plan,
+            false, // unbounded: continuous execution
+            checkpoint_location.clone(),
+        )
+        .await?;
+        let stream = service.runner().execute(ctx, plan.clone()).await?;
+        spark.start_streaming_query_realtime(
+            query_name.clone(),
+            info,
+            plan,
+            stream,
+            commit_interval,
+            checkpoint_location,
+        )?
+    } else if let Some(interval) = processing_interval {
         let config = spark.plan_config()?;
         let ctx_owned = ctx.clone();
         let start_owned = start.clone();

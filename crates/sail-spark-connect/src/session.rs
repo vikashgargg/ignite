@@ -263,6 +263,37 @@ impl SparkSession {
         Ok(id)
     }
 
+    /// Start a realtime (`Trigger.Continuous`) streaming query: one long-lived unbounded pipeline
+    /// (low latency) with per-epoch offset commits every `commit_interval`. See
+    /// docs/design/streaming-realtime-mode.md.
+    pub(crate) fn start_streaming_query_realtime(
+        &self,
+        name: String,
+        info: Vec<StringifiedPlan>,
+        plan: std::sync::Arc<dyn datafusion::physical_plan::ExecutionPlan>,
+        stream: datafusion::execution::SendableRecordBatchStream,
+        commit_interval: std::time::Duration,
+        checkpoint_location: Option<String>,
+    ) -> SparkResult<StreamingQueryId> {
+        let id = StreamingQueryId {
+            query_id: uuid::Uuid::new_v4().to_string(),
+            run_id: uuid::Uuid::new_v4().to_string(),
+        };
+        let mut state = self.state.lock()?;
+        let query = StreamingQuery::new_realtime(
+            id.query_id.clone(),
+            id.run_id.clone(),
+            name,
+            info,
+            plan,
+            stream,
+            commit_interval,
+            checkpoint_location,
+        );
+        state.streaming_queries.add_query(id.clone(), query);
+        Ok(id)
+    }
+
     pub(crate) fn stop_streaming_query(&self, id: &StreamingQueryId) -> SparkResult<()> {
         let mut state = self.state.lock()?;
         state.streaming_queries.stop_query(id)?;
