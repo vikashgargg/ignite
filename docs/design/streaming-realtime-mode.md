@@ -88,6 +88,38 @@ vectorized, GC-free. We reuse the marker we have; no new barrier subsystem.
     with the file commit-log entry** (epoch id = join key). This ties source offset + sink files into
     one epoch transaction → exactly-once for stateless **without alignment latency** (beats Spark
     Continuous at-least-once; avoids Flink's alignment tax). Stateful needs aligned barriers (F2/F3).
+
+### F1b EO mechanism — doc-grounded (Flink 2PC + Spark epoch + F4 atomic commit)
+
+Read first (2026-06-15): Flink *stateful-stream-processing* + *checkpointing* + the *end-to-end
+exactly-once with 2PC* blog; Spark *continuous-processing* guide. Established invariants:
+- **Flink:** barriers flow in-band and **never overtake records**; **single-input / embarrassingly-
+  parallel ops are exactly-once even without alignment**; 2PC = *pre-commit on barrier* → *commit on
+  checkpoint-complete notification*; on recovery the **source resets to the snapshotted offset** and the
+  sink issues an **idempotent preemptive commit** ("it is our responsibility to implement a commit in an
+  idempotent way").
+- **Spark Continuous:** **at-least-once only**, ~1 ms, **map/filter/projection only**, and sinks are
+  **Kafka/Memory/Console — no durable file sink**. So Vajra's EO durable-file realtime sink is *beyond*
+  Spark Continuous and at Flink's EO level, without alignment (single-input).
+
+**Vajra mechanism (maps 1:1 to the invariants, collapsed to an object-store-atomic commit):**
+1. The continuous source emits `FlowMarker::Checkpoint{epoch}` every commit interval, **in-band, never
+   overtaking data** (FlowEvent ordering already guarantees this — our markers *are* Chandy-Lamport
+   barriers). Before emitting, it **pre-commits** by staging its reached offset map to
+   `sources/0/staged-epoch-<id>`.
+2. The sink consumes the **flow-event** stream (sees markers). On `Checkpoint{epoch}` it durably writes
+   the epoch's data files (pre-commit) then performs the **commit as a SINGLE atomic `put`** of one
+   record `_spark_metadata/<epoch>` carrying **both** the committed file metadata **and** the source
+   offset map (read from `staged-epoch-<id>`). Object stores have no multi-object transaction, so one
+   atomic object = no torn commit (the F4 principle).
+3. **Recovery:** on restart the source reads the latest committed `_spark_metadata/<id>`.offsets and
+   **seeks there** (`assign`+`seek`, `enable.auto.commit=false` — not broker auto-commit); the sink
+   resumes at `id+1`. Crash *before* the atomic put → nothing committed → source re-reads from the last
+   committed offset → next epoch commits it (no dup, never committed). Crash *after* the atomic put →
+   offset+files committed together → resume strictly after (no dup, no loss). Idempotent by construction.
+This is **exactly-once for stateless without alignment latency** — beats Spark Continuous (at-least-once)
+and matches Flink EO, with a durable file sink Spark Continuous lacks. Stateful (agg/join) still needs
+aligned barriers → F2/F3.
 - **F1c**: latency metrics (`FlowMarker::LatencyTracker`). ✅ **MEASURED (2026-06-15):** realtime mode
   rate→memory @10k rows/s, end-to-end processing latency (source-emit→sink-process, marker-stamped so
   tz-independent and isolating *processing* latency): **p50 ≈ 0.0–0.1 ms, p99 ≈ 0.1 ms, max ≈ 0.1–1.1 ms,
