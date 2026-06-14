@@ -70,7 +70,7 @@ Legend: ✅ done & evidenced · 🟡 partial · ⬜ gap.
 | F8 | **Windowing: tumbling/sliding/session + incremental agg** | Core analytics | ✅ tumbling/sliding/session + two-phase incremental agg (275k→ throughput work) | done |
 | F9 | **Stateful stream-stream joins (interval/windowed)** | Core analytics | ✅ inner equi + interval join with watermark-bounded eviction | 🟡 outer joins |
 | F10 | **Transactional / exactly-once sinks (2PC)** | End-to-end EO | 🟡 Iceberg idempotent ✅, file `_spark_metadata` ✅; Delta ⬜, Kafka sink ⬜ | P1 |
-| F11 | **Replayable sources w/ committed offsets (Kafka)** | End-to-end EO | 🟡 file source ✅ (atomic offset record); Kafka source has NO offset checkpoint | **P0 (Kafka)** |
+| F11 | **Replayable sources w/ committed offsets (Kafka)** | End-to-end EO | ✅ **done (2026-06-15):** Kafka bounded reads + per-(topic,partition) offset commit/restore via CheckpointStore (Spark KafkaMicroBatchStream); gated on a real broker (EO across restart, incremental). File source ✅ too. | done |
 | F12 | **CEP / `ProcessFunction` / `KeyedProcessFunction`** | Pattern detection, custom state | ⬜ none | P2 |
 | F13 | **Backpressure + bounded buffers** | Stability under load | ✅ bounded mpsc exchange channels (memory-bounded) | done |
 | F14 | **Unaligned checkpoints, reactive/elastic rescale** | Advanced ops | ⬜ | P2 |
