@@ -18,6 +18,42 @@ Sources: Flink stateful-stream-processing & fault-tolerance docs
 
 ---
 
+## 0. Architecture thesis — why Vajra is fundamentally leaner (governs every feature)
+
+**We do not port Flink's mechanisms into Vajra. We re-derive each capability on a leaner substrate,
+then prove "better" with a fair, no-workaround measurement.** Three structural advantages Spark and
+Flink cannot retrofit (they're baked into their foundations):
+
+1. **No JVM (Rust, native).** This is the biggest lever, three ways: (a) **no GC pauses** → tail
+   latency stays flat (**p99 ≈ p50**; Flink's p99 is dominated by stop-the-world GC) — this is *the*
+   basis for "lower latency than Flink," not a faster loop but the *absence* of GC jitter; (b) **no
+   JVM object overhead** → data lives in compact Arrow buffers, the structural reason for the measured
+   7–16× memory wins; (c) no JIT warmup — a persistent native server.
+2. **Arrow columnar + vectorized (DataFusion).** Flink processes one row/object at a time (good
+   latency, costly per-record CPU+memory). Vajra processes Arrow batches vectorized (SIMD,
+   cache-friendly). Realtime mode shrinks the flow-event batch toward 1 row for latency **while staying
+   vectorized**, approaching Flink's latency without Flink's per-record CPU cost (measured: sub-ms
+   latency *at* multi-M rows/s simultaneously — the micro-batch-vs-continuous tradeoff doesn't bind us
+   the same way).
+3. **One engine for batch + streaming.** Batch is a *bounded stream* in the flow-event model, so the
+   optimizer/vectorization/perf work applies to both paths — no duplicated engine (Spark batch ≠
+   Structured Streaming; Flink batch is bolted onto streaming).
+
+**Re-derivation principle per gap** (take the reference *idea*, exploit the substrate):
+- Checkpoint (F4): Arrow-IPC state as a **single atomic object** (no rename, fewer S3 ops, compact) —
+  not Flink's serialized-Java multi-file coordinator.
+- Realtime (F1): tiny **vectorized** flow-event batches at high tick — not per-record operator threads.
+- Barriers (F2/F3): barriers = the **existing flow-event markers** on the existing Arrow-Flight shuffle
+  — not a bespoke network barrier subsystem; one shuffle for batch+streaming.
+- State backend (F5): **Arrow-columnar state** + Arrow spill to object store — not per-key RocksDB
+  serialization.
+
+**Discipline:** the substrate gives the headroom; a fair benchmark *earns* every claim (same input,
+isolate the component, discard handicapped numbers — see `docs/benchmarks/ICEBERG_SINK.md`). Where we
+don't yet beat Flink (e.g. distributed multi-node throughput today), we say so.
+
+---
+
 ## 1. Flink feature matrix vs Vajra (honest status)
 
 Legend: ✅ done & evidenced · 🟡 partial · ⬜ gap.

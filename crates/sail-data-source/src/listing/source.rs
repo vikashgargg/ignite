@@ -392,7 +392,7 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                 // falls back to the driver's offset markers for non-file sources). This is what
                 // makes a crashed batch replay at the *same* id and overwrite its log idempotently
                 // (see `crate::formats::file_stream::current_batch_id`).
-                let batch_id = crate::formats::file_stream::current_batch_id(cp);
+                let batch_id = crate::formats::file_stream::current_batch_id(cp).await;
                 let base_store_path = table_paths
                     .first()
                     .map(|u| u.prefix().clone())

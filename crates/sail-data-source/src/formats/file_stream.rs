@@ -19,7 +19,6 @@
 use std::any::Any;
 use std::collections::HashSet;
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::SchemaRef;
@@ -42,6 +41,7 @@ use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::FlowEvent;
 use sail_common_datafusion::streaming::source::StreamSource;
 
@@ -95,9 +95,14 @@ impl StreamSource for FileStreamSource {
         checkpoint_location: Option<&str>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // Already-committed files (cross-run exactly-once: never reprocess these).
-        let seen: HashSet<String> = checkpoint_location
-            .map(read_committed_files)
-            .unwrap_or_default();
+        let ck = match checkpoint_location {
+            Some(loc) => Some(CheckpointStore::from_location(loc)?),
+            None => None,
+        };
+        let seen: HashSet<String> = match &ck {
+            Some(ck) => read_committed_files(ck).await,
+            None => HashSet::new(),
+        };
         // Collect NEW files (not yet committed), with mod time, for deterministic ordering +
         // `maxFilesPerTrigger` backpressure. Identifier = the store-relative object path
         // (stable across runs and object stores).
@@ -171,52 +176,48 @@ impl StreamSource for FileStreamSource {
             table.scan(state, projection, filters, limit).await?
         };
 
-        // Write-ahead the batch id + new processed-files set; the runner promotes staged →
-        // committed (single atomic rename) after the batch output is durable. Embedding the batch
-        // id makes recovery exact (see `SourceOffsetRecord`).
-        if let Some(ck) = checkpoint_location {
-            write_staged_files(ck, current_batch_id(ck), &processed);
+        // Write-ahead the batch id + new processed-files set; the runner commits staged → committed
+        // (single atomic object write) after the batch output is durable. Embedding the batch id
+        // makes recovery exact (see `SourceOffsetRecord`).
+        if let Some(ck) = &ck {
+            let batch_id = current_batch_id_in(ck).await;
+            write_staged_files(ck, batch_id, &processed).await;
         }
 
         Ok(Arc::new(FileSourceExec::try_new(data_plan)?))
     }
 }
 
-fn sources_dir(checkpoint_location: &str) -> PathBuf {
-    Path::new(checkpoint_location).join("sources").join("0")
-}
-
 /// The file source's offset record: the micro-batch id **and** the cumulative processed-files set,
 /// serialized as one unit. Keeping the batch id inside the record is what makes recovery exact:
-/// the runner commits a batch with a single atomic rename of `staged` → `committed`, so the batch
-/// number and the source position advance together. A crash before the rename leaves `staged`
-/// (batch N still in flight) → recovery reprocesses batch **N** (same number → the sink
-/// idempotently overwrites `_spark_metadata/N`); a crash after sees `committed` at N → the next
-/// batch is N+1. Neither a duplicate nor a silent-loss window remains. (Older checkpoints stored a
-/// bare newline list with no id; those are still read for the file set, falling back to the
-/// `<cp>/offsets` markers for numbering.)
+/// the runner commits a batch with a single atomic write of `committed`, so the batch number and
+/// the source position advance together. A crash before the commit leaves `staged` (batch N still
+/// in flight) → recovery reprocesses batch **N** (same number → the sink idempotently overwrites
+/// `_spark_metadata/N`); a crash after sees `committed` at N → the next batch is N+1. Neither a
+/// duplicate nor a silent-loss window remains. Records are single objects in the [`CheckpointStore`]
+/// (local FS or object store), so this works the same on `file://` and `s3://`. (Older checkpoints
+/// stored a bare newline list with no id; still read for the file set, falling back to `offsets`
+/// markers for numbering.)
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SourceOffsetRecord {
     batch_id: u64,
     files: Vec<String>,
 }
 
-fn read_record(checkpoint_location: &str, name: &str) -> Option<SourceOffsetRecord> {
-    let body = std::fs::read_to_string(sources_dir(checkpoint_location).join(name)).ok()?;
-    serde_json::from_str(&body).ok()
+async fn read_record(ck: &CheckpointStore, name: &str) -> Option<SourceOffsetRecord> {
+    let bytes = ck.get(&format!("sources/0/{name}")).await.ok().flatten()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
-/// Read the durably-committed set of processed object paths, if any. Parses the JSON record,
-/// falling back to the legacy newline-list format for checkpoints written before the batch id was
-/// embedded.
-pub fn read_committed_files(checkpoint_location: &str) -> HashSet<String> {
-    let Ok(body) = std::fs::read_to_string(sources_dir(checkpoint_location).join("committed"))
-    else {
+/// Read the durably-committed set of processed object paths from a checkpoint store. Parses the JSON
+/// record, falling back to the legacy newline-list format.
+pub async fn read_committed_files(ck: &CheckpointStore) -> HashSet<String> {
+    let Some(bytes) = ck.get("sources/0/committed").await.ok().flatten() else {
         return HashSet::new();
     };
-    match serde_json::from_str::<SourceOffsetRecord>(&body) {
+    match serde_json::from_slice::<SourceOffsetRecord>(&bytes) {
         Ok(rec) => rec.files.into_iter().collect(),
-        Err(_) => body
+        Err(_) => String::from_utf8_lossy(&bytes)
             .lines()
             .filter(|l| !l.is_empty())
             .map(str::to_string)
@@ -224,43 +225,48 @@ pub fn read_committed_files(checkpoint_location: &str) -> HashSet<String> {
     }
 }
 
-/// Latest committed batch id from the driver's `<cp>/offsets` markers (the numbering fallback for
+/// Latest committed batch id from the driver's `offsets` markers (the numbering fallback for
 /// non-file/non-replayable sources, and for fresh checkpoints).
-fn latest_offset_batch_id(checkpoint_location: &str) -> Option<u64> {
-    let dir = Path::new(checkpoint_location).join("offsets");
-    std::fs::read_dir(dir).ok().and_then(|rd| {
-        rd.filter_map(|e| e.ok())
-            .filter_map(|e| e.file_name().to_str().and_then(|s| s.parse::<u64>().ok()))
-            .max()
-    })
+async fn latest_offset_batch_id(ck: &CheckpointStore) -> Option<u64> {
+    ck.list("offsets")
+        .await
+        .ok()?
+        .iter()
+        .filter_map(|s| s.parse::<u64>().ok())
+        .max()
 }
 
 /// The micro-batch id this checkpoint is on — used by both the file source (to label its `staged`
 /// record) and the file sink (to name `<out>/<id>/` + `_spark_metadata/<id>`), so the two always
 /// agree. See [`SourceOffsetRecord`] for why this is exact under crashes.
-pub fn current_batch_id(checkpoint_location: &str) -> u64 {
-    if let Some(rec) = read_record(checkpoint_location, "staged") {
+pub async fn current_batch_id_in(ck: &CheckpointStore) -> u64 {
+    if let Some(rec) = read_record(ck, "staged").await {
         return rec.batch_id; // in-flight batch → reprocess at the same id
     }
-    if let Some(rec) = read_record(checkpoint_location, "committed") {
+    if let Some(rec) = read_record(ck, "committed").await {
         return rec.batch_id + 1; // last fully committed → next id
     }
-    latest_offset_batch_id(checkpoint_location)
-        .map(|n| n + 1)
-        .unwrap_or(0)
+    latest_offset_batch_id(ck).await.map(|n| n + 1).unwrap_or(0)
 }
 
-/// Stage (write-ahead) the batch id + processed-files set; the runner commits it (atomic rename
-/// `staged` → `committed`) after the output is durable.
-fn write_staged_files(checkpoint_location: &str, batch_id: u64, files: &HashSet<String>) {
-    let dir = sources_dir(checkpoint_location);
-    let _ = std::fs::create_dir_all(&dir);
+/// `current_batch_id_in` for callers that hold a checkpoint *location* string (the two sink
+/// `create_writer`s). Returns 0 if the location can't be opened.
+pub async fn current_batch_id(checkpoint_location: &str) -> u64 {
+    match CheckpointStore::from_location(checkpoint_location) {
+        Ok(ck) => current_batch_id_in(&ck).await,
+        Err(_) => 0,
+    }
+}
+
+/// Stage (write-ahead) the batch id + processed-files set as a single object; the runner commits it
+/// (atomic write of `committed`) after the output is durable.
+async fn write_staged_files(ck: &CheckpointStore, batch_id: u64, files: &HashSet<String>) {
     let rec = SourceOffsetRecord {
         batch_id,
         files: files.iter().cloned().collect(),
     };
-    if let Ok(body) = serde_json::to_string(&rec) {
-        let _ = std::fs::write(dir.join("staged"), body);
+    if let Ok(body) = serde_json::to_vec(&rec) {
+        let _ = ck.put("sources/0/staged", body.into()).await;
     }
 }
 
@@ -364,40 +370,43 @@ impl ExecutionPlan for FileSourceExec {
 mod tests {
     use super::*;
 
-    // Exercises the recovery numbering that closes the crash-mid-commit duplicate window: the
-    // batch id and processed-files set are committed as one atomic record, so an in-flight
-    // `staged` replays at the SAME id while a clean `committed` advances to the next.
-    #[test]
-    fn current_batch_id_reflects_atomic_offset_record() {
-        let dir = std::env::temp_dir().join(format!("vajra_fs_eo_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let cp = dir.to_str().unwrap();
+    // Exercises the recovery numbering that closes the crash-mid-commit duplicate window, now over
+    // a CheckpointStore (here in-memory; same code path runs on file:// and s3://): the batch id +
+    // processed-files set are committed as one atomic object, so an in-flight `staged` replays at
+    // the SAME id while a clean `committed` advances to the next.
+    #[tokio::test]
+    async fn current_batch_id_reflects_atomic_offset_record() {
+        use std::sync::Arc;
+
+        use object_store::memory::InMemory;
+        let ck = CheckpointStore::from_store(
+            Arc::new(InMemory::new()),
+            object_store::path::Path::from("ck"),
+        );
 
         // Fresh checkpoint: batch 0.
-        assert_eq!(current_batch_id(cp), 0);
+        assert_eq!(current_batch_id_in(&ck).await, 0);
 
-        // Batch 0 committed -> next is 1.
+        // Batch 0 committed -> next is 1 (write staged, then atomically promote to committed).
         let mut files: HashSet<String> = HashSet::new();
         files.insert("a/0/f0.parquet".to_string());
-        write_staged_files(cp, 0, &files);
-        std::fs::rename(
-            sources_dir(cp).join("staged"),
-            sources_dir(cp).join("committed"),
-        )
-        .unwrap();
-        assert_eq!(current_batch_id(cp), 1);
-        assert_eq!(read_committed_files(cp), files);
+        write_staged_files(&ck, 0, &files).await;
+        ck.promote("sources/0/staged", "sources/0/committed")
+            .await
+            .unwrap();
+        assert_eq!(current_batch_id_in(&ck).await, 1);
+        assert_eq!(read_committed_files(&ck).await, files);
 
         // Batch 1 staged but NOT committed (crash mid-commit) -> reprocess at 1, not 2.
         files.insert("a/1/f1.parquet".to_string());
-        write_staged_files(cp, 1, &files);
-        assert_eq!(current_batch_id(cp), 1);
+        write_staged_files(&ck, 1, &files).await;
+        assert_eq!(current_batch_id_in(&ck).await, 1);
 
         // Legacy newline-list committed (no embedded id) is still read for the file set.
-        let _ = std::fs::remove_file(sources_dir(cp).join("staged"));
-        std::fs::write(sources_dir(cp).join("committed"), "x/old.parquet\n").unwrap();
-        assert!(read_committed_files(cp).contains("x/old.parquet"));
-
-        let _ = std::fs::remove_dir_all(&dir);
+        ck.delete("sources/0/staged").await.unwrap();
+        ck.put("sources/0/committed", bytes::Bytes::from_static(b"x/old.parquet\n"))
+            .await
+            .unwrap();
+        assert!(read_committed_files(&ck).await.contains("x/old.parquet"));
     }
 }

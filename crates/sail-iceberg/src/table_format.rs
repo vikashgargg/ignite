@@ -112,7 +112,7 @@ impl TableFormat for IcebergTableFormat {
             );
         }
         let (input, mode, streaming_commit) = if let (true, Some(cp)) = (streaming, &checkpoint) {
-            let batch_id = sail_data_source::formats::file_stream::current_batch_id(cp);
+            let batch_id = sail_data_source::formats::file_stream::current_batch_id(cp).await;
             let decoded: Arc<dyn ExecutionPlan> =
                 Arc::new(sail_data_source::streaming_decode::FlowEventToDataExec::try_new(input)?);
             // Streaming output mode is append (Spark Structured Streaming default for files/tables).
