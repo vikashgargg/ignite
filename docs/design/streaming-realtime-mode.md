@@ -68,7 +68,26 @@ vectorized, GC-free. We reuse the marker we have; no new barrier subsystem.
 
 ## 3. Build plan — gated, nothing claimed without a measured head-to-head
 - **F1a**: `Trigger.Continuous` → `Realtime` driver (long-lived pipeline); reject unsupported plans by name.
-- **F1b**: source periodic `Checkpoint{epoch}` markers; driver async epoch commit → EO for stateless + idempotent sink.
+- **F1b**: per-epoch durable sink (`RealtimeFileSinkExec`) + epoch-tied source-offset commit → EO for stateless.
+  - ✅ **MEASURED (2026-06-15), sink side:** continuous flow-event stream rolled into per-epoch committed
+    files (`<base>/<epoch>/` + `_spark_metadata/<epoch>` log). Validated on a debug server:
+    rate→parquet `Trigger.Continuous("1 second")` produced 5 epoch dirs/6 s, all rows distinct;
+    **real Kafka** (single-partition topic, `apache/kafka`) → 5000 msgs → 5000 rows, **0 dups
+    (within-run exactly-once)**; epoch counter **resumes** from the commit log across restart (0→6);
+    `from_json`/`select` projections preserve flow-event markers (rewriter contract) so realistic parse
+    pipelines route through the realtime sink; multi-partition realtime is **rejected by name** (no
+    silent data loss — lands with F2/F3).
+  - ⚠️ **Honest gap — cross-restart EO not yet closed (measured):** the *unbounded continuous* Kafka
+    reader still uses `subscribe` + broker auto-commit (`auto.offset.reset=earliest`); it does **not**
+    seek to the checkpoint-store committed offset on restart nor stage offsets per epoch (only the
+    *bounded* F11 path does). Measured restart re-read wave-1: **total=15000, distinct=10000**.
+    **Fix (next):** continuous Kafka reader → `assign`+`seek` to `sources/0/committed`,
+    `enable.auto.commit=false`, emit `FlowMarker::Checkpoint{epoch}` every commit interval and stage
+    that epoch's offsets to `sources/0/staged-epoch-<id>`; `RealtimeFileSinkExec` commits **on the
+    Checkpoint marker** (not a wall-clock timer) and **promotes the matching staged offset atomically
+    with the file commit-log entry** (epoch id = join key). This ties source offset + sink files into
+    one epoch transaction → exactly-once for stateless **without alignment latency** (beats Spark
+    Continuous at-least-once; avoids Flink's alignment tax). Stateful needs aligned barriers (F2/F3).
 - **F1c**: latency metrics (`FlowMarker::LatencyTracker`). ✅ **MEASURED (2026-06-15):** realtime mode
   rate→memory @10k rows/s, end-to-end processing latency (source-emit→sink-process, marker-stamped so
   tz-independent and isolating *processing* latency): **p50 ≈ 0.0–0.1 ms, p99 ≈ 0.1 ms, max ≈ 0.1–1.1 ms,

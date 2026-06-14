@@ -160,12 +160,29 @@ impl PlanResolver<'_> {
             .with_mode(WriteMode::Append {
                 error_if_absent: false,
             });
-        let enable_commit_log = |builder: WritePlanBuilder| match &checkpoint {
-            Some(cp) => builder.with_options(vec![(
-                sail_common_datafusion::datasource::STREAM_CHECKPOINT_OPTION.to_string(),
-                cp.clone(),
-            )]),
-            None => builder,
+        // `Trigger.Continuous` → realtime durable sink: pass the commit interval so the file sink
+        // commits per epoch (RealtimeFileSinkExec). See docs/design/streaming-realtime-mode.md.
+        let realtime_interval = match &trigger {
+            Some(spec::StreamTrigger::Continuous { checkpoint_interval }) => {
+                Some(checkpoint_interval.clone())
+            }
+            _ => None,
+        };
+        let enable_commit_log = |builder: WritePlanBuilder| {
+            let builder = match &checkpoint {
+                Some(cp) => builder.with_options(vec![(
+                    sail_common_datafusion::datasource::STREAM_CHECKPOINT_OPTION.to_string(),
+                    cp.clone(),
+                )]),
+                None => builder,
+            };
+            match &realtime_interval {
+                Some(iv) => builder.with_options(vec![(
+                    sail_common_datafusion::datasource::STREAM_REALTIME_INTERVAL_OPTION.to_string(),
+                    iv.clone(),
+                )]),
+                None => builder,
+            }
         };
         match sink_destination {
             None => {

@@ -247,6 +247,12 @@ pub fn find_path_in_options(options: &[OptionLayer]) -> Option<String> {
 /// `sail_data_source::streaming_sink_log`). Stripped before options reach the format writer.
 pub const STREAM_CHECKPOINT_OPTION: &str = "__vajra_stream_checkpoint";
 
+/// Reserved sink option carrying the realtime (`Trigger.Continuous`) commit interval (a duration
+/// string) to the file writer. Its presence selects the epoch-rolling realtime durable sink
+/// (`RealtimeFileSinkExec`): the continuous stream is committed per epoch every interval. Stripped
+/// before options reach the format writer. See docs/design/streaming-realtime-mode.md (F1b).
+pub const STREAM_REALTIME_INTERVAL_OPTION: &str = "__vajra_stream_realtime_interval";
+
 /// Extract (and remove) a reserved option key from the option layers, returning its value if any.
 pub fn take_option(options: &mut [OptionLayer], key: &str) -> Option<String> {
     let mut found = None;

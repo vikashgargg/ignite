@@ -506,3 +506,192 @@ impl ExecutionPlan for StreamingSinkCommitExec {
         Ok(Box::pin(RecordBatchStreamAdapter::new(empty, out)))
     }
 }
+
+/// Realtime (`Trigger.Continuous`) durable file sink: time-slices the continuous decoded data
+/// stream into **epochs** (every `commit_interval`) and commits each epoch durably — writing the
+/// epoch's batches to `<out>/<epoch>/part-0.parquet` and committing `_spark_metadata/<epoch>` via
+/// the same commit log the micro-batch file sink uses (`crate::streaming_sink_log`).
+///
+/// Unlike the micro-batch sink (one bounded write that finalizes on stream end), this runs inside a
+/// single long-lived pipeline and finalizes per epoch on a timer (DataFusion's writer only
+/// finalizes on stream-end, so we write each epoch with the Arrow `ArrowWriter` directly). Readers
+/// honoring `_spark_metadata` see only committed epochs; an in-flight (uncommitted) epoch's files
+/// are invisible. See docs/design/streaming-realtime-mode.md (F1b).
+#[derive(Debug)]
+pub struct RealtimeFileSinkExec {
+    /// Decoded data stream (markers already stripped by `FlowEventToDataExec`).
+    input: Arc<dyn ExecutionPlan>,
+    object_store_url: ObjectStoreUrl,
+    base: StorePath,
+    commit_interval: std::time::Duration,
+    /// First epoch number (resumed from the checkpoint so a restart continues, not overwrites).
+    start_epoch: u64,
+    properties: Arc<PlanProperties>,
+}
+
+impl RealtimeFileSinkExec {
+    pub fn new(
+        input: Arc<dyn ExecutionPlan>,
+        object_store_url: ObjectStoreUrl,
+        base: StorePath,
+        commit_interval: std::time::Duration,
+        start_epoch: u64,
+    ) -> Self {
+        let empty = Arc::new(Schema::empty());
+        let properties = Arc::new(PlanProperties::new(
+            EquivalenceProperties::new(empty),
+            Partitioning::UnknownPartitioning(1),
+            EmissionType::Both,
+            input.properties().boundedness,
+        ));
+        Self {
+            input,
+            object_store_url,
+            base,
+            commit_interval,
+            start_epoch,
+            properties,
+        }
+    }
+}
+
+impl DisplayAs for RealtimeFileSinkExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "RealtimeFileSinkExec: base={}", self.base)
+    }
+}
+
+impl ExecutionPlan for RealtimeFileSinkExec {
+    fn name(&self) -> &str {
+        "RealtimeFileSinkExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![&self.input]
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if children.len() != 1 {
+            return plan_err!("RealtimeFileSinkExec requires exactly one child");
+        }
+        Ok(Arc::new(RealtimeFileSinkExec::new(
+            children.remove(0),
+            self.object_store_url.clone(),
+            self.base.clone(),
+            self.commit_interval,
+            self.start_epoch,
+        )))
+    }
+
+    fn execute(
+        &self,
+        partition: usize,
+        context: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        if partition != 0 {
+            return internal_err!("RealtimeFileSinkExec: invalid partition {partition}");
+        }
+        let store = context.runtime_env().object_store(&self.object_store_url)?;
+        let input = Arc::clone(&self.input);
+        let base = self.base.clone();
+        let commit_interval = self.commit_interval;
+        let start_epoch = self.start_epoch;
+        let data_schema = self.input.schema();
+        let ctx = context.clone();
+        let empty = Arc::new(Schema::empty());
+        let empty_out = empty.clone();
+
+        // Write one epoch's batches to `<base>/<epoch>/` and commit `_spark_metadata/<epoch>`
+        // (clean-then-write-then-commit: idempotent on a replayed epoch). Empty epoch → no snapshot.
+        async fn commit_epoch(
+            store: &Arc<dyn object_store::ObjectStore>,
+            base: &StorePath,
+            epoch: u64,
+            schema: &SchemaRef,
+            batches: &[RecordBatch],
+        ) -> Result<()> {
+            if batches.is_empty() {
+                return Ok(());
+            }
+            crate::streaming_sink_log::clean_batch_dir(store, base, epoch)
+                .await
+                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+            let mut buf: Vec<u8> = Vec::new();
+            {
+                let mut w = datafusion::parquet::arrow::ArrowWriter::try_new(
+                    &mut buf,
+                    schema.clone(),
+                    None,
+                )
+                .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                for b in batches {
+                    w.write(b).map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                }
+                w.close().map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+            }
+            let part = base.clone().join(epoch.to_string()).join("part-0.parquet");
+            use object_store::ObjectStoreExt;
+            store
+                .put(&part, bytes::Bytes::from(buf).into())
+                .await
+                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+            let metas = crate::streaming_sink_log::list_batch_files(store, base, epoch)
+                .await
+                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+            crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
+                .await
+                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+            Ok(())
+        }
+
+        let out = async_stream::stream! {
+            let mut input_stream = match input.execute(0, ctx) {
+                Ok(s) => s,
+                Err(e) => { yield Err(e); return; }
+            };
+            let mut epoch = start_epoch;
+            let mut buffer: Vec<RecordBatch> = Vec::new();
+            let mut timer = tokio::time::interval(commit_interval);
+            timer.tick().await; // discard immediate first tick
+            loop {
+                tokio::select! {
+                    item = input_stream.next() => {
+                        match item {
+                            Some(Ok(b)) => { if b.num_rows() > 0 { buffer.push(b); } }
+                            Some(Err(e)) => { yield Err(e); return; }
+                            None => break, // pipeline ended
+                        }
+                    }
+                    _ = timer.tick() => {
+                        // Epoch boundary: durably commit this epoch's data.
+                        if let Err(e) = commit_epoch(&store, &base, epoch, &data_schema, &buffer).await {
+                            yield Err(e); return;
+                        }
+                        if !buffer.is_empty() {
+                            buffer.clear();
+                            epoch += 1;
+                            yield Ok(RecordBatch::new_empty(empty_out.clone()));
+                        }
+                    }
+                }
+            }
+            // Final epoch on stream end.
+            if let Err(e) = commit_epoch(&store, &base, epoch, &data_schema, &buffer).await {
+                yield Err(e); return;
+            }
+            yield Ok(RecordBatch::new_empty(empty_out.clone()));
+        };
+        Ok(Box::pin(RecordBatchStreamAdapter::new(empty, out)))
+    }
+}
