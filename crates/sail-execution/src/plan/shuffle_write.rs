@@ -18,8 +18,23 @@ use datafusion::physical_plan::{
 use futures::future::try_join_all;
 use futures::StreamExt;
 
+use sail_common_datafusion::streaming::event::schema::MARKER_FIELD_NAME;
+
 use crate::plan::ListListDisplay;
 use crate::stream::writer::{TaskStreamSinkState, TaskStreamWriter, TaskWriteLocation};
+
+/// Is this a flow-event **marker** batch (the `_marker` column has any non-null entry)? Marker
+/// batches are broadcast to every shuffle partition; data batches are hash-routed. A non-streaming
+/// (batch) shuffle has no `_marker` column, so this is always false there.
+fn is_marker_batch(batch: &RecordBatch) -> bool {
+    use datafusion::arrow::array::{Array, BinaryArray};
+    if let Ok(idx) = batch.schema().index_of(MARKER_FIELD_NAME) {
+        if let Some(m) = batch.column(idx).as_any().downcast_ref::<BinaryArray>() {
+            return m.null_count() < m.len();
+        }
+    }
+    false
+}
 
 #[derive(Debug, Clone)]
 pub struct ShuffleWriteExec {
@@ -188,6 +203,33 @@ async fn shuffle_write(
     };
     while let Some(batch) = stream.next().await {
         let batch = batch?;
+        if is_marker_batch(&batch) {
+            // Flow-event markers (watermark / checkpoint barrier / latency / EndOfData) are
+            // CONTROL events every downstream partition must observe — **broadcast** them to all
+            // sinks, never hash-route (a marker batch has null data in the key columns, so hashing
+            // would misroute it). Cross-node counterpart of `StreamExchangeExec`'s marker broadcast,
+            // required for distributed barrier alignment (F3). For batch shuffles `is_marker_batch`
+            // is always false, so this branch is a no-op there.
+            let mut active = 0;
+            for sink_slot in partition_sinks.iter_mut() {
+                let Some(sink) = sink_slot.as_mut() else {
+                    continue;
+                };
+                active += 1;
+                match sink.write(Ok(batch.clone())).await {
+                    TaskStreamSinkState::Ok => {}
+                    TaskStreamSinkState::Error(e) => return Err(e),
+                    TaskStreamSinkState::Closed => {
+                        *sink_slot = None;
+                        active -= 1;
+                    }
+                }
+            }
+            if active == 0 {
+                break;
+            }
+            continue;
+        }
         let mut partitions: Vec<Option<RecordBatch>> = vec![None; partition_sinks.len()];
         partitioner.partition(batch, |p, batch| {
             partitions[p] = Some(batch);
@@ -227,4 +269,157 @@ async fn shuffle_write(
         .filter_map(|s| s.map(|x| x.close()));
     try_join_all(futures).await?;
     Ok(())
+}
+
+#[expect(clippy::unwrap_used)]
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex as StdMutex;
+
+    use datafusion::arrow::array::{
+        new_null_array, ArrayRef, BinaryArray, BooleanArray, Int64Array,
+    };
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::arrow::record_batch::RecordBatch;
+    use datafusion::physical_expr::expressions::Column;
+    use datafusion::physical_plan::metrics::Time;
+    use sail_common_datafusion::streaming::event::marker::FlowMarker;
+    use sail_common_datafusion::streaming::event::schema::{
+        MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
+    };
+
+    use super::*;
+    use crate::id::{JobId, TaskStreamKey};
+    use crate::stream::error::TaskStreamResult;
+    use crate::stream::writer::{LocalStreamStorage, TaskStreamSink};
+
+    fn flow_schema() -> Arc<Schema> {
+        Arc::new(Schema::new(vec![
+            Field::new(MARKER_FIELD_NAME, DataType::Binary, true),
+            Field::new(RETRACTED_FIELD_NAME, DataType::Boolean, false),
+            Field::new("k", DataType::Int64, true),
+        ]))
+    }
+
+    fn data_batch(ks: &[i64]) -> RecordBatch {
+        RecordBatch::try_new(
+            flow_schema(),
+            vec![
+                Arc::new(BinaryArray::from(vec![None::<&[u8]>; ks.len()])) as ArrayRef,
+                Arc::new(BooleanArray::from(vec![false; ks.len()])) as ArrayRef,
+                Arc::new(Int64Array::from(ks.to_vec())) as ArrayRef,
+            ],
+        )
+        .unwrap()
+    }
+
+    fn marker_batch() -> RecordBatch {
+        let bytes = FlowMarker::Checkpoint { id: 7 }.encode().unwrap();
+        RecordBatch::try_new(
+            flow_schema(),
+            vec![
+                Arc::new(BinaryArray::from(vec![Some(bytes.as_slice())])) as ArrayRef,
+                Arc::new(BooleanArray::from(vec![false])) as ArrayRef,
+                new_null_array(&DataType::Int64, 1),
+            ],
+        )
+        .unwrap()
+    }
+
+    #[derive(Debug)]
+    struct MockWriter {
+        recorders: Vec<Arc<StdMutex<Vec<RecordBatch>>>>,
+        next: AtomicUsize,
+    }
+
+    struct MockSink {
+        rec: Arc<StdMutex<Vec<RecordBatch>>>,
+    }
+
+    #[tonic::async_trait]
+    impl TaskStreamSink for MockSink {
+        async fn write(&mut self, batch: TaskStreamResult<RecordBatch>) -> TaskStreamSinkState {
+            if let Ok(b) = batch {
+                self.rec.lock().unwrap().push(b);
+            }
+            TaskStreamSinkState::Ok
+        }
+        async fn close(self: Box<Self>) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tonic::async_trait]
+    impl TaskStreamWriter for MockWriter {
+        async fn open(
+            &self,
+            _location: &TaskWriteLocation,
+            _schema: Arc<Schema>,
+        ) -> Result<Box<dyn TaskStreamSink>> {
+            let i = self.next.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(MockSink {
+                rec: self.recorders[i].clone(),
+            }))
+        }
+    }
+
+    fn is_marker(b: &RecordBatch) -> bool {
+        super::is_marker_batch(b)
+    }
+
+    #[tokio::test]
+    async fn marker_batches_broadcast_to_all_partitions_data_hash_routed() {
+        let n = 3;
+        let recorders: Vec<Arc<StdMutex<Vec<RecordBatch>>>> =
+            (0..n).map(|_| Arc::new(StdMutex::new(vec![]))).collect();
+        let writer = Arc::new(MockWriter {
+            recorders: recorders.clone(),
+            next: AtomicUsize::new(0),
+        });
+        let locations: Vec<TaskWriteLocation> = (0..n)
+            .map(|p| TaskWriteLocation::Local {
+                storage: LocalStreamStorage::Memory { replicas: 1 },
+                key: TaskStreamKey {
+                    job_id: JobId::from(1u64),
+                    stage: 0,
+                    partition: p,
+                    attempt: 0,
+                    channel: 0,
+                },
+            })
+            .collect();
+        let partitioner = BatchPartitioner::try_new(
+            Partitioning::Hash(vec![Arc::new(Column::new("k", 2))], n),
+            Time::default(),
+            0,
+            1,
+        )
+        .unwrap();
+
+        // Source: a data batch (30 distinct keys) then a Checkpoint marker, then end.
+        let ks: Vec<i64> = (0..30).collect();
+        let items: Vec<Result<RecordBatch>> = vec![Ok(data_batch(&ks)), Ok(marker_batch())];
+        let stream = Box::pin(RecordBatchStreamAdapter::new(
+            flow_schema(),
+            futures::stream::iter(items),
+        ));
+
+        shuffle_write(writer, stream, &locations, partitioner)
+            .await
+            .unwrap();
+
+        // Every partition must have received exactly one marker (broadcast).
+        for (p, rec) in recorders.iter().enumerate() {
+            let batches = rec.lock().unwrap();
+            let markers = batches.iter().filter(|b| is_marker(b)).count();
+            assert_eq!(markers, 1, "partition {p} must get exactly one broadcast marker");
+        }
+        // All 30 data rows are preserved across partitions (hash-routed, none lost/duplicated).
+        let total_data: usize = recorders
+            .iter()
+            .flat_map(|r| r.lock().unwrap().iter().filter(|b| !is_marker(b)).map(|b| b.num_rows()).collect::<Vec<_>>())
+            .sum();
+        assert_eq!(total_data, 30, "all data rows hash-routed exactly once");
+    }
 }
