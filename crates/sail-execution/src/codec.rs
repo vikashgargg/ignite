@@ -237,6 +237,7 @@ use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
 use sail_physical_plan::streaming::exchange::{StreamCoalesceExec, StreamExchangeExec};
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode};
 use datafusion::physical_plan::empty::EmptyExec;
+use sail_physical_plan::streaming::stream_join::StreamJoinExec;
 use sail_physical_plan::streaming::watermark::WatermarkExec;
 use sail_physical_plan::streaming::window_accum::WindowAccumExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
@@ -1162,6 +1163,81 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     checkpoint_location,
                 )?))
             }
+            NodeKind::StreamJoin(gen::StreamJoinExecNode {
+                left,
+                right,
+                on,
+                join_type,
+                left_data_schema,
+                right_data_schema,
+                filter,
+                interval_lower,
+                interval_upper,
+                left_ts_idx,
+                right_ts_idx,
+                checkpoint_location,
+            }) => {
+                let left = self.try_decode_plan(&left, ctx)?;
+                let right = self.try_decode_plan(&right, ctx)?;
+                let left_data_schema = Arc::new(self.try_decode_schema(&left_data_schema)?);
+                let right_data_schema = Arc::new(self.try_decode_schema(&right_data_schema)?);
+                // Join keys parse against the decoded *data* schemas (markers stripped).
+                let on = on
+                    .into_iter()
+                    .map(|j| {
+                        let l = parse_physical_expr(
+                            &self.try_decode_message(&j.left)?,
+                            ctx,
+                            &left_data_schema,
+                            self,
+                        )?;
+                        let r = parse_physical_expr(
+                            &self.try_decode_message(&j.right)?,
+                            ctx,
+                            &right_data_schema,
+                            self,
+                        )?;
+                        Ok((l, r))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let join_type = ProtoJoinType::from_str_name(&join_type)
+                    .ok_or_else(|| plan_datafusion_err!("invalid join type: {join_type}"))?;
+                let join_type: datafusion::common::JoinType = join_type.into();
+                // The residual filter parses against the join output schema (left ++ right data).
+                let filter = filter
+                    .map(|f| {
+                        let mut fields = left_data_schema.fields().to_vec();
+                        fields.extend(right_data_schema.fields().iter().cloned());
+                        let out = Arc::new(datafusion::arrow::datatypes::Schema::new(fields));
+                        parse_physical_expr(&self.try_decode_message(&f)?, ctx, &out, self)
+                    })
+                    .transpose()?;
+                let interval_bounds = match (interval_lower, interval_upper) {
+                    (Some(l), Some(u)) => Some((l, u)),
+                    _ => None,
+                };
+                let left_ts_idx = left_ts_idx
+                    .map(usize::try_from)
+                    .transpose()
+                    .map_err(|_| plan_datafusion_err!("invalid left_ts_idx"))?;
+                let right_ts_idx = right_ts_idx
+                    .map(usize::try_from)
+                    .transpose()
+                    .map_err(|_| plan_datafusion_err!("invalid right_ts_idx"))?;
+                Ok(Arc::new(StreamJoinExec::try_new(
+                    left,
+                    right,
+                    on,
+                    join_type,
+                    left_data_schema,
+                    right_data_schema,
+                    filter,
+                    interval_bounds,
+                    left_ts_idx,
+                    right_ts_idx,
+                    checkpoint_location,
+                )?))
+            }
             NodeKind::StreamLimit(gen::StreamLimitExecNode { input, skip, fetch }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 let skip = usize::try_from(skip)
@@ -2081,6 +2157,41 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 event_time_col: window.event_time_col().to_string(),
                 delay_micros: window.delay_micros(),
                 checkpoint_location: window.checkpoint_location().map(str::to_string),
+            })
+        } else if let Some(join) = node.as_any().downcast_ref::<StreamJoinExec>() {
+            let left = self.try_encode_plan(join.left().clone())?;
+            let right = self.try_encode_plan(join.right().clone())?;
+            let on = join
+                .on()
+                .iter()
+                .map(|(l, r)| {
+                    let left = self.try_encode_message(serialize_physical_expr(l, self)?)?;
+                    let right = self.try_encode_message(serialize_physical_expr(r, self)?)?;
+                    Ok(gen::JoinOn { left, right })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let join_type: ProtoJoinType = join.join_type().into();
+            let filter = join
+                .filter()
+                .map(|f| self.try_encode_message(serialize_physical_expr(f, self)?))
+                .transpose()?;
+            let (interval_lower, interval_upper) = match join.interval_bounds() {
+                Some((l, u)) => (Some(l), Some(u)),
+                None => (None, None),
+            };
+            NodeKind::StreamJoin(gen::StreamJoinExecNode {
+                left,
+                right,
+                on,
+                join_type: join_type.as_str_name().to_string(),
+                left_data_schema: self.try_encode_schema(join.left_data_schema())?,
+                right_data_schema: self.try_encode_schema(join.right_data_schema())?,
+                filter,
+                interval_lower,
+                interval_upper,
+                left_ts_idx: join.left_ts_idx().map(|i| i as u64),
+                right_ts_idx: join.right_ts_idx().map(|i| i as u64),
+                checkpoint_location: join.checkpoint_location().map(str::to_string),
             })
         } else if let Some(stream_limit) = node.as_any().downcast_ref::<StreamLimitExec>() {
             let input = self.try_encode_plan(stream_limit.input().clone())?;
@@ -4504,6 +4615,64 @@ mod tests {
         assert_eq!(w.checkpoint_location(), Some("file:///tmp/wck"));
         assert_eq!(w.aggr_exprs().len(), 1, "aggregate round-trips");
         assert_eq!(w.group_exprs().expr().len(), 1, "group-by round-trips");
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_stream_join_exec() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::common::JoinType;
+        use datafusion::physical_expr::expressions::Column;
+        use datafusion::physical_plan::empty::EmptyExec;
+        use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
+
+        // The interval/equi stream-stream join must survive the codec for distributed stateful
+        // joins: two children, equi-keys, join type, interval bounds, event-time indices, checkpoint.
+        let codec = RemoteExecutionCodec;
+        let left_data = Arc::new(Schema::new(vec![
+            Field::new("lk", DataType::Int64, true),
+            Field::new("lts", DataType::Int64, true),
+        ]));
+        let right_data = Arc::new(Schema::new(vec![
+            Field::new("rk", DataType::Int64, true),
+            Field::new("rts", DataType::Int64, true),
+        ]));
+        let left: Arc<dyn ExecutionPlan> =
+            Arc::new(EmptyExec::new(Arc::new(to_flow_event_schema(&left_data))));
+        let right: Arc<dyn ExecutionPlan> =
+            Arc::new(EmptyExec::new(Arc::new(to_flow_event_schema(&right_data))));
+        let on: Vec<(
+            datafusion::physical_expr::PhysicalExprRef,
+            datafusion::physical_expr::PhysicalExprRef,
+        )> = vec![(Arc::new(Column::new("lk", 0)), Arc::new(Column::new("rk", 0)))];
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(StreamJoinExec::try_new(
+            left,
+            right,
+            on,
+            JoinType::Inner,
+            left_data,
+            right_data,
+            None,
+            Some((-1_000, 1_000)),
+            Some(1),
+            Some(1),
+            Some("file:///tmp/jck".to_string()),
+        )?);
+
+        let buf = codec.try_encode_plan(plan)?;
+        let session = datafusion::prelude::SessionContext::new();
+        let decoded = codec.try_decode_plan(&buf, &session.task_ctx())?;
+
+        let j = decoded
+            .as_any()
+            .downcast_ref::<StreamJoinExec>()
+            .ok_or_else(|| plan_datafusion_err!("decoded must be StreamJoinExec"))?;
+        assert_eq!(j.on().len(), 1, "join keys round-trip");
+        assert_eq!(j.join_type(), JoinType::Inner, "join type round-trips");
+        assert_eq!(j.interval_bounds(), Some((-1_000, 1_000)), "interval bounds round-trip");
+        assert_eq!(j.left_ts_idx(), Some(1));
+        assert_eq!(j.right_ts_idx(), Some(1));
+        assert_eq!(j.checkpoint_location(), Some("file:///tmp/jck"));
         Ok(())
     }
 }

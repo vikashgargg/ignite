@@ -71,6 +71,7 @@ message ExtendedPhysicalPlanNode {
     StreamDeduplicateExecNode stream_deduplicate = 56;
     KafkaSourceExecNode kafka_source = 57;
     WindowAccumExecNode window_accum = 58;
+    StreamJoinExecNode stream_join = 59;
   }
 }
 
@@ -689,6 +690,22 @@ message StreamDeduplicateExecNode {
   repeated string key_cols = 2;
   optional string event_time_col = 3;
   bytes data_schema = 4;
+}
+
+message StreamJoinExecNode {
+  bytes left = 1;
+  bytes right = 2;
+  repeated JoinOn on = 3;
+  string join_type = 4;
+  bytes left_data_schema = 5;
+  bytes right_data_schema = 6;
+  optional bytes filter = 7;
+  // interval_bounds = Some((lower, upper)) iff both present.
+  optional int64 interval_lower = 8;
+  optional int64 interval_upper = 9;
+  optional uint64 left_ts_idx = 10;
+  optional uint64 right_ts_idx = 11;
+  optional string checkpoint_location = 12;
 }
 
 message WindowAccumExecNode {

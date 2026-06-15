@@ -125,6 +125,40 @@ impl StreamJoinExec {
             properties,
         })
     }
+
+    pub fn left(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.left
+    }
+    pub fn right(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.right
+    }
+    pub fn on(&self) -> &[(PhysicalExprRef, PhysicalExprRef)] {
+        &self.on
+    }
+    pub fn join_type(&self) -> JoinType {
+        self.join_type
+    }
+    pub fn left_data_schema(&self) -> &SchemaRef {
+        &self.left_data_schema
+    }
+    pub fn right_data_schema(&self) -> &SchemaRef {
+        &self.right_data_schema
+    }
+    pub fn filter(&self) -> Option<&PhysicalExprRef> {
+        self.filter.as_ref()
+    }
+    pub fn interval_bounds(&self) -> Option<(i64, i64)> {
+        self.interval_bounds
+    }
+    pub fn left_ts_idx(&self) -> Option<usize> {
+        self.left_ts_idx
+    }
+    pub fn right_ts_idx(&self) -> Option<usize> {
+        self.right_ts_idx
+    }
+    pub fn checkpoint_location(&self) -> Option<&str> {
+        self.checkpoint_location.as_deref()
+    }
 }
 
 impl DisplayAs for StreamJoinExec {
