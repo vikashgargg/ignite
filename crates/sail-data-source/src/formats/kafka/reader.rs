@@ -248,6 +248,18 @@ impl KafkaSourceExec {
     pub fn projection(&self) -> &[usize] {
         &self.projection
     }
+
+    pub fn bounded(&self) -> bool {
+        self.bounded
+    }
+
+    pub fn checkpoint_location(&self) -> Option<&str> {
+        self.checkpoint_location.as_deref()
+    }
+
+    pub fn realtime_interval_ms(&self) -> Option<u64> {
+        self.realtime_interval_ms
+    }
 }
 
 impl DisplayAs for KafkaSourceExec {

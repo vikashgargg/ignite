@@ -69,6 +69,7 @@ message ExtendedPhysicalPlanNode {
     FlowEventToDataExecNode flow_event_to_data = 54;
     WatermarkExecNode watermark = 55;
     StreamDeduplicateExecNode stream_deduplicate = 56;
+    KafkaSourceExecNode kafka_source = 57;
   }
 }
 
@@ -687,6 +688,22 @@ message StreamDeduplicateExecNode {
   repeated string key_cols = 2;
   optional string event_time_col = 3;
   bytes data_schema = 4;
+}
+
+message KafkaSourceExecNode {
+  string bootstrap_servers = 1;
+  optional string subscribe = 2;
+  optional string subscribe_pattern = 3;
+  string starting_offsets = 4;
+  string group_id = 5;
+  uint64 max_batch_size = 6;
+  uint64 fetch_timeout_ms = 7;
+  map<string, string> extra = 8;
+  bytes schema = 9;
+  repeated uint64 projection = 10;
+  bool bounded = 11;
+  optional string checkpoint_location = 12;
+  optional uint64 realtime_interval_ms = 13;
 }
 
 message StreamLimitExecNode {

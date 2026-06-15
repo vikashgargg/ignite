@@ -83,6 +83,7 @@ use sail_common_datafusion::udf::StreamUDF;
 use sail_data_source::formats::binary::source::BinarySource;
 use sail_data_source::formats::console::ConsoleSinkExec;
 use sail_data_source::formats::json::permissive::{JsonMode, PermissiveJsonSource};
+use sail_data_source::formats::kafka::{KafkaReadOptions, KafkaSourceExec};
 use sail_data_source::formats::python::{
     InputPartition, PythonDataSourceExec, PythonDataSourceWriteCommitExec,
     PythonDataSourceWriteExec,
@@ -1083,6 +1084,52 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     data_schema,
                 )?))
             }
+            NodeKind::KafkaSource(gen::KafkaSourceExecNode {
+                bootstrap_servers,
+                subscribe,
+                subscribe_pattern,
+                starting_offsets,
+                group_id,
+                max_batch_size,
+                fetch_timeout_ms,
+                extra,
+                schema,
+                projection,
+                bounded,
+                checkpoint_location,
+                realtime_interval_ms,
+            }) => {
+                let schema = Arc::new(self.try_decode_schema(&schema)?);
+                let projection = projection
+                    .into_iter()
+                    .map(|p| {
+                        usize::try_from(p).map_err(|_| {
+                            plan_datafusion_err!("invalid projection index for KafkaSourceExec")
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let max_batch_size = usize::try_from(max_batch_size).map_err(|_| {
+                    plan_datafusion_err!("invalid max_batch_size for KafkaSourceExec")
+                })?;
+                let options = KafkaReadOptions {
+                    bootstrap_servers,
+                    subscribe,
+                    subscribe_pattern,
+                    starting_offsets,
+                    group_id,
+                    max_batch_size,
+                    fetch_timeout_ms,
+                    extra,
+                };
+                Ok(Arc::new(KafkaSourceExec::try_new(
+                    options,
+                    schema,
+                    projection,
+                    bounded,
+                    checkpoint_location,
+                    realtime_interval_ms,
+                )?))
+            }
             NodeKind::StreamLimit(gen::StreamLimitExecNode { input, skip, fetch }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 let skip = usize::try_from(skip)
@@ -1958,6 +2005,28 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 key_cols: dedup.key_cols().to_vec(),
                 event_time_col: dedup.event_time_col().map(str::to_string),
                 data_schema,
+            })
+        } else if let Some(kafka) = node.as_any().downcast_ref::<KafkaSourceExec>() {
+            let o = kafka.options();
+            let schema = self.try_encode_schema(kafka.original_schema())?;
+            let projection = kafka.projection().iter().map(|&p| p as u64).collect();
+            let max_batch_size = u64::try_from(o.max_batch_size).map_err(|_| {
+                plan_datafusion_err!("cannot encode max_batch_size for KafkaSourceExec")
+            })?;
+            NodeKind::KafkaSource(gen::KafkaSourceExecNode {
+                bootstrap_servers: o.bootstrap_servers.clone(),
+                subscribe: o.subscribe.clone(),
+                subscribe_pattern: o.subscribe_pattern.clone(),
+                starting_offsets: o.starting_offsets.clone(),
+                group_id: o.group_id.clone(),
+                max_batch_size,
+                fetch_timeout_ms: o.fetch_timeout_ms,
+                extra: o.extra.clone(),
+                schema,
+                projection,
+                bounded: kafka.bounded(),
+                checkpoint_location: kafka.checkpoint_location().map(str::to_string),
+                realtime_interval_ms: kafka.realtime_interval_ms(),
             })
         } else if let Some(stream_limit) = node.as_any().downcast_ref::<StreamLimitExec>() {
             let input = self.try_encode_plan(stream_limit.input().clone())?;
@@ -4274,6 +4343,57 @@ mod tests {
             .ok_or_else(|| plan_datafusion_err!("child must be WatermarkExec"))?;
         assert_eq!(wm.event_time_col(), "ts");
         assert_eq!(wm.delay_micros(), 1_000, "watermark delay round-trips");
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_kafka_source_exec() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use sail_data_source::formats::kafka::KafkaReadOptions;
+
+        // The Kafka source must survive the codec for distributed streaming ingest, including the
+        // realtime exactly-once config (checkpoint location + epoch interval).
+        let codec = RemoteExecutionCodec;
+        let mut extra = std::collections::HashMap::new();
+        extra.insert("security.protocol".to_string(), "PLAINTEXT".to_string());
+        let options = KafkaReadOptions {
+            bootstrap_servers: "localhost:9092".to_string(),
+            subscribe: Some("topic-a,topic-b".to_string()),
+            subscribe_pattern: None,
+            starting_offsets: "earliest".to_string(),
+            group_id: "vajra-test".to_string(),
+            max_batch_size: 2000,
+            fetch_timeout_ms: 250,
+            extra,
+        };
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Binary, true),
+            Field::new("value", DataType::Binary, true),
+        ]));
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(KafkaSourceExec::try_new(
+            options,
+            schema,
+            projection,
+            false,
+            Some("file:///tmp/ck".to_string()),
+            Some(1_000),
+        )?);
+
+        let buf = codec.try_encode_plan(plan)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+
+        let k = decoded
+            .as_any()
+            .downcast_ref::<KafkaSourceExec>()
+            .ok_or_else(|| plan_datafusion_err!("decoded must be KafkaSourceExec"))?;
+        assert_eq!(k.options().bootstrap_servers, "localhost:9092");
+        assert_eq!(k.options().subscribe.as_deref(), Some("topic-a,topic-b"));
+        assert_eq!(k.options().starting_offsets, "earliest");
+        assert_eq!(k.options().max_batch_size, 2000);
+        assert_eq!(k.options().extra.get("security.protocol").map(String::as_str), Some("PLAINTEXT"));
+        assert_eq!(k.checkpoint_location(), Some("file:///tmp/ck"));
+        assert_eq!(k.realtime_interval_ms(), Some(1_000), "realtime EO config round-trips");
         Ok(())
     }
 }
