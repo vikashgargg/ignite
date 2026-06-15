@@ -130,6 +130,37 @@ streaming-style), not Ballista blocking-style:
    snapshot `state/<op>/<partition>/<epoch>` (the single-node F1b commit generalized).
 
 **Already done / pre-existing:** concurrent pipelined scheduling (pre-existing); marker-aware shuffle
-broadcast (F3-b data plane, this session); `StreamBarrierAlignExec` (primitive); `EpochCoordinator`
-(brain). Single-node realtime stateless EO is done + measured (F1b). Multi-node continuous stateful is
-**not** end-to-end yet — blocked on codec (1), tracked here, not claimed.
+broadcast (F3-b data plane, this session); `StreamBarrierAlignExec` (primitive + wired into the
+parallel windowed-agg merge); `EpochCoordinator` (brain). Single-node realtime stateless EO is done +
+measured (F1b). Multi-node continuous stateful is **not** end-to-end yet.
+
+### Harness finding (2026-06-15) — the real gap is execution-model integration, not codec
+
+Built the gate harness (`scripts/dist_streaming_smoke.py`): a Vajra server in **local-cluster mode**
+(driver + 2 in-process workers, `--mode local-cluster --workers 2`) exercised through real Spark
+Connect. Results:
+- ✅ **Distributed batch is solid** — the full all-in-one batch suite (5/5) + a distributed
+  read→compute→**parquet write** (1000 rows) run correctly across the 2-worker cluster (validates the
+  `ClusterJobRunner` + Arrow-Flight shuffle + file write).
+- ⚠️ **Distributed streaming produces no output** — both stateless (`rate→filter→parquet`,
+  availableNow) and keyed-windowed streaming writes yield zero rows and the streaming query goes
+  **inactive immediately**. (The `memory` sink additionally isn't codec-serializable — `MemoryBufferScan`
+  — but that's a dev sink; the parquet path fails too.)
+
+**Diagnosis (precise).** Codec (item 1) was **necessary but not sufficient**. The remaining core gap is
+that **Vajra's streaming execution model is not integrated with the distributed cluster runner**:
+- Streaming queries are driven by the single-node `StreamDriver` (a long-lived pipeline that polls the
+  sink's partition 0 and commits per epoch), wired in `sail-spark-connect`.
+- The distributed `ClusterJobRunner` executes a **stage-based `JobGraph`** that runs to completion and
+  returns a result stream.
+- A streaming job submitted via `runner().execute()` in cluster mode runs the job-graph once and
+  terminates instead of being driven continuously — the two models don't yet mesh.
+
+**Re-scoped remaining work (in priority order):**
+1. **Streaming×cluster execution integration (THE core gap):** make the streaming driver run *on top of*
+   the distributed runner — the source/operators/sink tasks run on workers (pipelined, already
+   concurrent), while the driver continuously drives epochs and consumes the sink's completion stream.
+   This is the architectural reconciliation the harness exposed; gate with `dist_streaming_smoke.py`.
+2. Distributed `EpochCoordinator` wiring + per-instance state snapshot (F3-c) — once (1) runs.
+3. `memory`-sink codec (dev convenience) so the all-in-one streaming suite runs distributed too.
+4. Multi-node Flink head-to-head (F3-d).
