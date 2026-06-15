@@ -69,6 +69,8 @@ impl StreamSource for SocketStreamSource {
         _bounded: bool,
         // Socket has no replayable offsets; ignored.
         _checkpoint_location: Option<&str>,
+        // Socket is not replayable, so realtime EO does not apply; ignored.
+        _realtime_interval_ms: Option<u64>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()

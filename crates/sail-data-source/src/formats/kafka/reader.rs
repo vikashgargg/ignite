@@ -61,6 +61,55 @@ async fn write_staged_offsets(
     }
 }
 
+/// Realtime (`Trigger.Continuous`) committed checkpoint: the single source-of-truth object the sink
+/// writes atomically per epoch (`realtime/committed`, JSON `{epoch, offsets:{"t:p"->next-offset}}`).
+/// Both the sink (epoch resume) and the source (offset seek) read it on restart — one atomic object
+/// = no torn commit (F4 principle). See docs/design/streaming-realtime-mode.md (F1b).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct RealtimeCommitted {
+    epoch: u64,
+    offsets: std::collections::BTreeMap<String, i64>,
+}
+
+/// Read the realtime committed record (epoch + per-(topic,partition) offsets), if present.
+async fn read_realtime_committed(
+    ck: &CheckpointStore,
+) -> Option<(u64, std::collections::HashMap<(String, i32), i64>)> {
+    let bytes = ck.get("realtime/committed").await.ok().flatten()?;
+    let rec: RealtimeCommitted = serde_json::from_slice(&bytes).ok()?;
+    let offsets = rec
+        .offsets
+        .into_iter()
+        .filter_map(|(k, v)| {
+            let (t, p) = k.rsplit_once(':')?;
+            Some(((t.to_string(), p.parse().ok()?), v))
+        })
+        .collect();
+    Some((rec.epoch, offsets))
+}
+
+/// Pre-commit (write-ahead) the offsets reached at epoch `epoch` to a per-epoch staged object the
+/// sink reads when it commits that epoch's files. Keyed by epoch so a replayed epoch overwrites
+/// idempotently and concurrent epochs never clobber each other.
+async fn write_staged_epoch_offsets(
+    ck: &CheckpointStore,
+    epoch: u64,
+    offsets: &std::collections::HashMap<(String, i32), i64>,
+) {
+    let map: std::collections::BTreeMap<String, i64> = offsets
+        .iter()
+        .map(|((t, p), o)| (format!("{t}:{p}"), *o))
+        .collect();
+    if let Ok(body) = serde_json::to_vec(&map) {
+        let _ = ck
+            .put(
+                &format!("sources/0/staged-epoch-{epoch}"),
+                bytes::Bytes::from(body),
+            )
+            .await;
+    }
+}
+
 /// Spark-compatible Kafka source schema (7 columns).
 pub fn kafka_data_schema() -> Schema {
     Schema::new(vec![
@@ -115,6 +164,7 @@ impl StreamSource for KafkaStreamSource {
         // With a checkpoint location, per-(topic,partition) offsets are committed/restored via the
         // CheckpointStore for exactly-once recovery (Spark `KafkaMicroBatchStream` model).
         checkpoint_location: Option<&str>,
+        realtime_interval_ms: Option<u64>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()
@@ -125,6 +175,7 @@ impl StreamSource for KafkaStreamSource {
             projection,
             bounded,
             checkpoint_location.map(str::to_string),
+            realtime_interval_ms,
         )?))
     }
 }
@@ -144,6 +195,9 @@ pub struct KafkaSourceExec {
     bounded: bool,
     /// Streaming `checkpointLocation`, when set — restore/stage per-partition offsets for EO.
     checkpoint_location: Option<String>,
+    /// `Trigger.Continuous` epoch interval (millis), when set — realtime EO: seek to the committed
+    /// offset on start, emit `Checkpoint{epoch}` + pre-commit per-epoch offsets at this cadence.
+    realtime_interval_ms: Option<u64>,
     properties: Arc<PlanProperties>,
 }
 
@@ -154,6 +208,7 @@ impl KafkaSourceExec {
         projection: Vec<usize>,
         bounded: bool,
         checkpoint_location: Option<String>,
+        realtime_interval_ms: Option<u64>,
     ) -> Result<Self> {
         let projected_schema = Arc::new(schema.project(&projection)?);
         let output_schema = Arc::new(to_flow_event_schema(&projected_schema));
@@ -177,6 +232,7 @@ impl KafkaSourceExec {
             projection,
             bounded,
             checkpoint_location,
+            realtime_interval_ms,
             properties,
         })
     }
@@ -372,6 +428,146 @@ impl ExecutionPlan for KafkaSourceExec {
                     write_staged_offsets(ck, &next).await;
                 }
                 yield Ok(FlowEvent::Marker(sail_common_datafusion::streaming::event::marker::FlowMarker::EndOfData));
+            };
+            let stream = Box::pin(FlowEventStreamAdapter::new(projected_schema, events));
+            return Ok(Box::pin(EncodedFlowEventStream::new(stream)));
+        }
+
+        // Realtime (`Trigger.Continuous`) exactly-once path: one long-lived pipeline that
+        // `assign`s + `seek`s to the committed offset on start (NOT broker auto-commit), reads
+        // continuously, and every `realtime_interval_ms` emits a `Checkpoint{epoch}` barrier — after
+        // pre-committing that epoch's reached offsets to `sources/0/staged-epoch-<epoch>`. The
+        // barrier flows in-band (never overtaking data, Flink invariant); the realtime sink commits
+        // the epoch's files and the matching offset atomically on the marker. Single-input/stateless
+        // ⇒ exactly-once without alignment latency. See docs/design/streaming-realtime-mode.md (F1b).
+        if let Some(interval_ms) = self.realtime_interval_ms {
+            use sail_common_datafusion::streaming::event::marker::FlowMarker;
+            let checkpoint_location = self.checkpoint_location.clone();
+            let events = async_stream::stream! {
+                let Some(cl) = checkpoint_location else {
+                    yield Err(exec_datafusion_err!("realtime (continuous) exactly-once Kafka read requires checkpointLocation")); return;
+                };
+                let ck = match CheckpointStore::from_location(&cl) {
+                    Ok(ck) => ck,
+                    Err(e) => { yield Err(exec_datafusion_err!("checkpoint store {cl}: {e}")); return; }
+                };
+                let Some(topics_csv) = options.subscribe.clone() else {
+                    yield Err(exec_datafusion_err!("realtime/exactly-once Kafka read requires `subscribe` (explicit topics)")); return;
+                };
+                let topics: Vec<String> = topics_csv.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+
+                // Restore the committed epoch + offsets (the single atomic record the sink wrote).
+                let (mut epoch, committed) = match read_realtime_committed(&ck).await {
+                    Some((e, o)) => (e + 1, o),
+                    None => (0u64, std::collections::HashMap::new()),
+                };
+
+                let mut cfg = ClientConfig::new();
+                cfg.set("bootstrap.servers", &options.bootstrap_servers);
+                cfg.set("group.id", &options.group_id);
+                cfg.set("enable.auto.commit", "false");
+                for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
+                let consumer: StreamConsumer = match cfg.create() {
+                    Ok(c) => c,
+                    Err(e) => { yield Err(exec_datafusion_err!("failed to create Kafka consumer: {e}")); return; }
+                };
+                let earliest = options.starting_offsets.eq_ignore_ascii_case("earliest");
+
+                // Resolve start offsets per partition (committed if present, else earliest/latest
+                // watermark) in a SYNC step — rdkafka's non-Send `Metadata` never crosses an await.
+                let resolve = || -> std::result::Result<Vec<(String, i32, i64)>, String> {
+                    let mut out = vec![];
+                    for topic in &topics {
+                        let md = consumer.fetch_metadata(Some(topic), timeout)
+                            .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
+                        let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
+                        for p in t.partitions() {
+                            let part = p.id();
+                            let start = match committed.get(&(topic.clone(), part)).copied() {
+                                Some(o) => o,
+                                None => {
+                                    let (low, high) = consumer.fetch_watermarks(topic, part, timeout)
+                                        .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
+                                    if earliest { low } else { high }
+                                }
+                            };
+                            out.push((topic.clone(), part, start));
+                        }
+                    }
+                    Ok(out)
+                };
+                let assignments = match resolve() {
+                    Ok(a) => a,
+                    Err(e) => { yield Err(exec_datafusion_err!("Kafka {e}")); return; }
+                };
+                let mut tpl = rdkafka::TopicPartitionList::new();
+                let mut next: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
+                for (topic, part, start) in assignments {
+                    if let Err(e) = tpl.add_partition_offset(&topic, part, rdkafka::Offset::Offset(start)) {
+                        yield Err(exec_datafusion_err!("Kafka assign({topic},{part}@{start}): {e}")); return;
+                    }
+                    next.insert((topic, part), start);
+                }
+                if let Err(e) = consumer.assign(&tpl) {
+                    yield Err(exec_datafusion_err!("Kafka assign: {e}")); return;
+                }
+
+                let mut msg_stream = consumer.stream();
+                let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
+                let mut timer = tokio::time::interval(Duration::from_millis(interval_ms.max(1)));
+                timer.tick().await; // discard the immediate first tick
+                loop {
+                    tokio::select! {
+                        biased;
+                        // Epoch boundary: flush buffered data, then pre-commit offsets + emit barrier.
+                        // `biased` + data-flush-first guarantees the marker never overtakes its data.
+                        _ = timer.tick() => {
+                            if !rows.is_empty() {
+                                match build_batch(&full_schema, &projection, &rows) {
+                                    Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                                    Err(e) => { yield Err(e); return; }
+                                }
+                                rows.clear();
+                            }
+                            write_staged_epoch_offsets(&ck, epoch, &next).await;
+                            yield Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id: epoch }));
+                            epoch += 1;
+                        }
+                        msg = msg_stream.next() => {
+                            match msg {
+                                Some(Ok(m)) => {
+                                    let (ts_ms, ts_type) = match m.timestamp() {
+                                        Timestamp::NotAvailable => (-1i64, -1i32),
+                                        Timestamp::CreateTime(ms) => (ms, 0i32),
+                                        Timestamp::LogAppendTime(ms) => (ms, 1i32),
+                                    };
+                                    let tp = (m.topic().to_string(), m.partition());
+                                    next.insert(tp, m.offset() + 1);
+                                    rows.push(KafkaRow {
+                                        key: m.key().map(|k| k.to_vec()),
+                                        value: m.payload().map(|v| v.to_vec()),
+                                        topic: m.topic().to_string(),
+                                        partition: m.partition(),
+                                        offset: m.offset(),
+                                        timestamp_ms: ts_ms,
+                                        timestamp_type: ts_type,
+                                    });
+                                    // Flush a full batch immediately for throughput (epoch still
+                                    // delimits the commit; mid-epoch batches just carry data forward).
+                                    if rows.len() >= max_batch {
+                                        match build_batch(&full_schema, &projection, &rows) {
+                                            Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                                            Err(e) => { yield Err(e); return; }
+                                        }
+                                        rows.clear();
+                                    }
+                                }
+                                Some(Err(e)) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
+                                None => break, // stream ended (unexpected for continuous)
+                            }
+                        }
+                    }
+                }
             };
             let stream = Box::pin(FlowEventStreamAdapter::new(projected_schema, events));
             return Ok(Box::pin(EncodedFlowEventStream::new(stream)));

@@ -40,6 +40,9 @@ struct StreamingRewriter {
     bounded: bool,
     /// Streaming `checkpointLocation`, threaded to sources for offset recovery.
     checkpoint_location: Option<String>,
+    /// `Trigger.Continuous` epoch-commit interval (millis), threaded to sources for realtime
+    /// exactly-once (source emits `Checkpoint{epoch}` + pre-commits offsets at this cadence).
+    realtime_interval_ms: Option<u64>,
 }
 
 impl StreamingRewriter {
@@ -442,6 +445,7 @@ impl TreeNodeRewriter for StreamingRewriter {
                                 *fetch,
                                 self.bounded,
                                 self.checkpoint_location.clone(),
+                                self.realtime_interval_ms,
                             )?),
                         })))
                     } else {
@@ -610,6 +614,7 @@ pub fn rewrite_streaming_plan(
     plan: LogicalPlan,
     bounded: bool,
     checkpoint_location: Option<String>,
+    realtime_interval_ms: Option<u64>,
 ) -> Result<LogicalPlan> {
     // Systemic qualifier normalization: streaming operators decode flow events into the
     // **unqualified** data schema, while the resolver tags columns with a synthetic
@@ -621,6 +626,7 @@ pub fn rewrite_streaming_plan(
     let node = plan.rewrite(&mut StreamingRewriter {
         bounded,
         checkpoint_location,
+        realtime_interval_ms,
     })?;
     let plan = node.data;
 

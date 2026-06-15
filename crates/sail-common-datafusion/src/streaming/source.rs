@@ -49,6 +49,11 @@ pub trait StreamSource: Send + Sync + fmt::Debug {
         // Streaming `checkpointLocation`, when set — for offset commit/restore
         // (exactly-once recovery). Sources that don't support it may ignore it.
         checkpoint_location: Option<&str>,
+        // `Trigger.Continuous` epoch-commit interval (millis), when set — realtime mode: the
+        // source emits `Checkpoint{epoch}` barriers + pre-commits per-epoch offsets at this
+        // cadence for exactly-once (see docs/design/streaming-realtime-mode.md). Sources that
+        // don't support realtime EO may ignore it.
+        realtime_interval_ms: Option<u64>,
     ) -> Result<Arc<dyn ExecutionPlan>>;
 }
 

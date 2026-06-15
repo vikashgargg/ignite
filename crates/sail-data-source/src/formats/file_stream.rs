@@ -93,6 +93,7 @@ impl StreamSource for FileStreamSource {
         // driven by the runner re-plan loop, so `bounded` is not needed here.
         _bounded: bool,
         checkpoint_location: Option<&str>,
+        _realtime_interval_ms: Option<u64>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // Already-committed files (cross-run exactly-once: never reprocess these).
         let ck = match checkpoint_location {

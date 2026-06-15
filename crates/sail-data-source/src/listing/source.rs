@@ -351,8 +351,10 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         } else {
             return internal_err!("empty listing table path: {path}");
         };
-        // Realtime durable sink: continuous flow-event stream → per-epoch committed files.
-        if let Some(interval_str) = &realtime_interval {
+        // Realtime durable sink: continuous flow-event stream → per-epoch committed files. The
+        // sink consumes the FLOW-EVENT input (not the decoded one) so it sees `Checkpoint{epoch}`
+        // barriers — committing each epoch's files + the source's matching offsets atomically.
+        if realtime_interval.is_some() {
             if !streaming {
                 return internal_err!(
                     "realtime (continuous) durable sink requires a streaming (flow-event) input"
@@ -367,23 +369,15 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                      single-partition only for now (multi-partition lands with F2/F3)"
                 );
             }
-            let commit_interval = parse_realtime_interval(interval_str)?;
             let base = table_paths
                 .first()
                 .map(|u| u.prefix().clone())
                 .unwrap_or_default();
-            // Resume from the last committed epoch so a restart continues the epoch sequence
-            // (idempotent: re-running an epoch overwrites its `<base>/<epoch>/` dir + log entry).
-            let start_epoch = match &commit_log_checkpoint {
-                Some(cp) => crate::formats::file_stream::current_batch_id(cp).await,
-                None => 0,
-            };
             return Ok(Arc::new(crate::streaming_decode::RealtimeFileSinkExec::new(
-                input,
+                flow_input,
                 object_store_url.clone(),
                 base,
-                commit_interval,
-                start_epoch,
+                commit_log_checkpoint.clone(),
             )));
         }
         // We do not need to specify the exact data type for partition columns,
@@ -546,34 +540,3 @@ async fn committed_urls_if_logged(
     Ok(any_logged.then_some(out))
 }
 
-/// Parse a Spark `Trigger.Continuous` interval string (e.g. `"1 second"`, `"500 milliseconds"`,
-/// `"2 seconds"`, `"100ms"`) into a [`std::time::Duration`]. Mirrors Spark's `Trigger.Continuous`
-/// pacing units; the interval is the epoch-commit cadence for the realtime durable sink. An
-/// unrecognized unit is an explicit error (no silent default) so misconfiguration never silently
-/// changes commit semantics.
-fn parse_realtime_interval(s: &str) -> Result<std::time::Duration> {
-    let t = s.trim().to_lowercase();
-    // Split leading numeric part from the unit (with or without a separating space).
-    let split = t
-        .find(|c: char| !c.is_ascii_digit() && c != '.')
-        .unwrap_or(t.len());
-    let (num, unit) = t.split_at(split);
-    let value: f64 = num
-        .trim()
-        .parse()
-        .map_err(|_| DataFusionError::Plan(format!("invalid continuous trigger interval: {s:?}")))?;
-    if value <= 0.0 {
-        return plan_err!("continuous trigger interval must be positive: {s:?}");
-    }
-    let secs = match unit.trim() {
-        // A bare number defaults to milliseconds (Spark's `Trigger` interval default unit).
-        "" | "ms" | "millisecond" | "milliseconds" => value / 1_000.0,
-        "s" | "sec" | "secs" | "second" | "seconds" => value,
-        "m" | "min" | "mins" | "minute" | "minutes" => value * 60.0,
-        "us" | "microsecond" | "microseconds" => value / 1_000_000.0,
-        other => {
-            return plan_err!("unsupported continuous trigger interval unit {other:?} in {s:?}");
-        }
-    };
-    Ok(std::time::Duration::from_secs_f64(secs))
-}

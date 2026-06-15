@@ -71,6 +71,7 @@ impl StreamSource for RateStreamSource {
         _limit: Option<usize>,
         bounded: bool,
         checkpoint_location: Option<&str>,
+        _realtime_interval_ms: Option<u64>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         let projection = projection
             .cloned()

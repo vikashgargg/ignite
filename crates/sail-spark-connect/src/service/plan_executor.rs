@@ -337,6 +337,8 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
             plan,
             false, // unbounded: continuous execution
             checkpoint_location.clone(),
+            // Realtime EO: the source emits Checkpoint{epoch} + pre-commits offsets at this cadence.
+            Some(commit_interval.as_millis() as u64),
         )
         .await?;
         let stream = service.runner().execute(ctx, plan.clone()).await?;
@@ -363,7 +365,8 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
                 // picks up new data, processes only what's uncommitted, commits on clean end.
                 let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
                 let (plan, _info) =
-                    resolve_and_execute_plan_with_options(&ctx, config, plan, true, cp).await?;
+                    resolve_and_execute_plan_with_options(&ctx, config, plan, true, cp, None)
+                        .await?;
                 let stream = ctx
                     .extension::<JobService>()?
                     .runner()
@@ -392,6 +395,7 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
             plan,
             bounded,
             checkpoint_location.clone(),
+            None,
         )
         .await?;
         let stream = service.runner().execute(ctx, plan.clone()).await?;

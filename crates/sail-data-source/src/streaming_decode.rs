@@ -22,6 +22,11 @@ use datafusion_common::{internal_err, plan_err, DataFusionError, Result};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use object_store::path::Path as StorePath;
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
+use sail_common_datafusion::streaming::event::encoding::DecodedFlowEventStream;
+use sail_common_datafusion::streaming::event::marker::FlowMarker;
+use sail_common_datafusion::streaming::event::stream::FlowEventStream;
+use sail_common_datafusion::streaming::event::FlowEvent;
 use sail_common_datafusion::streaming::event::schema::{
     try_from_flow_event_schema, MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
 };
@@ -519,13 +524,14 @@ impl ExecutionPlan for StreamingSinkCommitExec {
 /// are invisible. See docs/design/streaming-realtime-mode.md (F1b).
 #[derive(Debug)]
 pub struct RealtimeFileSinkExec {
-    /// Decoded data stream (markers already stripped by `FlowEventToDataExec`).
+    /// Flow-event input (NOT decoded): the sink reads `Checkpoint{epoch}` barriers in-band to
+    /// delimit each epoch's data — that is what ties source offsets to sink files exactly-once.
     input: Arc<dyn ExecutionPlan>,
     object_store_url: ObjectStoreUrl,
     base: StorePath,
-    commit_interval: std::time::Duration,
-    /// First epoch number (resumed from the checkpoint so a restart continues, not overwrites).
-    start_epoch: u64,
+    /// Streaming `checkpointLocation` — the sink reads the source's per-epoch staged offsets and
+    /// writes the single atomic committed record (`realtime/committed`). Required for EO recovery.
+    checkpoint_location: Option<String>,
     properties: Arc<PlanProperties>,
 }
 
@@ -534,8 +540,7 @@ impl RealtimeFileSinkExec {
         input: Arc<dyn ExecutionPlan>,
         object_store_url: ObjectStoreUrl,
         base: StorePath,
-        commit_interval: std::time::Duration,
-        start_epoch: u64,
+        checkpoint_location: Option<String>,
     ) -> Self {
         let empty = Arc::new(Schema::empty());
         let properties = Arc::new(PlanProperties::new(
@@ -548,8 +553,7 @@ impl RealtimeFileSinkExec {
             input,
             object_store_url,
             base,
-            commit_interval,
-            start_epoch,
+            checkpoint_location,
             properties,
         }
     }
@@ -563,6 +567,15 @@ impl DisplayAs for RealtimeFileSinkExec {
     ) -> std::fmt::Result {
         write!(f, "RealtimeFileSinkExec: base={}", self.base)
     }
+}
+
+/// The single atomic committed record (`realtime/committed`) — the source-of-truth for realtime EO
+/// recovery: the latest committed epoch + the per-(topic,partition) offsets included in it. Written
+/// as ONE object `put` (object stores have no multi-object txn → one atomic object = no torn commit).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct RealtimeCommitted {
+    epoch: u64,
+    offsets: std::collections::BTreeMap<String, i64>,
 }
 
 impl ExecutionPlan for RealtimeFileSinkExec {
@@ -589,8 +602,7 @@ impl ExecutionPlan for RealtimeFileSinkExec {
             children.remove(0),
             self.object_store_url.clone(),
             self.base.clone(),
-            self.commit_interval,
-            self.start_epoch,
+            self.checkpoint_location.clone(),
         )))
     }
 
@@ -605,92 +617,120 @@ impl ExecutionPlan for RealtimeFileSinkExec {
         let store = context.runtime_env().object_store(&self.object_store_url)?;
         let input = Arc::clone(&self.input);
         let base = self.base.clone();
-        let commit_interval = self.commit_interval;
-        let start_epoch = self.start_epoch;
-        let data_schema = self.input.schema();
+        let checkpoint_location = self.checkpoint_location.clone();
         let ctx = context.clone();
         let empty = Arc::new(Schema::empty());
         let empty_out = empty.clone();
 
-        // Write one epoch's batches to `<base>/<epoch>/` and commit `_spark_metadata/<epoch>`
-        // (clean-then-write-then-commit: idempotent on a replayed epoch). Empty epoch → no snapshot.
+        // Commit epoch `epoch` exactly-once (Flink 2PC collapsed to an object-store-atomic commit):
+        //  1. write the epoch's buffered data to `<base>/<epoch>/part-0.parquet` (pre-commit),
+        //  2. commit `_spark_metadata/<epoch>` so readers see the files (idempotent overwrite),
+        //  3. atomic `put` of `realtime/committed` = {epoch, offsets} read from the source's
+        //     `sources/0/staged-epoch-<epoch>` — THE commit point (single source of truth).
+        // Crash before (3): nothing committed → source re-reads from the last committed offset →
+        // the epoch is redone identically (no dup, no loss). See docs/design/streaming-realtime-mode.md.
         async fn commit_epoch(
             store: &Arc<dyn object_store::ObjectStore>,
             base: &StorePath,
+            ck: &Option<CheckpointStore>,
             epoch: u64,
             schema: &SchemaRef,
             batches: &[RecordBatch],
         ) -> Result<()> {
-            if batches.is_empty() {
-                return Ok(());
-            }
-            crate::streaming_sink_log::clean_batch_dir(store, base, epoch)
-                .await
-                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-            let mut buf: Vec<u8> = Vec::new();
-            {
-                let mut w = datafusion::parquet::arrow::ArrowWriter::try_new(
-                    &mut buf,
-                    schema.clone(),
-                    None,
-                )
-                .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
-                for b in batches {
-                    w.write(b).map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+            if !batches.is_empty() {
+                crate::streaming_sink_log::clean_batch_dir(store, base, epoch)
+                    .await
+                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+                let mut buf: Vec<u8> = Vec::new();
+                {
+                    let mut w = datafusion::parquet::arrow::ArrowWriter::try_new(
+                        &mut buf,
+                        schema.clone(),
+                        None,
+                    )
+                    .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                    for b in batches {
+                        w.write(b)
+                            .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                    }
+                    w.close()
+                        .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
                 }
-                w.close().map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                let part = base.clone().join(epoch.to_string()).join("part-0.parquet");
+                use object_store::ObjectStoreExt;
+                store
+                    .put(&part, bytes::Bytes::from(buf).into())
+                    .await
+                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+                let metas = crate::streaming_sink_log::list_batch_files(store, base, epoch)
+                    .await
+                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+                crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
+                    .await
+                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
             }
-            let part = base.clone().join(epoch.to_string()).join("part-0.parquet");
-            use object_store::ObjectStoreExt;
-            store
-                .put(&part, bytes::Bytes::from(buf).into())
-                .await
-                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-            let metas = crate::streaming_sink_log::list_batch_files(store, base, epoch)
-                .await
-                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-            crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
-                .await
-                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+            // The atomic commit point: read the source's pre-committed offsets for this epoch and
+            // write the single committed record. After this returns, the epoch is durably committed.
+            if let Some(ck) = ck {
+                let offsets: std::collections::BTreeMap<String, i64> = match ck
+                    .get(&format!("sources/0/staged-epoch-{epoch}"))
+                    .await
+                    .ok()
+                    .flatten()
+                {
+                    Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+                    None => std::collections::BTreeMap::new(),
+                };
+                let rec = RealtimeCommitted { epoch, offsets };
+                if let Ok(body) = serde_json::to_vec(&rec) {
+                    ck.put("realtime/committed", bytes::Bytes::from(body))
+                        .await
+                        .map_err(|e| DataFusionError::External(Box::new(e)))?;
+                }
+            }
             Ok(())
         }
 
         let out = async_stream::stream! {
-            let mut input_stream = match input.execute(0, ctx) {
+            let raw = match input.execute(0, ctx) {
                 Ok(s) => s,
                 Err(e) => { yield Err(e); return; }
             };
-            let mut epoch = start_epoch;
+            let mut decoded = match DecodedFlowEventStream::try_new(raw) {
+                Ok(s) => s,
+                Err(e) => { yield Err(e); return; }
+            };
+            let data_schema = decoded.schema();
+            let ck = checkpoint_location
+                .as_deref()
+                .and_then(|l| CheckpointStore::from_location(l).ok());
             let mut buffer: Vec<RecordBatch> = Vec::new();
-            let mut timer = tokio::time::interval(commit_interval);
-            timer.tick().await; // discard immediate first tick
-            loop {
-                tokio::select! {
-                    item = input_stream.next() => {
-                        match item {
-                            Some(Ok(b)) => { if b.num_rows() > 0 { buffer.push(b); } }
-                            Some(Err(e)) => { yield Err(e); return; }
-                            None => break, // pipeline ended
+            while let Some(item) = decoded.next().await {
+                match item {
+                    Ok(FlowEvent::Data { batch, .. }) => {
+                        // Append-only realtime (stateless): retractions don't occur. Buffer rows.
+                        if batch.num_rows() > 0 {
+                            buffer.push(batch);
                         }
                     }
-                    _ = timer.tick() => {
-                        // Epoch boundary: durably commit this epoch's data.
-                        if let Err(e) = commit_epoch(&store, &base, epoch, &data_schema, &buffer).await {
+                    Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id })) => {
+                        // Epoch boundary: durably commit this epoch's data + offsets atomically.
+                        if let Err(e) =
+                            commit_epoch(&store, &base, &ck, id, &data_schema, &buffer).await
+                        {
                             yield Err(e); return;
                         }
-                        if !buffer.is_empty() {
-                            buffer.clear();
-                            epoch += 1;
-                            yield Ok(RecordBatch::new_empty(empty_out.clone()));
-                        }
+                        buffer.clear();
+                        yield Ok(RecordBatch::new_empty(empty_out.clone()));
                     }
+                    // Watermark / latency markers don't bound a durable commit here.
+                    Ok(FlowEvent::Marker(_)) => {}
+                    Err(e) => { yield Err(e); return; }
                 }
             }
-            // Final epoch on stream end.
-            if let Err(e) = commit_epoch(&store, &base, epoch, &data_schema, &buffer).await {
-                yield Err(e); return;
-            }
-            yield Ok(RecordBatch::new_empty(empty_out.clone()));
+            // Stream end: any trailing buffered rows are NOT committed — they belong to an
+            // un-checkpointed epoch and are re-read from the last committed offset on restart
+            // (exactly-once: no partial/uncommitted epoch is ever made visible).
         };
         Ok(Box::pin(RecordBatchStreamAdapter::new(empty, out)))
     }

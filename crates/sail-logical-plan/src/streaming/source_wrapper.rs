@@ -30,6 +30,10 @@ pub struct StreamSourceWrapperNode {
     /// offset on start and stage the new offset, for exactly-once recovery
     /// (see docs/design/streaming-exactly-once.md).
     checkpoint_location: Option<String>,
+    /// `Trigger.Continuous` epoch-commit interval in millis, when set. Realtime mode: the
+    /// source emits `Checkpoint{epoch}` barriers + pre-commits per-epoch offsets at this cadence
+    /// (see docs/design/streaming-realtime-mode.md, F1b).
+    realtime_interval_ms: Option<u64>,
 }
 
 impl PartialEq for StreamSourceWrapperNode {
@@ -41,6 +45,7 @@ impl PartialEq for StreamSourceWrapperNode {
             && self.fetch == other.fetch
             && self.bounded == other.bounded
             && self.checkpoint_location == other.checkpoint_location
+            && self.realtime_interval_ms == other.realtime_interval_ms
     }
 }
 
@@ -55,10 +60,16 @@ impl Hash for StreamSourceWrapperNode {
         self.fetch.hash(state);
         self.bounded.hash(state);
         self.checkpoint_location.hash(state);
+        self.realtime_interval_ms.hash(state);
     }
 }
 
 impl StreamSourceWrapperNode {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "constructor mirrors the StreamSource::scan() params 1:1 (incl. bounded / \
+                  checkpoint_location / realtime_interval_ms); bundling would obscure that mapping"
+    )]
     pub fn try_new(
         table_name: TableReference,
         source: Arc<dyn StreamSource>,
@@ -68,6 +79,7 @@ impl StreamSourceWrapperNode {
         fetch: Option<usize>,
         bounded: bool,
         checkpoint_location: Option<String>,
+        realtime_interval_ms: Option<u64>,
     ) -> Result<Self> {
         let schema = match &names {
             Some(names) => rename_schema(&source.data_schema(), names)?,
@@ -98,6 +110,7 @@ impl StreamSourceWrapperNode {
             fetch,
             bounded,
             checkpoint_location,
+            realtime_interval_ms,
         })
     }
 
@@ -111,6 +124,10 @@ impl StreamSourceWrapperNode {
 
     pub fn checkpoint_location(&self) -> Option<&str> {
         self.checkpoint_location.as_deref()
+    }
+
+    pub fn realtime_interval_ms(&self) -> Option<u64> {
+        self.realtime_interval_ms
     }
 
     pub fn names(&self) -> Option<&Vec<String>> {

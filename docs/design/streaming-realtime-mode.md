@@ -77,17 +77,19 @@ vectorized, GC-free. We reuse the marker we have; no new barrier subsystem.
     `from_json`/`select` projections preserve flow-event markers (rewriter contract) so realistic parse
     pipelines route through the realtime sink; multi-partition realtime is **rejected by name** (no
     silent data loss — lands with F2/F3).
-  - ⚠️ **Honest gap — cross-restart EO not yet closed (measured):** the *unbounded continuous* Kafka
-    reader still uses `subscribe` + broker auto-commit (`auto.offset.reset=earliest`); it does **not**
-    seek to the checkpoint-store committed offset on restart nor stage offsets per epoch (only the
-    *bounded* F11 path does). Measured restart re-read wave-1: **total=15000, distinct=10000**.
-    **Fix (next):** continuous Kafka reader → `assign`+`seek` to `sources/0/committed`,
-    `enable.auto.commit=false`, emit `FlowMarker::Checkpoint{epoch}` every commit interval and stage
-    that epoch's offsets to `sources/0/staged-epoch-<id>`; `RealtimeFileSinkExec` commits **on the
-    Checkpoint marker** (not a wall-clock timer) and **promotes the matching staged offset atomically
-    with the file commit-log entry** (epoch id = join key). This ties source offset + sink files into
-    one epoch transaction → exactly-once for stateless **without alignment latency** (beats Spark
-    Continuous at-least-once; avoids Flink's alignment tax). Stateful needs aligned barriers (F2/F3).
+  - ✅ **Cross-restart exactly-once — CLOSED, measured on real Kafka (2026-06-15):** the continuous
+    Kafka reader now `assign`+`seek`s to the committed offset (`enable.auto.commit=false`, NOT broker
+    auto-commit), emits `FlowMarker::Checkpoint{epoch}` every commit interval after pre-committing that
+    epoch's offsets to `sources/0/staged-epoch-<id>`; `RealtimeFileSinkExec` consumes the **flow-event**
+    stream and commits **on the Checkpoint marker** — writing the epoch's files, then a **single atomic
+    `put`** of `realtime/committed = {epoch, offsets}` (the commit point + recovery source-of-truth).
+    Gate (single-partition topic, `apache/kafka`): wave-1 5000 msgs → committed `{epoch:4,
+    offsets:5000}`; **stop**; wave-2 5000 more → restart **seeks to offset 5000** (no wave-1 re-read) →
+    committed `{epoch:9, offsets:10000}`; final read **total=10000, distinct=10000, contiguous
+    0..9999 = exactly-once**. all-in-one 12/12 + clippy green. This is EO for stateless **without
+    alignment latency** — beyond Spark Continuous (at-least-once, no durable file sink) and at Flink's
+    EO level. *Gaps:* multi-partition realtime (rejected by name today) + stateful aligned barriers
+    land with F2/F3; rate source doesn't emit `Checkpoint` markers yet (testing-only, not replayable).
 
 ### F1b EO mechanism — doc-grounded (Flink 2PC + Spark epoch + F4 atomic commit)
 

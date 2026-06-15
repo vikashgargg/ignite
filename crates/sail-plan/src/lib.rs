@@ -38,7 +38,7 @@ pub async fn resolve_and_execute_plan(
     config: Arc<PlanConfig>,
     plan: spec::Plan,
 ) -> PlanResult<(Arc<dyn ExecutionPlan>, Vec<StringifiedPlan>)> {
-    resolve_and_execute_plan_with_options(ctx, config, plan, false, None).await
+    resolve_and_execute_plan_with_options(ctx, config, plan, false, None, None).await
 }
 
 /// Like [`resolve_and_execute_plan`], but allows requesting bounded streaming
@@ -50,6 +50,7 @@ pub async fn resolve_and_execute_plan_with_options(
     plan: spec::Plan,
     bounded: bool,
     checkpoint_location: Option<String>,
+    realtime_interval_ms: Option<u64>,
 ) -> PlanResult<(Arc<dyn ExecutionPlan>, Vec<StringifiedPlan>)> {
     let mut info = vec![];
     let resolver = PlanResolver::new(ctx, config);
@@ -60,7 +61,7 @@ pub async fn resolve_and_execute_plan_with_options(
     let plan = session_state.optimize(&plan)?;
     let streaming = is_streaming_plan(&plan)?;
     let plan = if streaming {
-        rewrite_streaming_plan(plan, bounded, checkpoint_location)?
+        rewrite_streaming_plan(plan, bounded, checkpoint_location, realtime_interval_ms)?
     } else {
         plan
     };
