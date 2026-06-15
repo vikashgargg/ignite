@@ -147,11 +147,19 @@ Connect. Results:
   **inactive immediately**. (The `memory` sink additionally isn't codec-serializable — `MemoryBufferScan`
   — but that's a dev sink; the parquet path fails too.)
 
-**Root cause (found + FIXED 2026-06-15).** It was a **codec gap, not an execution-model gap** (the
-first theory was wrong). The micro-batch streaming file-sink wrappers (`StreamingSinkCommitExec`,
-`EmptySinkAdapterExec`, `PartitionSelectExec`, `ParallelStreamSinkExec`) were not codec-serializable,
-so a streaming write job failed at *submission* to the cluster (`unsupported physical plan node:
-StreamingSinkCommitExec`) and the query went inactive with no output. Fixed by codec'ing them + a
+**✅ RESOLVED 2026-06-16 — distributed streaming works 4/4 (local-cluster, 2 workers).** It was a
+**codec gap, not an execution-model gap**. A full codec-coverage audit of every custom Exec found the
+missing nodes: the micro-batch sink wrappers (`StreamingSinkCommitExec`, `EmptySinkAdapterExec`,
+`PartitionSelectExec`, `ParallelStreamSinkExec`) **and** the streaming **`FileSourceExec`** +
+`ExplicitRepartitionExec`. `FileSourceExec` being unserializable is why distributed *file-source*
+streaming silently produced 0 rows. All are now codec'd + round-trip tested. `scripts/dist_streaming_smoke.py`
+passes **4/4** on both a 2-worker cluster and local single-node: `batch.write=1000`, `stream.rate=20000`,
+`stream.file=1000`, **`stream.windowed_file=97` (keyed event-time window agg over a file source, exactly
+matching real Spark 3.5.3)**. The earlier "windowed reads 0" was a *false alarm* — a single
+availableNow batch + a 2s watermark closes no window, and real Spark produces 0 there too.
+
+*(Historical note — the original failing symptom:)* a streaming write job failed at *submission* to the
+cluster (`unsupported physical plan node: StreamingSinkCommitExec`) and the query went inactive. Fixed by codec'ing them + a
 real `StreamBarrierAlignExec` bug (it rebuilt aligned marker batches with `new_null_array`, which
 fails on non-nullable columns like a windowed `COUNT`; now it stashes + forwards the upstream marker
 batch with the source encoder's placeholders). **Result: `dist_streaming_smoke.py` 1/3 → 2/3 —
