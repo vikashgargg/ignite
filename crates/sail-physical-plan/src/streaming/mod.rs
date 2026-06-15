@@ -1,3 +1,4 @@
+pub mod barrier_align;
 pub mod collector;
 pub mod dedup;
 pub mod exchange;

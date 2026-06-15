@@ -7544,6 +7544,7 @@ dependencies = [
 name = "sail-physical-plan"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "bytes",
  "chrono",
  "datafusion",
