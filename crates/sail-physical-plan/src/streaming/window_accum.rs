@@ -254,6 +254,27 @@ impl WindowAccumExec {
         })
     }
 
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
+    pub fn group_exprs(&self) -> &PhysicalGroupBy {
+        &self.group_exprs
+    }
+    pub fn aggr_exprs(&self) -> &[Arc<AggregateFunctionExpr>] {
+        &self.aggr_exprs
+    }
+    pub fn data_input_schema(&self) -> &SchemaRef {
+        &self.data_input_schema
+    }
+    pub fn event_time_col(&self) -> &str {
+        &self.event_time_col
+    }
+    pub fn delay_micros(&self) -> i64 {
+        self.delay_micros
+    }
+    pub fn checkpoint_location(&self) -> Option<&str> {
+        self.checkpoint_location.as_deref()
+    }
 }
 
 impl DisplayAs for WindowAccumExec {

@@ -70,6 +70,7 @@ message ExtendedPhysicalPlanNode {
     WatermarkExecNode watermark = 55;
     StreamDeduplicateExecNode stream_deduplicate = 56;
     KafkaSourceExecNode kafka_source = 57;
+    WindowAccumExecNode window_accum = 58;
   }
 }
 
@@ -688,6 +689,17 @@ message StreamDeduplicateExecNode {
   repeated string key_cols = 2;
   optional string event_time_col = 3;
   bytes data_schema = 4;
+}
+
+message WindowAccumExecNode {
+  // The streaming (flow-event) child plan.
+  bytes input = 1;
+  // A template AggregateExec over EmptyExec(data_input_schema) carrying the group-by + aggregate
+  // exprs — reuses DataFusion's proven aggregate serialization instead of hand-rolling it.
+  bytes agg_template = 2;
+  string event_time_col = 3;
+  int64 delay_micros = 4;
+  optional string checkpoint_location = 5;
 }
 
 message KafkaSourceExecNode {

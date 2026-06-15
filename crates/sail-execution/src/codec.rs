@@ -235,7 +235,10 @@ use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
 use sail_physical_plan::streaming::collector::StreamCollectorExec;
 use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
 use sail_physical_plan::streaming::exchange::{StreamCoalesceExec, StreamExchangeExec};
+use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode};
+use datafusion::physical_plan::empty::EmptyExec;
 use sail_physical_plan::streaming::watermark::WatermarkExec;
+use sail_physical_plan::streaming::window_accum::WindowAccumExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
@@ -1128,6 +1131,35 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     bounded,
                     checkpoint_location,
                     realtime_interval_ms,
+                )?))
+            }
+            NodeKind::WindowAccum(gen::WindowAccumExecNode {
+                input,
+                agg_template,
+                event_time_col,
+                delay_micros,
+                checkpoint_location,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                // Recover the group-by + aggregates from the template AggregateExec.
+                let template = self.try_decode_plan(&agg_template, ctx)?;
+                let agg = template
+                    .as_any()
+                    .downcast_ref::<AggregateExec>()
+                    .ok_or_else(|| {
+                        plan_datafusion_err!("WindowAccumExec template is not an AggregateExec")
+                    })?;
+                let group_exprs = agg.group_expr().clone();
+                let aggr_exprs = agg.aggr_expr().to_vec();
+                let data_input_schema = agg.input().schema();
+                Ok(Arc::new(WindowAccumExec::try_new(
+                    input,
+                    group_exprs,
+                    aggr_exprs,
+                    data_input_schema,
+                    event_time_col,
+                    delay_micros,
+                    checkpoint_location,
                 )?))
             }
             NodeKind::StreamLimit(gen::StreamLimitExecNode { input, skip, fetch }) => {
@@ -2027,6 +2059,28 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 bounded: kafka.bounded(),
                 checkpoint_location: kafka.checkpoint_location().map(str::to_string),
                 realtime_interval_ms: kafka.realtime_interval_ms(),
+            })
+        } else if let Some(window) = node.as_any().downcast_ref::<WindowAccumExec>() {
+            let input = self.try_encode_plan(window.input().clone())?;
+            // Encode the group-by + aggregates as a template AggregateExec over an EmptyExec of the
+            // data-input schema, reusing DataFusion's aggregate serialization (incl. UDAF state).
+            let data_schema = window.data_input_schema().clone();
+            let n = window.aggr_exprs().len();
+            let template: Arc<dyn ExecutionPlan> = Arc::new(AggregateExec::try_new(
+                AggregateMode::Single,
+                window.group_exprs().clone(),
+                window.aggr_exprs().to_vec(),
+                vec![None; n],
+                Arc::new(EmptyExec::new(data_schema.clone())),
+                data_schema,
+            )?);
+            let agg_template = self.try_encode_plan(template)?;
+            NodeKind::WindowAccum(gen::WindowAccumExecNode {
+                input,
+                agg_template,
+                event_time_col: window.event_time_col().to_string(),
+                delay_micros: window.delay_micros(),
+                checkpoint_location: window.checkpoint_location().map(str::to_string),
             })
         } else if let Some(stream_limit) = node.as_any().downcast_ref::<StreamLimitExec>() {
             let input = self.try_encode_plan(stream_limit.input().clone())?;
@@ -4394,6 +4448,62 @@ mod tests {
         assert_eq!(k.options().extra.get("security.protocol").map(String::as_str), Some("PLAINTEXT"));
         assert_eq!(k.checkpoint_location(), Some("file:///tmp/ck"));
         assert_eq!(k.realtime_interval_ms(), Some(1_000), "realtime EO config round-trips");
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_window_accum_exec() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::functions_aggregate::count::count_udaf;
+        use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+        use datafusion::physical_expr::expressions::Column;
+        use datafusion::physical_plan::aggregates::PhysicalGroupBy;
+        use datafusion::physical_plan::empty::EmptyExec;
+        use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
+
+        // The keyed event-time window aggregation (group-by + COUNT) must survive the codec for
+        // distributed stateful streaming. Group/aggregate exprs ride a template AggregateExec.
+        let codec = RemoteExecutionCodec;
+        let data_schema = Arc::new(Schema::new(vec![
+            Field::new("ts", DataType::Int64, true),
+            Field::new("k", DataType::Int64, true),
+            Field::new("v", DataType::Int64, true),
+        ]));
+        let group = PhysicalGroupBy::new_single(vec![(
+            Arc::new(Column::new("k", 1)),
+            "k".to_string(),
+        )]);
+        let count = AggregateExprBuilder::new(count_udaf(), vec![Arc::new(Column::new("v", 2))])
+            .schema(data_schema.clone())
+            .alias("cnt")
+            .build()?;
+        let flow_schema = Arc::new(to_flow_event_schema(&data_schema));
+        let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema));
+        let window: Arc<dyn ExecutionPlan> = Arc::new(WindowAccumExec::try_new(
+            child,
+            group,
+            vec![Arc::new(count)],
+            data_schema,
+            "ts".to_string(),
+            2_000,
+            Some("file:///tmp/wck".to_string()),
+        )?);
+
+        let buf = codec.try_encode_plan(window)?;
+        // Decode against a context whose registry has the aggregate UDFs (workers have these); the
+        // template AggregateExec resolves COUNT by name on the way back.
+        let session = datafusion::prelude::SessionContext::new();
+        let decoded = codec.try_decode_plan(&buf, &session.task_ctx())?;
+
+        let w = decoded
+            .as_any()
+            .downcast_ref::<WindowAccumExec>()
+            .ok_or_else(|| plan_datafusion_err!("decoded must be WindowAccumExec"))?;
+        assert_eq!(w.event_time_col(), "ts");
+        assert_eq!(w.delay_micros(), 2_000, "watermark delay round-trips");
+        assert_eq!(w.checkpoint_location(), Some("file:///tmp/wck"));
+        assert_eq!(w.aggr_exprs().len(), 1, "aggregate round-trips");
+        assert_eq!(w.group_exprs().expr().len(), 1, "group-by round-trips");
         Ok(())
     }
 }
