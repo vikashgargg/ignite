@@ -53,6 +53,33 @@ benchmark is possible:
 - **Stream-stream join** and **mixed batch+streaming** head-to-head — gated on the file-source
   gap and a stable streaming throughput harness. Tracked for the next iteration once #1 lands.
 
+## Realtime continuous Kafka → durable file sink, exactly-once (2026-06-15, local)
+
+Same pipeline on **both** engines: real Kafka (`apache/kafka`, single-partition topic, 50,000
+JSON messages) → `CAST(value AS STRING)` → write **parquet** with a checkpoint location. 8-core
+MacBook Air; Vajra = persistent `vajra server` (debug build); Spark 3.5.3 `local[*]` with
+`spark-sql-kafka-0-10`. Same input, same sink format — a true like-for-like.
+
+| Mode | Vajra | Spark 3.5.3 | Read |
+|---|--:|--:|---|
+| **availableNow micro-batch** (drain 50k → parquet) | **50,000 rows, exactly-once, 0.51 s, ~98.7k rows/s** | 50,000 rows, exactly-once, 8.78 s, ~5.7k rows/s | throughput gap real; Spark wall-clock is **startup-inflated** (JVM + local-job spin-up) — see caveat |
+| **continuous → durable file sink, exactly-once** | **✅ 50,000 rows, exactly-once** (+ EO **across restart** measured separately: wave1 5k → stop → wave2 5k → 10,000 distinct, contiguous) | **❌ not possible** — `java.lang.IllegalStateException: Unknown type of trigger: ContinuousTrigger(1000)`; Spark Continuous sinks are **Kafka/Memory/Console only, at-least-once** (official docs) | **capability Vajra has and Spark does not** |
+
+### Honest reading
+- The **headline is the capability gap**, not the micro-batch wall-clock. Spark *cannot* run
+  continuous processing into a durable file sink (it throws), and Spark Continuous is at-least-once
+  even where it does run; Vajra does continuous **exactly-once** to parquet, recoverable across
+  restart (Flink-class EO via in-band epoch barriers + a single atomic commit, no alignment latency
+  for stateless). This is the F1b result, measured.
+- The micro-batch **0.51 s vs 8.78 s** ratio is inflated by Spark's local-mode/JVM startup; a warm
+  Spark narrows it. But Vajra's **~98.7k rows/s** sustained on a debug build (no-JVM, Arrow core) is
+  the dependable number, consistent with the ~2.5× batch win above.
+- Single node, single Kafka partition. **Multi-partition / distributed** realtime is F2/F3 (the
+  Chandy-Lamport alignment primitive `StreamBarrierAlignExec` is built + unit-tested; cross-node
+  Arrow-Flight shuffle + continuous stateful remain). A Kafka→file **Flink** streaming comparison is
+  the next external head-to-head (the Iceberg-sink run earlier showed Vajra 0.26 s vs Flink 20.27 s
+  on equivalent input).
+
 ## Conclusion
 **Batch is a clean, fair ~2.5× win over Spark on real Graviton hardware.** Streaming windowed
 throughput is ahead of Flink per-core (directional, ~1.55×), but the exercise's real value was
