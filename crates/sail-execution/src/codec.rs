@@ -232,7 +232,9 @@ use sail_physical_plan::show_string::ShowStringExec;
 use sail_physical_plan::spark_partition_id::SparkPartitionIdExec;
 use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
 use sail_physical_plan::streaming::collector::StreamCollectorExec;
+use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
 use sail_physical_plan::streaming::exchange::{StreamCoalesceExec, StreamExchangeExec};
+use sail_physical_plan::streaming::watermark::WatermarkExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
@@ -1050,6 +1052,36 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             NodeKind::FlowEventToData(gen::FlowEventToDataExecNode { input }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 Ok(Arc::new(FlowEventToDataExec::try_new(input)?))
+            }
+            NodeKind::Watermark(gen::WatermarkExecNode {
+                input,
+                event_time_col,
+                delay_micros,
+                data_schema,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                let data_schema = Arc::new(self.try_decode_schema(&data_schema)?);
+                Ok(Arc::new(WatermarkExec::try_new(
+                    input,
+                    event_time_col,
+                    delay_micros,
+                    data_schema,
+                )?))
+            }
+            NodeKind::StreamDeduplicate(gen::StreamDeduplicateExecNode {
+                input,
+                key_cols,
+                event_time_col,
+                data_schema,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                let data_schema = Arc::new(self.try_decode_schema(&data_schema)?);
+                Ok(Arc::new(StreamDeduplicateExec::try_new(
+                    input,
+                    key_cols,
+                    event_time_col,
+                    data_schema,
+                )?))
             }
             NodeKind::StreamLimit(gen::StreamLimitExecNode { input, skip, fetch }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
@@ -1909,6 +1941,24 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         } else if let Some(decode) = node.as_any().downcast_ref::<FlowEventToDataExec>() {
             let input = self.try_encode_plan(decode.input().clone())?;
             NodeKind::FlowEventToData(gen::FlowEventToDataExecNode { input })
+        } else if let Some(watermark) = node.as_any().downcast_ref::<WatermarkExec>() {
+            let input = self.try_encode_plan(watermark.input().clone())?;
+            let data_schema = self.try_encode_schema(watermark.data_schema())?;
+            NodeKind::Watermark(gen::WatermarkExecNode {
+                input,
+                event_time_col: watermark.event_time_col().to_string(),
+                delay_micros: watermark.delay_micros(),
+                data_schema,
+            })
+        } else if let Some(dedup) = node.as_any().downcast_ref::<StreamDeduplicateExec>() {
+            let input = self.try_encode_plan(dedup.input().clone())?;
+            let data_schema = self.try_encode_schema(dedup.data_schema())?;
+            NodeKind::StreamDeduplicate(gen::StreamDeduplicateExecNode {
+                input,
+                key_cols: dedup.key_cols().to_vec(),
+                event_time_col: dedup.event_time_col().map(str::to_string),
+                data_schema,
+            })
         } else if let Some(stream_limit) = node.as_any().downcast_ref::<StreamLimitExec>() {
             let input = self.try_encode_plan(stream_limit.input().clone())?;
             let skip = u64::try_from(stream_limit.skip()).map_err(|_| {
@@ -4177,6 +4227,53 @@ mod tests {
             .ok_or_else(|| plan_datafusion_err!("bottom must be a StreamExchangeExec"))?;
         assert_eq!(ex.partition_count(), 3, "partition count round-trips");
         assert_eq!(ex.hash_keys().len(), 1, "hash keys round-trip");
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_stateful_stream_operators() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_plan::empty::EmptyExec;
+        use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
+
+        // Stateful streaming ops must survive the codec for distributed event-time processing:
+        // StreamDeduplicate(Watermark(child)). Watermark/dedup carry the decoded data schema +
+        // event-time/key columns; round-trip the whole stack.
+        let codec = RemoteExecutionCodec;
+        let data_schema = Arc::new(Schema::new(vec![
+            Field::new("ts", DataType::Int64, true),
+            Field::new("k", DataType::Int64, true),
+        ]));
+        let flow_schema = Arc::new(to_flow_event_schema(&data_schema));
+        let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema));
+        let watermark: Arc<dyn ExecutionPlan> = Arc::new(WatermarkExec::try_new(
+            child,
+            "ts".to_string(),
+            1_000,
+            data_schema.clone(),
+        )?);
+        let dedup: Arc<dyn ExecutionPlan> = Arc::new(StreamDeduplicateExec::try_new(
+            watermark,
+            vec!["k".to_string()],
+            Some("ts".to_string()),
+            data_schema,
+        )?);
+
+        let buf = codec.try_encode_plan(dedup)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+
+        let dd = decoded
+            .as_any()
+            .downcast_ref::<StreamDeduplicateExec>()
+            .ok_or_else(|| plan_datafusion_err!("top must be StreamDeduplicateExec"))?;
+        assert_eq!(dd.key_cols(), ["k".to_string()], "dedup keys round-trip");
+        assert_eq!(dd.event_time_col(), Some("ts"), "dedup event-time round-trips");
+        let wm = decoded.children()[0]
+            .as_any()
+            .downcast_ref::<WatermarkExec>()
+            .ok_or_else(|| plan_datafusion_err!("child must be WatermarkExec"))?;
+        assert_eq!(wm.event_time_col(), "ts");
+        assert_eq!(wm.delay_micros(), 1_000, "watermark delay round-trips");
         Ok(())
     }
 }

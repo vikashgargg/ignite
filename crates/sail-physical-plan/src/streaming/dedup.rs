@@ -66,6 +66,19 @@ impl StreamDeduplicateExec {
             properties,
         })
     }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
+    pub fn key_cols(&self) -> &[String] {
+        &self.key_cols
+    }
+    pub fn event_time_col(&self) -> Option<&str> {
+        self.event_time_col.as_deref()
+    }
+    pub fn data_schema(&self) -> &SchemaRef {
+        &self.data_schema
+    }
 }
 
 impl DisplayAs for StreamDeduplicateExec {

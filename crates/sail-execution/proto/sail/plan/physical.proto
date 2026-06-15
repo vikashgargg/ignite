@@ -67,6 +67,8 @@ message ExtendedPhysicalPlanNode {
     StreamCoalesceExecNode stream_coalesce = 52;
     StreamExchangeExecNode stream_exchange = 53;
     FlowEventToDataExecNode flow_event_to_data = 54;
+    WatermarkExecNode watermark = 55;
+    StreamDeduplicateExecNode stream_deduplicate = 56;
   }
 }
 
@@ -671,6 +673,20 @@ message StreamExchangeExecNode {
 
 message FlowEventToDataExecNode {
   bytes input = 1;
+}
+
+message WatermarkExecNode {
+  bytes input = 1;
+  string event_time_col = 2;
+  int64 delay_micros = 3;
+  bytes data_schema = 4;
+}
+
+message StreamDeduplicateExecNode {
+  bytes input = 1;
+  repeated string key_cols = 2;
+  optional string event_time_col = 3;
+  bytes data_schema = 4;
 }
 
 message StreamLimitExecNode {
