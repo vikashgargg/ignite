@@ -94,6 +94,7 @@ use sail_data_source::formats::text::source::TextSource;
 use sail_data_source::formats::text::writer::{TextSink, TextWriterOptions};
 use datafusion::execution::object_store::ObjectStoreUrl;
 use object_store::path::Path as StorePath;
+use sail_data_source::formats::file_stream::FileSourceExec;
 use sail_data_source::streaming_decode::{
     EmptySinkAdapterExec, FlowEventToDataExec, ParallelStreamSinkExec, PartitionSelectExec,
     RealtimeFileSinkExec, StreamingSinkCommitExec,
@@ -236,6 +237,7 @@ use sail_physical_plan::range::RangeExec;
 use sail_physical_plan::schema_pivot::SchemaPivotExec;
 use sail_physical_plan::show_string::ShowStringExec;
 use sail_physical_plan::spark_partition_id::SparkPartitionIdExec;
+use sail_physical_plan::repartition::ExplicitRepartitionExec;
 use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
 use sail_physical_plan::streaming::collector::StreamCollectorExec;
 use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
@@ -1215,6 +1217,19 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     .map(|c| self.try_decode_plan(c, ctx))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(Arc::new(ParallelStreamSinkExec::new(children)))
+            }
+            NodeKind::FileSource(gen::FileSourceExecNode { input }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                Ok(Arc::new(FileSourceExec::try_new(input)?))
+            }
+            NodeKind::ExplicitRepartition(gen::ExplicitRepartitionExecNode {
+                input,
+                partitioning,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                let schema = input.schema();
+                let partitioning = self.try_decode_partitioning(&partitioning, &schema, ctx)?;
+                Ok(Arc::new(ExplicitRepartitionExec::new(input, partitioning)))
             }
             NodeKind::StreamJoin(gen::StreamJoinExecNode {
                 left,
@@ -2243,6 +2258,17 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 .map(|c| self.try_encode_plan(c.clone()))
                 .collect::<Result<Vec<_>>>()?;
             NodeKind::ParallelStreamSink(gen::ParallelStreamSinkExecNode { children })
+        } else if let Some(file_source) = node.as_any().downcast_ref::<FileSourceExec>() {
+            let input = self.try_encode_plan(file_source.input().clone())?;
+            NodeKind::FileSource(gen::FileSourceExecNode { input })
+        } else if let Some(repart) = node.as_any().downcast_ref::<ExplicitRepartitionExec>() {
+            let input = self.try_encode_plan(repart.input().clone())?;
+            let partitioning =
+                self.try_encode_partitioning(repart.properties().output_partitioning())?;
+            NodeKind::ExplicitRepartition(gen::ExplicitRepartitionExecNode {
+                input,
+                partitioning,
+            })
         } else if let Some(join) = node.as_any().downcast_ref::<StreamJoinExec>() {
             let left = self.try_encode_plan(join.left().clone())?;
             let right = self.try_encode_plan(join.right().clone())?;
@@ -4820,6 +4846,45 @@ mod tests {
             .ok_or_else(|| plan_datafusion_err!("decoded must be StreamingSinkCommitExec"))?;
         assert_eq!(c.base().to_string(), "out/micro");
         assert_eq!(c.batch_id(), 7, "batch id round-trips");
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_file_source_and_explicit_repartition() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_expr::expressions::Column;
+        use datafusion::physical_plan::empty::EmptyExec;
+
+        // FileSourceExec (the streaming file source) was the missing codec node that silently
+        // produced 0 rows for distributed file-source streaming. ExplicitRepartitionExec was the
+        // other gap. Round-trip both.
+        let codec = RemoteExecutionCodec;
+        let data_schema = Arc::new(Schema::new(vec![
+            Field::new("v", DataType::Int64, true),
+            Field::new("k", DataType::Int64, true),
+        ]));
+        let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(data_schema.clone()));
+        let file_source: Arc<dyn ExecutionPlan> = Arc::new(FileSourceExec::try_new(child)?);
+        let buf = codec.try_encode_plan(file_source)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+        assert!(decoded.as_any().is::<FileSourceExec>(), "FileSourceExec round-trips");
+
+        let child2: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(data_schema));
+        let repart: Arc<dyn ExecutionPlan> = Arc::new(ExplicitRepartitionExec::new(
+            child2,
+            datafusion::physical_expr::Partitioning::Hash(vec![Arc::new(Column::new("k", 1))], 4),
+        ));
+        let buf = codec.try_encode_plan(repart)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+        let r = decoded
+            .as_any()
+            .downcast_ref::<ExplicitRepartitionExec>()
+            .ok_or_else(|| plan_datafusion_err!("decoded must be ExplicitRepartitionExec"))?;
+        assert_eq!(
+            r.properties().output_partitioning().partition_count(),
+            4,
+            "repartition count round-trips"
+        );
         Ok(())
     }
 }

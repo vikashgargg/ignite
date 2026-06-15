@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Distributed-streaming smoke harness (F3-c gate).
+"""Distributed-streaming smoke harness (F3 gate).
 
-Runs probes against a Vajra server started in local-cluster mode (driver + N
-in-process workers), through real Spark Connect — the prerequisite gate for
-distributed stateful streaming. Start the server first, e.g.:
+Runs probes against a Vajra server in local-cluster mode (driver + N in-process
+workers) through real Spark Connect. Start the server first:
 
     target/debug/vajra server --mode local-cluster --workers 2 --port 50081
 
@@ -11,18 +10,18 @@ then:
 
     .venvs/smoke/bin/python scripts/dist_streaming_smoke.py 50081
 
-Probes (each isolates one capability so a failure points at the exact gap):
-  1. batch.write     — distributed read -> compute -> parquet write
-  2. stream.write    — stateless streaming (rate -> filter -> parquet, availableNow)
-  3. stream.windowed — keyed event-time window agg -> parquet (exchange/align/window)
+Probes (expected values cross-checked against real Spark 3.5.3 on the same inputs):
+  1. batch.write          — distributed read -> compute -> parquet write          (1000)
+  2. stream.rate          — stateless rate -> filter -> parquet (availableNow)     (>0)
+  3. stream.file          — stateless FILE -> filter -> parquet (availableNow)     (1000)
+  4. stream.windowed_file — keyed event-time window agg over a FILE source         (97)
 
-Findings (2026-06-15, --workers 2): probe 1 PASS; probes 2/3 produce no output and
-the streaming query goes inactive immediately. Distributed BATCH is solid; the gap
-is that the streaming execution model (single-node long-lived StreamDriver) is not
-integrated with the distributed cluster runner (stage-based JobGraph) — codec is
-necessary but not sufficient. See docs/design/distributed-streaming-f2f3.md.
+Probe 4's input spans 100s of event-time over 5 keys with a 2s watermark; the
+watermark closes 97 (window,key) groups — Spark produces exactly 97 too (the
+earlier rate+availableNow windowed probe correctly produced 0 because a single
+batch + 2s watermark closes no window; that matched Spark and was NOT a bug).
 """
-import sys, time, shutil
+import sys, shutil
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
@@ -36,42 +35,55 @@ def check(name, ok, detail=""):
     print(("PASS" if ok else "FAIL"), name, detail)
 
 
+def reset(*dirs):
+    for d in dirs:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 # 1. distributed batch write
 try:
-    out = "/tmp/dss_batch"
-    shutil.rmtree(out, ignore_errors=True)
+    out = "/tmp/dss_batch"; reset(out)
     s.range(0, 1000).selectExpr("id AS v").write.mode("overwrite").parquet(out)
     n = s.read.parquet(out).count()
     check("batch.write", n == 1000, f"rows={n}")
 except Exception as e:
     check("batch.write", False, f"EXC {str(e)[:140]}")
 
-# 2. stateless streaming write (availableNow micro-batch)
+# 2. stateless streaming write — rate source (single partition, no shuffle)
 try:
-    out, ck = "/tmp/dss_stream", "/tmp/dss_stream_ck"
-    for d in (out, ck):
-        shutil.rmtree(d, ignore_errors=True)
+    out, ck = "/tmp/dss_rate", "/tmp/dss_rate_ck"; reset(out, ck)
     df = s.readStream.format("rate").option("rowsPerSecond", "20000").load().selectExpr("value AS v")
     q = df.writeStream.format("parquet").option("path", out).option("checkpointLocation", ck).trigger(availableNow=True).start()
     q.awaitTermination(timeout=30)
     n = s.read.parquet(out).count()
-    check("stream.write", n > 0, f"rows={n}")
+    check("stream.rate", n > 0, f"rows={n}")
 except Exception as e:
-    check("stream.write", False, f"EXC {str(e)[:140]}")
+    check("stream.rate", False, f"EXC {str(e)[:140]}")
 
-# 3. keyed event-time windowed aggregation -> parquet (exchange/align/window)
+# 3. stateless streaming write — FILE source
 try:
-    out, ck = "/tmp/dss_win", "/tmp/dss_win_ck"
-    for d in (out, ck):
-        shutil.rmtree(d, ignore_errors=True)
-    df = s.readStream.format("rate").option("rowsPerSecond", "20000").load().withColumn("k", F.col("value") % 5)
-    win = df.withWatermark("timestamp", "2 seconds").groupBy(F.window("timestamp", "1 second"), F.col("k")).count()
-    q = win.writeStream.format("parquet").option("path", out).option("checkpointLocation", ck).trigger(availableNow=True).start()
+    inp, out, ck = "/tmp/dss_f_in", "/tmp/dss_f_out", "/tmp/dss_f_ck"; reset(inp, out, ck)
+    s.range(0, 1000).selectExpr("id AS v").coalesce(1).write.mode("overwrite").parquet(inp)
+    df = s.readStream.schema("v long").parquet(inp).filter("v >= 0")
+    q = df.writeStream.format("parquet").option("path", out).option("checkpointLocation", ck).trigger(availableNow=True).start()
     q.awaitTermination(timeout=30)
     n = s.read.parquet(out).count()
-    check("stream.windowed", n > 0, f"rows={n}")
+    check("stream.file", n == 1000, f"rows={n} (expect 1000)")
 except Exception as e:
-    check("stream.windowed", False, f"EXC {str(e)[:140]}")
+    check("stream.file", False, f"EXC {str(e)[:140]}")
+
+# 4. keyed event-time windowed aggregation over a FILE source (event-time spans 100s)
+try:
+    inp, out, ck = "/tmp/dss_w_in", "/tmp/dss_w_out", "/tmp/dss_w_ck"; reset(inp, out, ck)
+    s.range(0, 100).selectExpr("CAST(id AS TIMESTAMP) AS ts", "id % 5 AS k").coalesce(1).write.mode("overwrite").parquet(inp)
+    df = s.readStream.schema("ts timestamp, k long").parquet(inp)
+    win = df.withWatermark("ts", "2 seconds").groupBy(F.window("ts", "1 second"), F.col("k")).count()
+    q = win.writeStream.format("parquet").option("path", out).option("checkpointLocation", ck).trigger(availableNow=True).start()
+    q.awaitTermination(timeout=60)
+    n = s.read.parquet(out).count()
+    check("stream.windowed_file", n == 97, f"rows={n} (expect 97, Spark-matched)")
+except Exception as e:
+    check("stream.windowed_file", False, f"EXC {str(e)[:140]}")
 
 passed = sum(1 for _, ok in results if ok)
 print(f"\nDIST_STREAMING_SMOKE {passed}/{len(results)} passed")

@@ -77,6 +77,8 @@ message ExtendedPhysicalPlanNode {
     EmptySinkAdapterExecNode empty_sink_adapter = 62;
     PartitionSelectExecNode partition_select = 63;
     ParallelStreamSinkExecNode parallel_stream_sink = 64;
+    FileSourceExecNode file_source = 65;
+    ExplicitRepartitionExecNode explicit_repartition = 66;
   }
 }
 
@@ -722,6 +724,15 @@ message PartitionSelectExecNode {
 
 message ParallelStreamSinkExecNode {
   repeated bytes children = 1;
+}
+
+message FileSourceExecNode {
+  bytes input = 1;
+}
+
+message ExplicitRepartitionExecNode {
+  bytes input = 1;
+  bytes partitioning = 2;
 }
 
 message StreamJoinExecNode {
