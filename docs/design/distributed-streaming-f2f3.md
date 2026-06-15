@@ -115,13 +115,15 @@ streaming-style), not Ballista blocking-style:
   fire) — which is exactly the desired streaming lifecycle. **F3-b control plane = already done.**
 
 **The actual blockers for distributed *stateful* streaming (re-scoped):**
-1. **Codec serialization of streaming operators.** 🟡 **IN PROGRESS (2026-06-15).** Done + round-trip
-   tested: `StreamBarrierAlignExec`, `StreamExchangeExec`, `StreamCoalesceExec`, `FlowEventToDataExec`,
-   `WatermarkExec`, `StreamDeduplicateExec`, `KafkaSourceExec` (incl. realtime EO config) — plus the
-   pre-existing `filter`/`limit`/`collector`/`source-adapter`/`rate`/`socket`. This covers the full
-   **stateless + event-time** distributed streaming path (kafka → exchange/align → watermark/dedup →
-   decode). *Remaining:* `WindowAccumExec` + `StreamJoinExec` (aggregate/join-expr serialization +
-   checkpoint location) and `RealtimeFileSinkExec` — each gateable per-operator via codec round-trip.
+1. **Codec serialization of streaming operators.** ✅ **DONE (2026-06-15), round-trip tested.** Every
+   streaming operator now serializes through `RemoteExecutionCodec` (driver↔worker): `KafkaSourceExec`
+   (incl. realtime EO config) · `StreamExchangeExec` · `StreamCoalesceExec` · `StreamBarrierAlignExec` ·
+   `WatermarkExec` · `StreamDeduplicateExec` · `WindowAccumExec` (group-by + aggregates via a template
+   `AggregateExec`, reusing DataFusion's UDAF serialization) · `StreamJoinExec` (equi-keys + join type +
+   interval bounds + filter) · `FlowEventToDataExec` · `RealtimeFileSinkExec` — plus the pre-existing
+   `filter`/`limit`/`collector`/`source-adapter`/`rate`/`socket`. **A full distributed streaming plan —
+   stateless, event-time, *and* stateful (window-agg / stream-join) — can now be shipped to workers.**
+   8 codec round-trip tests green. THE blocker is cleared.
 2. **Insert `StreamBarrierAlignExec`** at distributed shuffle-receive points for stateful operators
    (the planner wires the in-node exchange today; the aligned merge needs wiring for the cross-node case).
 3. **Distributed checkpoint commit:** wire `EpochCoordinator` into the driver + per-instance state

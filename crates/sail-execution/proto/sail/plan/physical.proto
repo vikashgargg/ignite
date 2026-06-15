@@ -72,6 +72,7 @@ message ExtendedPhysicalPlanNode {
     KafkaSourceExecNode kafka_source = 57;
     WindowAccumExecNode window_accum = 58;
     StreamJoinExecNode stream_join = 59;
+    RealtimeFileSinkExecNode realtime_file_sink = 60;
   }
 }
 
@@ -690,6 +691,13 @@ message StreamDeduplicateExecNode {
   repeated string key_cols = 2;
   optional string event_time_col = 3;
   bytes data_schema = 4;
+}
+
+message RealtimeFileSinkExecNode {
+  bytes input = 1;
+  string object_store_url = 2;
+  string base = 3;
+  optional string checkpoint_location = 4;
 }
 
 message StreamJoinExecNode {

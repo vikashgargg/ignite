@@ -561,6 +561,19 @@ impl RealtimeFileSinkExec {
             properties,
         }
     }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
+    pub fn object_store_url(&self) -> &ObjectStoreUrl {
+        &self.object_store_url
+    }
+    pub fn base(&self) -> &StorePath {
+        &self.base
+    }
+    pub fn checkpoint_location(&self) -> Option<&str> {
+        self.checkpoint_location.as_deref()
+    }
 }
 
 impl DisplayAs for RealtimeFileSinkExec {

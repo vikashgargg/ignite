@@ -7327,6 +7327,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "log",
+ "object_store",
  "prost",
  "prost-build",
  "rand 0.10.1",

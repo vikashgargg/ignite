@@ -92,7 +92,9 @@ use sail_data_source::formats::rate::RateSourceExec;
 use sail_data_source::formats::socket::{SocketReadOptions, SocketSourceExec};
 use sail_data_source::formats::text::source::TextSource;
 use sail_data_source::formats::text::writer::{TextSink, TextWriterOptions};
-use sail_data_source::streaming_decode::FlowEventToDataExec;
+use datafusion::execution::object_store::ObjectStoreUrl;
+use object_store::path::Path as StorePath;
+use sail_data_source::streaming_decode::{FlowEventToDataExec, RealtimeFileSinkExec};
 use sail_data_source::options::gen::RateReadOptions;
 use sail_delta_lake::physical_plan::{
     DeletionVectorRowsWriterExec, DeletionVectorWriterExec, DeltaCastColumnExpr,
@@ -1163,6 +1165,22 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     checkpoint_location,
                 )?))
             }
+            NodeKind::RealtimeFileSink(gen::RealtimeFileSinkExecNode {
+                input,
+                object_store_url,
+                base,
+                checkpoint_location,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                let object_store_url = ObjectStoreUrl::parse(&object_store_url)?;
+                let base = StorePath::from(base);
+                Ok(Arc::new(RealtimeFileSinkExec::new(
+                    input,
+                    object_store_url,
+                    base,
+                    checkpoint_location,
+                )))
+            }
             NodeKind::StreamJoin(gen::StreamJoinExecNode {
                 left,
                 right,
@@ -2157,6 +2175,14 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 event_time_col: window.event_time_col().to_string(),
                 delay_micros: window.delay_micros(),
                 checkpoint_location: window.checkpoint_location().map(str::to_string),
+            })
+        } else if let Some(sink) = node.as_any().downcast_ref::<RealtimeFileSinkExec>() {
+            let input = self.try_encode_plan(sink.input().clone())?;
+            NodeKind::RealtimeFileSink(gen::RealtimeFileSinkExecNode {
+                input,
+                object_store_url: sink.object_store_url().as_str().to_string(),
+                base: sink.base().to_string(),
+                checkpoint_location: sink.checkpoint_location().map(str::to_string),
             })
         } else if let Some(join) = node.as_any().downcast_ref::<StreamJoinExec>() {
             let left = self.try_encode_plan(join.left().clone())?;
@@ -4673,6 +4699,38 @@ mod tests {
         assert_eq!(j.left_ts_idx(), Some(1));
         assert_eq!(j.right_ts_idx(), Some(1));
         assert_eq!(j.checkpoint_location(), Some("file:///tmp/jck"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_realtime_file_sink_exec() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_plan::empty::EmptyExec;
+        use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
+
+        // The realtime durable sink must survive the codec so distributed continuous EO writes
+        // (per-epoch commit + atomic realtime/committed) can run on workers.
+        let codec = RemoteExecutionCodec;
+        let data_schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, true)]));
+        let child: Arc<dyn ExecutionPlan> =
+            Arc::new(EmptyExec::new(Arc::new(to_flow_event_schema(&data_schema))));
+        let url = ObjectStoreUrl::parse("file://")?;
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(RealtimeFileSinkExec::new(
+            child,
+            url,
+            StorePath::from("out/realtime"),
+            Some("file:///tmp/rck".to_string()),
+        ));
+
+        let buf = codec.try_encode_plan(plan)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+
+        let s = decoded
+            .as_any()
+            .downcast_ref::<RealtimeFileSinkExec>()
+            .ok_or_else(|| plan_datafusion_err!("decoded must be RealtimeFileSinkExec"))?;
+        assert_eq!(s.base().to_string(), "out/realtime", "sink base path round-trips");
+        assert_eq!(s.checkpoint_location(), Some("file:///tmp/rck"));
         Ok(())
     }
 }
