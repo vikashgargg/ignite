@@ -91,6 +91,7 @@ use sail_data_source::formats::rate::RateSourceExec;
 use sail_data_source::formats::socket::{SocketReadOptions, SocketSourceExec};
 use sail_data_source::formats::text::source::TextSource;
 use sail_data_source::formats::text::writer::{TextSink, TextWriterOptions};
+use sail_data_source::streaming_decode::FlowEventToDataExec;
 use sail_data_source::options::gen::RateReadOptions;
 use sail_delta_lake::physical_plan::{
     DeletionVectorRowsWriterExec, DeletionVectorWriterExec, DeltaCastColumnExpr,
@@ -231,6 +232,7 @@ use sail_physical_plan::show_string::ShowStringExec;
 use sail_physical_plan::spark_partition_id::SparkPartitionIdExec;
 use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
 use sail_physical_plan::streaming::collector::StreamCollectorExec;
+use sail_physical_plan::streaming::exchange::{StreamCoalesceExec, StreamExchangeExec};
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
@@ -1018,6 +1020,36 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             NodeKind::StreamBarrierAlign(gen::StreamBarrierAlignExecNode { input }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 Ok(Arc::new(StreamBarrierAlignExec::new(input)))
+            }
+            NodeKind::StreamCoalesce(gen::StreamCoalesceExecNode { input }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                Ok(Arc::new(StreamCoalesceExec::new(input)))
+            }
+            NodeKind::StreamExchange(gen::StreamExchangeExecNode {
+                input,
+                hash_keys,
+                partition_count,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                let schema = input.schema();
+                let hash_keys = hash_keys
+                    .iter()
+                    .map(|k| {
+                        parse_physical_expr(&self.try_decode_message(k)?, ctx, &schema, self)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let partition_count = usize::try_from(partition_count).map_err(|_| {
+                    plan_datafusion_err!("invalid partition count for StreamExchangeExec")
+                })?;
+                Ok(Arc::new(StreamExchangeExec::try_new(
+                    input,
+                    hash_keys,
+                    partition_count,
+                )?))
+            }
+            NodeKind::FlowEventToData(gen::FlowEventToDataExecNode { input }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                Ok(Arc::new(FlowEventToDataExec::try_new(input)?))
             }
             NodeKind::StreamLimit(gen::StreamLimitExecNode { input, skip, fetch }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
@@ -1856,6 +1888,27 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         {
             let input = self.try_encode_plan(barrier_align.input().clone())?;
             NodeKind::StreamBarrierAlign(gen::StreamBarrierAlignExecNode { input })
+        } else if let Some(coalesce) = node.as_any().downcast_ref::<StreamCoalesceExec>() {
+            let input = self.try_encode_plan(coalesce.input().clone())?;
+            NodeKind::StreamCoalesce(gen::StreamCoalesceExecNode { input })
+        } else if let Some(exchange) = node.as_any().downcast_ref::<StreamExchangeExec>() {
+            let input = self.try_encode_plan(exchange.input().clone())?;
+            let hash_keys = exchange
+                .hash_keys()
+                .iter()
+                .map(|k| self.try_encode_message(serialize_physical_expr(k, self)?))
+                .collect::<Result<Vec<_>>>()?;
+            let partition_count = u64::try_from(exchange.partition_count()).map_err(|_| {
+                plan_datafusion_err!("cannot encode partition count for StreamExchangeExec")
+            })?;
+            NodeKind::StreamExchange(gen::StreamExchangeExecNode {
+                input,
+                hash_keys,
+                partition_count,
+            })
+        } else if let Some(decode) = node.as_any().downcast_ref::<FlowEventToDataExec>() {
+            let input = self.try_encode_plan(decode.input().clone())?;
+            NodeKind::FlowEventToData(gen::FlowEventToDataExecNode { input })
         } else if let Some(stream_limit) = node.as_any().downcast_ref::<StreamLimitExec>() {
             let input = self.try_encode_plan(stream_limit.input().clone())?;
             let skip = u64::try_from(stream_limit.skip()).map_err(|_| {
@@ -4082,6 +4135,48 @@ mod tests {
             "decoded plan must be a StreamBarrierAlignExec"
         );
         assert_eq!(decoded.children().len(), 1, "child must round-trip");
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_streaming_shuffle_operators() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_expr::expressions::Column;
+        use datafusion::physical_plan::empty::EmptyExec;
+        use sail_common_datafusion::streaming::event::schema::{
+            MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
+        };
+
+        // The cross-node streaming shuffle stack must survive the driver->worker codec:
+        // FlowEventToData(StreamCoalesce(StreamExchange(child))). Round-trip the whole stack.
+        let codec = RemoteExecutionCodec;
+        let flow_schema = Arc::new(Schema::new(vec![
+            Field::new(MARKER_FIELD_NAME, DataType::Binary, true),
+            Field::new(RETRACTED_FIELD_NAME, DataType::Boolean, false),
+            Field::new("k", DataType::Int64, true),
+        ]));
+        let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema));
+        let exchange: Arc<dyn ExecutionPlan> = Arc::new(StreamExchangeExec::try_new(
+            child,
+            vec![Arc::new(Column::new("k", 2))],
+            3,
+        )?);
+        let coalesce: Arc<dyn ExecutionPlan> = Arc::new(StreamCoalesceExec::new(exchange));
+        let decode: Arc<dyn ExecutionPlan> = Arc::new(FlowEventToDataExec::try_new(coalesce)?);
+
+        let buf = codec.try_encode_plan(decode)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+
+        assert!(decoded.as_any().is::<FlowEventToDataExec>(), "top = FlowEventToData");
+        let coalesce_d = &decoded.children()[0];
+        assert!(coalesce_d.as_any().is::<StreamCoalesceExec>(), "mid = StreamCoalesce");
+        let exchange_d = &coalesce_d.children()[0];
+        let ex = exchange_d
+            .as_any()
+            .downcast_ref::<StreamExchangeExec>()
+            .ok_or_else(|| plan_datafusion_err!("bottom must be a StreamExchangeExec"))?;
+        assert_eq!(ex.partition_count(), 3, "partition count round-trips");
+        assert_eq!(ex.hash_keys().len(), 1, "hash keys round-trip");
         Ok(())
     }
 }

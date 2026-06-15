@@ -54,6 +54,10 @@ impl FlowEventToDataExec {
             properties,
         })
     }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
 }
 
 impl DisplayAs for FlowEventToDataExec {

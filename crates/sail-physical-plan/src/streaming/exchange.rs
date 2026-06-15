@@ -69,6 +69,14 @@ impl StreamExchangeExec {
         })
     }
 
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
+
+    pub fn hash_keys(&self) -> &[PhysicalExprRef] {
+        &self.hash_keys
+    }
+
     pub fn partition_count(&self) -> usize {
         self.partition_count
     }
@@ -182,6 +190,10 @@ impl StreamCoalesceExec {
             input.properties().boundedness,
         ));
         Self { input, properties }
+    }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
     }
 }
 

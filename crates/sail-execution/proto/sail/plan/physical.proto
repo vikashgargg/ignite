@@ -64,6 +64,9 @@ message ExtendedPhysicalPlanNode {
     DeletionVectorRowsWriterExecNode deletion_vector_rows_writer = 49;
     PermissiveJsonExecNode permissive_json = 50;
     StreamBarrierAlignExecNode stream_barrier_align = 51;
+    StreamCoalesceExecNode stream_coalesce = 52;
+    StreamExchangeExecNode stream_exchange = 53;
+    FlowEventToDataExecNode flow_event_to_data = 54;
   }
 }
 
@@ -653,6 +656,20 @@ message StreamCollectorExecNode {
 }
 
 message StreamBarrierAlignExecNode {
+  bytes input = 1;
+}
+
+message StreamCoalesceExecNode {
+  bytes input = 1;
+}
+
+message StreamExchangeExecNode {
+  bytes input = 1;
+  repeated bytes hash_keys = 2;
+  uint64 partition_count = 3;
+}
+
+message FlowEventToDataExecNode {
   bytes input = 1;
 }
 
