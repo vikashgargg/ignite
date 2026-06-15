@@ -73,6 +73,10 @@ message ExtendedPhysicalPlanNode {
     WindowAccumExecNode window_accum = 58;
     StreamJoinExecNode stream_join = 59;
     RealtimeFileSinkExecNode realtime_file_sink = 60;
+    StreamingSinkCommitExecNode streaming_sink_commit = 61;
+    EmptySinkAdapterExecNode empty_sink_adapter = 62;
+    PartitionSelectExecNode partition_select = 63;
+    ParallelStreamSinkExecNode parallel_stream_sink = 64;
   }
 }
 
@@ -698,6 +702,26 @@ message RealtimeFileSinkExecNode {
   string object_store_url = 2;
   string base = 3;
   optional string checkpoint_location = 4;
+}
+
+message StreamingSinkCommitExecNode {
+  bytes input = 1;
+  string object_store_url = 2;
+  string base = 3;
+  uint64 batch_id = 4;
+}
+
+message EmptySinkAdapterExecNode {
+  bytes input = 1;
+}
+
+message PartitionSelectExecNode {
+  bytes input = 1;
+  uint64 index = 2;
+}
+
+message ParallelStreamSinkExecNode {
+  repeated bytes children = 1;
 }
 
 message StreamJoinExecNode {

@@ -156,6 +156,10 @@ impl EmptySinkAdapterExec {
         ));
         Self { input, properties }
     }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
 }
 
 impl DisplayAs for EmptySinkAdapterExec {
@@ -234,6 +238,13 @@ impl PartitionSelectExec {
             index,
             properties,
         }
+    }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
+    pub fn index(&self) -> usize {
+        self.index
     }
 }
 
@@ -431,6 +442,19 @@ impl StreamingSinkCommitExec {
             batch_id,
             properties,
         }
+    }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
+    pub fn object_store_url(&self) -> &ObjectStoreUrl {
+        &self.object_store_url
+    }
+    pub fn base(&self) -> &StorePath {
+        &self.base
+    }
+    pub fn batch_id(&self) -> u64 {
+        self.batch_id
     }
 }
 

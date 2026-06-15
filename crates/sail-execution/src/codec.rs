@@ -94,7 +94,10 @@ use sail_data_source::formats::text::source::TextSource;
 use sail_data_source::formats::text::writer::{TextSink, TextWriterOptions};
 use datafusion::execution::object_store::ObjectStoreUrl;
 use object_store::path::Path as StorePath;
-use sail_data_source::streaming_decode::{FlowEventToDataExec, RealtimeFileSinkExec};
+use sail_data_source::streaming_decode::{
+    EmptySinkAdapterExec, FlowEventToDataExec, ParallelStreamSinkExec, PartitionSelectExec,
+    RealtimeFileSinkExec, StreamingSinkCommitExec,
+};
 use sail_data_source::options::gen::RateReadOptions;
 use sail_delta_lake::physical_plan::{
     DeletionVectorRowsWriterExec, DeletionVectorWriterExec, DeltaCastColumnExpr,
@@ -1181,6 +1184,38 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     checkpoint_location,
                 )))
             }
+            NodeKind::StreamingSinkCommit(gen::StreamingSinkCommitExecNode {
+                input,
+                object_store_url,
+                base,
+                batch_id,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                let object_store_url = ObjectStoreUrl::parse(&object_store_url)?;
+                Ok(Arc::new(StreamingSinkCommitExec::new(
+                    input,
+                    object_store_url,
+                    StorePath::from(base),
+                    batch_id,
+                )))
+            }
+            NodeKind::EmptySinkAdapter(gen::EmptySinkAdapterExecNode { input }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                Ok(Arc::new(EmptySinkAdapterExec::new(input)))
+            }
+            NodeKind::PartitionSelect(gen::PartitionSelectExecNode { input, index }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                let index = usize::try_from(index)
+                    .map_err(|_| plan_datafusion_err!("invalid index for PartitionSelectExec"))?;
+                Ok(Arc::new(PartitionSelectExec::new(input, index)))
+            }
+            NodeKind::ParallelStreamSink(gen::ParallelStreamSinkExecNode { children }) => {
+                let children = children
+                    .iter()
+                    .map(|c| self.try_decode_plan(c, ctx))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok(Arc::new(ParallelStreamSinkExec::new(children)))
+            }
             NodeKind::StreamJoin(gen::StreamJoinExecNode {
                 left,
                 right,
@@ -2184,6 +2219,30 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 base: sink.base().to_string(),
                 checkpoint_location: sink.checkpoint_location().map(str::to_string),
             })
+        } else if let Some(commit) = node.as_any().downcast_ref::<StreamingSinkCommitExec>() {
+            let input = self.try_encode_plan(commit.input().clone())?;
+            NodeKind::StreamingSinkCommit(gen::StreamingSinkCommitExecNode {
+                input,
+                object_store_url: commit.object_store_url().as_str().to_string(),
+                base: commit.base().to_string(),
+                batch_id: commit.batch_id(),
+            })
+        } else if let Some(adapter) = node.as_any().downcast_ref::<EmptySinkAdapterExec>() {
+            let input = self.try_encode_plan(adapter.input().clone())?;
+            NodeKind::EmptySinkAdapter(gen::EmptySinkAdapterExecNode { input })
+        } else if let Some(select) = node.as_any().downcast_ref::<PartitionSelectExec>() {
+            let input = self.try_encode_plan(select.input().clone())?;
+            NodeKind::PartitionSelect(gen::PartitionSelectExecNode {
+                input,
+                index: select.index() as u64,
+            })
+        } else if let Some(parallel) = node.as_any().downcast_ref::<ParallelStreamSinkExec>() {
+            let children = parallel
+                .children()
+                .into_iter()
+                .map(|c| self.try_encode_plan(c.clone()))
+                .collect::<Result<Vec<_>>>()?;
+            NodeKind::ParallelStreamSink(gen::ParallelStreamSinkExecNode { children })
         } else if let Some(join) = node.as_any().downcast_ref::<StreamJoinExec>() {
             let left = self.try_encode_plan(join.left().clone())?;
             let right = self.try_encode_plan(join.right().clone())?;
@@ -4731,6 +4790,36 @@ mod tests {
             .ok_or_else(|| plan_datafusion_err!("decoded must be RealtimeFileSinkExec"))?;
         assert_eq!(s.base().to_string(), "out/realtime", "sink base path round-trips");
         assert_eq!(s.checkpoint_location(), Some("file:///tmp/rck"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_streaming_sink_commit_exec() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_plan::empty::EmptyExec;
+
+        // The micro-batch streaming file-sink commit wrapper must survive the codec — this was the
+        // gap that blocked distributed streaming writes (the job failed at submission).
+        let codec = RemoteExecutionCodec;
+        let schema = Arc::new(Schema::new(vec![Field::new("count", DataType::UInt64, true)]));
+        let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(schema));
+        let url = ObjectStoreUrl::parse("file://")?;
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(StreamingSinkCommitExec::new(
+            child,
+            url,
+            StorePath::from("out/micro"),
+            7,
+        ));
+
+        let buf = codec.try_encode_plan(plan)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+
+        let c = decoded
+            .as_any()
+            .downcast_ref::<StreamingSinkCommitExec>()
+            .ok_or_else(|| plan_datafusion_err!("decoded must be StreamingSinkCommitExec"))?;
+        assert_eq!(c.base().to_string(), "out/micro");
+        assert_eq!(c.batch_id(), 7, "batch id round-trips");
         Ok(())
     }
 }

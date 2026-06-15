@@ -26,7 +26,7 @@ use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
-use datafusion_common::{exec_datafusion_err, internal_err, Result};
+use datafusion_common::{internal_err, Result};
 use futures::StreamExt;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::MARKER_FIELD_NAME;
@@ -152,30 +152,35 @@ impl ExecutionPlan for StreamBarrierAlignExec {
         let out = async_stream::stream! {
             // Per-input state: `reached` = the epoch this input is currently blocked at (Some),
             // `ended` = the input is exhausted. An input contributes to the next barrier once it is
-            // blocked; an ended input no longer needs to reach barriers.
+            // blocked; an ended input no longer needs to reach barriers. We stash the actual
+            // `Checkpoint`/`EndOfData` marker batch each input delivered and forward ONE of them on
+            // alignment — reusing the source's exact encoding (incl. non-nullable-column
+            // placeholders) instead of reconstructing it (which would mishandle nullability).
             let mut reached: Vec<Option<u64>> = vec![None; n];
             let mut ended: Vec<bool> = vec![false; n];
+            let mut checkpoint_batch: Vec<Option<RecordBatch>> = vec![None; n];
+            let mut end_batch: Option<RecordBatch> = None;
 
             loop {
                 // Can we seal an epoch? Every non-ended input must be blocked at the same epoch,
                 // and at least one input must be blocked (so we don't loop on an all-ended set).
                 let active: Vec<usize> = (0..n).filter(|&i| !ended[i]).collect();
                 if !active.is_empty() && active.iter().all(|&i| reached[i].is_some()) {
-                    // All active inputs reached a barrier — they must agree (broadcast epoch).
-                    let epoch = reached[active[0]].unwrap_or(0);
-                    // Re-emit the aligned barrier as a single-row marker batch on the input schema.
-                    match marker_batch(&schema, FlowMarker::Checkpoint { id: epoch }) {
-                        Ok(b) => yield Ok(b),
-                        Err(e) => { yield Err(e); return; }
+                    // All active inputs reached the barrier — forward ONE of their stashed marker
+                    // batches (they carry the same broadcast epoch), then unblock.
+                    if let Some(b) = checkpoint_batch[active[0]].take() {
+                        yield Ok(b);
                     }
-                    for i in &active { reached[*i] = None; } // unblock
+                    for &i in &active {
+                        reached[i] = None;
+                        checkpoint_batch[i] = None;
+                    }
                     continue;
                 }
                 if active.is_empty() {
-                    // Every input ended: forward a single EndOfData and finish.
-                    match marker_batch(&schema, FlowMarker::EndOfData) {
-                        Ok(b) => yield Ok(b),
-                        Err(e) => { yield Err(e); return; }
+                    // Every input ended: forward a single EndOfData (a real one if we saw it).
+                    if let Some(b) = end_batch.take() {
+                        yield Ok(b);
                     }
                     return;
                 }
@@ -200,11 +205,20 @@ impl ExecutionPlan for StreamBarrierAlignExec {
                     Some(Ok(batch)) => {
                         match classify(&batch) {
                             Ok(BatchKind::Data) => yield Ok(batch),
-                            Ok(BatchKind::Checkpoint(e)) => reached[i] = Some(e), // block until aligned
+                            Ok(BatchKind::Checkpoint(e)) => {
+                                // Block this input until all align; stash its real marker batch.
+                                reached[i] = Some(e);
+                                checkpoint_batch[i] = Some(batch);
+                            }
                             // De-dup broadcast watermark/latency: forward only input 0's copy.
                             Ok(BatchKind::OtherMarker) => { if i == 0 { yield Ok(batch); } }
-                            // EndOfData on a stream still carrying it: treat the input as ended.
-                            Ok(BatchKind::EndOfData) => ended[i] = true,
+                            // EndOfData: this input is done; keep one real EndOfData batch to forward.
+                            Ok(BatchKind::EndOfData) => {
+                                ended[i] = true;
+                                if end_batch.is_none() {
+                                    end_batch = Some(batch);
+                                }
+                            }
                             Err(e) => { yield Err(e); return; }
                         }
                     }
@@ -214,29 +228,6 @@ impl ExecutionPlan for StreamBarrierAlignExec {
         };
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema_out, out)))
     }
-}
-
-/// Build a single-row flow-event marker batch (marker column set, all data columns null) on the
-/// given flow-event schema — the wire form a downstream operator expects for a control event.
-fn marker_batch(schema: &datafusion::arrow::datatypes::SchemaRef, marker: FlowMarker) -> Result<RecordBatch> {
-    use datafusion::arrow::array::{new_null_array, BinaryArray, BooleanArray};
-    use sail_common_datafusion::streaming::event::schema::RETRACTED_FIELD_NAME;
-    let bytes = marker.encode()?;
-    let cols: Vec<Arc<dyn Array>> = schema
-        .fields()
-        .iter()
-        .map(|f| -> Arc<dyn Array> {
-            if f.name() == MARKER_FIELD_NAME {
-                Arc::new(BinaryArray::from(vec![Some(bytes.as_slice())]))
-            } else if f.name() == RETRACTED_FIELD_NAME {
-                Arc::new(BooleanArray::from(vec![false]))
-            } else {
-                new_null_array(f.data_type(), 1)
-            }
-        })
-        .collect();
-    RecordBatch::try_new(schema.clone(), cols)
-        .map_err(|e| exec_datafusion_err!("marker_batch: {e}"))
 }
 
 #[expect(clippy::unwrap_used)]
