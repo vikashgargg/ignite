@@ -85,5 +85,33 @@ try:
 except Exception as e:
     check("stream.windowed_file", False, f"EXC {str(e)[:140]}")
 
+# 5. stateful dedup — dropDuplicates over a file source carrying a non-key column
+try:
+    inp, out, ck = "/tmp/dss_d_in", "/tmp/dss_d_out", "/tmp/dss_d_ck"; reset(inp, out, ck)
+    s.range(0, 1000).selectExpr("id % 50 AS k", "id AS v").coalesce(1).write.mode("overwrite").parquet(inp)
+    df = s.readStream.schema("k long, v long").parquet(inp).dropDuplicates(["k"])
+    q = df.writeStream.format("parquet").option("path", out).option("checkpointLocation", ck).trigger(availableNow=True).start()
+    q.awaitTermination(timeout=60)
+    d = s.read.parquet(out).select("k").distinct().count()
+    check("stream.dedup", d == 50, f"distinct_k={d} (expect 50, Spark-matched)")
+except Exception as e:
+    check("stream.dedup", False, f"EXC {str(e)[:140]}")
+
+# 6. stream-stream join over two file sources
+try:
+    lin, rin, out, ck = "/tmp/dss_jl", "/tmp/dss_jr", "/tmp/dss_j_out", "/tmp/dss_j_ck"
+    reset(lin, rin, out, ck)
+    s.range(0, 200).selectExpr("id AS ka", "id*10 AS va").coalesce(1).write.mode("overwrite").parquet(lin)
+    s.range(0, 200).selectExpr("id AS kb", "id*100 AS vb").coalesce(1).write.mode("overwrite").parquet(rin)
+    a = s.readStream.schema("ka long, va long").parquet(lin)
+    b = s.readStream.schema("kb long, vb long").parquet(rin)
+    j = a.join(b, F.expr("ka = kb"))
+    q = j.writeStream.format("parquet").option("path", out).option("checkpointLocation", ck).trigger(availableNow=True).start()
+    q.awaitTermination(timeout=60)
+    n = s.read.parquet(out).count()
+    check("stream.join", n == 200, f"rows={n} (expect 200, Spark-matched)")
+except Exception as e:
+    check("stream.join", False, f"EXC {str(e)[:140]}")
+
 passed = sum(1 for _, ok in results if ok)
 print(f"\nDIST_STREAMING_SMOKE {passed}/{len(results)} passed")

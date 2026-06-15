@@ -742,6 +742,25 @@ fn first_value_inner(e: &Expr) -> Option<&Expr> {
 fn strip_plan_qualifiers(plan: LogicalPlan) -> Result<LogicalPlan> {
     use datafusion_common::tree_node::TreeNode;
     plan.transform_up(|p| {
+        // Aggregate is special: stripping the relation qualifier from a column INSIDE an aggregate
+        // argument (e.g. `first_value(?table?.#0)`) re-derives the aggregate's auto-generated output
+        // field name (→ `first_value(#0)`), which silently breaks a parent projection's column
+        // reference (still the literal string `first_value(?table?.#0)`) — the
+        // `No field named "first_value(?table?.#0)"` error on `dropDuplicates`/aggregations over a
+        // qualified column. So we strip only the GROUP exprs here (their names are columns, stable
+        // under stripping) and leave `aggr_expr` untouched to keep the output field names stable.
+        // The streaming rewriter's window/dedup handlers strip aggregate-arg qualifiers locally where
+        // they actually build the physical operators (see the `Aggregate` arm above), so unqualified
+        // columns still reach the streaming operators.
+        if let LogicalPlan::Aggregate(agg) = &p {
+            let group_expr: Vec<Expr> = agg.group_expr.iter().map(strip_qualifiers).collect();
+            let input = Arc::new(agg.input.as_ref().clone());
+            return Ok(Transformed::yes(LogicalPlan::Aggregate(Aggregate::try_new(
+                input,
+                group_expr,
+                agg.aggr_expr.clone(),
+            )?)));
+        }
         let exprs: Vec<Expr> = p.expressions().iter().map(strip_qualifiers).collect();
         let inputs: Vec<LogicalPlan> = p.inputs().into_iter().cloned().collect();
         Ok(Transformed::yes(p.with_new_exprs(exprs, inputs)?))
