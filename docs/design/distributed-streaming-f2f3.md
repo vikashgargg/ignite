@@ -99,7 +99,34 @@ substrate, not ported.
 - **F3-d: multi-node head-to-head vs Flink** — same Kafka→stateful→sink pipeline on K8s; latency,
   throughput, memory, EO-across-failure. Then — and only then — claim parity/superiority.
 
-## 5. Honest gaps (today)
-- Components 2/4/5 distributed wiring not built yet; coordinator (1) lands this increment; alignment
-  (3) primitive done. Multi-node continuous stateful is **not** end-to-end yet — tracked here, not
-  claimed. Single-node realtime stateless EO **is** done + measured (F1b).
+## 5. Honest gaps (today) — corrected 2026-06-15 after reading the scheduler
+
+**Important correction (with code evidence).** The "concurrent producer+consumer stage scheduling"
+that was assumed missing **already exists**. The distributed engine is **fully pipelined** (Flink
+streaming-style), not Ballista blocking-style:
+- `job_graph/planner.rs` creates **every** stage with `OutputMode::Pipelined`; `OutputMode::Blocking`
+  is defined but **never constructed**.
+- `job_scheduler/topology.rs::try_new` groups all `Pipelined`-connected stages into **one pipelined
+  region** (connected-components over the pipelined adjacency); the cross-region `Succeeded`
+  dependency gate in `schedule_task_regions` therefore **never blocks** (there are no blocking edges).
+- So all stages are **co-scheduled and run concurrently**; the pipelined `ShuffleWriteExec`→Flight→
+  `ShuffleReadExec` already streams per-batch with bounded-channel backpressure; a streaming region
+  never reaches `Succeeded`, so the job runs until stopped (the `Draining`/cleanup paths simply never
+  fire) — which is exactly the desired streaming lifecycle. **F3-b control plane = already done.**
+
+**The actual blockers for distributed *stateful* streaming (re-scoped):**
+1. **Codec serialization of streaming operators (THE blocker).** `RemoteExecutionCodec` serializes
+   **zero** streaming operators (`StreamExchangeExec`, `StreamCoalesceExec`, `StreamBarrierAlignExec`,
+   `WindowAccumExec`, `StreamJoinExec`, `WatermarkExec`, `DedupExec`, `FlowEventToDataExec`,
+   `RealtimeFileSinkExec`, `KafkaSourceExec`/`RateStreamExec`). A streaming plan **cannot be shipped to
+   workers** until each has a protobuf message + encode/decode arm (`physical.proto` + `codec.rs`).
+   This is the next focused effort — large surface, gateable per-operator via codec round-trip tests.
+2. **Insert `StreamBarrierAlignExec`** at distributed shuffle-receive points for stateful operators
+   (the planner wires the in-node exchange today; the aligned merge needs wiring for the cross-node case).
+3. **Distributed checkpoint commit:** wire `EpochCoordinator` into the driver + per-instance state
+   snapshot `state/<op>/<partition>/<epoch>` (the single-node F1b commit generalized).
+
+**Already done / pre-existing:** concurrent pipelined scheduling (pre-existing); marker-aware shuffle
+broadcast (F3-b data plane, this session); `StreamBarrierAlignExec` (primitive); `EpochCoordinator`
+(brain). Single-node realtime stateless EO is done + measured (F1b). Multi-node continuous stateful is
+**not** end-to-end yet — blocked on codec (1), tracked here, not claimed.
