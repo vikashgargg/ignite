@@ -147,20 +147,25 @@ Connect. Results:
   **inactive immediately**. (The `memory` sink additionally isn't codec-serializable — `MemoryBufferScan`
   — but that's a dev sink; the parquet path fails too.)
 
-**Diagnosis (precise).** Codec (item 1) was **necessary but not sufficient**. The remaining core gap is
-that **Vajra's streaming execution model is not integrated with the distributed cluster runner**:
-- Streaming queries are driven by the single-node `StreamDriver` (a long-lived pipeline that polls the
-  sink's partition 0 and commits per epoch), wired in `sail-spark-connect`.
-- The distributed `ClusterJobRunner` executes a **stage-based `JobGraph`** that runs to completion and
-  returns a result stream.
-- A streaming job submitted via `runner().execute()` in cluster mode runs the job-graph once and
-  terminates instead of being driven continuously — the two models don't yet mesh.
+**Root cause (found + FIXED 2026-06-15).** It was a **codec gap, not an execution-model gap** (the
+first theory was wrong). The micro-batch streaming file-sink wrappers (`StreamingSinkCommitExec`,
+`EmptySinkAdapterExec`, `PartitionSelectExec`, `ParallelStreamSinkExec`) were not codec-serializable,
+so a streaming write job failed at *submission* to the cluster (`unsupported physical plan node:
+StreamingSinkCommitExec`) and the query went inactive with no output. Fixed by codec'ing them + a
+real `StreamBarrierAlignExec` bug (it rebuilt aligned marker batches with `new_null_array`, which
+fails on non-nullable columns like a windowed `COUNT`; now it stashes + forwards the upstream marker
+batch with the source encoder's placeholders). **Result: `dist_streaming_smoke.py` 1/3 → 2/3 —
+distributed *stateless* streaming (`rate→filter→parquet`, 20000 rows) works end-to-end across 2
+workers.**
 
-**Re-scoped remaining work (in priority order):**
-1. **Streaming×cluster execution integration (THE core gap):** make the streaming driver run *on top of*
-   the distributed runner — the source/operators/sink tasks run on workers (pipelined, already
-   concurrent), while the driver continuously drives epochs and consumes the sink's completion stream.
-   This is the architectural reconciliation the harness exposed; gate with `dist_streaming_smoke.py`.
-2. Distributed `EpochCoordinator` wiring + per-instance state snapshot (F3-c) — once (1) runs.
-3. `memory`-sink codec (dev convenience) so the all-in-one streaming suite runs distributed too.
-4. Multi-node Flink head-to-head (F3-d).
+**Remaining (narrowed): distributed windowed aggregation reads `numInputRows=0`.** Both keyed
+(`groupBy(window,k)`) **and** non-keyed (`groupBy(window)`, parallelism=1, no exchange) windowed aggs
+read zero input rows under `availableNow` in cluster mode and terminate in ~40 ms, while the
+single-stage stateless path on the *same* rate source reads 20000. So it is **not** the parallel
+exchange / multi-stage path — it is the **windowed-aggregation × availableNow × distributed
+bounded-execution** interaction (the pipeline-breaking agg appears to hit the bounded-source
+termination before the source produces). Next debugging target; gate with `dist_streaming_smoke.py`
+`stream.windowed`.
+
+**Then:** distributed `EpochCoordinator` wiring + per-instance state snapshot (F3-c) for cross-worker
+continuous EO; `memory`-sink codec (dev convenience); multi-node Flink head-to-head (F3-d).
