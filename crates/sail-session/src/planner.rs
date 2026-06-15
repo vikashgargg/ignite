@@ -62,7 +62,8 @@ use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
-use sail_physical_plan::streaming::exchange::{StreamCoalesceExec, StreamExchangeExec};
+use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
+use sail_physical_plan::streaming::exchange::StreamExchangeExec;
 use sail_physical_plan::streaming::stream_join::StreamJoinExec;
 use sail_physical_plan::streaming::watermark::WatermarkExec;
 use sail_physical_plan::streaming::window_accum::WindowAccumExec;
@@ -463,7 +464,13 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 node.checkpoint_location.clone(),
             )?);
             if window_parallelism > 1 {
-                Arc::new(StreamCoalesceExec::new(window))
+                // Barrier-aligning N->1 merge: a strict superset of a plain coalesce — it fans the N
+                // keyed window instances back into one partition AND aligns broadcast
+                // `Checkpoint{epoch}` barriers (collect from all N before forwarding one), so the
+                // downstream commit sees a globally-consistent epoch. For micro-batch (no epoch
+                // barriers) it behaves exactly like the prior coalesce. This is the F3 alignment
+                // primitive wired into a real parallel streaming plan (Flink "merger"/RisingWave).
+                Arc::new(StreamBarrierAlignExec::new(window))
             } else {
                 window
             }
