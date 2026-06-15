@@ -52,6 +52,10 @@ impl StreamBarrierAlignExec {
         ));
         Self { input, properties }
     }
+
+    pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.input
+    }
 }
 
 impl DisplayAs for StreamBarrierAlignExec {

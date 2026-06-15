@@ -229,6 +229,7 @@ use sail_physical_plan::range::RangeExec;
 use sail_physical_plan::schema_pivot::SchemaPivotExec;
 use sail_physical_plan::show_string::ShowStringExec;
 use sail_physical_plan::spark_partition_id::SparkPartitionIdExec;
+use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
 use sail_physical_plan::streaming::collector::StreamCollectorExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
@@ -1013,6 +1014,10 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             NodeKind::StreamCollector(gen::StreamCollectorExecNode { input }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 Ok(Arc::new(StreamCollectorExec::try_new(input)?))
+            }
+            NodeKind::StreamBarrierAlign(gen::StreamBarrierAlignExecNode { input }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                Ok(Arc::new(StreamBarrierAlignExec::new(input)))
             }
             NodeKind::StreamLimit(gen::StreamLimitExecNode { input, skip, fetch }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
@@ -1846,6 +1851,11 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         } else if let Some(stream_collector) = node.as_any().downcast_ref::<StreamCollectorExec>() {
             let input = self.try_encode_plan(stream_collector.input().clone())?;
             NodeKind::StreamCollector(gen::StreamCollectorExecNode { input })
+        } else if let Some(barrier_align) =
+            node.as_any().downcast_ref::<StreamBarrierAlignExec>()
+        {
+            let input = self.try_encode_plan(barrier_align.input().clone())?;
+            NodeKind::StreamBarrierAlign(gen::StreamBarrierAlignExecNode { input })
         } else if let Some(stream_limit) = node.as_any().downcast_ref::<StreamLimitExec>() {
             let input = self.try_encode_plan(stream_limit.input().clone())?;
             let skip = u64::try_from(stream_limit.skip()).map_err(|_| {
@@ -4045,6 +4055,33 @@ mod tests {
         assert!(decoded.inner().as_any().is::<SparkVariantExplodeUdf>());
         assert_eq!(decoded.name(), "spark_variant_explode");
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_stream_barrier_align_exec() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_plan::empty::EmptyExec;
+
+        // Distributing a streaming plan requires the F3 barrier-alignment operator to survive the
+        // driver->worker codec. Encode a StreamBarrierAlignExec over a trivial child and decode it.
+        let codec = RemoteExecutionCodec;
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "_marker",
+            DataType::Binary,
+            true,
+        )]));
+        let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(schema));
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(StreamBarrierAlignExec::new(child));
+
+        let buf = codec.try_encode_plan(plan)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+
+        assert!(
+            decoded.as_any().is::<StreamBarrierAlignExec>(),
+            "decoded plan must be a StreamBarrierAlignExec"
+        );
+        assert_eq!(decoded.children().len(), 1, "child must round-trip");
         Ok(())
     }
 }

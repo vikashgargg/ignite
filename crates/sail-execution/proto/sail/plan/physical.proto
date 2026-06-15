@@ -63,6 +63,7 @@ message ExtendedPhysicalPlanNode {
     DeletionVectorWriterExecNode deletion_vector_writer = 48;
     DeletionVectorRowsWriterExecNode deletion_vector_rows_writer = 49;
     PermissiveJsonExecNode permissive_json = 50;
+    StreamBarrierAlignExecNode stream_barrier_align = 51;
   }
 }
 
@@ -648,6 +649,10 @@ message TextSinkExecNode {
 }
 
 message StreamCollectorExecNode {
+  bytes input = 1;
+}
+
+message StreamBarrierAlignExecNode {
   bytes input = 1;
 }
 
