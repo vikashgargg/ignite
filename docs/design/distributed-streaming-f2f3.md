@@ -153,10 +153,20 @@ missing nodes: the micro-batch sink wrappers (`StreamingSinkCommitExec`, `EmptyS
 `PartitionSelectExec`, `ParallelStreamSinkExec`) **and** the streaming **`FileSourceExec`** +
 `ExplicitRepartitionExec`. `FileSourceExec` being unserializable is why distributed *file-source*
 streaming silently produced 0 rows. All are now codec'd + round-trip tested. `scripts/dist_streaming_smoke.py`
-passes **4/4** on both a 2-worker cluster and local single-node: `batch.write=1000`, `stream.rate=20000`,
-`stream.file=1000`, **`stream.windowed_file=97` (keyed event-time window agg over a file source, exactly
-matching real Spark 3.5.3)**. The earlier "windowed reads 0" was a *false alarm* — a single
-availableNow batch + a 2s watermark closes no window, and real Spark produces 0 there too.
+passes **6/6** on both a 2-worker cluster and local single-node, **every value matching real Spark
+3.5.3**: `batch.write=1000`, `stream.rate=20000`, `stream.file=1000`,
+`stream.windowed_file=97` (keyed event-time window agg over a file source),
+`stream.dedup distinct_k=50` (`dropDuplicates`), `stream.join=200` (stream-stream join). The earlier
+"windowed reads 0" was a *false alarm* — a single availableNow batch + a 2s watermark closes no window,
+and real Spark produces 0 there too. The `dropDuplicates` carry-column failure was a pre-existing (not
+distributed-specific) qualifier bug: `strip_plan_qualifiers` rebuilt the `Aggregate`, re-deriving its
+output field name from the stripped arg (`first_value(?table?.#0)`→`first_value(#0)`) while the parent
+reference stayed literal — fixed by stripping only the aggregate's group exprs and leaving `aggr_expr`
+untouched (the window/dedup handlers strip aggregate-arg qualifiers locally).
+
+**The full distributed stateful streaming operator surface is validated end-to-end across workers,
+matching Spark: stateless (rate + file), keyed event-time window aggregation, dropDuplicates, and
+stream-stream join.**
 
 *(Historical note — the original failing symptom:)* a streaming write job failed at *submission* to the
 cluster (`unsupported physical plan node: StreamingSinkCommitExec`) and the query went inactive. Fixed by codec'ing them + a
