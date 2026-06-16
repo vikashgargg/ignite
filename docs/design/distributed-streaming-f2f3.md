@@ -168,6 +168,25 @@ untouched (the window/dedup handlers strip aggregate-arg qualifiers locally).
 matching Spark: stateless (rate + file), keyed event-time window aggregation, dropDuplicates, and
 stream-stream join.**
 
+### Distributed exactly-once ACROSS RESTART (micro-batch) — ✅ done (2026-06-16)
+
+Distributed Kafka→parquet (`availableNow`) is now **exactly-once across restart**, validated on a
+2-worker cluster: wave-1 5000 → **restart** (no new data) 5000 (no dup/loss) → wave-2 (+5000) → 10000
+distinct, contiguous `0..9999` ⇒ `EXACTLY_ONCE`. The `offsets/<batch_id>` WAL is now written in
+distributed mode (it was missing).
+
+*Root cause + fix:* `consume_stream` wrote the per-batch offset WAL marker once **per output item**
+from the sink stream. The sink emits an empty-schema (0-row/0-col) completion batch; single-node
+received it but the **Arrow-Flight shuffle drops empty batches in transit**, so the distributed driver
+got 0 items → no WAL → `batch_id` stuck at 0 → each restart re-ran "batch 0", re-cleaning its dir and
+losing committed output. Fixed by writing the marker **once per clean bounded micro-batch**
+(item-count-independent) — semantically "one micro-batch = one offset commit", identical single-node
+and distributed. (commit `4ee1fd41`)
+
+This is the Spark-model EO (micro-batch + checkpoint WAL), now distributed + restart-safe. **Still
+pending:** distributed *continuous* (`Trigger.Continuous`, long-lived) EO via the `EpochCoordinator`
++ per-instance state snapshot (the low-latency realtime path; single-node realtime EO done in F1b).
+
 *(Historical note — the original failing symptom:)* a streaming write job failed at *submission* to the
 cluster (`unsupported physical plan node: StreamingSinkCommitExec`) and the query went inactive. Fixed by codec'ing them + a
 real `StreamBarrierAlignExec` bug (it rebuilt aligned marker batches with `new_null_array`, which
