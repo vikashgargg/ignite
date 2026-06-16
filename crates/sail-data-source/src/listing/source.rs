@@ -360,27 +360,42 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                     "realtime (continuous) durable sink requires a streaming (flow-event) input"
                 );
             }
-            // Multi-partition continuous: a parallelized (keyed-repartition) flow-event stream fans
-            // into N partitions, each carrying a broadcast copy of every `Checkpoint{epoch}` barrier.
-            // Re-align them N→1 with `StreamBarrierAlignExec` (collect the barrier from all N inputs,
-            // block post-barrier data until aligned — Flink "barriers never overtake records") so the
-            // single-partition realtime sink seals each globally-consistent epoch. The single source
-            // (e.g. one Kafka reader) stages the offsets once, so the atomic `realtime/committed`
-            // record stays correct; exactly-once is preserved. Upstream stateless work runs in
-            // parallel across the N partitions (throughput); only the durable commit funnels to one.
-            let aligned: Arc<dyn ExecutionPlan> = if n_parts > 1 {
-                Arc::new(sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec::new(
-                    flow_input,
-                ))
-            } else {
-                flow_input
-            };
             let base = table_paths
                 .first()
                 .map(|u| u.prefix().clone())
                 .unwrap_or_default();
+            if n_parts > 1 {
+                // No-funnel parallel realtime sink: a parallelized (keyed-repartition) flow-event
+                // stream fans into N partitions, each carrying its data slice + a broadcast copy of
+                // every `Checkpoint{epoch}` barrier. Run N independent sink tasks — one per partition
+                // — each writing its own `part-<i>.parquet` per epoch and coordinating the single
+                // global commit via object-store done-markers (the LAST task to finish an epoch writes
+                // `realtime/committed`). Both processing AND writes scale across N tasks (no funnel),
+                // and exactly-once holds: the single source stages offsets once, per-task slices are
+                // idempotent by `(epoch, partition)`, and the global commit is a single atomic record.
+                let mut children: Vec<Arc<dyn ExecutionPlan>> = Vec::with_capacity(n_parts);
+                for i in 0..n_parts {
+                    let part = Arc::new(crate::streaming_decode::PartitionSelectExec::new(
+                        Arc::clone(&flow_input),
+                        i,
+                    ));
+                    children.push(Arc::new(
+                        crate::streaming_decode::RealtimeFileSinkExec::new_parallel(
+                            part,
+                            object_store_url.clone(),
+                            base.clone(),
+                            commit_log_checkpoint.clone(),
+                            i,
+                            n_parts,
+                        ),
+                    ));
+                }
+                return Ok(Arc::new(crate::streaming_decode::ParallelStreamSinkExec::new(
+                    children,
+                )));
+            }
             return Ok(Arc::new(crate::streaming_decode::RealtimeFileSinkExec::new(
-                aligned,
+                flow_input,
                 object_store_url.clone(),
                 base,
                 commit_log_checkpoint.clone(),

@@ -560,15 +560,35 @@ pub struct RealtimeFileSinkExec {
     /// Streaming `checkpointLocation` — the sink reads the source's per-epoch staged offsets and
     /// writes the single atomic committed record (`realtime/committed`). Required for EO recovery.
     checkpoint_location: Option<String>,
+    /// This sink task's logical partition index (the `part-<index>.parquet` it owns).
+    partition_index: usize,
+    /// Total number of parallel sink tasks. `1` = single sink (commits directly). `>1` = no-funnel
+    /// parallel write: each task writes its slice + a per-epoch done-marker, and the LAST task to
+    /// finish an epoch (sees all `num_partitions` markers) writes the single global commit —
+    /// object-store coordination (cloud-native, no driver RPC), idempotent under races/replay.
+    num_partitions: usize,
     properties: Arc<PlanProperties>,
 }
 
 impl RealtimeFileSinkExec {
+    /// Single-partition realtime sink (commits each epoch directly).
     pub fn new(
         input: Arc<dyn ExecutionPlan>,
         object_store_url: ObjectStoreUrl,
         base: StorePath,
         checkpoint_location: Option<String>,
+    ) -> Self {
+        Self::new_parallel(input, object_store_url, base, checkpoint_location, 0, 1)
+    }
+
+    /// One task of an N-way parallel (no-funnel) realtime sink: `partition_index` of `num_partitions`.
+    pub fn new_parallel(
+        input: Arc<dyn ExecutionPlan>,
+        object_store_url: ObjectStoreUrl,
+        base: StorePath,
+        checkpoint_location: Option<String>,
+        partition_index: usize,
+        num_partitions: usize,
     ) -> Self {
         let empty = Arc::new(Schema::empty());
         let properties = Arc::new(PlanProperties::new(
@@ -582,6 +602,8 @@ impl RealtimeFileSinkExec {
             object_store_url,
             base,
             checkpoint_location,
+            partition_index,
+            num_partitions: num_partitions.max(1),
             properties,
         }
     }
@@ -597,6 +619,12 @@ impl RealtimeFileSinkExec {
     }
     pub fn checkpoint_location(&self) -> Option<&str> {
         self.checkpoint_location.as_deref()
+    }
+    pub fn partition_index(&self) -> usize {
+        self.partition_index
+    }
+    pub fn num_partitions(&self) -> usize {
+        self.num_partitions
     }
 }
 
@@ -639,11 +667,13 @@ impl ExecutionPlan for RealtimeFileSinkExec {
         if children.len() != 1 {
             return plan_err!("RealtimeFileSinkExec requires exactly one child");
         }
-        Ok(Arc::new(RealtimeFileSinkExec::new(
+        Ok(Arc::new(RealtimeFileSinkExec::new_parallel(
             children.remove(0),
             self.object_store_url.clone(),
             self.base.clone(),
             self.checkpoint_location.clone(),
+            self.partition_index,
+            self.num_partitions,
         )))
     }
 
@@ -659,6 +689,8 @@ impl ExecutionPlan for RealtimeFileSinkExec {
         let input = Arc::clone(&self.input);
         let base = self.base.clone();
         let checkpoint_location = self.checkpoint_location.clone();
+        let part_idx = self.partition_index;
+        let num_parts = self.num_partitions;
         let ctx = context.clone();
         let empty = Arc::new(Schema::empty());
         let empty_out = empty.clone();
@@ -670,48 +702,22 @@ impl ExecutionPlan for RealtimeFileSinkExec {
         //     `sources/0/staged-epoch-<epoch>` — THE commit point (single source of truth).
         // Crash before (3): nothing committed → source re-reads from the last committed offset →
         // the epoch is redone identically (no dup, no loss). See docs/design/streaming-realtime-mode.md.
-        async fn commit_epoch(
+        // Read the source's pre-committed offsets for an epoch and write the single global
+        // `realtime/committed` record — the commit point + recovery source-of-truth.
+        async fn write_global_committed(
             store: &Arc<dyn object_store::ObjectStore>,
             base: &StorePath,
             ck: &Option<CheckpointStore>,
             epoch: u64,
-            schema: &SchemaRef,
-            batches: &[RecordBatch],
         ) -> Result<()> {
-            if !batches.is_empty() {
-                crate::streaming_sink_log::clean_batch_dir(store, base, epoch)
-                    .await
-                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-                let mut buf: Vec<u8> = Vec::new();
-                {
-                    let mut w = datafusion::parquet::arrow::ArrowWriter::try_new(
-                        &mut buf,
-                        schema.clone(),
-                        None,
-                    )
-                    .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
-                    for b in batches {
-                        w.write(b)
-                            .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
-                    }
-                    w.close()
-                        .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
-                }
-                let part = base.clone().join(epoch.to_string()).join("part-0.parquet");
-                use object_store::ObjectStoreExt;
-                store
-                    .put(&part, bytes::Bytes::from(buf).into())
-                    .await
-                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-                let metas = crate::streaming_sink_log::list_batch_files(store, base, epoch)
-                    .await
-                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-                crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
-                    .await
-                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-            }
-            // The atomic commit point: read the source's pre-committed offsets for this epoch and
-            // write the single committed record. After this returns, the epoch is durably committed.
+            // List all `<base>/<epoch>/part-*.parquet` and commit `_spark_metadata/<epoch>` so readers
+            // see the full epoch (all partitions' slices), then the atomic offset commit.
+            let metas = crate::streaming_sink_log::list_batch_files(store, base, epoch)
+                .await
+                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+            crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
+                .await
+                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
             if let Some(ck) = ck {
                 let offsets: std::collections::BTreeMap<String, i64> = match ck
                     .get(&format!("sources/0/staged-epoch-{epoch}"))
@@ -727,6 +733,81 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                     ck.put("realtime/committed", bytes::Bytes::from(body))
                         .await
                         .map_err(|e| DataFusionError::External(Box::new(e)))?;
+                }
+            }
+            Ok(())
+        }
+
+        // Commit one task's slice of `epoch` exactly-once (Flink-style 2PC, object-store-coordinated).
+        // Single-partition (`num==1`): write `part-0` + commit directly. No-funnel parallel
+        // (`num>1`): each task writes `part-<idx>` + a per-epoch done-marker, then the LAST task to
+        // observe all `num` markers writes the single global commit (`_spark_metadata/<epoch>` +
+        // `realtime/committed`). Idempotent under races (same epoch ⇒ same content) and replay
+        // (deterministic `part-<idx>` names overwrite); crash before the global commit ⇒ source
+        // re-reads from the last committed offset and the epoch is redone identically.
+        async fn commit_epoch(
+            store: &Arc<dyn object_store::ObjectStore>,
+            base: &StorePath,
+            ck: &Option<CheckpointStore>,
+            epoch: u64,
+            schema: &SchemaRef,
+            batches: &[RecordBatch],
+            idx: usize,
+            num: usize,
+        ) -> Result<()> {
+            use object_store::ObjectStoreExt;
+            // 1. Write this task's slice (overwrite, idempotent) iff it has data for the epoch.
+            if !batches.is_empty() {
+                let mut buf: Vec<u8> = Vec::new();
+                {
+                    let mut w = datafusion::parquet::arrow::ArrowWriter::try_new(
+                        &mut buf,
+                        schema.clone(),
+                        None,
+                    )
+                    .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                    for b in batches {
+                        w.write(b)
+                            .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                    }
+                    w.close()
+                        .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
+                }
+                let part = base
+                    .clone()
+                    .join(epoch.to_string())
+                    .join(format!("part-{idx}.parquet"));
+                store
+                    .put(&part, bytes::Bytes::from(buf).into())
+                    .await
+                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
+            }
+            if num <= 1 {
+                // Single sink: it alone defines the epoch — commit directly.
+                return write_global_committed(store, base, ck, epoch).await;
+            }
+            // No-funnel parallel: mark this task done for the epoch, then the task that observes all
+            // `num` done-markers performs the single global commit.
+            let Some(ck) = ck else {
+                // Without a checkpoint store there is no coordination medium; commit per-task (the
+                // realtime EO path always has a checkpoint location, so this is a defensive no-op).
+                return write_global_committed(store, base, &None, epoch).await;
+            };
+            let marker_dir = format!("realtime/epoch-{epoch}");
+            ck.put(
+                &format!("{marker_dir}/done-{idx}"),
+                bytes::Bytes::from_static(b"1"),
+            )
+            .await
+            .map_err(|e| DataFusionError::External(Box::new(e)))?;
+            let done = ck.list_rel(&marker_dir).await.unwrap_or_default().len();
+            if done >= num {
+                write_global_committed(store, base, &Some(ck.clone()), epoch).await?;
+                // Best-effort prune of this epoch's done-markers (bounded checkpoint growth).
+                if let Ok(markers) = ck.list_rel(&marker_dir).await {
+                    for m in markers {
+                        let _ = ck.delete(&format!("{marker_dir}/{m}")).await;
+                    }
                 }
             }
             Ok(())
@@ -755,9 +836,9 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                         }
                     }
                     Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id })) => {
-                        // Epoch boundary: durably commit this epoch's data + offsets atomically.
+                        // Epoch boundary: durably commit this task's slice + (last task) the epoch.
                         if let Err(e) =
-                            commit_epoch(&store, &base, &ck, id, &data_schema, &buffer).await
+                            commit_epoch(&store, &base, &ck, id, &data_schema, &buffer, part_idx, num_parts).await
                         {
                             yield Err(e); return;
                         }

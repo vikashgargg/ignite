@@ -1175,15 +1175,23 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 object_store_url,
                 base,
                 checkpoint_location,
+                partition_index,
+                num_partitions,
             }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 let object_store_url = ObjectStoreUrl::parse(&object_store_url)?;
                 let base = StorePath::from(base);
-                Ok(Arc::new(RealtimeFileSinkExec::new(
+                let partition_index = usize::try_from(partition_index)
+                    .map_err(|_| plan_datafusion_err!("invalid partition_index"))?;
+                let num_partitions = usize::try_from(num_partitions)
+                    .map_err(|_| plan_datafusion_err!("invalid num_partitions"))?;
+                Ok(Arc::new(RealtimeFileSinkExec::new_parallel(
                     input,
                     object_store_url,
                     base,
                     checkpoint_location,
+                    partition_index,
+                    num_partitions,
                 )))
             }
             NodeKind::StreamingSinkCommit(gen::StreamingSinkCommitExecNode {
@@ -2233,6 +2241,8 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 object_store_url: sink.object_store_url().as_str().to_string(),
                 base: sink.base().to_string(),
                 checkpoint_location: sink.checkpoint_location().map(str::to_string),
+                partition_index: sink.partition_index() as u64,
+                num_partitions: sink.num_partitions() as u64,
             })
         } else if let Some(commit) = node.as_any().downcast_ref::<StreamingSinkCommitExec>() {
             let input = self.try_encode_plan(commit.input().clone())?;

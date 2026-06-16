@@ -704,6 +704,8 @@ message RealtimeFileSinkExecNode {
   string object_store_url = 2;
   string base = 3;
   optional string checkpoint_location = 4;
+  uint64 partition_index = 5;
+  uint64 num_partitions = 6;
 }
 
 message StreamingSinkCommitExecNode {
