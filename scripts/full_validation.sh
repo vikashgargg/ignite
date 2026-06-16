@@ -17,7 +17,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 MODE="${1:-cluster}"; PORT="${2:-50150}"
 PY=.venvs/smoke/bin/python
-BIN=target/release/vajra
+BIN="${VAJRA_BIN:-target/release/vajra}"
 KAFKA=vajra_kafka
 pass=0; fail=0
 declare -a RESULTS
