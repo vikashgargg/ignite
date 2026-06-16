@@ -71,14 +71,18 @@ RUN cargo fetch --locked
 COPY crates.tar.gz ./
 RUN tar -xzf crates.tar.gz && rm crates.tar.gz
 
-# Low-memory build settings for constrained builders (e.g. 8 GB Macs):
-# 1 codegen job + no debug symbols keeps peak RSS well under ~3 GB so the
-# build VM does not swap-thrash. LTO off keeps it single-pass.
+# Low-memory build settings for constrained builders (e.g. 8 GB Macs).
+# This is the FUNCTIONAL / packaging image for Apple-container local validation,
+# NOT the perf image (the EKS head-to-head builds opt-level=3 + LTO on a large
+# cloud builder). opt-level=1 keeps peak RSS of the giant generated AWS SDK
+# crates (aws-sdk-glue etc.) well under 4 GB so the build VM does not OOM (SIGKILL),
+# and compiles markedly faster. --jobs 1 serialises the heavy crates for safety.
 RUN CARGO_BUILD_JOBS=1 \
     CARGO_PROFILE_RELEASE_LTO=off \
     CARGO_PROFILE_RELEASE_DEBUG=false \
+    CARGO_PROFILE_RELEASE_OPT_LEVEL=1 \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-    cargo build --release -p sail-cli --bins \
+    cargo build --release -p sail-cli --bins --jobs 1 \
     && cp /app/target/release/vajra /usr/local/bin/vajra
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
