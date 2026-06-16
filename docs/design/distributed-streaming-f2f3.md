@@ -183,9 +183,30 @@ losing committed output. Fixed by writing the marker **once per clean bounded mi
 (item-count-independent) — semantically "one micro-batch = one offset commit", identical single-node
 and distributed. (commit `4ee1fd41`)
 
-This is the Spark-model EO (micro-batch + checkpoint WAL), now distributed + restart-safe. **Still
-pending:** distributed *continuous* (`Trigger.Continuous`, long-lived) EO via the `EpochCoordinator`
-+ per-instance state snapshot (the low-latency realtime path; single-node realtime EO done in F1b).
+This is the Spark-model EO (micro-batch + checkpoint WAL), now distributed + restart-safe.
+
+### Distributed CONTINUOUS (realtime) exactly-once + HARD-CRASH recovery — ✅ done (2026-06-16)
+
+Distributed `Trigger.Continuous` Kafka→parquet is **exactly-once across a hard crash**, validated on a
+2-worker cluster (`scripts/dist_continuous_eo_crash.py`): wave-1 5000 → committed `{epoch:6,
+offsets:5000}` → **`pkill -9` the server mid-stream** → restart → wave-2 (+5000) → durable output is
+exactly `0..9999` (10000 distinct, contiguous) ⇒ `EXACTLY_ONCE_ACROSS_CRASH`. Graceful stop+restart is
+EO too.
+
+*Why it's distribution-transparent for the single-partition realtime case:* the F1b mechanism — source
+emits `Checkpoint{epoch}` + stages offsets, `RealtimeFileSinkExec` commits per epoch as a **single
+atomic `put`** of `realtime/committed={epoch,offsets}` on the **shared object-store** checkpoint, and
+the source **seeks to the committed offset on restart** — has no driver-local state, so it works
+unchanged whether the source/sink tasks run on the driver or on a worker. The single atomic put is
+crash-safe (no torn commit), which is why SIGKILL mid-epoch loses no data and duplicates none.
+
+**`EpochCoordinator` (built + unit-tested) is NOT needed for single-partition** continuous EO — the
+single sink task's atomic commit *is* the coordination. It is required only for **multi-partition /
+multi-sink-task** continuous EO (collect per-task acks → one global commit), which is gated behind the
+realtime sink's by-name multi-partition rejection (the F2/F3 scale-out path). So:
+- Single-partition distributed continuous EO + hard-crash recovery: **done + measured.**
+- Multi-partition continuous EO (`EpochCoordinator` wiring + per-instance state snapshot + barrier
+  alignment at the sink): the remaining scale-out item.
 
 *(Historical note — the original failing symptom:)* a streaming write job failed at *submission* to the
 cluster (`unsupported physical plan node: StreamingSinkCommitExec`) and the query went inactive. Fixed by codec'ing them + a
