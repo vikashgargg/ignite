@@ -213,9 +213,22 @@ realtime sink's by-name multi-partition rejection (the F2/F3 scale-out path). So
   → parquet, EO across restart → 10000 distinct, contiguous (`MULTIPART_EXACTLY_ONCE`). Upstream
   stateless work runs parallel across N; only the durable commit funnels to one sink (single atomic
   `realtime/committed` keeps EO).
-- **Remaining true scale-out (optional):** N-parallel-**sink-task** continuous EO (no funnel) via the
-  built `EpochCoordinator` (per-task acks → one global commit) + per-instance state snapshot — for when
-  the single sink's write throughput is the bottleneck.
+- N-parallel-**sink-task** continuous EO (no funnel): **✅ done (2026-06-16).** For `n_parts>1` the
+  realtime writer builds N independent sink tasks (one per exchange partition); each writes its own
+  `part-<i>.parquet` per epoch + a done-marker `realtime/epoch-<epoch>/done-<i>`, and the **last task to
+  observe all N markers** performs the single global commit (`_spark_metadata/<epoch>` over all parts +
+  the atomic `realtime/committed`). **Object-store coordination** (cloud-native / RisingWave-style — no
+  driver RPC, no driver bottleneck, survives driver restart); idempotent under races (same epoch ⇒ same
+  content) and replay (deterministic `part-<i>` overwrite). *Both processing and writes scale across N
+  with no funnel.* Measured on a 2-worker cluster: continuous Kafka → `repartition(4, key)` → parquet
+  writes `part-0..3` in parallel; EO across graceful restart **and `kill -9` mid-stream** → 10000
+  distinct, contiguous (`MULTIPART_EXACTLY_ONCE`). (The in-memory `EpochCoordinator` is built + tested
+  but not needed here — object-store coordination fits Vajra's F4 atomic-commit architecture better; it
+  remains available for an RPC-based variant.)
+
+**The distributed reliability gate is complete + release-verified:** distributed batch; distributed
+stateful streaming (6/6 vs Spark); micro-batch EO across restart; continuous EO single- **and**
+multi-partition (no funnel) across restart **and hard crash**.
 
 *(Historical note — the original failing symptom:)* a streaming write job failed at *submission* to the
 cluster (`unsupported physical plan node: StreamingSinkCommitExec`) and the query went inactive. Fixed by codec'ing them + a
