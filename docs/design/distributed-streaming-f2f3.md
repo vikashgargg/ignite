@@ -205,8 +205,17 @@ single sink task's atomic commit *is* the coordination. It is required only for 
 multi-sink-task** continuous EO (collect per-task acks → one global commit), which is gated behind the
 realtime sink's by-name multi-partition rejection (the F2/F3 scale-out path). So:
 - Single-partition distributed continuous EO + hard-crash recovery: **done + measured.**
-- Multi-partition continuous EO (`EpochCoordinator` wiring + per-instance state snapshot + barrier
-  alignment at the sink): the remaining scale-out item.
+- Multi-partition continuous EO (parallel stateless processing): **✅ done (2026-06-16).** Streaming
+  `repartition(N, key)` now maps to the marker-aware `StreamExchangeExec(1→N)` (rewriter passthrough +
+  physical-planner mapping; round-robin/keyless passes through single-partition); the realtime sink
+  routes `n_parts>1` through `StreamBarrierAlignExec(N→1)` so the single sink seals each
+  globally-consistent epoch. Measured on a 2-worker cluster: continuous Kafka → `repartition(4, key)`
+  → parquet, EO across restart → 10000 distinct, contiguous (`MULTIPART_EXACTLY_ONCE`). Upstream
+  stateless work runs parallel across N; only the durable commit funnels to one sink (single atomic
+  `realtime/committed` keeps EO).
+- **Remaining true scale-out (optional):** N-parallel-**sink-task** continuous EO (no funnel) via the
+  built `EpochCoordinator` (per-task acks → one global commit) + per-instance state snapshot — for when
+  the single sink's write throughput is the bottleneck.
 
 *(Historical note — the original failing symptom:)* a streaming write job failed at *submission* to the
 cluster (`unsupported physical plan node: StreamingSinkCommitExec`) and the query went inactive. Fixed by codec'ing them + a
