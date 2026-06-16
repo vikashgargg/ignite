@@ -143,33 +143,40 @@ async fn consume_stream(
     error: &watch::Sender<Option<SparkThrowable>>,
 ) -> bool {
     let mut clean = true;
+    // Drain the bounded micro-batch to completion. The sink does the durable work (files +
+    // `_spark_metadata` + source-offset staging); the driver only needs to detect a clean end.
+    // We deliberately do NOT key the offset marker on output items: the streaming sink emits an
+    // empty-schema (0-row, 0-column) completion batch, which the single-node path receives but the
+    // distributed Arrow-Flight shuffle drops in transit — so per-item marker writes silently skip in
+    // cluster mode, leaving no `offsets/<batch_id>` WAL and breaking batch-id resume across restart.
     while let Some(x) = stream.next().await {
-        match x {
-            Ok(_) => {
-                if let Some(ck) = ck {
-                    let payload = format!(
-                        "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_millis())
-                            .unwrap_or(0)
-                    );
-                    if let Err(e) = ck
-                        .put(&format!("offsets/{batch_id}"), bytes::Bytes::from(payload))
-                        .await
-                    {
-                        warn!("Failed to write checkpoint offset {batch_id}: {e}");
-                    }
-                }
-                web_ui::increment_batch(ui_id).await;
-                *batch_id += 1;
-            }
-            Err(e) => {
-                clean = false;
-                let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
-                let _ = error.send(Some(cause.into()));
+        if let Err(e) = x {
+            clean = false;
+            let cause = CommonErrorCause::new::<PyErrExtractor>(&e);
+            let _ = error.send(Some(cause.into()));
+        }
+    }
+    // One bounded micro-batch = one offset commit. On a clean end, write the per-batch offset marker
+    // (the WAL that lets a restart resume at `batch_id + 1`) exactly once — robust whether or not the
+    // sink's completion batch reached the driver. Identical behavior single-node and distributed.
+    if clean {
+        if let Some(ck) = ck {
+            let payload = format!(
+                "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            );
+            if let Err(e) = ck
+                .put(&format!("offsets/{batch_id}"), bytes::Bytes::from(payload))
+                .await
+            {
+                warn!("Failed to write checkpoint offset {batch_id}: {e}");
             }
         }
+        web_ui::increment_batch(ui_id).await;
+        *batch_id += 1;
     }
     clean
 }
