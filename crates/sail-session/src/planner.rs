@@ -276,7 +276,29 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 node.partitioning_expressions(),
                 session_state,
             )?;
-            Arc::new(ExplicitRepartitionExec::new(input.clone(), partitioning))
+            // Streaming repartition: a flow-event stream must repartition through the marker-aware
+            // `StreamExchangeExec` (broadcasts barriers/watermarks to every output partition,
+            // hash-routes data) — the batch `ExplicitRepartitionExec` would mis-route the control
+            // markers. A keyed (Hash) repartition parallelizes the downstream stateless work across
+            // N partitions; the N→1 re-alignment before a single-partition sink is inserted by the
+            // sink writer via `StreamBarrierAlignExec`. Round-robin (keyless) streaming repartition
+            // has no marker-safe N-way form yet, so it passes through (single partition) rather than
+            // silently misrouting — Spark Continuous likewise keeps stateless pipelines single-partition.
+            use sail_common_datafusion::streaming::event::schema::is_flow_event_schema;
+            if is_flow_event_schema(&input.schema()) {
+                match partitioning {
+                    datafusion::physical_expr::Partitioning::Hash(keys, n) if n > 1 => {
+                        Arc::new(sail_physical_plan::streaming::exchange::StreamExchangeExec::try_new(
+                            input.clone(),
+                            keys,
+                            n,
+                        )?)
+                    }
+                    _ => input.clone(),
+                }
+            } else {
+                Arc::new(ExplicitRepartitionExec::new(input.clone(), partitioning))
+            }
         } else if node.as_any().is::<StreamSourceAdapterNode>() {
             let [input] = physical_inputs else {
                 return internal_err!("StreamSourceExec requires exactly one physical input");

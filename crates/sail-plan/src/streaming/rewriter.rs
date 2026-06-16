@@ -61,6 +61,11 @@ impl StreamingRewriter {
             Ok(Transformed::yes(LogicalPlan::Extension(Extension {
                 node: show.with_exprs_and_inputs(vec![], vec![input])?,
             })))
+        } else if node.as_any().is::<sail_logical_plan::repartition::ExplicitRepartitionNode>() {
+            // Streaming repartition: pass the node through unchanged so the physical planner maps it
+            // to the marker-aware `StreamExchangeExec` (keyed) for parallel stateless processing; the
+            // sink writer re-aligns N→1 via `StreamBarrierAlignExec`. (See planner.rs.)
+            Ok(Transformed::no(LogicalPlan::Extension(extension)))
         } else if node.as_any().is::<FileWriteNode>()
             || node.as_any().is::<ForeachBatchSinkNode>()
             || node.as_any().is::<MemorySinkNode>()

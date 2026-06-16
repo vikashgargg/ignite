@@ -7265,6 +7265,7 @@ dependencies = [
  "sail-build-scripts",
  "sail-common",
  "sail-common-datafusion",
+ "sail-physical-plan",
  "sail-sql-analyzer",
  "serde",
  "serde_json",

@@ -360,21 +360,27 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                     "realtime (continuous) durable sink requires a streaming (flow-event) input"
                 );
             }
-            // Increment 1 supports a single source partition (rate/single-assignment Kafka). A
-            // multi-partition continuous write needs per-partition epoch alignment — tracked with
-            // distributed streaming (F2/F3). Reject by name rather than silently dropping data.
-            if n_parts > 1 {
-                return not_impl_err!(
-                    "realtime (continuous) durable sink with {n_parts} source partitions; \
-                     single-partition only for now (multi-partition lands with F2/F3)"
-                );
-            }
+            // Multi-partition continuous: a parallelized (keyed-repartition) flow-event stream fans
+            // into N partitions, each carrying a broadcast copy of every `Checkpoint{epoch}` barrier.
+            // Re-align them N→1 with `StreamBarrierAlignExec` (collect the barrier from all N inputs,
+            // block post-barrier data until aligned — Flink "barriers never overtake records") so the
+            // single-partition realtime sink seals each globally-consistent epoch. The single source
+            // (e.g. one Kafka reader) stages the offsets once, so the atomic `realtime/committed`
+            // record stays correct; exactly-once is preserved. Upstream stateless work runs in
+            // parallel across the N partitions (throughput); only the durable commit funnels to one.
+            let aligned: Arc<dyn ExecutionPlan> = if n_parts > 1 {
+                Arc::new(sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec::new(
+                    flow_input,
+                ))
+            } else {
+                flow_input
+            };
             let base = table_paths
                 .first()
                 .map(|u| u.prefix().clone())
                 .unwrap_or_default();
             return Ok(Arc::new(crate::streaming_decode::RealtimeFileSinkExec::new(
-                flow_input,
+                aligned,
                 object_store_url.clone(),
                 base,
                 commit_log_checkpoint.clone(),
