@@ -1,0 +1,39 @@
+# Vajra for the streaming head-to-head. Runs on the SAME role=compute c7g.4xlarge
+# the Flink TaskManager used (run sequentially, never concurrently), local-cluster
+# with 4 workers across the 16 vCPU — same hardware, same shared Kafka topic.
+# __ECR__ is substituted at deploy time with the account ECR host.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vajra-stream
+  namespace: stream
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: vajra-stream } }
+  template:
+    metadata: { labels: { app: vajra-stream } }
+    spec:
+      nodeSelector: { role: compute }
+      containers:
+        - name: server
+          image: __ECR__/vajra:eks
+          args: ["server", "--ip", "0.0.0.0", "--port", "50051", "--mode", "local-cluster", "--workers", "4"]
+          ports: [ { containerPort: 50051 } ]
+          resources:
+            requests: { cpu: "15", memory: "24Gi" }
+            limits: { cpu: "16", memory: "28Gi" }
+          env:
+            - { name: RUST_LOG, value: warn }
+            - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 50Gi }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vajra-stream, namespace: stream }
+spec:
+  selector: { app: vajra-stream }
+  ports: [ { port: 50051, targetPort: 50051 } ]

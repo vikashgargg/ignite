@@ -1,0 +1,62 @@
+# Single-broker KRaft Kafka for the streaming head-to-head. Pinned (nodeSelector
+# role=kafka) to its own c7g.4xlarge so it never competes with the engine-under-test
+# (which gets a dedicated role=compute node with all 16 vCPU). The producer pre-loads
+# a bounded topic; Flink and Vajra each consume the SAME topic from earliest.
+apiVersion: v1
+kind: Namespace
+metadata: { name: stream }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: stream
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: kafka } }
+  template:
+    metadata: { labels: { app: kafka } }
+    spec:
+      nodeSelector: { role: kafka }
+      containers:
+        - name: kafka
+          image: apache/kafka:3.8.0
+          ports:
+            - { containerPort: 9092 }
+          resources:
+            requests: { cpu: "6", memory: "16Gi" }
+            limits: { cpu: "14", memory: "26Gi" }
+          env:
+            - { name: KAFKA_NODE_ID, value: "1" }
+            - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
+            - { name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9094" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka.stream.svc.cluster.local:9092" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9094" }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1" }
+            - { name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0" }
+            # large logs + throughput: keep all data, big socket buffers
+            - { name: KAFKA_LOG_RETENTION_MS, value: "-1" }
+            - { name: KAFKA_NUM_PARTITIONS, value: "16" }
+            - { name: KAFKA_MESSAGE_MAX_BYTES, value: "10485760" }
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx20g -Xms20g" }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/kafka/data }
+      volumes:
+        - name: data
+          emptyDir: { sizeLimit: 200Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: stream
+spec:
+  clusterIP: None
+  selector: { app: kafka }
+  ports:
+    - { port: 9092, targetPort: 9092 }

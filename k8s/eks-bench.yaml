@@ -1,0 +1,34 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: vajra-bench
+  region: ap-south-1
+  version: "1.31"
+
+# 3 x c7g.4xlarge (Graviton, arm64) = 48 vCPU / 96 GiB total.
+# Each node is one c7g.4xlarge = the exact hardware of Flink's official Nexmark
+# reference (16 vCPU). Engines run sequentially on the same nodegroup so each
+# gets identical resources — a true like-for-like head-to-head.
+managedNodeGroups:
+  - name: bench-ng
+    instanceType: c7g.4xlarge
+    amiFamily: AmazonLinux2023
+    desiredCapacity: 3
+    minSize: 3
+    maxSize: 3
+    volumeSize: 100
+    volumeType: gp3
+    labels:
+      workload: bench
+    tags:
+      project: vajra-bench
+
+iam:
+  withOIDC: true
+
+addons:
+  - name: vpc-cni
+  - name: coredns
+  - name: kube-proxy
+  - name: aws-ebs-csi-driver
