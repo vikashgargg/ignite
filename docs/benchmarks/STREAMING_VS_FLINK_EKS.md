@@ -26,7 +26,7 @@ happened, including a genuine Vajra bug the test surfaced.**
 | Engine | Workload | Result | Peak RSS |
 |---|---|---|---|
 | **Apache Flink 1.19** | 100M-event 10s tumbling windowed COUNT | **8.8 s → 11.36M events/s** | **8.5 GiB** |
-| **Vajra** | same | **FAILED — Arrow i32 offset overflow** (see below) | — |
+| **Vajra** (at time of run) | same | **FAILED — Arrow i32 offset overflow** (root-caused + FIXED, commit 6b812758; see below) | — |
 
 Flink's number is clean and official-setup (the only config fix needed was exposing
 the JobManager **blob port 6124** in the service, per Flink's standalone-Kubernetes
@@ -60,19 +60,43 @@ exceeded **2 GiB** (i32 offset limit). The streaming windowed aggregation over t
   a debug-symbol build (`docker/Dockerfile.dbg`) on the distributed env is needed for
   the exact failing operator.
 
-### Prod-grade fix direction (grounded in references; NOT yet applied)
-1. **Bounded micro-batches (Spark model).** Vajra's Kafka source ignores
-   `maxOffsetsPerTrigger`; `availableNow` reads the entire backlog as one micro-batch.
-   Implement Spark's `KafkaMicroBatchStream` behavior: split the backlog into bounded
-   micro-batches, each committing offsets + emitting + advancing the watermark. Bounds
-   per-batch memory and prevents any single oversized array.
-2. **Incremental watermark-driven window eviction (Flink/Spark model).** Ensure closed
-   windows finalize+evict *during* the read, so state stays O(open windows), never
-   O(backlog).
-3. **Arrow large-offset / view layout.** Where large variable-length columns are
-   unavoidable, use `LargeBinary`/`LargeUtf8` (i64 offsets) or DataFusion's
-   `StringView`/`BinaryView` (the DataFusion 53+ default) — Arrow's documented remedy
-   for the 2 GiB i32 limit.
+### Root cause (CONFIRMED via on-instance debug-symbol backtrace)
+The backtrace pinned it to `sail-function/src/scalar/json/from_json.rs:154` inside a
+DataFusion `project_batch`. Chain:
+`maxOffsetsPerTrigger=20000000` → (options.rs aliased it to `max_batch_size`) → the
+Kafka source built a **single 20M-row Arrow RecordBatch** → `from_json` materialized a
+`Utf8` column whose total bytes exceeded Arrow's **i32 `OffsetBuffer` limit (2 GiB)** →
+`offset overflow`. Scale-dependent: 4M rows stayed under 2 GiB (worked), 20M did not.
+
+The defect was **conflating three concerns the proven systems keep separate**:
+- **Spark `KafkaMicroBatchStream`**: `maxOffsetsPerTrigger` is per-micro-batch
+  *admission control*, NOT the columnar buffer size.
+- **DataFusion**: streams **bounded** RecordBatches (`batch_size` default 8192) so
+  arrays/memory stay bounded.
+- **Arrow**: `Utf8`/`Binary` use i32 offsets (2 GiB/array) — bound batches by *bytes*,
+  or use `LargeUtf8`/`BinaryView` (StringView).
+
+### Fix (APPLIED — commit 6b812758)
+1. **Decouple admission from buffering** (`options.rs`): `maxOffsetsPerTrigger` /
+   `maxOffsetsPerMicroBatch` now parse into a separate `max_offsets_per_trigger`
+   (admission); `maxbatchsize` sets the Arrow buffer (default **8192**, clamped to a
+   2 GiB-safe ceiling). Admission is driver-side, so it is not serialized to workers.
+2. **Byte-bounded batching** (`reader.rs`, all 3 collection loops incl. the realtime
+   epoch loop): flush on **either** a row cap **or** a 128 MiB byte cap — the byte cap is
+   the real guarantee since the overflow is byte-driven, keeping every Utf8/Binary
+   column far under the i32 limit regardless of payload size.
+
+**Validated** on the same c7g.4xlarge + 100M-event workload at `maxOffsetsPerTrigger=20M`
+(the exact failing case): completes cleanly, **no overflow**.
+
+### Still open for a clean head-to-head number
+- A clean Vajra throughput figure needs the dedicated-node EKS topology (Kafka + engine
+  on separate c7g.4xlarge), not the single-instance validation host. Pending a future
+  EKS run with the fixed image (and an account vCPU-quota raise — current limit is 16).
+- Windowed-agg under `availableNow`+checkpoint emits only watermark-*closed* windows
+  (open windows are staged for the next run); for a like-for-like vs Flink's bounded
+  read (which fires all windows), align emission semantics (flush-on-EndOfData for
+  bounded/`Trigger.AvailableNow`).
 
 ## Reproduce
 - Cluster: `k8s/eks-bench.yaml` (eksctl). Kafka + producer: `k8s/stream/kafka.yaml`,
@@ -82,5 +106,12 @@ exceeded **2 GiB** (i32 offset limit). The streaming windowed aggregation over t
 
 ## Status
 Batch (TPC-H SF-100) vs Spark is already published (`TPCH_SF100.md`: 3.2× faster,
-2.2× less memory). Streaming: **Flink baseline captured; Vajra windowed-agg at 100M
-events needs the offset-overflow fix above before a clean head-to-head number.**
+2.2× less memory). Streaming: **Flink baseline captured (11.36M ev/s, 8.5 GiB); the
+Vajra offset-overflow bug it surfaced is root-caused and FIXED (commit 6b812758),
+validated overflow-free on the same hardware + 100M-event workload.** A clean Vajra
+*throughput* head-to-head number remains to be measured on the dedicated-node EKS
+topology with the fixed image (blocked only by an account vCPU-quota raise).
+
+This is the intended value of a true, no-workaround head-to-head: it found a real,
+scale-dependent engine bug, and the fix realigns Vajra with how Spark/DataFusion/Arrow
+separate admission control, columnar buffering, and the 2 GiB array limit.
