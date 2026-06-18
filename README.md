@@ -120,36 +120,36 @@ TPC-H SF-100 — 22/22 PASS — Vajra 347s / 51.7GiB  vs  Spark 1099s / 115GiB
 ClickBench 100M (distributed, EKS) — 43/43 PASS — Vajra 377.9s
 ```
 
-### Streaming — Flink-class, in the same binary
+### Streaming — measured head-to-head vs Apache Flink 1.19 (honest)
 
-Vajra is also a real-time streaming engine. Measured head-to-head vs **Apache Flink 1.18**
-on identical AWS Graviton hardware (single node, parallelism 1 — directional, not published;
-see [docs/benchmarks/FLINK_HEAD_TO_HEAD.md](docs/benchmarks/FLINK_HEAD_TO_HEAD.md)):
+Vajra is also a streaming engine. Rigorous head-to-head vs **official Apache Flink 1.19**
+on one AWS `c7g.4xlarge` (Graviton), identical 100M-event 10 s tumbling keyed-COUNT over a
+shared Kafka topic ([docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAMING_VS_FLINK_EKS.md)):
 
-| Streaming dimension | Vajra | Flink 1.18 | Read |
+| Dimension | Flink 1.19 | Vajra | Verdict |
 |---|--:|--:|---|
-| Stateless throughput | **9.0M rows/s** | 6.7M/s | Vajra ~1.34× |
-| Windowed-agg throughput | **3.4M rows/s** | ~0.9M/s | Vajra ~3× |
-| Latency at high throughput | **sub-ms** (simultaneous) | ms | Vajra ≈ Flink |
-| Memory | **~42 MB** | ~700 MB | Vajra ~16× less |
+| **Throughput** | 1.157M ev/s | **1.543M ev/s** | 🟢 Vajra **1.33× faster** |
+| **Memory** (peak RSS) | 8.24 GiB | **1.29 GiB** | 🟢 Vajra **~6.4× less** |
+| **Exactly-once** (hard-kill chaos) | mature | EO ✓ (100000/100000) | 🟢 correct / 🟡 less hardened |
+| **Latency** | ms (Kafka) / ~ckpt (file) | p50 ~30 s (realtime probe) | 🔴 **Flink wins** |
 
-- **Exactly-once** (Spark `MicroBatchExecution` / `StateStore` model): stateless **and**
-  stateful (windowed agg + stream joins), verified under **clean restart and hard
-  crash (SIGKILL)** — no loss, no duplicates. See
-  [docs/benchmarks/STREAMING_FAILURE_RECOVERY.md](docs/benchmarks/STREAMING_FAILURE_RECOVERY.md).
+**Honest summary:** Vajra **wins streaming throughput and memory and holds exactly-once
+across a hard crash** — but **Flink wins latency** today (Vajra has no record-level
+low-latency sink yet; its realtime mode is immature). This true head-to-head also surfaced
++ fixed two real bugs (an Arrow i32 offset overflow, and a single-threaded Kafka source now
+parallelized per Spark `KafkaSourceRDD` / Flink FLIP-27).
+
+- **Exactly-once** (Spark `MicroBatchExecution` / object-store checkpoint model): stateless
+  **and** stateful, verified under clean restart **and hard crash (SIGKILL)** including the
+  parallel source — no loss, no duplicates.
 - **Operators:** event-time tumbling windows + watermarks, keyed windowed aggregation,
-  stream-stream / interval joins, stateful deduplication, durable file sink.
-- **Intra-node parallelism:** keyed windowed aggregation scales across cores via a
-  marker-aware keyed exchange (~2.55× on 8 cores; near-linear is the next lever).
-- **All-in-one validated:** a single sweep covering batch + every streaming operator +
-  exactly-once + the combined flow (batch SQL reading streaming-written output) passes
-  **12/12** — [docs/benchmarks/ALL_IN_ONE_VALIDATION.md](docs/benchmarks/ALL_IN_ONE_VALIDATION.md).
+  stream-stream / interval joins, stateful deduplication, durable file sink, parallel Kafka source.
 
-> **The combined-engine claim, honestly:** per **core**, Vajra beats Flink on streaming
-> throughput, memory, and latency, and is Spark-class on batch — in one no-JVM binary.
-> Flink still wins per-**node** max throughput via multi-core scaling (Vajra's streaming
-> operators parallelize but the source/distributor front-end is being parallelized next).
-> Distributed streaming and a continuous-mode exactly-once coordinator are on the roadmap.
+> **The road to a true Spark + Flink replacement** — what's measured, where the real gaps
+> are (latency, large-state, mid-job failure recovery), and the grounded plan to close them
+> — is in **[docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md)**. Vajra is a strong
+> Spark batch replacement and now wins Flink on throughput/memory; latency + operational
+> maturity are the honest remaining work.
 
 ---
 
