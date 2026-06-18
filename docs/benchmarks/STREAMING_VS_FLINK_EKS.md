@@ -34,6 +34,35 @@ reference). It is higher than Flink's 1.82M/s headline because that headline is 
 heavier Nexmark-class query; this simple 1000-key COUNT is lighter — but both engines
 run the **identical** query here, so it's a fair comparison.
 
+## Single-node apples-to-apples re-run (both engines, identical conditions)
+
+After the fix, both engines were run on **one** c7g.4xlarge with Kafka co-located
+(the 16-vCPU account quota blocks the 2-node dedicated topology), same 100M-event
+topic, same 10s tumbling keyed COUNT, run sequentially:
+
+| Engine | Wall (100M events) | Throughput |
+|---|--:|--:|
+| **Apache Flink 1.19** | 88.6 s | **1.13M ev/s** |
+| **Vajra** (fixed) | 205.8 s | **0.49M ev/s** |
+
+**Honest result: on this streaming windowed-aggregation, Vajra is ~2.3× *slower*
+than Flink.** No overflow, correct, but not winning. Raising the Arrow batch size
+16× (8192 → 131072) did **not** help (203 s) — so per-batch overhead is not the cause.
+
+**Root cause (confirmed in code):** Vajra's Kafka source is **single-threaded** —
+`KafkaSourceExec` reports `Partitioning::UnknownPartitioning(1)` and rejects
+`partition != 0` (reader.rs:232,322), so one execution partition reads *all* Kafka
+partitions and runs `from_json` + pre-aggregation on a single core. Flink runs **16
+parallel source subtasks** (one per partition). That ~16× source/parse parallelism
+gap (minus co-location contention) is the throughput difference.
+
+**Grounded fix (the path to matching/beating Flink):** parallelize the source across
+Kafka partitions — one reader per partition (Spark Structured Streaming: one task per
+TopicPartition; Flink: one source subtask per partition) → `UnknownPartitioning(N)`,
+each instance reading its assigned partitions, offsets staged per instance. Combined
+with Vajra's no-JVM / Arrow-columnar advantages, that is what closes (and should
+invert) this gap. This is now the #1 streaming-throughput item.
+
 ## The Vajra bug this surfaced (honest finding)
 
 On the identical 100M-event workload, the Vajra worker **panicked**:
