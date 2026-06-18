@@ -89,8 +89,40 @@ watermark-*closed* windows and stages the rest for the next run (here 927 window
 groups emitted), whereas Flink's bounded read fires all windows. Throughput is measured
 over all 100M processed events (both engines fully process the stream); aligning the
 *emission* (flush-on-EndOfData for `Trigger.AvailableNow`) is the remaining item for an
-identical-output comparison. EO across worker/instance restart with the per-instance
-offsets is also still to be chaos-validated.
+identical-output comparison.
+
+## Four-dimension scorecard (all measured on one c7g.4xlarge unless noted)
+
+| Dimension | Flink 1.19 | Vajra | Verdict |
+|---|---|---|---|
+| **Throughput** (100M windowed-agg) | 1.157M ev/s | **1.543M ev/s** | **Vajra 1.33× faster** |
+| **Memory** (peak RSS, same job) | 8.24 GiB | **1.29 GiB** | **Vajra ~6.4× less** (no JVM, Arrow) |
+| **Reliability** (exactly-once) | mature, battle-tested | **EO across hard kill ✓** (parallel src, 100000/100000) | Vajra correct; Flink more hardened |
+| **Latency** | ms (Kafka sink) / ~checkpoint (file) | **p50 ~30 s realtime-mode probe** | **Flink wins clearly** |
+
+- **Memory** — `/sys/fs/cgroup/memory.peak` after each engine's identical windowed-agg
+  run: Flink 8.24 GiB vs Vajra **1.29 GiB**. The no-JVM / Arrow-columnar architecture
+  shows up as a real ~6.4× memory advantage.
+- **Reliability** — EO-chaos: produce 0–49999 → parallel Kafka→parquet (checkpoint) →
+  **hard-kill the server mid-stream** → restart → produce 50000–99999 → re-run; durable
+  output was **exactly 0–99999, no dup/loss** (`EXACTLY_ONCE=True`). The new per-instance
+  offset staging is crash-safe. (Flink remains far more production-hardened — unaligned/
+  incremental checkpoints, autoscaling, years at scale.)
+- **Latency — Vajra's clear weakness (honest).** A realtime-mode (`Trigger.Continuous`
+  1 s) Kafka→file probe measured p50 ≈ 30 s / p99 ≈ 49 s. That figure is partly inflated
+  by the probe (a ~10 s Kafka backlog before the engine started + `current_timestamp()`
+  evaluated per-epoch, not per-record), so it is **not** a clean record-latency number —
+  but the conclusion is firm: **Vajra does not yet compete on latency.** Root reasons:
+  (1) **no record-level low-latency sink** — Vajra has no Kafka sink; its only continuous
+  durable sink is the per-epoch file sink, so sub-interval record latency isn't possible;
+  (2) the realtime/continuous mode is immature (F1/F2/F3 gaps). Flink does record-at-a-time
+  Kafka→Kafka at **ms**. Closing this needs a low-latency sink (Kafka/socket) + record-paced
+  realtime emission — the #1 streaming item after this.
+
+**Summary:** Vajra now **wins throughput and memory decisively** and holds **exactly-once**
+on the parallel path; **Flink wins latency** and remains more battle-tested. For
+throughput/cost-efficiency batch-streaming, Vajra is ahead; for low-latency event
+processing, Flink leads until Vajra's realtime sink/path matures.
 
 ## The Vajra bug this surfaced (honest finding)
 
