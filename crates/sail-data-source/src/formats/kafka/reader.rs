@@ -36,13 +36,33 @@ use crate::formats::kafka::options::KafkaReadOptions;
 /// row-based `batch_size`.
 const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
 
-/// Read committed per-(topic,partition) offsets from the checkpoint store (single object
-/// `sources/0/committed`, a JSON map `"topic:partition" -> next-offset`). The runner commits
-/// staged→committed via `CheckpointStore.promote` after the batch output is durable.
+/// Per-instance checkpoint key for the bounded source's offsets. With parallelism 1 we keep
+/// the legacy `sources/0/{staged,committed}` keys (back-compat with existing checkpoints); with
+/// N>1 each instance uses a disjoint `sources/0/inst-<i>/...` key so the N parallel readers never
+/// clobber each other's offsets. The generic commit (`commit_source_offsets`) promotes any
+/// `.../staged` → `.../committed`, so per-instance keys need no commit-side change.
+fn offset_key(suffix: &str, inst: usize, parallelism: usize) -> String {
+    if parallelism <= 1 {
+        format!("sources/0/{suffix}")
+    } else {
+        format!("sources/0/inst-{inst}/{suffix}")
+    }
+}
+
+/// Read committed per-(topic,partition) offsets for this instance from the checkpoint store
+/// (JSON map `"topic:partition" -> next-offset`). Committed staged→committed by the runner
+/// after the batch output is durable.
 async fn read_committed_offsets(
     ck: &CheckpointStore,
+    inst: usize,
+    parallelism: usize,
 ) -> std::collections::HashMap<(String, i32), i64> {
-    let Some(bytes) = ck.get("sources/0/committed").await.ok().flatten() else {
+    let Some(bytes) = ck
+        .get(&offset_key("committed", inst, parallelism))
+        .await
+        .ok()
+        .flatten()
+    else {
         return std::collections::HashMap::new();
     };
     let map: std::collections::BTreeMap<String, i64> =
@@ -55,17 +75,24 @@ async fn read_committed_offsets(
         .collect()
 }
 
-/// Stage (write-ahead) the per-(topic,partition) offsets reached by this micro-batch.
+/// Stage (write-ahead) the per-(topic,partition) offsets reached by this instance's micro-batch.
 async fn write_staged_offsets(
     ck: &CheckpointStore,
     offsets: &std::collections::HashMap<(String, i32), i64>,
+    inst: usize,
+    parallelism: usize,
 ) {
     let map: std::collections::BTreeMap<String, i64> = offsets
         .iter()
         .map(|((t, p), o)| (format!("{t}:{p}"), *o))
         .collect();
     if let Ok(body) = serde_json::to_vec(&map) {
-        let _ = ck.put("sources/0/staged", bytes::Bytes::from(body)).await;
+        let _ = ck
+            .put(
+                &offset_key("staged", inst, parallelism),
+                bytes::Bytes::from(body),
+            )
+            .await;
     }
 }
 
@@ -162,7 +189,7 @@ impl StreamSource for KafkaStreamSource {
 
     async fn scan(
         &self,
-        _state: &dyn Session,
+        state: &dyn Session,
         projection: Option<&Vec<usize>>,
         _filters: &[Expr],
         _limit: Option<usize>,
@@ -177,6 +204,17 @@ impl StreamSource for KafkaStreamSource {
         let projection = projection
             .cloned()
             .unwrap_or_else(|| (0..self.schema.fields.len()).collect());
+        // Parallel source read for the bounded (availableNow / micro-batch) path: one
+        // execution partition per `target_partitions`, each owning a disjoint subset of
+        // Kafka partitions (parallel read + from_json). The realtime continuous path stays
+        // single (parallelism=1) — its per-epoch barrier coordination across instances is a
+        // separate concern. Capped at target_partitions; the executor caps effective work at
+        // the number of Kafka partitions (extra instances read nothing).
+        let parallelism = if bounded {
+            state.config().target_partitions().max(1)
+        } else {
+            1
+        };
         Ok(Arc::new(KafkaSourceExec::try_new(
             self.options.clone(),
             Arc::clone(&self.schema),
@@ -184,6 +222,7 @@ impl StreamSource for KafkaStreamSource {
             bounded,
             checkpoint_location.map(str::to_string),
             realtime_interval_ms,
+            parallelism,
         )?))
     }
 }
@@ -206,6 +245,14 @@ pub struct KafkaSourceExec {
     /// `Trigger.Continuous` epoch interval (millis), when set — realtime EO: seek to the committed
     /// offset on start, emit `Checkpoint{epoch}` + pre-commit per-epoch offsets at this cadence.
     realtime_interval_ms: Option<u64>,
+    /// Source read parallelism: the number of execution partitions. Each instance `i`
+    /// owns the Kafka partitions whose stable global index `% parallelism == i` (Spark
+    /// `KafkaSourceRDD` one-task-per-partition / Flink FLIP-27 split assignment), giving
+    /// parallel read + `from_json` parsing. The bounded (availableNow / micro-batch) path
+    /// uses this; the realtime continuous path stays at 1 (per-epoch barrier coordination
+    /// across N instances is handled separately). Each instance stages its offsets under a
+    /// per-instance checkpoint key for exactly-once.
+    parallelism: usize,
     properties: Arc<PlanProperties>,
 }
 
@@ -217,6 +264,7 @@ impl KafkaSourceExec {
         bounded: bool,
         checkpoint_location: Option<String>,
         realtime_interval_ms: Option<u64>,
+        parallelism: usize,
     ) -> Result<Self> {
         let projected_schema = Arc::new(schema.project(&projection)?);
         let output_schema = Arc::new(to_flow_event_schema(&projected_schema));
@@ -227,9 +275,10 @@ impl KafkaSourceExec {
                 requires_infinite_memory: false,
             }
         };
+        let parallelism = parallelism.max(1);
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(output_schema),
-            Partitioning::UnknownPartitioning(1),
+            Partitioning::UnknownPartitioning(parallelism),
             EmissionType::Both,
             boundedness,
         ));
@@ -241,8 +290,14 @@ impl KafkaSourceExec {
             bounded,
             checkpoint_location,
             realtime_interval_ms,
+            parallelism,
             properties,
         })
+    }
+
+    /// Source read parallelism (number of execution partitions).
+    pub fn parallelism(&self) -> usize {
+        self.parallelism
     }
 
     pub fn options(&self) -> &KafkaReadOptions {
@@ -319,9 +374,14 @@ impl ExecutionPlan for KafkaSourceExec {
         partition: usize,
         _context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        if partition != 0 {
-            return plan_err!("{} only supports a single partition", self.name());
+        let parallelism = self.parallelism.max(1);
+        if partition >= parallelism {
+            return plan_err!(
+                "{} partition {partition} out of range (parallelism {parallelism})",
+                self.name()
+            );
         }
+        let inst = partition; // this execution instance's index
 
         let options = self.options.clone();
         let projection = self.projection.clone();
@@ -355,7 +415,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 // Restore committed per-(topic,partition) offsets, if any.
                 let ck = checkpoint_location.as_deref().and_then(|l| CheckpointStore::from_location(l).ok());
                 let committed: std::collections::HashMap<(String, i32), i64> = match &ck {
-                    Some(ck) => read_committed_offsets(ck).await,
+                    Some(ck) => read_committed_offsets(ck, inst, parallelism).await,
                     None => std::collections::HashMap::new(),
                 };
                 let earliest = options.starting_offsets.eq_ignore_ascii_case("earliest");
@@ -363,24 +423,37 @@ impl ExecutionPlan for KafkaSourceExec {
                 // Resolve assignments (topic, partition, start offset, end=high watermark) in a SYNC
                 // step that returns owned data — so rdkafka's non-Send `Metadata` is never held
                 // across an await/yield in this stream.
+                //
+                // Parallel-source assignment: collect ALL (topic, partition) pairs, sort into a
+                // stable global order, and keep only those whose global index `% parallelism == inst`
+                // (Spark KafkaSourceRDD one-task-per-partition / Flink FLIP-27 round-robin split
+                // assignment). Deterministic, so on restart instance `i` resumes exactly its own
+                // partitions (its per-instance committed offsets).
                 let resolve = || -> std::result::Result<Vec<(String, i32, i64, i64)>, String> {
-                    let mut out = vec![];
+                    let mut pairs: Vec<(String, i32)> = vec![];
                     for topic in &topics {
                         let md = consumer
                             .fetch_metadata(Some(topic), timeout)
                             .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
-                            let part = p.id();
-                            let (low, high) = consumer
-                                .fetch_watermarks(topic, part, timeout)
-                                .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
-                            let start = committed
-                                .get(&(topic.clone(), part))
-                                .copied()
-                                .unwrap_or(if earliest { low } else { high });
-                            out.push((topic.clone(), part, start, high));
+                            pairs.push((topic.clone(), p.id()));
                         }
+                    }
+                    pairs.sort();
+                    let mut out = vec![];
+                    for (g, (topic, part)) in pairs.into_iter().enumerate() {
+                        if g % parallelism != inst {
+                            continue; // owned by another instance
+                        }
+                        let (low, high) = consumer
+                            .fetch_watermarks(&topic, part, timeout)
+                            .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
+                        let start = committed
+                            .get(&(topic.clone(), part))
+                            .copied()
+                            .unwrap_or(if earliest { low } else { high });
+                        out.push((topic, part, start, high));
                     }
                     Ok(out)
                 };
@@ -460,7 +533,7 @@ impl ExecutionPlan for KafkaSourceExec {
 
                 // Stage the offsets actually reached (write-ahead); runner commits after durable.
                 if let Some(ck) = &ck {
-                    write_staged_offsets(ck, &next).await;
+                    write_staged_offsets(ck, &next, inst, parallelism).await;
                 }
                 yield Ok(FlowEvent::Marker(sail_common_datafusion::streaming::event::marker::FlowMarker::EndOfData));
             };

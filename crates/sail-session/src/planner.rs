@@ -358,6 +358,18 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             let [input] = physical_inputs else {
                 return internal_err!("WatermarkNode requires exactly one physical input");
             };
+            // If upstream is parallel (e.g. a multi-partition Kafka source reading partitions
+            // concurrently), barrier-align N→1 BEFORE deriving the watermark. The source emits
+            // no watermarks itself, so merging first and computing a single event-time watermark
+            // over the full stream is correct and avoids the per-partition-watermark hazard
+            // (a fast partition advancing event-time and prematurely closing windows — the
+            // failure mode Flink guards against with per-split watermarks + MIN alignment).
+            let input: Arc<dyn ExecutionPlan> =
+                if input.properties().output_partitioning().partition_count() > 1 {
+                    Arc::new(StreamBarrierAlignExec::new(input.clone()))
+                } else {
+                    input.clone()
+                };
             let data_schema = Arc::new(
                 sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema(
                     &input.schema(),

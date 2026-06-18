@@ -1109,6 +1109,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 bounded,
                 checkpoint_location,
                 realtime_interval_ms,
+                parallelism,
             }) => {
                 let schema = Arc::new(self.try_decode_schema(&schema)?);
                 let projection = projection
@@ -1143,6 +1144,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     bounded,
                     checkpoint_location,
                     realtime_interval_ms,
+                    parallelism as usize,
                 )?))
             }
             NodeKind::WindowAccum(gen::WindowAccumExecNode {
@@ -2215,6 +2217,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 bounded: kafka.bounded(),
                 checkpoint_location: kafka.checkpoint_location().map(str::to_string),
                 realtime_interval_ms: kafka.realtime_interval_ms(),
+                parallelism: kafka.parallelism() as u64,
             })
         } else if let Some(window) = node.as_any().downcast_ref::<WindowAccumExec>() {
             let input = self.try_encode_plan(window.input().clone())?;
@@ -4653,6 +4656,7 @@ mod tests {
             starting_offsets: "earliest".to_string(),
             group_id: "vajra-test".to_string(),
             max_batch_size: 2000,
+            max_offsets_per_trigger: None,
             fetch_timeout_ms: 250,
             extra,
         };
@@ -4668,6 +4672,7 @@ mod tests {
             false,
             Some("file:///tmp/ck".to_string()),
             Some(1_000),
+            4,
         )?);
 
         let buf = codec.try_encode_plan(plan)?;
@@ -4677,6 +4682,7 @@ mod tests {
             .as_any()
             .downcast_ref::<KafkaSourceExec>()
             .ok_or_else(|| plan_datafusion_err!("decoded must be KafkaSourceExec"))?;
+        assert_eq!(k.parallelism(), 4, "source parallelism round-trips");
         assert_eq!(k.options().bootstrap_servers, "localhost:9092");
         assert_eq!(k.options().subscribe.as_deref(), Some("topic-a,topic-b"));
         assert_eq!(k.options().starting_offsets, "earliest");

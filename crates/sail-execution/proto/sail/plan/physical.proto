@@ -778,6 +778,7 @@ message KafkaSourceExecNode {
   bool bounded = 11;
   optional string checkpoint_location = 12;
   optional uint64 realtime_interval_ms = 13;
+  uint64 parallelism = 14;
 }
 
 message StreamLimitExecNode {
