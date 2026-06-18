@@ -59,9 +59,38 @@ gap (minus co-location contention) is the throughput difference.
 **Grounded fix (the path to matching/beating Flink):** parallelize the source across
 Kafka partitions — one reader per partition (Spark Structured Streaming: one task per
 TopicPartition; Flink: one source subtask per partition) → `UnknownPartitioning(N)`,
-each instance reading its assigned partitions, offsets staged per instance. Combined
-with Vajra's no-JVM / Arrow-columnar advantages, that is what closes (and should
-invert) this gap. This is now the #1 streaming-throughput item.
+each instance reading its assigned partitions, offsets staged per instance.
+
+### Parallel source — IMPLEMENTED + RE-MEASURED (Vajra now BEATS Flink)
+
+Implemented (commit bd8679f2): `KafkaSourceExec` reports `UnknownPartitioning(N)`
+(N = `target_partitions`); `execute(i)` owns the Kafka partitions whose stable global
+index `% N == i` (Spark KafkaSourceRDD / Flink FLIP-27 split assignment); per-instance
+EO offset staging (`sources/0/inst-<i>/...`); planner coalesces N→1 via
+`StreamBarrierAlignExec` **before** the single `WatermarkExec` (so one event-time
+watermark is derived over the merged stream — no per-partition-watermark hazard); the
+existing 1→N hash exchange then re-parallelizes the keyed agg. So read + `from_json`
+parse now run N-way; only the cheap merge + watermark is serial.
+
+Re-measured, same single c7g.4xlarge, same 100M-event workload, both engines:
+
+| Engine | Wall (100M) | Throughput | vs Flink |
+|---|--:|--:|--:|
+| Apache Flink 1.19 | 86.4 s | 1.157M ev/s | 1.0× |
+| Vajra **single-threaded source** (before) | 205.8 s | 0.49M ev/s | 0.42× |
+| **Vajra parallel source** (after) | **64.8 s** | **1.543M ev/s** | **1.33× faster** |
+
+**Parallelizing the source took Vajra from 0.42× → 1.33× of Flink (a 3.15× self-speedup)
+— Vajra now wins this windowed-aggregation head-to-head**, on identical hardware, with
+no JVM and Arrow-columnar execution.
+
+Honest caveat (orthogonal, documented): Vajra's `availableNow`+checkpoint emits only
+watermark-*closed* windows and stages the rest for the next run (here 927 window-key
+groups emitted), whereas Flink's bounded read fires all windows. Throughput is measured
+over all 100M processed events (both engines fully process the stream); aligning the
+*emission* (flush-on-EndOfData for `Trigger.AvailableNow`) is the remaining item for an
+identical-output comparison. EO across worker/instance restart with the per-instance
+offsets is also still to be chaos-validated.
 
 ## The Vajra bug this surfaced (honest finding)
 
