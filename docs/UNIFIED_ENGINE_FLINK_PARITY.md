@@ -1,5 +1,14 @@
 # Vajra — one engine for batch + streaming + realtime (Spark API, Flink-class streaming)
 
+> **⚠️ Measured update (2026-06-19):** the rigorous, like-for-like head-to-head vs **official
+> Apache Flink 1.19** on EKS supersedes the older single-node "sub-ms / Flink 1.18"
+> directional figures below. Measured: Vajra **wins throughput (1.33×) and memory (6.4×)**
+> and holds **exactly-once across a hard kill**, but **Flink wins latency** (Vajra has no
+> record-level low-latency sink yet). Authoritative results + the grounded gap analysis +
+> roadmap: **[STREAMING_VS_FLINK_EKS.md](benchmarks/STREAMING_VS_FLINK_EKS.md)** and
+> **[PROD_GRADE_ROADMAP.md](PROD_GRADE_ROADMAP.md)**. Treat the "realtime/latency" claims
+> in this vision doc as *target*, not *measured*.
+
 **Vision.** One product, one API. Write Spark DataFrame/SQL (the "Spark coding way") and run it three ways
 on the same native engine:
 - **batch** — Spark-class (already shipped; ~30× faster than Spark 3.5 on TPC-H SF-1, head-to-head).
