@@ -2,6 +2,15 @@ use std::collections::HashMap;
 
 use datafusion_common::{DataFusionError, Result};
 
+/// DataFusion's default execution batch size — a good throughput/latency balance
+/// and far below any i32-offset risk.
+pub const DEFAULT_ARROW_BATCH_ROWS: usize = 8192;
+/// Hard ceiling on rows per Arrow RecordBatch flushed by the Kafka source. Keeps
+/// a single batch's variable-length (Utf8/Binary) columns safely under Arrow's
+/// i32 `OffsetBuffer` limit (2 GiB) even with multi-KB values: 262144 rows ×
+/// ~8 KiB ≈ 2 GiB, so realistic payloads stay well clear.
+pub const MAX_ARROW_BATCH_ROWS: usize = 262_144;
+
 #[derive(Debug, Clone)]
 pub struct KafkaReadOptions {
     /// Kafka bootstrap servers, e.g. "localhost:9092".
@@ -14,8 +23,18 @@ pub struct KafkaReadOptions {
     pub starting_offsets: String,
     /// Consumer group ID (auto-generated if not supplied).
     pub group_id: String,
-    /// Maximum number of records collected into a single micro-batch.
+    /// Maximum rows collected into a single **Arrow RecordBatch** before it is
+    /// flushed downstream. This is an internal execution-buffer size — NOT the
+    /// per-trigger admission limit (see `max_offsets_per_trigger`). It is clamped
+    /// to `MAX_ARROW_BATCH_ROWS` so a single batch's variable-length columns can
+    /// never exceed Arrow's i32 `OffsetBuffer` limit (2 GiB). DataFusion's default
+    /// execution batch size is 8192; we match that.
     pub max_batch_size: usize,
+    /// Spark `maxOffsetsPerTrigger`: the maximum number of Kafka offsets admitted
+    /// per micro-batch (rate/admission control). Distinct from `max_batch_size`
+    /// (the Arrow buffer size) — conflating them is what caused giant 20M-row
+    /// batches to overflow `from_json`'s i32 string offsets. `None` = no limit.
+    pub max_offsets_per_trigger: Option<usize>,
     /// How long to wait (ms) for a batch to fill before flushing a partial batch.
     pub fetch_timeout_ms: u64,
     /// Extra rdkafka options: keys have the "kafka." prefix already stripped.
@@ -29,7 +48,8 @@ impl KafkaReadOptions {
         let mut subscribe_pattern = None;
         let mut starting_offsets = "latest".to_string();
         let mut group_id = Self::generate_group_id("vajra");
-        let mut max_batch_size: usize = 1000;
+        let mut max_batch_size: usize = DEFAULT_ARROW_BATCH_ROWS;
+        let mut max_offsets_per_trigger: Option<usize> = None;
         let mut fetch_timeout_ms: u64 = 500;
         let mut extra = HashMap::new();
 
@@ -53,10 +73,22 @@ impl KafkaReadOptions {
                 "groupidprefix" => {
                     group_id = Self::generate_group_id(&value);
                 }
-                "maxbatchsize" | "maxoffsetspertrigger" | "maxoffsetspermicrobatch" => {
-                    max_batch_size = value
+                "maxbatchsize" => {
+                    // Arrow execution-buffer size; clamp so a single batch can never
+                    // overflow Arrow's i32 string/binary OffsetBuffer (2 GiB).
+                    let n = value
                         .parse::<usize>()
                         .map_err(|e| DataFusionError::Plan(format!("invalid {key}: {e}")))?;
+                    max_batch_size = n.clamp(1, MAX_ARROW_BATCH_ROWS);
+                }
+                "maxoffsetspertrigger" | "maxoffsetspermicrobatch" => {
+                    // Spark admission limit (offsets per micro-batch) — NOT the Arrow
+                    // buffer size. Does not affect per-batch memory / offset width.
+                    max_offsets_per_trigger = Some(
+                        value
+                            .parse::<usize>()
+                            .map_err(|e| DataFusionError::Plan(format!("invalid {key}: {e}")))?,
+                    );
                 }
                 "fetchtimeoutms" => {
                     fetch_timeout_ms = value.parse::<u64>().map_err(|e| {
@@ -89,6 +121,7 @@ impl KafkaReadOptions {
             starting_offsets,
             group_id,
             max_batch_size,
+            max_offsets_per_trigger,
             fetch_timeout_ms,
             extra,
         })

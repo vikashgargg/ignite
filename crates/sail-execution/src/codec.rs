@@ -1129,6 +1129,10 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     starting_offsets,
                     group_id,
                     max_batch_size,
+                    // Admission control (maxOffsetsPerTrigger) is a driver/planner concern
+                    // (it bounds each micro-batch's offset range); the worker source reads
+                    // its assigned range, so it is not serialized to workers.
+                    max_offsets_per_trigger: None,
                     fetch_timeout_ms,
                     extra,
                 };

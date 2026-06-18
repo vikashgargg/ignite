@@ -28,6 +28,14 @@ use sail_common_datafusion::streaming::source::StreamSource;
 
 use crate::formats::kafka::options::KafkaReadOptions;
 
+/// Byte budget per emitted Arrow RecordBatch. Flush when the accumulated
+/// variable-length payload (value + key + topic) reaches this, regardless of row
+/// count, so no Utf8/Binary column can approach Arrow's i32 `OffsetBuffer` limit
+/// (2 GiB). 128 MiB keeps batches small for cache locality while bounding the
+/// 2 GiB array risk by ~16x headroom — the byte-driven analogue of DataFusion's
+/// row-based `batch_size`.
+const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
+
 /// Read committed per-(topic,partition) offsets from the checkpoint store (single object
 /// `sources/0/committed`, a JSON map `"topic:partition" -> next-offset`). The runner commits
 /// staged→committed via `CheckpointStore.promote` after the batch output is durable.
@@ -401,7 +409,17 @@ impl ExecutionPlan for KafkaSourceExec {
                 let mut msg_stream = consumer.stream();
                 while remaining(&next) > 0 {
                     let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
-                    while rows.len() < max_batch && remaining(&next) > 0 {
+                    // Flush on EITHER a row cap OR a byte cap. The byte cap is the
+                    // real safety guarantee: Arrow Utf8/Binary use i32 offsets (2 GiB
+                    // per array), and the overflow is byte-driven, so a row count alone
+                    // is too coarse (e.g. 262k rows x 8 KiB = 2 GiB). Bounding bytes keeps
+                    // every variable-length column safely under the i32 limit regardless
+                    // of payload size — matching how Arrow/DataFusion size-bound batches.
+                    let mut batch_bytes: usize = 0;
+                    while rows.len() < max_batch
+                        && batch_bytes < MAX_BATCH_BYTES
+                        && remaining(&next) > 0
+                    {
                         match tokio::time::timeout(timeout, msg_stream.next()).await {
                             Ok(Some(Ok(msg))) => {
                                 let tp = (msg.topic().to_string(), msg.partition());
@@ -412,9 +430,14 @@ impl ExecutionPlan for KafkaSourceExec {
                                     Timestamp::CreateTime(ms) => (ms, 0i32),
                                     Timestamp::LogAppendTime(ms) => (ms, 1i32),
                                 };
+                                let key = msg.key().map(|k| k.to_vec());
+                                let value = msg.payload().map(|v| v.to_vec());
+                                batch_bytes += value.as_ref().map_or(0, |v| v.len())
+                                    + key.as_ref().map_or(0, |k| k.len())
+                                    + msg.topic().len();
                                 rows.push(KafkaRow {
-                                    key: msg.key().map(|k| k.to_vec()),
-                                    value: msg.payload().map(|v| v.to_vec()),
+                                    key,
+                                    value,
                                     topic: msg.topic().to_string(),
                                     partition: msg.partition(),
                                     offset: msg.offset(),
@@ -526,6 +549,7 @@ impl ExecutionPlan for KafkaSourceExec {
 
                 let mut msg_stream = consumer.stream();
                 let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
+                let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let mut timer = tokio::time::interval(Duration::from_millis(interval_ms.max(1)));
                 timer.tick().await; // discard the immediate first tick
                 loop {
@@ -540,6 +564,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                     Err(e) => { yield Err(e); return; }
                                 }
                                 rows.clear();
+                                batch_bytes = 0;
                             }
                             write_staged_epoch_offsets(&ck, epoch, &next).await;
                             yield Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id: epoch }));
@@ -555,23 +580,30 @@ impl ExecutionPlan for KafkaSourceExec {
                                     };
                                     let tp = (m.topic().to_string(), m.partition());
                                     next.insert(tp, m.offset() + 1);
+                                    let key = m.key().map(|k| k.to_vec());
+                                    let value = m.payload().map(|v| v.to_vec());
+                                    batch_bytes += value.as_ref().map_or(0, |v| v.len())
+                                        + key.as_ref().map_or(0, |k| k.len())
+                                        + m.topic().len();
                                     rows.push(KafkaRow {
-                                        key: m.key().map(|k| k.to_vec()),
-                                        value: m.payload().map(|v| v.to_vec()),
+                                        key,
+                                        value,
                                         topic: m.topic().to_string(),
                                         partition: m.partition(),
                                         offset: m.offset(),
                                         timestamp_ms: ts_ms,
                                         timestamp_type: ts_type,
                                     });
-                                    // Flush a full batch immediately for throughput (epoch still
-                                    // delimits the commit; mid-epoch batches just carry data forward).
-                                    if rows.len() >= max_batch {
+                                    // Flush on row OR byte cap for throughput (epoch still delimits
+                                    // the commit; mid-epoch batches just carry data forward). Byte cap
+                                    // keeps Utf8/Binary columns under Arrow's i32 offset limit.
+                                    if rows.len() >= max_batch || batch_bytes >= MAX_BATCH_BYTES {
                                         match build_batch(&full_schema, &projection, &rows) {
                                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
                                             Err(e) => { yield Err(e); return; }
                                         }
                                         rows.clear();
+                                        batch_bytes = 0;
                                     }
                                 }
                                 Some(Err(e)) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
@@ -646,9 +678,10 @@ impl ExecutionPlan for KafkaSourceExec {
             // Collect messages into micro-batches.
             loop {
                 let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
+                let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let deadline = tokio::time::Instant::now() + timeout;
 
-                while rows.len() < max_batch {
+                while rows.len() < max_batch && batch_bytes < MAX_BATCH_BYTES {
                     let remaining =
                         deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {
@@ -661,9 +694,14 @@ impl ExecutionPlan for KafkaSourceExec {
                                 Timestamp::CreateTime(ms) => (ms, 0i32),
                                 Timestamp::LogAppendTime(ms) => (ms, 1i32),
                             };
+                            let key = msg.key().map(|k| k.to_vec());
+                            let value = msg.payload().map(|v| v.to_vec());
+                            batch_bytes += value.as_ref().map_or(0, |v| v.len())
+                                + key.as_ref().map_or(0, |k| k.len())
+                                + msg.topic().len();
                             rows.push(KafkaRow {
-                                key: msg.key().map(|k| k.to_vec()),
-                                value: msg.payload().map(|v| v.to_vec()),
+                                key,
+                                value,
                                 topic: msg.topic().to_string(),
                                 partition: msg.partition(),
                                 offset: msg.offset(),
