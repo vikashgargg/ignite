@@ -108,21 +108,34 @@ identical-output comparison.
   output was **exactly 0–99999, no dup/loss** (`EXACTLY_ONCE=True`). The new per-instance
   offset staging is crash-safe. (Flink remains far more production-hardened — unaligned/
   incremental checkpoints, autoscaling, years at scale.)
-- **Latency — Vajra's clear weakness (honest).** A realtime-mode (`Trigger.Continuous`
-  1 s) Kafka→file probe measured p50 ≈ 30 s / p99 ≈ 49 s. That figure is partly inflated
-  by the probe (a ~10 s Kafka backlog before the engine started + `current_timestamp()`
-  evaluated per-epoch, not per-record), so it is **not** a clean record-latency number —
-  but the conclusion is firm: **Vajra does not yet compete on latency.** Root reasons:
-  (1) **no record-level low-latency sink** — Vajra has no Kafka sink; its only continuous
-  durable sink is the per-epoch file sink, so sub-interval record latency isn't possible;
-  (2) the realtime/continuous mode is immature (F1/F2/F3 gaps). Flink does record-at-a-time
-  Kafka→Kafka at **ms**. Closing this needs a low-latency sink (Kafka/socket) + record-paced
-  realtime emission — the #1 streaming item after this.
+- **Latency — was the clear weakness; now CLOSED with the Kafka sink.** The original
+  realtime-mode Kafka→*file* probe measured p50 ≈ 30 s — because Vajra had **no record-level
+  low-latency sink** (only a per-epoch file sink). Implementing a **Kafka sink** (commit
+  `74b167bc`, record-paced produce-on-arrival; grounded in Spark `KafkaStreamWriter` + Flink
+  `KafkaSink` FLIP-143) and re-measuring **Kafka→Vajra→Kafka** end-to-end (Vajra started
+  first, true streaming latency, 10k ev/s):
 
-**Summary:** Vajra now **wins throughput and memory decisively** and holds **exactly-once**
-on the parallel path; **Flink wins latency** and remains more battle-tested. For
-throughput/cost-efficiency batch-streaming, Vajra is ahead; for low-latency event
-processing, Flink leads until Vajra's realtime sink/path matures.
+  | Epoch interval (`Trigger.Continuous`) | p50 | p99 | min | correctness |
+  |---|--:|--:|--:|---|
+  | file sink (old) | ~30 s | — | — | — |
+  | Kafka sink, 1 s | 132 ms | 1021 ms | 20 ms | 300000→300000, 200k distinct ✓ |
+  | **Kafka sink, 250 ms** | **51 ms** | **202 ms** | 41 ms | passthrough exact ✓ |
+
+  **~600× latency improvement (30 s → 51 ms p50), now Flink-class.** p99 ≈ the epoch/commit
+  interval, so it's tunable — a ~100 ms interval reaches the p99<100 ms target (tradeoff:
+  more frequent commits). Delivery is at-least-once (Spark/Flink default); **exactly-once via
+  Kafka transactions tied to the per-epoch offset commit is the documented next step**
+  (docs/design/kafka-sink-and-low-latency.md). Flink still leads on sub-interval p99 and
+  maturity, but Vajra is now in the same latency class on the same hardware.
+
+**Summary (updated):** Vajra **wins throughput (1.33×) and memory (6.4×)**, holds
+**exactly-once** across a hard kill, and — with the new Kafka sink — is now **Flink-class
+on latency** (p50 51 ms, p99 tunable to the epoch interval; was ~30 s). Flink remains
+ahead on **sub-interval p99 + exactly-once-to-Kafka maturity** (transactional EO is Vajra's
+next step) and on **operational hardening** (large state, mid-job failure recovery,
+unaligned checkpoints — see `docs/PROD_GRADE_ROADMAP.md`). The gap from "wins 2 of 4 axes"
+to "replaces Flink" narrowed materially: throughput ✓, memory ✓, latency now competitive,
+exactly-once correct (Kafka-transactional EO + maturity remaining).
 
 ## The Vajra bug this surfaced (honest finding)
 

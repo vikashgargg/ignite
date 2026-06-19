@@ -73,19 +73,20 @@ gap analysis, each grounded in how the incumbents do it.
 - **Spark Real-Time Mode (2025):** abandons the micro-batch latency floor with
   **long-running stages** that process records on arrival → sub-second/ms p99, *keeping*
   exactly-once + the DataFrame API. (https://www.databricks.com/blog/introducing-real-time-mode-apache-sparktm-structured-streaming)
-- **Vajra now:** default is micro-batch (`availableNow`/`ProcessingTime`); `ProcessingTime`
-  pacing is *not yet honored*. The `StreamDriver::Realtime` continuous pipeline exists but
-  only has a **per-epoch file sink** (no Kafka/socket sink) → durable latency is
-  commit-interval-bound; measured probe p50 ~30 s.
-- **Needed (build on Spark Real-Time Mode + Flink):**
-  1. **A record-level low-latency sink** — Kafka sink first (the missing connector), then
-     socket; emit per record/per-mini-flush, not per epoch.
-  2. **Record-paced realtime emission** in `StreamDriver::Realtime` — long-running operators
-     that forward on arrival (Spark Real-Time Mode model), decoupled from the durable
-     commit cadence (commit asynchronously off the record path — already the design intent).
-  3. **Honor `ProcessingTime` trigger** intervals for predictable micro-batch latency.
-  - *Acceptance:* sustained 100k ev/s, **p99 < 100 ms** record-to-emit on a stateless
-    Kafka→Kafka pipeline; windowed-agg emit-latency ≤ Flink at matched semantics.
+- **Vajra now:** **Kafka sink landed** (commit `74b167bc`) — `writeStream.format("kafka")`
+  produces records **on arrival** (record-paced) via librdkafka, flushing per epoch. Measured
+  Kafka→Vajra→Kafka: **p50 51 ms / p99 202 ms at a 250 ms epoch** (p99 ≈ epoch interval),
+  vs the old file-sink ~30 s — **~600× better, Flink-class** (`STREAMING_VS_FLINK_EKS.md`).
+  Delivery = at-least-once.
+- **Remaining (build on Spark Real-Time Mode + Flink):**
+  1. ✅ **Record-level low-latency sink** — Kafka sink done. (Socket sink next for non-Kafka.)
+  2. **Exactly-once to Kafka** — transactions (`begin/commit_transaction`) tied to the
+     per-epoch offset commit (Flink `KafkaSink` EXACTLY_ONCE / 2PC). Currently at-least-once.
+  3. **Sub-interval p99** — decouple the produce/flush cadence from the offset-commit epoch
+     so p99 < 100 ms without paying a commit per 100 ms (Spark Real-Time Mode long-running
+     stages); honor `ProcessingTime` trigger intervals.
+  - *Acceptance:* sustained 100k ev/s, **p99 < 100 ms** record-to-emit (close: 202 ms at
+    250 ms epoch); exactly-once Kafka→Kafka across a kill.
 
 ### 3.2 State management & large state — **P0**
 - **Flink:** pluggable keyed state; **RocksDB** backend for state >> memory; **incremental

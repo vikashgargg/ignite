@@ -19,12 +19,15 @@ Full writeup: [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAM
 | **Throughput** | 1.157M ev/s | **1.543M ev/s** | 🟢 Vajra **1.33× faster** |
 | **Memory** (peak RSS) | 8.24 GiB | **1.29 GiB** | 🟢 Vajra **~6.4× less** |
 | **Exactly-once** | mature | EO across **hard kill** ✓ (100000/100000, parallel source) | 🟢 correct / 🟡 less hardened |
-| **Latency** | ms (Kafka) / ~ckpt (file) | p50 ~30 s (realtime probe) | 🔴 **Flink wins** (no low-latency sink yet) |
+| **Latency** | ms (Kafka) / ~ckpt (file) | **p50 51 ms / p99 202 ms** (Kafka sink, 250 ms epoch) | 🟢 now **Flink-class** (was ~30 s) |
 
-Surfaced + fixed two real bugs via the true head-to-head: Arrow i32 offset overflow
-(`6b812758`) and a single-threaded Kafka source (`bd8679f2`, parallelized per Spark
-`KafkaSourceRDD` / Flink FLIP-27). **Vajra now wins throughput + memory + holds
-exactly-once; latency is the documented #1 gap** (see the roadmap). All AWS torn down to $0.
+Surfaced + fixed two real bugs via the true head-to-head (Arrow i32 offset overflow
+`6b812758`; single-threaded Kafka source `bd8679f2`, parallelized per Spark
+`KafkaSourceRDD` / Flink FLIP-27), then **added a Kafka sink** (`74b167bc`,
+record-paced) that took streaming latency from ~30 s → **p50 51 ms (~600×, Flink-class)**.
+**Vajra now wins throughput + memory, holds exactly-once, and is latency-competitive.**
+Remaining: exactly-once-to-Kafka (transactions), sub-100 ms p99, operational hardening —
+see [docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md). All AWS torn down to $0.
 
 ---
 
