@@ -79,6 +79,7 @@ message ExtendedPhysicalPlanNode {
     ParallelStreamSinkExecNode parallel_stream_sink = 64;
     FileSourceExecNode file_source = 65;
     ExplicitRepartitionExecNode explicit_repartition = 66;
+    KafkaSinkExecNode kafka_sink = 67;
   }
 }
 
@@ -635,6 +636,15 @@ message DeltaRemoveActionsExecNode {
 
 message ConsoleSinkExecNode {
   bytes input = 1;
+}
+
+message KafkaSinkExecNode {
+  bytes input = 1;
+  string bootstrap_servers = 2;
+  string topic = 3;
+  optional string value_col = 4;
+  optional string key_col = 5;
+  map<string, string> extra = 6;
 }
 
 message SocketSourceExecNode {

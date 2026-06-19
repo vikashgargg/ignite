@@ -83,7 +83,7 @@ use sail_common_datafusion::udf::StreamUDF;
 use sail_data_source::formats::binary::source::BinarySource;
 use sail_data_source::formats::console::ConsoleSinkExec;
 use sail_data_source::formats::json::permissive::{JsonMode, PermissiveJsonSource};
-use sail_data_source::formats::kafka::{KafkaReadOptions, KafkaSourceExec};
+use sail_data_source::formats::kafka::{KafkaReadOptions, KafkaSinkExec, KafkaSourceExec};
 use sail_data_source::formats::python::{
     InputPartition, PythonDataSourceExec, PythonDataSourceWriteCommitExec,
     PythonDataSourceWriteExec,
@@ -915,6 +915,24 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             NodeKind::ConsoleSink(gen::ConsoleSinkExecNode { input }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 Ok(Arc::new(ConsoleSinkExec::new(input)))
+            }
+            NodeKind::KafkaSink(gen::KafkaSinkExecNode {
+                input,
+                bootstrap_servers,
+                topic,
+                value_col,
+                key_col,
+                extra,
+            }) => {
+                let input = self.try_decode_plan(&input, ctx)?;
+                Ok(Arc::new(KafkaSinkExec::try_new(
+                    input,
+                    bootstrap_servers,
+                    topic,
+                    value_col,
+                    key_col,
+                    extra.into_iter().collect(),
+                )?))
             }
             NodeKind::SocketSource(gen::SocketSourceExecNode {
                 host,
@@ -2062,6 +2080,16 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         } else if let Some(console_sink) = node.as_any().downcast_ref::<ConsoleSinkExec>() {
             let input = self.try_encode_plan(console_sink.input().clone())?;
             NodeKind::ConsoleSink(gen::ConsoleSinkExecNode { input })
+        } else if let Some(sink) = node.as_any().downcast_ref::<KafkaSinkExec>() {
+            let input = self.try_encode_plan(sink.input().clone())?;
+            NodeKind::KafkaSink(gen::KafkaSinkExecNode {
+                input,
+                bootstrap_servers: sink.bootstrap_servers().to_string(),
+                topic: sink.topic().to_string(),
+                value_col: sink.value_col().map(str::to_string),
+                key_col: sink.key_col().map(str::to_string),
+                extra: sink.extra().clone(),
+            })
         } else if let Some(socket_source) = node.as_any().downcast_ref::<SocketSourceExec>() {
             let options = socket_source.options();
             let max_batch_size = u64::try_from(options.max_batch_size).map_err(|_| {
