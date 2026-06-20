@@ -115,15 +115,20 @@ identical-output comparison.
   `KafkaSink` FLIP-143) and re-measuring **Kafka→Vajra→Kafka** end-to-end (Vajra started
   first, true streaming latency, 10k ev/s):
 
-  | Epoch interval (`Trigger.Continuous`) | p50 | p99 | min | correctness |
+  | Config | p50 | p99 | min | correctness |
   |---|--:|--:|--:|---|
   | file sink (old) | ~30 s | — | — | — |
-  | Kafka sink, 1 s | 132 ms | 1021 ms | 20 ms | 300000→300000, 200k distinct ✓ |
-  | **Kafka sink, 250 ms** | **51 ms** | **202 ms** | 41 ms | passthrough exact ✓ |
+  | Kafka sink, 1 s epoch | 132 ms | 1021 ms | 20 ms | 300000→300000 ✓ |
+  | Kafka sink, 250 ms epoch | 51 ms | 202 ms | 41 ms | passthrough exact ✓ |
+  | **Kafka sink, 1 s epoch + 5 ms decoupled flush** | **27 ms** | **51 ms** | 18 ms | passthrough ✓ |
 
-  **~600× latency improvement (30 s → 51 ms p50), now Flink-class.** p99 ≈ the epoch/commit
-  interval, so it's tunable — a ~100 ms interval reaches the p99<100 ms target (tradeoff:
-  more frequent commits). Default delivery is at-least-once (Spark/Flink default).
+  **~600× latency improvement (30 s → 27 ms p50, p99 < 100 ms).** Initially p99 ≈ the epoch
+  interval (records waited for the epoch tick). Decoupling data flush from the commit epoch
+  (commit `0e9aedfd`; a 5 ms data-flush timer emits records on arrival while commits stay at
+  the `Trigger.Continuous` interval — the **Spark Real-Time Mode** idea, native Arrow impl)
+  cut p99 from **1021 ms → 51 ms at the SAME 1 s epoch** — proving it's the decoupling, not a
+  smaller commit cadence. **Vajra now hits sub-100 ms p99 without sacrificing commit/EO
+  efficiency.** Default delivery is at-least-once (Spark/Flink default).
 
 - **Exactly-once to Kafka — IMPLEMENTED + chaos-VALIDATED** (commit `f1b978e0`). EO mode
   (`.option("delivery","exactly_once")` + a shared `kafka.group.id`) uses Flink's

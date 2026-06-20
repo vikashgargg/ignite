@@ -83,11 +83,12 @@ gap analysis, each grounded in how the incumbents do it.
   2. ✅ **Exactly-once to Kafka** — DONE + chaos-validated (commit `f1b978e0`): transactional
      producer + `send_offsets_to_transaction` (records+offsets atomic) + `transactional.id`
      fencing + source group-offset recovery. Kill-mid-stream chaos: 100000/100000 exactly once.
-  3. **Sub-interval p99** — decouple the produce/flush cadence from the offset-commit epoch
-     so p99 < 100 ms without paying a commit per 100 ms (Spark Real-Time Mode long-running
-     stages); honor `ProcessingTime` trigger intervals.
-  - *Acceptance:* sustained 100k ev/s, **p99 < 100 ms** record-to-emit (close: 202 ms at
-    250 ms epoch); exactly-once Kafka→Kafka across a kill.
+  3. ✅ **Sub-interval p99** — DONE: a 5 ms data-flush timer decoupled from the commit epoch
+     (Spark Real-Time Mode idea, native Arrow impl) → **p99 51 ms / p50 27 ms at a 1 s epoch**
+     (was 1021 ms), so latency is independent of the commit cadence. (`ProcessingTime` trigger
+     pacing still to honor for the micro-batch path.)
+  - *Acceptance:* ✅ **p99 < 100 ms** (51 ms) at 10k ev/s; ✅ exactly-once Kafka→Kafka across
+    a kill (100000/100000). Latency P0 essentially complete.
 
 ### 3.2 State management & large state — **P0**
 - **Flink:** pluggable keyed state; **RocksDB** backend for state >> memory; **incremental

@@ -19,7 +19,7 @@ Full writeup: [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAM
 | **Throughput** | 1.157M ev/s | **1.543M ev/s** | 🟢 Vajra **1.33× faster** |
 | **Memory** (peak RSS) | 8.24 GiB | **1.29 GiB** | 🟢 Vajra **~6.4× less** |
 | **Exactly-once** | mature | EO across **hard kill** ✓ (100000/100000, parallel source) | 🟢 correct / 🟡 less hardened |
-| **Latency** | ms (Kafka) / ~ckpt (file) | **p50 51 ms / p99 202 ms** (Kafka sink, 250 ms epoch) | 🟢 now **Flink-class** (was ~30 s) |
+| **Latency** | ms (Kafka) / ~ckpt (file) | **p50 27 ms / p99 51 ms** (Kafka sink + decoupled 5 ms flush, 1 s epoch) | 🟢 **sub-100 ms, Flink-class** (was ~30 s) |
 | **Exactly-once → Kafka** | transactional (FLIP-143) | **EO Kafka→Kafka across kill -9: 100000/100000** (`f1b978e0`) | 🟢 **matches Flink** |
 
 Surfaced + fixed two real bugs via the true head-to-head (Arrow i32 offset overflow
