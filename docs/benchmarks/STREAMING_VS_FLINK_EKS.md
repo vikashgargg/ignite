@@ -123,10 +123,22 @@ identical-output comparison.
 
   **~600× latency improvement (30 s → 51 ms p50), now Flink-class.** p99 ≈ the epoch/commit
   interval, so it's tunable — a ~100 ms interval reaches the p99<100 ms target (tradeoff:
-  more frequent commits). Delivery is at-least-once (Spark/Flink default); **exactly-once via
-  Kafka transactions tied to the per-epoch offset commit is the documented next step**
-  (docs/design/kafka-sink-and-low-latency.md). Flink still leads on sub-interval p99 and
-  maturity, but Vajra is now in the same latency class on the same hardware.
+  more frequent commits). Default delivery is at-least-once (Spark/Flink default).
+
+- **Exactly-once to Kafka — IMPLEMENTED + chaos-VALIDATED** (commit `f1b978e0`). EO mode
+  (`.option("delivery","exactly_once")` + a shared `kafka.group.id`) uses Flink's
+  read-process-write pattern: a transactional producer commits each epoch's records AND the
+  source's consumed offsets in **one atomic Kafka transaction** (`send_offsets_to_transaction`),
+  a stable `transactional.id` **fences/aborts orphaned txns** on restart, and the source
+  recovers from the group's committed offset. Chaos test — Kafka→Vajra→Kafka, **kill -9
+  mid-stream**, restart, `read_committed` consumer:
+
+  ```
+  EO_KAFKA total=100000 distinct=100000 dups=0 missing=0 EXACTLY_ONCE=True
+  ```
+
+  **Each of 100000 inputs appears exactly once across a hard crash — no dup, no loss.**
+  Vajra now matches Flink's exactly-once-to-Kafka guarantee.
 
 **Summary (updated):** Vajra **wins throughput (1.33×) and memory (6.4×)**, holds
 **exactly-once** across a hard kill, and — with the new Kafka sink — is now **Flink-class

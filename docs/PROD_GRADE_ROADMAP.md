@@ -79,9 +79,10 @@ gap analysis, each grounded in how the incumbents do it.
   vs the old file-sink ~30 s — **~600× better, Flink-class** (`STREAMING_VS_FLINK_EKS.md`).
   Delivery = at-least-once.
 - **Remaining (build on Spark Real-Time Mode + Flink):**
-  1. ✅ **Record-level low-latency sink** — Kafka sink done. (Socket sink next for non-Kafka.)
-  2. **Exactly-once to Kafka** — transactions (`begin/commit_transaction`) tied to the
-     per-epoch offset commit (Flink `KafkaSink` EXACTLY_ONCE / 2PC). Currently at-least-once.
+  1. ✅ **Record-level low-latency sink** — Kafka sink done (p50 51 ms). (Socket sink next.)
+  2. ✅ **Exactly-once to Kafka** — DONE + chaos-validated (commit `f1b978e0`): transactional
+     producer + `send_offsets_to_transaction` (records+offsets atomic) + `transactional.id`
+     fencing + source group-offset recovery. Kill-mid-stream chaos: 100000/100000 exactly once.
   3. **Sub-interval p99** — decouple the produce/flush cadence from the offset-commit epoch
      so p99 < 100 ms without paying a commit per 100 ms (Spark Real-Time Mode long-running
      stages); honor `ProcessingTime` trigger intervals.

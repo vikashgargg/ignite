@@ -20,13 +20,16 @@ Full writeup: [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAM
 | **Memory** (peak RSS) | 8.24 GiB | **1.29 GiB** | 🟢 Vajra **~6.4× less** |
 | **Exactly-once** | mature | EO across **hard kill** ✓ (100000/100000, parallel source) | 🟢 correct / 🟡 less hardened |
 | **Latency** | ms (Kafka) / ~ckpt (file) | **p50 51 ms / p99 202 ms** (Kafka sink, 250 ms epoch) | 🟢 now **Flink-class** (was ~30 s) |
+| **Exactly-once → Kafka** | transactional (FLIP-143) | **EO Kafka→Kafka across kill -9: 100000/100000** (`f1b978e0`) | 🟢 **matches Flink** |
 
 Surfaced + fixed two real bugs via the true head-to-head (Arrow i32 offset overflow
 `6b812758`; single-threaded Kafka source `bd8679f2`, parallelized per Spark
-`KafkaSourceRDD` / Flink FLIP-27), then **added a Kafka sink** (`74b167bc`,
-record-paced) that took streaming latency from ~30 s → **p50 51 ms (~600×, Flink-class)**.
-**Vajra now wins throughput + memory, holds exactly-once, and is latency-competitive.**
-Remaining: exactly-once-to-Kafka (transactions), sub-100 ms p99, operational hardening —
+`KafkaSourceRDD` / Flink FLIP-27), then **added a Kafka sink** (`74b167bc`, record-paced
+→ latency ~30 s → **p50 51 ms, ~600×, Flink-class**) and **exactly-once-to-Kafka**
+(`f1b978e0`, transactional + `send_offsets_to_transaction` + fencing; chaos-validated
+100000/100000 across a hard kill). **Vajra now wins throughput + memory, and matches
+Flink on latency *and* exactly-once-to-Kafka.** Remaining for full Flink parity:
+sub-100 ms p99, large-state backend, mid-job failure recovery, unaligned checkpoints —
 see [docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md). All AWS torn down to $0.
 
 ---
