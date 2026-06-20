@@ -90,7 +90,7 @@ gap analysis, each grounded in how the incumbents do it.
   - *Acceptance:* ✅ **p99 < 100 ms** (51 ms) at 10k ev/s; ✅ exactly-once Kafka→Kafka across
     a kill (100000/100000). Latency P0 essentially complete.
 
-### 3.2 State management & large state — **P0**
+### 3.2 State management & large state — **P0** · [design: `design/large-state-backend.md`]
 - **Flink:** pluggable keyed state; **RocksDB** backend for state >> memory; **incremental
   + changelog checkpoints** (only deltas uploaded); state TTL; **rescalable** state
   (key-group reassignment). **Flink 2.0 disaggregated state (ForSt):** state lives on
@@ -140,6 +140,13 @@ gap analysis, each grounded in how the incumbents do it.
   `WatermarkExec` (correct, but serializes the merge). No idle-source detection / alignment.
 - **Needed:** per-partition watermark generation + MIN-merge in the distributed exchange;
   idle-partition handling; allowed-lateness + side outputs.
+
+### 3.5b DataFusion 54.0.0 upgrade — **P1 (free wins)** · [plan: `design/datafusion-54-upgrade.md`]
+DF 54.0.0 brings RepartitionExec coalesce-before-distributor (helps our shuffle), Parquet
+predicate short-circuit + stats-based file/row-group reorder (faster scans), ORDER BY
+redundant-sort-key pruning, scalar-subquery physical exec, lateral joins, lambda/`array_transform`,
+an Extension Type Registry (hook for Vajra-native vector/AI types), and arrow-avro. Bump from
+53.1.0, absorb the arrow-version ripple (codec/flow-event/parquet), re-run all gates, re-bench.
 
 ### 3.6 Adaptive execution & query optimization (batch) — **P1**
 - **Spark AQE:** runtime re-optimization (coalesce shuffle partitions, skew-join handling,
