@@ -645,6 +645,9 @@ message KafkaSinkExecNode {
   optional string value_col = 4;
   optional string key_col = 5;
   map<string, string> extra = 6;
+  bool exactly_once = 7;
+  optional string group_id = 8;
+  optional string checkpoint_location = 9;
 }
 
 message SocketSourceExecNode {

@@ -107,6 +107,9 @@ impl TableFormat for KafkaTableFormat {
         let mut value_col: Option<String> = None;
         let mut key_col: Option<String> = None;
         let mut extra: HashMap<String, String> = HashMap::new();
+        let mut exactly_once = false;
+        let mut group_id: Option<String> = None;
+        let mut checkpoint_location: Option<String> = None;
         for (k, v) in flat {
             match k.to_lowercase().as_str() {
                 "kafka.bootstrap.servers" | "bootstrap.servers" | "bootstrapservers" => {
@@ -115,8 +118,17 @@ impl TableFormat for KafkaTableFormat {
                 "topic" => topic = v,
                 "value" | "valuecolumn" | "value.column" => value_col = Some(v),
                 "key" | "keycolumn" | "key.column" => key_col = Some(v),
-                // Reserved streaming/sink options the Kafka producer must not see.
-                "checkpointlocation" | "path" => {}
+                // Consumer group whose offsets the EO transaction commits (shared with source).
+                "kafka.group.id" | "group.id" | "groupid" => group_id = Some(v),
+                // Delivery guarantee: "exactly_once" / "at_least_once" (default).
+                "delivery" => {
+                    exactly_once =
+                        v.eq_ignore_ascii_case("exactly_once") || v.eq_ignore_ascii_case("exactly-once");
+                }
+                "exactly.once" | "exactlyonce" => exactly_once = v.eq_ignore_ascii_case("true"),
+                // Reserved streaming options the Kafka producer must not see directly.
+                "checkpointlocation" => checkpoint_location = Some(v),
+                "path" => {}
                 lk if lk.starts_with("kafka.") => {
                     extra.insert(lk[6..].to_string(), v);
                 }
@@ -130,6 +142,9 @@ impl TableFormat for KafkaTableFormat {
             value_col,
             key_col,
             extra,
+            exactly_once,
+            group_id,
+            checkpoint_location,
         )?))
     }
 }

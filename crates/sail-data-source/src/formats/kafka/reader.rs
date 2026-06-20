@@ -591,7 +591,26 @@ impl ExecutionPlan for KafkaSourceExec {
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
                             let part = p.id();
-                            let start = match committed.get(&(topic.clone(), part)).copied() {
+                            // Recovery precedence (EO Kafka sink first):
+                            //  1. the consumer GROUP's committed offset — for an EO Kafka sink this is
+                            //     the records' atomic commit point (sink commits offsets INTO its txn
+                            //     via send_offsets_to_transaction); an auto-generated group (file sink)
+                            //     has none here, so this is skipped and the next source is used;
+                            //  2. the object-store `realtime/committed` record (file-sink EO model);
+                            //  3. the earliest/latest watermark (fresh start).
+                            let mut one = rdkafka::TopicPartitionList::new();
+                            let _ = one.add_partition(topic, part);
+                            let group_off = consumer
+                                .committed_offsets(one, timeout)
+                                .ok()
+                                .and_then(|t| t.find_partition(topic, part).map(|e| e.offset()))
+                                .and_then(|o| match o {
+                                    rdkafka::Offset::Offset(v) => Some(v),
+                                    _ => None,
+                                });
+                            let start = match group_off
+                                .or_else(|| committed.get(&(topic.clone(), part)).copied())
+                            {
                                 Some(o) => o,
                                 None => {
                                     let (low, high) = consumer.fetch_watermarks(topic, part, timeout)

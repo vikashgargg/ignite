@@ -923,6 +923,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 value_col,
                 key_col,
                 extra,
+                exactly_once,
+                group_id,
+                checkpoint_location,
             }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 Ok(Arc::new(KafkaSinkExec::try_new(
@@ -932,6 +935,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     value_col,
                     key_col,
                     extra.into_iter().collect(),
+                    exactly_once,
+                    group_id,
+                    checkpoint_location,
                 )?))
             }
             NodeKind::SocketSource(gen::SocketSourceExecNode {
@@ -2089,6 +2095,9 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 value_col: sink.value_col().map(str::to_string),
                 key_col: sink.key_col().map(str::to_string),
                 extra: sink.extra().clone(),
+                exactly_once: sink.exactly_once(),
+                group_id: sink.group_id().map(str::to_string),
+                checkpoint_location: sink.checkpoint_location().map(str::to_string),
             })
         } else if let Some(socket_source) = node.as_any().downcast_ref::<SocketSourceExec>() {
             let options = socket_source.options();

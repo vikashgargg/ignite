@@ -29,10 +29,13 @@ use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{exec_datafusion_err, internal_err, plan_err, Result};
 use futures::StreamExt;
 use rdkafka::config::ClientConfig;
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaError;
 use rdkafka::producer::{BaseRecord, Producer, ThreadedProducer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::util::Timeout;
+use rdkafka::{Offset, TopicPartitionList};
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::encoding::DecodedFlowEventStream;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::stream::FlowEventStream;
@@ -50,10 +53,23 @@ pub struct KafkaSinkExec {
     key_col: Option<String>,
     /// Extra `kafka.*` producer options (prefix already stripped).
     extra: HashMap<String, String>,
+    /// `true` = exactly-once via Kafka transactions (Flink `KafkaSink` EXACTLY_ONCE /
+    /// read-process-write): per epoch, `send_offsets_to_transaction(source offsets, group)`
+    /// + `commit_transaction`, so produced records and consumed offsets commit atomically;
+    /// a stable `transactional.id` fences orphaned txns on restart. `read_committed`
+    /// consumers never see aborted/in-flight records. `false` = at-least-once (default).
+    exactly_once: bool,
+    /// Consumer group whose offsets are committed inside the transaction (EO). Shared with
+    /// the source so recovery reads the group's committed offsets = the records' commit point.
+    group_id: Option<String>,
+    /// Checkpoint location — EO reads the source's per-epoch staged offsets
+    /// (`sources/0/staged-epoch-<epoch>`) to put into the transaction.
+    checkpoint_location: Option<String>,
     properties: Arc<PlanProperties>,
 }
 
 impl KafkaSinkExec {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         input: Arc<dyn ExecutionPlan>,
         bootstrap_servers: String,
@@ -61,12 +77,20 @@ impl KafkaSinkExec {
         value_col: Option<String>,
         key_col: Option<String>,
         extra: HashMap<String, String>,
+        exactly_once: bool,
+        group_id: Option<String>,
+        checkpoint_location: Option<String>,
     ) -> Result<Self> {
         if bootstrap_servers.is_empty() {
             return plan_err!("kafka sink requires kafka.bootstrap.servers");
         }
         if topic.is_empty() {
             return plan_err!("kafka sink requires the `topic` option");
+        }
+        if exactly_once && group_id.is_none() {
+            return plan_err!(
+                "kafka sink exactly-once requires `kafka.group.id` (shared with the source)"
+            );
         }
         let properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(Arc::new(Schema::empty())),
@@ -81,6 +105,9 @@ impl KafkaSinkExec {
             value_col,
             key_col,
             extra,
+            exactly_once,
+            group_id,
+            checkpoint_location,
             properties,
         })
     }
@@ -103,6 +130,15 @@ impl KafkaSinkExec {
     pub fn extra(&self) -> &HashMap<String, String> {
         &self.extra
     }
+    pub fn exactly_once(&self) -> bool {
+        self.exactly_once
+    }
+    pub fn group_id(&self) -> Option<&str> {
+        self.group_id.as_deref()
+    }
+    pub fn checkpoint_location(&self) -> Option<&str> {
+        self.checkpoint_location.as_deref()
+    }
 }
 
 /// Resolve the value column index: explicit name, else `value`, else the sole column.
@@ -122,6 +158,32 @@ fn resolve_value_idx(schema: &SchemaRef, requested: Option<&str>) -> Result<usiz
         "kafka sink: no `value` column and input has {} columns; set the value column explicitly",
         schema.fields().len()
     )
+}
+
+/// Read the source's per-epoch staged offsets (`sources/0/staged-epoch-<epoch>`, a JSON
+/// map `"topic:partition" -> next-offset`) into a `TopicPartitionList` for
+/// `send_offsets_to_transaction` (the committed position = next offset to consume).
+async fn read_staged_epoch_offsets(ck: &CheckpointStore, epoch: u64) -> Result<TopicPartitionList> {
+    let mut tpl = TopicPartitionList::new();
+    let Some(bytes) = ck
+        .get(&format!("sources/0/staged-epoch-{epoch}"))
+        .await
+        .ok()
+        .flatten()
+    else {
+        return Ok(tpl);
+    };
+    let map: std::collections::BTreeMap<String, i64> =
+        serde_json::from_slice(&bytes).unwrap_or_default();
+    for (k, off) in map {
+        if let Some((topic, part)) = k.rsplit_once(':') {
+            if let Ok(p) = part.parse::<i32>() {
+                tpl.add_partition_offset(topic, p, Offset::Offset(off))
+                    .map_err(|e| exec_datafusion_err!("kafka sink: offset list: {e}"))?;
+            }
+        }
+    }
+    Ok(tpl)
 }
 
 impl DisplayAs for KafkaSinkExec {
@@ -161,6 +223,9 @@ impl ExecutionPlan for KafkaSinkExec {
             self.value_col.clone(),
             self.key_col.clone(),
             self.extra.clone(),
+            self.exactly_once,
+            self.group_id.clone(),
+            self.checkpoint_location.clone(),
         )?))
     }
 
@@ -178,6 +243,9 @@ impl ExecutionPlan for KafkaSinkExec {
         let value_col = self.value_col.clone();
         let key_col = self.key_col.clone();
         let extra = self.extra.clone();
+        let exactly_once = self.exactly_once;
+        let group_id = self.group_id.clone();
+        let checkpoint_location = self.checkpoint_location.clone();
         let empty = Arc::new(Schema::empty());
         let empty_out = empty.clone();
 
@@ -189,6 +257,14 @@ impl ExecutionPlan for KafkaSinkExec {
             cfg.set("linger.ms", "5");
             cfg.set("queue.buffering.max.messages", "2000000");
             cfg.set("compression.type", "lz4");
+            if exactly_once {
+                // Transactional producer (Flink KafkaSink EXACTLY_ONCE). Stable transactional.id
+                // per sink task → on restart a new producer with the same id FENCES + aborts any
+                // orphaned in-flight txn, so read_committed consumers never see partial output.
+                cfg.set("transactional.id", format!("vajra-sink-{topic}-0"));
+                cfg.set("enable.idempotence", "true");
+                cfg.set("transaction.timeout.ms", "120000");
+            }
             for (k, v) in &extra {
                 cfg.set(k.as_str(), v.as_str());
             }
@@ -196,6 +272,38 @@ impl ExecutionPlan for KafkaSinkExec {
                 Ok(p) => p,
                 Err(e) => { yield Err(exec_datafusion_err!("kafka sink: create producer: {e}")); return; }
             };
+            let ck = checkpoint_location
+                .as_deref()
+                .and_then(|l| CheckpointStore::from_location(l).ok());
+            let group = group_id.clone().unwrap_or_default();
+            // EO: a consumer carrying the shared group.id supplies the ConsumerGroupMetadata for
+            // `send_offsets_to_transaction` (rdkafka has no group-id-only constructor). The source
+            // uses manual assign (no group membership), so the group id alone drives the offset
+            // commit; the stable transactional.id provides the fencing.
+            let cgm = if exactly_once {
+                let mc: BaseConsumer = match ClientConfig::new()
+                    .set("bootstrap.servers", &bootstrap)
+                    .set("group.id", &group)
+                    .create()
+                {
+                    Ok(c) => c,
+                    Err(e) => { yield Err(exec_datafusion_err!("kafka sink: group consumer: {e}")); return; }
+                };
+                match mc.group_metadata() {
+                    Some(m) => Some(m),
+                    None => { yield Err(exec_datafusion_err!("kafka sink: no group metadata for `{group}`")); return; }
+                }
+            } else {
+                None
+            };
+            if exactly_once {
+                if let Err(e) = producer.init_transactions(Timeout::After(Duration::from_secs(30))) {
+                    yield Err(exec_datafusion_err!("kafka sink: init_transactions: {e}")); return;
+                }
+                if let Err(e) = producer.begin_transaction() {
+                    yield Err(exec_datafusion_err!("kafka sink: begin_transaction: {e}")); return;
+                }
+            }
 
             let raw = match input.execute(0, context) {
                 Ok(s) => s,
@@ -261,11 +369,45 @@ impl ExecutionPlan for KafkaSinkExec {
                             }
                         }
                     }
-                    // Epoch / end boundary: flush so this micro-batch's records are durable
-                    // BEFORE the source's offsets are committed (at-least-once).
-                    Ok(FlowEvent::Marker(FlowMarker::Checkpoint { .. }))
-                    | Ok(FlowEvent::Marker(FlowMarker::EndOfData)) => {
-                        if let Err(e) = producer.flush(Timeout::After(Duration::from_secs(60))) {
+                    // Epoch boundary.
+                    Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id })) => {
+                        if exactly_once {
+                            // Commit this epoch's records AND the source's consumed offsets in ONE
+                            // Kafka transaction (read-process-write EO): atomic, so recovery from the
+                            // group's committed offsets never duplicates or loses.
+                            let tpl = match &ck {
+                                Some(ck) => match read_staged_epoch_offsets(ck, id).await {
+                                    Ok(t) => t,
+                                    Err(e) => { yield Err(e); return; }
+                                },
+                                None => TopicPartitionList::new(),
+                            };
+                            if tpl.count() > 0 {
+                                if let Some(cgm) = &cgm {
+                                    if let Err(e) = producer.send_offsets_to_transaction(&tpl, cgm, Timeout::After(Duration::from_secs(30))) {
+                                        yield Err(exec_datafusion_err!("kafka sink: send_offsets_to_transaction: {e}")); return;
+                                    }
+                                }
+                            }
+                            if let Err(e) = producer.commit_transaction(Timeout::After(Duration::from_secs(60))) {
+                                yield Err(exec_datafusion_err!("kafka sink: commit_transaction: {e}")); return;
+                            }
+                            if let Err(e) = producer.begin_transaction() {
+                                yield Err(exec_datafusion_err!("kafka sink: begin_transaction: {e}")); return;
+                            }
+                        } else if let Err(e) = producer.flush(Timeout::After(Duration::from_secs(60))) {
+                            // at-least-once: flush so the epoch's records are durable before commit.
+                            yield Err(exec_datafusion_err!("kafka sink: flush: {e}")); return;
+                        }
+                        yield Ok(RecordBatch::new_empty(empty_out.clone()));
+                    }
+                    // Terminal (micro-batch availableNow).
+                    Ok(FlowEvent::Marker(FlowMarker::EndOfData)) => {
+                        if exactly_once {
+                            if let Err(e) = producer.commit_transaction(Timeout::After(Duration::from_secs(60))) {
+                                yield Err(exec_datafusion_err!("kafka sink: commit_transaction (eod): {e}")); return;
+                            }
+                        } else if let Err(e) = producer.flush(Timeout::After(Duration::from_secs(60))) {
                             yield Err(exec_datafusion_err!("kafka sink: flush: {e}")); return;
                         }
                         yield Ok(RecordBatch::new_empty(empty_out.clone()));
