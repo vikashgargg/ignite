@@ -36,6 +36,13 @@ use crate::formats::kafka::options::KafkaReadOptions;
 /// row-based `batch_size`.
 const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
 
+/// Realtime data-flush cadence (ms) — DECOUPLED from the epoch/commit interval. The
+/// realtime source emits accumulated rows this often (no barrier) so records flow with
+/// ~ms latency (Spark Real-Time Mode: records on arrival), while epochs/commits stay at
+/// the larger `Trigger.Continuous` interval for exactly-once efficiency. At high rates the
+/// row/byte cap flushes first, so throughput is unaffected.
+const LOW_LATENCY_FLUSH_MS: u64 = 5;
+
 /// Per-instance checkpoint key for the bounded source's offsets. With parallelism 1 we keep
 /// the legacy `sources/0/{staged,committed}` keys (back-compat with existing checkpoints); with
 /// N>1 each instance uses a disjoint `sources/0/inst-<i>/...` key so the N parallel readers never
@@ -644,6 +651,11 @@ impl ExecutionPlan for KafkaSourceExec {
                 let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let mut timer = tokio::time::interval(Duration::from_millis(interval_ms.max(1)));
                 timer.tick().await; // discard the immediate first tick
+                // Low-latency data-flush timer, decoupled from the epoch timer (never coarser
+                // than the epoch interval). Emits accumulated rows on arrival for ~ms latency.
+                let flush_ms = LOW_LATENCY_FLUSH_MS.min(interval_ms.max(1)).max(1);
+                let mut flush_timer = tokio::time::interval(Duration::from_millis(flush_ms));
+                flush_timer.tick().await;
                 loop {
                     tokio::select! {
                         biased;
@@ -661,6 +673,18 @@ impl ExecutionPlan for KafkaSourceExec {
                             write_staged_epoch_offsets(&ck, epoch, &next).await;
                             yield Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id: epoch }));
                             epoch += 1;
+                        }
+                        // Low-latency flush: emit accumulated rows (no barrier) so records flow
+                        // with ~ms latency instead of waiting for the (coarser) epoch tick.
+                        _ = flush_timer.tick() => {
+                            if !rows.is_empty() {
+                                match build_batch(&full_schema, &projection, &rows) {
+                                    Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                                    Err(e) => { yield Err(e); return; }
+                                }
+                                rows.clear();
+                                batch_bytes = 0;
+                            }
                         }
                         msg = msg_stream.next() => {
                             match msg {
