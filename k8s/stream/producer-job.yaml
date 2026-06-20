@@ -14,7 +14,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
-      nodeSelector: { role: kafka }
+      nodeSelector: { role: compute }   # run on the idle 16-vCPU node; Kafka's 8-vCPU node can't also host the 6-CPU producer
       containers:
         - name: producer
           image: python:3.12-slim

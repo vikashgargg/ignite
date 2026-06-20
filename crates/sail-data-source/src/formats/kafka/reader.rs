@@ -36,6 +36,14 @@ use crate::formats::kafka::options::KafkaReadOptions;
 /// row-based `batch_size`.
 const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
 
+/// Wall-clock stall tolerance (ms) for a bounded read: once `remaining > 0` but no message
+/// has arrived for this long, the residual offsets are deemed unreachable (log compaction /
+/// aborted-txn control records inflating the high watermark) and the read completes. Derived
+/// into a consecutive-empty-poll budget from `fetch_timeout_ms`, so the tolerance is the same
+/// wall time regardless of poll granularity. Large enough that a transient fetch hiccup never
+/// ends a read early; small enough to bound the tail wait on genuinely gapped topics.
+const BOUNDED_STALL_TOLERANCE_MS: u64 = 10_000;
+
 /// Realtime data-flush cadence (ms) — DECOUPLED from the epoch/commit interval. The
 /// realtime source emits accumulated rows this often (no barrier) so records flow with
 /// ~ms latency (Spark Real-Time Mode: records on arrival), while epochs/commits stay at
@@ -395,7 +403,13 @@ impl ExecutionPlan for KafkaSourceExec {
         let full_schema = Arc::new(kafka_data_schema());
         let projected_schema = self.projected_schema.clone();
         let max_batch = options.max_batch_size;
+        // Per-poll fetch timeout (small -> responsive batching / low latency).
         let timeout = Duration::from_millis(options.fetch_timeout_ms);
+        // Broker control-plane calls (metadata, watermarks, committed offsets) are
+        // request/response round-trips, NOT data polls — they must NOT inherit the small
+        // poll timeout (at e.g. 10ms they'd spuriously fail before any data is read). Use a
+        // generous fixed floor so these never flake, independent of poll granularity.
+        let meta_timeout = timeout.max(Duration::from_secs(30));
 
         // Bounded micro-batch read with exactly-once offsets (Spark `KafkaMicroBatchStream` model):
         // assign + seek to committed (or earliest/latest) start offsets, read up to the current end
@@ -440,7 +454,7 @@ impl ExecutionPlan for KafkaSourceExec {
                     let mut pairs: Vec<(String, i32)> = vec![];
                     for topic in &topics {
                         let md = consumer
-                            .fetch_metadata(Some(topic), timeout)
+                            .fetch_metadata(Some(topic), meta_timeout)
                             .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
@@ -454,7 +468,7 @@ impl ExecutionPlan for KafkaSourceExec {
                             continue; // owned by another instance
                         }
                         let (low, high) = consumer
-                            .fetch_watermarks(&topic, part, timeout)
+                            .fetch_watermarks(&topic, part, meta_timeout)
                             .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
                         let start = committed
                             .get(&(topic.clone(), part))
@@ -487,6 +501,19 @@ impl ExecutionPlan for KafkaSourceExec {
                     ends.iter().map(|(k, e)| (e - next.get(k).copied().unwrap_or(*e)).max(0)).sum()
                 };
                 let mut msg_stream = consumer.stream();
+                // A bounded (availableNow / micro-batch) read MUST reach each partition's
+                // captured end offset — that snapshot is exactly what Spark's
+                // `KafkaMicroBatchStream` and Flink's bounded Kafka source read to. A
+                // transient fetch timeout (slow broker, cross-node fetch latency, rebalance)
+                // is NOT end-of-data: treating one empty poll as "done" silently under-reads
+                // (measured ~5% short at 100M on EKS). So we KEEP polling while `remaining > 0`
+                // and only conclude the residual offsets are unreachable after a bounded
+                // wall-clock stall with zero progress (covers genuine offset gaps from log
+                // compaction / aborted-txn control records, so we never hang nor under-read).
+                let timeout_ms = options.fetch_timeout_ms.max(1);
+                let max_empty_polls: u32 =
+                    ((BOUNDED_STALL_TOLERANCE_MS / timeout_ms).max(5)) as u32;
+                let mut empty_polls: u32 = 0;
                 while remaining(&next) > 0 {
                     let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
                     // Flush on EITHER a row cap OR a byte cap. The byte cap is the
@@ -496,12 +523,14 @@ impl ExecutionPlan for KafkaSourceExec {
                     // every variable-length column safely under the i32 limit regardless
                     // of payload size — matching how Arrow/DataFusion size-bound batches.
                     let mut batch_bytes: usize = 0;
+                    let mut stream_ended = false;
                     while rows.len() < max_batch
                         && batch_bytes < MAX_BATCH_BYTES
                         && remaining(&next) > 0
                     {
                         match tokio::time::timeout(timeout, msg_stream.next()).await {
                             Ok(Some(Ok(msg))) => {
+                                empty_polls = 0; // made progress -> reset the stall budget
                                 let tp = (msg.topic().to_string(), msg.partition());
                                 let end = ends.get(&tp).copied().unwrap_or(i64::MIN);
                                 if msg.offset() >= end { continue; } // past this batch's snapshot
@@ -527,14 +556,27 @@ impl ExecutionPlan for KafkaSourceExec {
                                 next.insert(tp, msg.offset() + 1);
                             }
                             Ok(Some(Err(e))) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
-                            Ok(None) => break,
-                            Err(_) => break, // timeout: no more messages available right now
+                            Ok(None) => { stream_ended = true; break; } // consumer stream closed
+                            Err(_) => break, // transient poll timeout: flush partial, then retry
                         }
                     }
-                    if rows.is_empty() { break; }
-                    match build_batch(&full_schema, &projection, &rows) {
-                        Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
-                        Err(e) => { yield Err(e); return; }
+                    if !rows.is_empty() {
+                        match build_batch(&full_schema, &projection, &rows) {
+                            Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                            Err(e) => { yield Err(e); return; }
+                        }
+                        continue;
+                    }
+                    // Empty batch with `remaining > 0`: either the consumer stream closed,
+                    // or a poll timed out before any data arrived. The latter is transient —
+                    // retry until we either make progress or exhaust the stall budget, so a
+                    // momentary fetch hiccup never prematurely ends a bounded read.
+                    if stream_ended {
+                        break;
+                    }
+                    empty_polls += 1;
+                    if empty_polls >= max_empty_polls {
+                        break; // genuinely stalled: residual offsets are unreachable (gaps)
                     }
                 }
 
@@ -593,7 +635,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 let resolve = || -> std::result::Result<Vec<(String, i32, i64)>, String> {
                     let mut out = vec![];
                     for topic in &topics {
-                        let md = consumer.fetch_metadata(Some(topic), timeout)
+                        let md = consumer.fetch_metadata(Some(topic), meta_timeout)
                             .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
@@ -608,7 +650,7 @@ impl ExecutionPlan for KafkaSourceExec {
                             let mut one = rdkafka::TopicPartitionList::new();
                             let _ = one.add_partition(topic, part);
                             let group_off = consumer
-                                .committed_offsets(one, timeout)
+                                .committed_offsets(one, meta_timeout)
                                 .ok()
                                 .and_then(|t| t.find_partition(topic, part).map(|e| e.offset()))
                                 .and_then(|o| match o {
@@ -620,7 +662,7 @@ impl ExecutionPlan for KafkaSourceExec {
                             {
                                 Some(o) => o,
                                 None => {
-                                    let (low, high) = consumer.fetch_watermarks(topic, part, timeout)
+                                    let (low, high) = consumer.fetch_watermarks(topic, part, meta_timeout)
                                         .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
                                     if earliest { low } else { high }
                                 }
