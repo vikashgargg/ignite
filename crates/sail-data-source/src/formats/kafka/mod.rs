@@ -122,8 +122,8 @@ impl TableFormat for KafkaTableFormat {
                 "kafka.group.id" | "group.id" | "groupid" => group_id = Some(v),
                 // Delivery guarantee: "exactly_once" / "at_least_once" (default).
                 "delivery" => {
-                    exactly_once =
-                        v.eq_ignore_ascii_case("exactly_once") || v.eq_ignore_ascii_case("exactly-once");
+                    exactly_once = v.eq_ignore_ascii_case("exactly_once")
+                        || v.eq_ignore_ascii_case("exactly-once");
                 }
                 "exactly.once" | "exactlyonce" => exactly_once = v.eq_ignore_ascii_case("true"),
                 // Reserved streaming options the Kafka producer must not see directly.

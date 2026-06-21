@@ -69,7 +69,7 @@ pub struct KafkaSinkExec {
 }
 
 impl KafkaSinkExec {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn try_new(
         input: Arc<dyn ExecutionPlan>,
         bootstrap_servers: String,

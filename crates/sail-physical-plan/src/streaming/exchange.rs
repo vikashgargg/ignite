@@ -23,6 +23,7 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{exec_datafusion_err, internal_err, Result};
 use futures::StreamExt;
+use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::MARKER_FIELD_NAME;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
@@ -31,8 +32,10 @@ use tokio_stream::wrappers::ReceiverStream;
 const CHANNEL_CAPACITY: usize = 16;
 
 type BatchResult = Result<RecordBatch>;
-/// Per-output-partition receivers, taken by `execute`; lazily initialized on first call.
-type SharedReceivers = Arc<Mutex<Option<Vec<Option<Receiver<BatchResult>>>>>>;
+/// Per-output-partition sub-receivers, taken by `execute`; lazily initialized on first call.
+/// Outer index = output partition; inner = one sub-channel per INPUT partition (length 1 for the
+/// legacy 1→N path, N for the N→M keyed shuffle). `Option` so each is taken exactly once.
+type SharedReceivers = Arc<Mutex<Option<Vec<Vec<Option<Receiver<BatchResult>>>>>>>;
 
 #[derive(Debug)]
 pub struct StreamExchangeExec {
@@ -136,34 +139,70 @@ impl ExecutionPlan for StreamExchangeExec {
             );
         }
         let schema = self.input.schema();
-        // Lazily start the single distributor task on the first `execute` call and stash a
-        // receiver for each output partition; subsequent calls just take their receiver.
+        let m = self.partition_count;
+        let n_in = self
+            .input
+            .properties()
+            .output_partitioning()
+            .partition_count();
+        // Lazily start the distributor(s) on the first `execute` call and stash, per output
+        // partition, its sub-receiver(s); subsequent calls just take theirs.
         let mut guard = self
             .state
             .lock()
             .map_err(|e| exec_datafusion_err!("StreamExchangeExec state lock poisoned: {e}"))?;
         if guard.is_none() {
-            let n = self.partition_count;
-            let mut senders: Vec<Sender<BatchResult>> = Vec::with_capacity(n);
-            let mut receivers: Vec<Option<Receiver<BatchResult>>> = Vec::with_capacity(n);
-            for _ in 0..n {
-                let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY);
-                senders.push(tx);
-                receivers.push(Some(rx));
+            // Per output m, a sub-channel from each input. 1→N: one distributor reads input 0 and
+            // each output has ONE sub-channel. N→M: one sender PER input hashes its rows in
+            // parallel into per-output sub-channels (Flink keyBy: each upstream subtask hash-routes
+            // its own output), and each output merges its N sub-channels (watermark MIN at the
+            // receiver — Flink's "min across input channels").
+            let mut out_subs: Vec<Vec<Option<Receiver<BatchResult>>>> =
+                (0..m).map(|_| Vec::with_capacity(n_in.max(1))).collect();
+            if n_in <= 1 {
+                let mut senders: Vec<Sender<BatchResult>> = Vec::with_capacity(m);
+                for slot in out_subs.iter_mut() {
+                    let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY);
+                    senders.push(tx);
+                    slot.push(Some(rx));
+                }
+                let input_stream = self.input.execute(0, context.clone())?;
+                tokio::spawn(distribute(input_stream, senders, self.hash_keys.clone(), m));
+            } else {
+                for i in 0..n_in {
+                    let mut senders: Vec<Sender<BatchResult>> = Vec::with_capacity(m);
+                    for slot in out_subs.iter_mut() {
+                        let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY);
+                        senders.push(tx);
+                        slot.push(Some(rx));
+                    }
+                    let input_stream = self.input.execute(i, context.clone())?;
+                    tokio::spawn(distribute(input_stream, senders, self.hash_keys.clone(), m));
+                }
             }
-            let input_stream = self.input.execute(0, context.clone())?;
-            let hash_keys = self.hash_keys.clone();
-            tokio::spawn(distribute(input_stream, senders, hash_keys, n));
-            *guard = Some(receivers);
+            *guard = Some(out_subs);
         }
-        let rx = guard
+        let subs: Vec<Receiver<BatchResult>> = guard
             .as_mut()
-            .and_then(|rs| rs.get_mut(partition).and_then(|slot| slot.take()))
+            .and_then(|rs| rs.get_mut(partition))
+            .map(|slots| slots.iter_mut().filter_map(|s| s.take()).collect())
+            .filter(|v: &Vec<_>| !v.is_empty())
             .ok_or_else(|| {
                 exec_datafusion_err!("StreamExchangeExec: partition {partition} already taken")
             })?;
         drop(guard);
-        let stream = ReceiverStream::new(rx);
+        if subs.len() == 1 {
+            // 1→N: single sub-channel already carries broadcast markers — pass through unchanged.
+            let rx = subs
+                .into_iter()
+                .next()
+                .ok_or_else(|| exec_datafusion_err!("StreamExchangeExec: missing sub-channel"))?;
+            let stream = ReceiverStream::new(rx);
+            return Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)));
+        }
+        // N→M: merge this output's N sub-channels — yield data, MIN-merge watermarks across the
+        // N input channels (Flink receiver rule), forward one EndOfData once all N inputs end.
+        let stream = merge_output_subchannels(subs);
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
     }
 }
@@ -237,7 +276,11 @@ impl ExecutionPlan for StreamCoalesceExec {
         if partition != 0 {
             return internal_err!("StreamCoalesceExec: invalid partition {partition}");
         }
-        let n = self.input.properties().output_partitioning().partition_count();
+        let n = self
+            .input
+            .properties()
+            .output_partitioning()
+            .partition_count();
         let schema = self.input.schema();
         let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY.max(n));
         for i in 0..n {
@@ -322,6 +365,125 @@ async fn distribute(
     }
 }
 
+/// Marker classification for the N→M receiver merge.
+enum Mk {
+    Data,
+    Watermark(i64),
+    EndOfData,
+    Other,
+}
+
+fn classify_mk(batch: &RecordBatch) -> Mk {
+    let Ok(idx) = batch.schema().index_of(MARKER_FIELD_NAME) else {
+        return Mk::Data;
+    };
+    let Some(m) = batch.column(idx).as_any().downcast_ref::<BinaryArray>() else {
+        return Mk::Data;
+    };
+    for i in 0..m.len() {
+        if m.is_valid(i) {
+            return match FlowMarker::decode(m.value(i)) {
+                Ok(FlowMarker::Watermark { timestamp, .. }) => {
+                    Mk::Watermark(timestamp.timestamp_micros())
+                }
+                Ok(FlowMarker::EndOfData) => Mk::EndOfData,
+                _ => Mk::Other,
+            };
+        }
+    }
+    Mk::Data
+}
+
+/// Rebuild a watermark marker batch from a template (reuses its non-null-column placeholders),
+/// overwriting the marker column with a `Watermark` at `micros`.
+fn rewrite_watermark(template: &RecordBatch, micros: i64) -> Result<RecordBatch> {
+    let idx = template.schema().index_of(MARKER_FIELD_NAME)?;
+    let ts = chrono::DateTime::from_timestamp_micros(micros)
+        .ok_or_else(|| exec_datafusion_err!("invalid watermark micros {micros}"))?;
+    let bytes = FlowMarker::Watermark {
+        source: "merged".to_string(),
+        timestamp: ts,
+    }
+    .encode()?;
+    let mut cols = template.columns().to_vec();
+    cols[idx] = Arc::new(BinaryArray::from(vec![Some(bytes.as_slice())]));
+    Ok(RecordBatch::try_new(template.schema(), cols)?)
+}
+
+/// Merge one output partition's N input sub-channels (Flink keyBy receiver). Data batches pass
+/// through; watermarks are MIN-merged across the N input channels and emitted only when the min
+/// strictly advances (so a fast input never closes a window before a slow input's data on its own
+/// channel arrives); a single `EndOfData` is forwarded once all N inputs have ended.
+fn merge_output_subchannels(
+    subs: Vec<Receiver<BatchResult>>,
+) -> impl futures::Stream<Item = BatchResult> {
+    let n = subs.len();
+    async_stream::stream! {
+        let mut receivers = subs;
+        let mut wm: Vec<Option<i64>> = vec![None; n];
+        let mut ended: Vec<bool> = vec![false; n];
+        let mut last_emitted: Option<i64> = None;
+        let mut end_batch: Option<RecordBatch> = None;
+        loop {
+            let pollable: Vec<usize> = (0..n).filter(|&j| !ended[j]).collect();
+            if pollable.is_empty() {
+                if let Some(b) = end_batch.take() {
+                    yield Ok(b);
+                }
+                return;
+            }
+            let (j, item) = futures::future::poll_fn(|cx| {
+                for &j in &pollable {
+                    if let std::task::Poll::Ready(v) = receivers[j].poll_recv(cx) {
+                        return std::task::Poll::Ready((j, v));
+                    }
+                }
+                std::task::Poll::Pending
+            })
+            .await;
+            match item {
+                None => ended[j] = true, // channel closed = input exhausted
+                Some(Err(e)) => { yield Err(e); return; }
+                Some(Ok(batch)) => match classify_mk(&batch) {
+                    Mk::Data => yield Ok(batch),
+                    Mk::Watermark(ts) => {
+                        wm[j] = Some(wm[j].map_or(ts, |c| c.max(ts)));
+                        let merged = {
+                            let mut mn: Option<i64> = None;
+                            let mut all = true;
+                            for k in 0..n {
+                                if ended[k] { continue; }
+                                match wm[k] {
+                                    Some(v) => mn = Some(mn.map_or(v, |c| c.min(v))),
+                                    None => { all = false; break; }
+                                }
+                            }
+                            if all { mn } else { None }
+                        };
+                        if let Some(mw) = merged {
+                            if last_emitted.is_none_or(|l| mw > l) {
+                                last_emitted = Some(mw);
+                                match rewrite_watermark(&batch, mw) {
+                                    Ok(b) => yield Ok(b),
+                                    Err(e) => { yield Err(e); return; }
+                                }
+                            }
+                        }
+                    }
+                    Mk::EndOfData => {
+                        ended[j] = true;
+                        if end_batch.is_none() {
+                            end_batch = Some(batch);
+                        }
+                    }
+                    // Other broadcast markers (latency): forward only sub-channel 0's copy.
+                    Mk::Other => { if j == 0 { yield Ok(batch); } }
+                },
+            }
+        }
+    }
+}
+
 #[expect(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
@@ -401,19 +563,21 @@ mod tests {
                 if is_marker_batch(b) {
                     partition_markers += 1;
                 } else {
-                    let col = b
-                        .column(2)
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .unwrap();
+                    let col = b.column(2).as_any().downcast_ref::<Int64Array>().unwrap();
                     for i in 0..col.len() {
                         data_rows += 1;
-                        assert!(seen.insert(col.value(i)), "duplicate value across partitions");
+                        assert!(
+                            seen.insert(col.value(i)),
+                            "duplicate value across partitions"
+                        );
                     }
                 }
             }
             // Each partition must see the broadcast marker exactly once.
-            assert_eq!(partition_markers, 1, "marker not broadcast to every partition");
+            assert_eq!(
+                partition_markers, 1,
+                "marker not broadcast to every partition"
+            );
             marker_count += partition_markers;
         }
         assert_eq!(data_rows, 100, "no data rows lost");

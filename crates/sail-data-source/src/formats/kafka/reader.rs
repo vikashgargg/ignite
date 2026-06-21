@@ -19,8 +19,8 @@ use futures::StreamExt;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{Message, Timestamp};
-use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
+use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
 use sail_common_datafusion::streaming::event::FlowEvent;
@@ -160,6 +160,41 @@ async fn write_staged_epoch_offsets(
     }
 }
 
+/// Count the total partitions across the subscribed topics (one source instance per partition —
+/// Spark `KafkaSourceRDD` / Flink FLIP-27). Returns `None` if metadata can't be fetched (caller
+/// falls back to `target_partitions`). Runs the blocking rdkafka metadata RPC off the async runtime.
+async fn count_kafka_partitions(options: &KafkaReadOptions) -> Option<usize> {
+    let topics_csv = options.subscribe.clone()?;
+    let bootstrap = options.bootstrap_servers.clone();
+    let group = options.group_id.clone();
+    let extra = options.extra.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut cfg = ClientConfig::new();
+        cfg.set("bootstrap.servers", &bootstrap);
+        cfg.set("group.id", &group);
+        cfg.set("enable.auto.commit", "false");
+        for (k, v) in &extra {
+            cfg.set(k.as_str(), v.as_str());
+        }
+        let consumer: StreamConsumer = cfg.create().ok()?;
+        let timeout = Duration::from_secs(30);
+        let mut total = 0usize;
+        for topic in topics_csv
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            let md = consumer.fetch_metadata(Some(topic), timeout).ok()?;
+            let t = md.topics().iter().find(|t| t.name() == topic)?;
+            total += t.partitions().len();
+        }
+        (total > 0).then_some(total)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// Spark-compatible Kafka source schema (7 columns).
 pub fn kafka_data_schema() -> Schema {
     Schema::new(vec![
@@ -219,14 +254,21 @@ impl StreamSource for KafkaStreamSource {
         let projection = projection
             .cloned()
             .unwrap_or_else(|| (0..self.schema.fields.len()).collect());
-        // Parallel source read for the bounded (availableNow / micro-batch) path: one
-        // execution partition per `target_partitions`, each owning a disjoint subset of
-        // Kafka partitions (parallel read + from_json). The realtime continuous path stays
-        // single (parallelism=1) — its per-epoch barrier coordination across instances is a
-        // separate concern. Capped at target_partitions; the executor caps effective work at
-        // the number of Kafka partitions (extra instances read nothing).
+        // Parallel source read for the bounded (availableNow / micro-batch) path: ONE execution
+        // instance per Kafka partition (Spark `KafkaSourceRDD` one-task-per-TopicPartition / Flink
+        // FLIP-27 one-split-per-partition). This is REQUIRED for event-time correctness: an
+        // instance reading multiple partitions interleaves their records out of event-time order,
+        // so the per-instance `max` watermark races past a slower partition's data and the keyed
+        // window operator drops it as "late" (measured ~7% loss at 16 partitions / 8 instances).
+        // One partition per instance keeps each instance's stream event-time ordered, so its
+        // watermark is monotone and the downstream MIN-merge is correct. The realtime continuous
+        // path stays single (parallelism=1) — its per-epoch barrier coordination is separate.
         let parallelism = if bounded {
-            state.config().target_partitions().max(1)
+            let n_parts = count_kafka_partitions(&self.options).await;
+            // Fall back to target_partitions if metadata is unavailable; never below 1.
+            n_parts
+                .unwrap_or_else(|| state.config().target_partitions())
+                .max(1)
         } else {
             1
         };

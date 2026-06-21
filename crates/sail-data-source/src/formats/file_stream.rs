@@ -37,11 +37,11 @@ use datafusion::physical_plan::{
 };
 use datafusion_common::{plan_err, Constraints, Result};
 use futures::StreamExt;
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
-use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::FlowEvent;
 use sail_common_datafusion::streaming::source::StreamSource;
 
@@ -131,8 +131,8 @@ impl StreamSource for FileStreamSource {
                     let id = rel.as_ref().to_string();
                     if !seen.contains(&id) {
                         let url = ListingTableUrl::parse(format!("{prefix}{}", rel.as_ref()))?;
-                        let mtime = chrono::DateTime::from_timestamp_millis(mtime_ms)
-                            .unwrap_or_default();
+                        let mtime =
+                            chrono::DateTime::from_timestamp_millis(mtime_ms).unwrap_or_default();
                         new_files.push((mtime, id, url));
                     }
                 }
@@ -143,7 +143,8 @@ impl StreamSource for FileStreamSource {
                 let meta = meta?;
                 let id = meta.location.as_ref().to_string();
                 if !seen.contains(&id) {
-                    let url = ListingTableUrl::parse(format!("{prefix}{}", meta.location.as_ref()))?;
+                    let url =
+                        ListingTableUrl::parse(format!("{prefix}{}", meta.location.as_ref()))?;
                     new_files.push((meta.last_modified, id, url));
                 }
             }
@@ -409,9 +410,12 @@ mod tests {
 
         // Legacy newline-list committed (no embedded id) is still read for the file set.
         ck.delete("sources/0/staged").await.unwrap();
-        ck.put("sources/0/committed", bytes::Bytes::from_static(b"x/old.parquet\n"))
-            .await
-            .unwrap();
+        ck.put(
+            "sources/0/committed",
+            bytes::Bytes::from_static(b"x/old.parquet\n"),
+        )
+        .await
+        .unwrap();
         assert!(read_committed_files(&ck).await.contains("x/old.parquet"));
     }
 }

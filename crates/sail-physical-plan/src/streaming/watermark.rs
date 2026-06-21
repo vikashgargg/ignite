@@ -142,7 +142,12 @@ impl ExecutionPlan for WatermarkExec {
             datafusion_common::exec_datafusion_err!("WatermarkExec decode (input {names:?}): {e}")
         })?;
 
-        type State = (DecodedFlowEventStream, Option<i64>, Option<i64>, VecDeque<FlowEvent>);
+        type State = (
+            DecodedFlowEventStream,
+            Option<i64>,
+            Option<i64>,
+            VecDeque<FlowEvent>,
+        );
         let init: State = (input_stream, None, None, VecDeque::new());
 
         let event_stream = stream::unfold(

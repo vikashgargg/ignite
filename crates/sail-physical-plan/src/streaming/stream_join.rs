@@ -29,10 +29,10 @@ use datafusion::physical_plan::joins::{HashJoinExec, PartitionMode};
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{internal_err, JoinType, Result};
 use futures::{stream, StreamExt};
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::encoding::{
     DecodedFlowEventStream, EncodedFlowEventStream,
 };
-use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
@@ -167,7 +167,11 @@ impl DisplayAs for StreamJoinExec {
         _t: datafusion::physical_plan::DisplayFormatType,
         f: &mut std::fmt::Formatter,
     ) -> std::fmt::Result {
-        write!(f, "StreamJoinExec: type={:?}, on={:?}", self.join_type, self.on)
+        write!(
+            f,
+            "StreamJoinExec: type={:?}, on={:?}",
+            self.join_type, self.on
+        )
     }
 }
 
@@ -218,17 +222,15 @@ fn apply_filter(batch: RecordBatch, filter: &PhysicalExprRef) -> Result<RecordBa
                 "stream join filter did not evaluate to a boolean".to_string(),
             )
         })?;
-    Ok(datafusion::arrow::compute::filter_record_batch(&batch, mask)?)
+    Ok(datafusion::arrow::compute::filter_record_batch(
+        &batch, mask,
+    )?)
 }
 
 /// Evict buffered rows whose event-time (`ts_idx`, microseconds) is `< threshold`;
 /// they can no longer match (Flink interval-join cleanup). Rows with a null/uncomparable
 /// timestamp are kept (conservative).
-fn evict_older_than(
-    batches: Vec<RecordBatch>,
-    ts_idx: usize,
-    threshold: i64,
-) -> Vec<RecordBatch> {
+fn evict_older_than(batches: Vec<RecordBatch>, ts_idx: usize, threshold: i64) -> Vec<RecordBatch> {
     use datafusion::arrow::array::{Array, BooleanBuilder, TimestampMicrosecondArray};
     let mut out = Vec::with_capacity(batches.len());
     for b in batches {
@@ -295,11 +297,11 @@ impl ExecutionPlan for StreamJoinExec {
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let [left, right]: [Arc<dyn ExecutionPlan>; 2] = children
-            .try_into()
-            .map_err(|_| datafusion_common::DataFusionError::Internal(
+        let [left, right]: [Arc<dyn ExecutionPlan>; 2] = children.try_into().map_err(|_| {
+            datafusion_common::DataFusionError::Internal(
                 "StreamJoinExec requires exactly two children".to_string(),
-            ))?;
+            )
+        })?;
         Ok(Arc::new(StreamJoinExec::try_new(
             left,
             right,
@@ -324,12 +326,15 @@ impl ExecutionPlan for StreamJoinExec {
             return internal_err!("StreamJoinExec: invalid partition {partition}");
         }
         let left_stream = DecodedFlowEventStream::try_new(self.left.execute(0, context.clone())?)?;
-        let right_stream = DecodedFlowEventStream::try_new(self.right.execute(0, context.clone())?)?;
+        let right_stream =
+            DecodedFlowEventStream::try_new(self.right.execute(0, context.clone())?)?;
         // Tag each side and merge into one stream.
-        let left_tagged: std::pin::Pin<Box<dyn stream::Stream<Item = (Side, Result<FlowEvent>)> + Send>> =
-            Box::pin(left_stream.map(|e| (Side::Left, e)));
-        let right_tagged: std::pin::Pin<Box<dyn stream::Stream<Item = (Side, Result<FlowEvent>)> + Send>> =
-            Box::pin(right_stream.map(|e| (Side::Right, e)));
+        let left_tagged: std::pin::Pin<
+            Box<dyn stream::Stream<Item = (Side, Result<FlowEvent>)> + Send>,
+        > = Box::pin(left_stream.map(|e| (Side::Left, e)));
+        let right_tagged: std::pin::Pin<
+            Box<dyn stream::Stream<Item = (Side, Result<FlowEvent>)> + Send>,
+        > = Box::pin(right_stream.map(|e| (Side::Right, e)));
         let merged = stream::select_all(vec![left_tagged, right_tagged]);
 
         let on = self.on.clone();
@@ -398,7 +403,9 @@ impl ExecutionPlan for StreamJoinExec {
                     if let Some(ev) = buf.pop_front() {
                         return Some((
                             Ok(ev),
-                            (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
+                            (
+                                merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored,
+                            ),
                         ));
                     }
                     match merged.next().await {
@@ -406,7 +413,10 @@ impl ExecutionPlan for StreamJoinExec {
                         Some((_, Err(e))) => {
                             return Some((
                                 Err(e),
-                                (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
+                                (
+                                    merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx,
+                                    restored,
+                                ),
                             ))
                         }
                         Some((side, Ok(FlowEvent::Data { batch, .. }))) => {
@@ -443,7 +453,10 @@ impl ExecutionPlan for StreamJoinExec {
                                 Err(e) => {
                                     return Some((
                                         Err(e),
-                                        (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
+                                        (
+                                            merged, left_buf, right_buf, lwm, rwm, last_wm, buf,
+                                            ctx, restored,
+                                        ),
                                     ))
                                 }
                                 Ok(out) => {
@@ -455,7 +468,10 @@ impl ExecutionPlan for StreamJoinExec {
                                                 Err(e) => {
                                                     return Some((
                                                         Err(e),
-                                                        (merged, left_buf, right_buf, lwm, rwm, last_wm, buf, ctx, restored),
+                                                        (
+                                                            merged, left_buf, right_buf, lwm, rwm,
+                                                            last_wm, buf, ctx, restored,
+                                                        ),
                                                     ))
                                                 }
                                             },
@@ -472,7 +488,10 @@ impl ExecutionPlan for StreamJoinExec {
                                 Side::Right => right_buf.push(batch),
                             }
                         }
-                        Some((side, Ok(FlowEvent::Marker(FlowMarker::Watermark { timestamp, .. })))) => {
+                        Some((
+                            side,
+                            Ok(FlowEvent::Marker(FlowMarker::Watermark { timestamp, .. })),
+                        )) => {
                             let ts = timestamp.timestamp_micros();
                             match side {
                                 Side::Left => lwm = Some(lwm.map_or(ts, |c| c.max(ts))),
@@ -524,11 +543,19 @@ impl ExecutionPlan for StreamJoinExec {
                                     last_wm.unwrap_or(i64::MIN),
                                 ];
                                 crate::streaming::state_io::stage_state(
-                                    ck, "join-0-left", &left_schema, &left_buf, &meta,
+                                    ck,
+                                    "join-0-left",
+                                    &left_schema,
+                                    &left_buf,
+                                    &meta,
                                 )
                                 .await;
                                 crate::streaming::state_io::stage_state(
-                                    ck, "join-0-right", &right_schema, &right_buf, &[],
+                                    ck,
+                                    "join-0-right",
+                                    &right_schema,
+                                    &right_buf,
+                                    &[],
                                 )
                                 .await;
                             }
@@ -542,8 +569,10 @@ impl ExecutionPlan for StreamJoinExec {
             }
         });
 
-        let flow_stream =
-            Box::pin(FlowEventStreamAdapter::new(self.output_data_schema.clone(), event_stream));
+        let flow_stream = Box::pin(FlowEventStreamAdapter::new(
+            self.output_data_schema.clone(),
+            event_stream,
+        ));
         Ok(Box::pin(EncodedFlowEventStream::new(flow_stream)))
     }
 }

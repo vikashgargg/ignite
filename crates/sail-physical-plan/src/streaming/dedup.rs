@@ -172,8 +172,7 @@ impl ExecutionPlan for StreamDeduplicateExec {
         // `seen`: key tuple → latest event-time (micros) of that key, for watermark eviction.
         // `watermark`: latest watermark (micros), only meaningful when `event_time_idx` is set.
         type Seen = HashMap<Vec<ScalarValue>, i64>;
-        let init: (DecodedFlowEventStream, Seen, Option<i64>) =
-            (input_stream, Seen::new(), None);
+        let init: (DecodedFlowEventStream, Seen, Option<i64>) = (input_stream, Seen::new(), None);
 
         let event_stream = stream::unfold(init, move |(mut input, mut seen, mut watermark)| {
             let key_indices = key_indices.clone();
@@ -210,15 +209,19 @@ impl ExecutionPlan for StreamDeduplicateExec {
                         }
                         // Watermark advance: evict seen keys older than the watermark → bounded
                         // state (`dropDuplicatesWithinWatermark` / dropDuplicates+watermark).
-                        Some(Ok(FlowEvent::Marker(FlowMarker::Watermark { source, timestamp })))
-                            if event_time_idx.is_some() =>
-                        {
+                        Some(Ok(FlowEvent::Marker(FlowMarker::Watermark {
+                            source,
+                            timestamp,
+                        }))) if event_time_idx.is_some() => {
                             let wm = timestamp.timestamp_micros();
                             let wm = watermark.map_or(wm, |c| c.max(wm));
                             watermark = Some(wm);
                             seen.retain(|_, &mut et| et >= wm);
                             return Some((
-                                Ok(FlowEvent::Marker(FlowMarker::Watermark { source, timestamp })),
+                                Ok(FlowEvent::Marker(FlowMarker::Watermark {
+                                    source,
+                                    timestamp,
+                                })),
                                 (input, seen, watermark),
                             ));
                         }

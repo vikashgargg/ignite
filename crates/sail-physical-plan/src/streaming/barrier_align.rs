@@ -128,7 +128,11 @@ impl ExecutionPlan for StreamBarrierAlignExec {
         if partition != 0 {
             return internal_err!("StreamBarrierAlignExec: invalid partition {partition}");
         }
-        let n = self.input.properties().output_partitioning().partition_count();
+        let n = self
+            .input
+            .properties()
+            .output_partitioning()
+            .partition_count();
         let schema = self.input.schema();
         let schema_out = schema.clone();
 
@@ -244,7 +248,9 @@ mod tests {
     use datafusion::physical_plan::ExecutionPlan;
     use futures::TryStreamExt;
     use sail_common_datafusion::streaming::event::marker::FlowMarker;
-    use sail_common_datafusion::streaming::event::schema::{MARKER_FIELD_NAME, RETRACTED_FIELD_NAME};
+    use sail_common_datafusion::streaming::event::schema::{
+        MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
+    };
 
     use super::{classify, BatchKind, StreamBarrierAlignExec};
 
@@ -329,12 +335,7 @@ mod tests {
             marker(FlowMarker::Checkpoint { id: 1 }),
             marker(FlowMarker::EndOfData),
         ];
-        let src = MemorySourceConfig::try_new_exec(
-            &[p0, p1],
-            schema.clone(),
-            None,
-        )
-        .unwrap();
+        let src = MemorySourceConfig::try_new_exec(&[p0, p1], schema.clone(), None).unwrap();
         let align = Arc::new(StreamBarrierAlignExec::new(src));
         let out: Vec<RecordBatch> = align
             .execute(0, Arc::new(TaskContext::default()))
@@ -343,7 +344,15 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(count_checkpoints(&out), vec![0, 1], "one aligned barrier per epoch, in order");
-        assert_eq!(sum_data(&out), 1 + 2 + 3 + 4 + 5 + 6, "no data lost or duplicated");
+        assert_eq!(
+            count_checkpoints(&out),
+            vec![0, 1],
+            "one aligned barrier per epoch, in order"
+        );
+        assert_eq!(
+            sum_data(&out),
+            1 + 2 + 3 + 4 + 5 + 6,
+            "no data lost or duplicated"
+        );
     }
 }

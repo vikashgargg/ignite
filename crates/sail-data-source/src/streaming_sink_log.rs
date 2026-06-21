@@ -179,11 +179,15 @@ pub async fn commit_batch(
     } else {
         (batch_file(base, batch_id, false), adds)
     };
-    let body = encode_log(&entries)
-        .map_err(|e| object_store::Error::Generic { store: "spark_metadata", source: Box::new(e) })?;
+    let body = encode_log(&entries).map_err(|e| object_store::Error::Generic {
+        store: "spark_metadata",
+        source: Box::new(e),
+    })?;
     // `put` is atomic (LocalFileSystem stages to a temp file then renames; object stores do a
     // single atomic PUT), and a retried batch idempotently overwrites the same file.
-    store.put(&target, PutPayload::from(body.into_bytes())).await?;
+    store
+        .put(&target, PutPayload::from(body.into_bytes()))
+        .await?;
     Ok(())
 }
 
@@ -212,7 +216,11 @@ async fn read_live_entries(
     }
     // The newest compaction file is a complete snapshot; only delta files after it matter.
     files.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let latest_compact = files.iter().filter(|(_, c, _)| *c).map(|(id, _, _)| *id).max();
+    let latest_compact = files
+        .iter()
+        .filter(|(_, c, _)| *c)
+        .map(|(id, _, _)| *id)
+        .max();
     let mut live: Vec<SinkFileStatus> = vec![];
     let mut deleted: std::collections::HashSet<String> = Default::default();
     for (id, compact, path) in &files {
@@ -309,7 +317,10 @@ mod tests {
         }
         // An orphan file from a crashed batch (never committed) must be invisible.
         store
-            .put(&StorePath::from("out/99/orphan.parquet"), PutPayload::from("x"))
+            .put(
+                &StorePath::from("out/99/orphan.parquet"),
+                PutPayload::from("x"),
+            )
             .await
             .unwrap();
 
@@ -322,7 +333,10 @@ mod tests {
             .collect();
         got.sort();
         expected.sort();
-        assert_eq!(got, expected, "committed set must equal all adds, no orphan");
+        assert_eq!(
+            got, expected,
+            "committed set must equal all adds, no orphan"
+        );
 
         // A compaction snapshot must exist at batch 9.
         assert!(has_metadata_log(&store, &base).await.unwrap());

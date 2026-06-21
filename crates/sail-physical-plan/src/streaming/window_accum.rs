@@ -18,10 +18,10 @@ use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{internal_err, plan_err, Result};
 use futures::{stream, StreamExt};
+use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::encoding::{
     DecodedFlowEventStream, EncodedFlowEventStream,
 };
-use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
@@ -219,7 +219,9 @@ impl WindowAccumExec {
                 .map(|i| {
                     let name = partial_schema.field(i).name().clone();
                     (
-                        Arc::new(datafusion::physical_plan::expressions::Column::new(&name, i))
+                        Arc::new(datafusion::physical_plan::expressions::Column::new(
+                            &name, i,
+                        ))
                             as Arc<dyn datafusion::physical_expr::PhysicalExpr>,
                         name,
                     )
@@ -425,7 +427,10 @@ impl ExecutionPlan for WindowAccumExec {
                             }
                             // No output yet; loop to read next event.
                         }
-                        Some(Ok(FlowEvent::Marker(FlowMarker::Watermark { source, timestamp }))) => {
+                        Some(Ok(FlowEvent::Marker(FlowMarker::Watermark {
+                            source,
+                            timestamp,
+                        }))) => {
                             acc.set_watermark(timestamp.timestamp_micros());
                             let wm = acc.watermark_micros;
                             // Throttle the Final merge/emit (Partial pre-agg already ran per
@@ -463,8 +468,7 @@ impl ExecutionPlan for WindowAccumExec {
                                 // partial state (write-ahead) so windows spanning runs complete
                                 // correctly — the runner commits it after the output is durable.
                                 // (Do NOT flush; open windows carry over to the next run.)
-                                let mut meta =
-                                    vec![acc.watermark_micros.unwrap_or(i64::MIN)];
+                                let mut meta = vec![acc.watermark_micros.unwrap_or(i64::MIN)];
                                 meta.extend(acc.emitted_ends.iter().copied());
                                 crate::streaming::state_io::stage_state(
                                     ck,
@@ -519,8 +523,14 @@ async fn finalize_and_emit(
     context: Arc<TaskContext>,
 ) -> Result<()> {
     let partials = acc.pending_rows.clone();
-    let agg_batches =
-        run_final_aggregate(partials, final_group_by, aggr_exprs, partial_schema, context).await?;
+    let agg_batches = run_final_aggregate(
+        partials,
+        final_group_by,
+        aggr_exprs,
+        partial_schema,
+        context,
+    )
+    .await?;
     for agg_batch in agg_batches {
         if let Some(mask) = window_emit_mask(&agg_batch, emit_wm, &mut acc.emitted_ends) {
             if let Ok(filtered) = compute::filter_record_batch(&agg_batch, &mask) {
@@ -711,8 +721,8 @@ fn retain_open_window_rows(
         }
         match compute::filter_record_batch(&batch, &b.finish()) {
             Ok(filtered) if filtered.num_rows() > 0 => out.push(filtered),
-            Ok(_) => {}                 // all rows closed → drop batch
-            Err(_) => out.push(batch),  // on error, keep (safe)
+            Ok(_) => {}                // all rows closed → drop batch
+            Err(_) => out.push(batch), // on error, keep (safe)
         }
     }
     out

@@ -90,7 +90,10 @@ pub async fn stage_state(
 }
 
 /// Restore an operator's committed state, if present.
-pub async fn restore_state(ck: &CheckpointStore, operator_id: &str) -> (Vec<RecordBatch>, Vec<i64>) {
+pub async fn restore_state(
+    ck: &CheckpointStore,
+    operator_id: &str,
+) -> (Vec<RecordBatch>, Vec<i64>) {
     match ck.get(&committed_key(operator_id)).await {
         Ok(Some(bytes)) => decode_state(&bytes),
         _ => (vec![], vec![]),
