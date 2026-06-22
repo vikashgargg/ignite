@@ -302,7 +302,13 @@ the real multi-node cluster. **Prod insight (important):** the distributed sink 
 — writing parquet to a worker pod's local `/tmp` fails cross-pod (reader on another pod sees no files);
 pointing outputs at the shared hostPath (`/tmp/sail`, the EKS analogue = S3, which the prior EKS runs
 used) makes it 6/6. So distributed streaming on Vajra requires object-store/shared sinks (already the
-F4 design). Remaining: F3-c continuous-stateful EO across a **worker-pod kill** (multi-node failover);
-then EKS multi-node + Flink (step 2/3).
+F4 design). **Multi-node WORKER-POD-KILL failover — PASS 2026-06-22 (stateless continuous).** Continuous
+Kafka→parquet on the 3-node KIND cluster (driver spawns 5 workers); deleted a running worker pod
+(`kubectl delete pod --force`) MID-STREAM; query stayed alive, driver recovered; produced wave2;
+final durable output = **6000 distinct, contiguous 0..5999, 0 dup/loss** ⇒
+`MULTINODE_WORKER_FAILOVER_EO PASS`. The multi-node failover mechanism (worker loss → reschedule →
+EO recovery from the shared checkpoint) works. Remaining: the SAME across worker-kill with a
+*stateful* windowed-agg (F3-c on multi-node — extends this with per-epoch state recovery); then
+EKS multi-node (real node loss) + Flink head-to-head (step 2/3).
 - **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
   `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.
