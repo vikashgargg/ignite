@@ -266,8 +266,13 @@ Spark-matched). The ONE remaining stateful gap, located precisely:
   (`committed_epoch` reads the sink's record; `restore_epoch_state`) — same epoch the source seeks ⇒
   Chandy-Lamport consistent snapshot. GC keeps a trailing window. Unit test proves it restores the
   committed epoch (not a later uncommitted one ⇒ no over-count, nor a stale one) + GC. 8/8 green.
-  **GATE PENDING (not claimed end-to-end):** full pyspark continuous-stateful (windowed-agg)
-  EO-across-`kill -9` on local-cluster — exercises the continuous windowed-agg→realtime-sink path
-  (may surface integration issues); the real claim awaits this gate green. EO-critical ⇒ no rush.
+  **GATE PASS (e2e, 2026-06-22, commit) — `scripts/f3c_stateful_crash.sh`:** continuous windowed-agg
+  (Kafka→`groupBy(window,k).count()`→realtime parquet, `Trigger.Continuous`) on local-cluster (2 workers).
+  W0,W1 commit pre-crash; W2's events are produced pre-crash with its window OPEN at a `kill -9`. After
+  crash+restart+wave2 → **12 rows (W0..W5 × 2 keys), every count=10, no dup (W0/W1 not re-emitted),
+  no loss (W2=10 survived)** ⇒ `F3C_STATEFUL_EO_ACROSS_CRASH PASS`. **Distributed continuous STATEFUL
+  exactly-once across a hard crash is validated end-to-end.** (Vajra allows windowed-agg under
+  `Trigger.Continuous`; Spark forbids it.) Remaining for F2/F3: **F3-d** = true multi-NODE
+  (`kubernetes-cluster`) gate vs Flink (this is all local-cluster = in-process workers on one box).
 - **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
   `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.
