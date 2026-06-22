@@ -74,9 +74,17 @@ https://datafusion.apache.org/ballista/contributors-guide/architecture.html · F
 Source: https://datafusion.apache.org/
 - Arrow-native columnar `ExecutionPlan`s; `AggregateMode::{Partial,Final}`; `RowConverter` for
   row-format keys; physical-plan codec for distributed serialization; vectorized operators.
-- **Implication for Vajra:** we ARE DataFusion-based; keep every operator Arrow-vectorized, push work
-  into DataFusion kernels. Window changelog uses `RowConverter` (same primitive as grouping/sorting) —
-  keep that alignment.
+- **Spill (for F5):** DataFusion's grouped-hash `AggregateExec` **spills its hash table to disk**
+  under memory pressure via `RuntimeEnv` → `MemoryPool` (bounded, e.g. `FairSpillPool`) +
+  `DiskManager` (temp spill files). Available in our pinned 53.1.0 (`RuntimeEnv` already used;
+  `cluster.shuffle_spill_dir` config exists). So a streaming agg run under a **bounded memory pool**
+  spills automatically — no hand-rolled spill for the final merge.
+- **Implication for Vajra:** keep operators Arrow-vectorized, push work into DataFusion kernels.
+  **F5 (spillable window state, docs/design/streaming-spillable-state-f5.md):** the operator's OWN
+  `pending_rows: Vec<RecordBatch>` is the unbounded-RAM part (DataFusion's pool can't see it) — spill
+  it via `state_io` Arrow-IPC ↔ `CheckpointStore` (object-store = ForSt §3) with a local memory cache;
+  AND run the final merge under a bounded `MemoryPool` so DataFusion spills the hash table. Two
+  complementary spills = state ≫ RAM, like Flink RocksDB/ForSt.
 
 ---
 
