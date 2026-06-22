@@ -62,10 +62,10 @@ all P0 items below are ✅ and published.
 ## 4. Reliability & Endurance  — **unproven under production conditions**
 | Item | Status | Acceptance criterion |
 |---|---|---|
-| Kafka → sink soak (24 h) | 🟡 | **harness built**: `scripts/stream_soak_chaos.sh` (`SOAK=1`) — continuous Kafka→parquet EO; asserts bounded lag + flat RSS + EO. Run pending (needs local binary + `.venvs/smoke`). |
+| Kafka → sink soak (24 h) | 🟡 | `scripts/stream_soak_chaos.sh` — **smoke PASSED 2026-06-22** (120s/20k-s: 2.36M rows EO, flat RSS); 24 h `SOAK=1` run still pending for the GA DoD. |
 | Concurrency / multi-tenant load | ⬜ | N concurrent clients sustained; latency + correctness hold, no deadlock |
-| Failover / chaos | 🟡 | **harness built**: same `stream_soak_chaos.sh` hard-kills (`kill -9`) the server mid-stream + restarts → asserts EO across crash (contiguous, no loss/dup). Run pending. |
-| Memory stability over time | 🟡 | **harness built**: `stream_soak_chaos.sh` samples RSS every 10s → asserts `max/median < LEAK_RATIO` (no unbounded growth). Run pending. |
+| Failover / chaos | ✅ | **PASSED 2026-06-22**: `stream_soak_chaos.sh` hard-kills (`kill -9`) the server mid-stream + restarts → durable output exactly-once across the crash (2,360,000 rows, **0 loss, 0 dup, contiguous**). |
+| Memory stability over time | 🟡 | **smoke PASSED**: RSS median 127 MB / max 142 MB = flat (1.11× < 1.5) across crash/restart; flat over 24 h still pending. |
 | Graceful shutdown + backpressure | 🟡 | in-flight queries drain on SIGTERM; slow consumers don't unbound buffers — verify |
 | Crash recovery | 🟡 | streaming checkpoint recovery ✅; batch driver restart story documented |
 
