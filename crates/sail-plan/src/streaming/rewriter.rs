@@ -43,6 +43,11 @@ struct StreamingRewriter {
     /// `Trigger.Continuous` epoch-commit interval (millis), threaded to sources for realtime
     /// exactly-once (source emits `Checkpoint{epoch}` + pre-commits offsets at this cadence).
     realtime_interval_ms: Option<u64>,
+    /// `outputMode("update")`: window aggregation emits a changelog (retract+insert) instead of
+    /// append-on-close. Default false (append). See docs/design/streaming-update-retraction-mode.md.
+    update_mode: bool,
+    /// Update mode only: `allowedLateness` window-state retention past close (micros).
+    allowed_lateness_micros: i64,
 }
 
 impl StreamingRewriter {
@@ -267,7 +272,8 @@ impl TreeNodeRewriter for StreamingRewriter {
                             )?),
                             agg_output_schema,
                             self.checkpoint_location.clone(),
-                        )),
+                        )
+                        .with_output_mode(self.update_mode, self.allowed_lateness_micros)),
                     })));
                 }
 
@@ -615,11 +621,14 @@ pub fn is_streaming_plan(plan: &LogicalPlan) -> Result<bool> {
 /// all logical commands are executed. An error will be returned if the plan
 /// contains logical command nodes or nodes that should be eliminated by the
 /// optimizer (e.g. subquery).
+#[expect(clippy::too_many_arguments)]
 pub fn rewrite_streaming_plan(
     plan: LogicalPlan,
     bounded: bool,
     checkpoint_location: Option<String>,
     realtime_interval_ms: Option<u64>,
+    update_mode: bool,
+    allowed_lateness_micros: i64,
 ) -> Result<LogicalPlan> {
     // Systemic qualifier normalization: streaming operators decode flow events into the
     // **unqualified** data schema, while the resolver tags columns with a synthetic
@@ -632,6 +641,8 @@ pub fn rewrite_streaming_plan(
         bounded,
         checkpoint_location,
         realtime_interval_ms,
+        update_mode,
+        allowed_lateness_micros,
     })?;
     let plan = node.data;
 

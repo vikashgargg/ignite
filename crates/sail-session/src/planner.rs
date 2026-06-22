@@ -500,15 +500,23 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             } else {
                 input.clone()
             };
-            let window: Arc<dyn ExecutionPlan> = Arc::new(WindowAccumExec::try_new(
-                window_input,
-                physical_group_by,
-                aggr_exprs,
-                data_schema,
-                node.event_time_col.clone(),
-                node.delay_micros,
-                node.checkpoint_location.clone(),
-            )?);
+            let window_output_mode = if node.update_mode {
+                sail_physical_plan::streaming::window_accum::WindowOutputMode::Update
+            } else {
+                sail_physical_plan::streaming::window_accum::WindowOutputMode::Append
+            };
+            let window: Arc<dyn ExecutionPlan> = Arc::new(
+                WindowAccumExec::try_new(
+                    window_input,
+                    physical_group_by,
+                    aggr_exprs,
+                    data_schema,
+                    node.event_time_col.clone(),
+                    node.delay_micros,
+                    node.checkpoint_location.clone(),
+                )?
+                .with_output_mode(window_output_mode, node.allowed_lateness_micros),
+            );
             if window_parallelism > 1 {
                 // Barrier-aligning N->1 merge: a strict superset of a plain coalesce — it fans the N
                 // keyed window instances back into one partition AND aligns broadcast

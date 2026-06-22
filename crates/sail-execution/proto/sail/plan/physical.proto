@@ -775,6 +775,10 @@ message WindowAccumExecNode {
   string event_time_col = 3;
   int64 delay_micros = 4;
   optional string checkpoint_location = 5;
+  // outputMode("update"): changelog (retract+insert) emission. Default false = append.
+  bool update_mode = 6;
+  // Update mode only: allowedLateness window retention past close (micros).
+  int64 allowed_lateness_micros = 7;
 }
 
 message KafkaSourceExecNode {

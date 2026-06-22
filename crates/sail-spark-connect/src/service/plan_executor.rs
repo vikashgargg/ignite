@@ -276,6 +276,26 @@ pub(crate) async fn handle_execute_sql_command(
     ))
 }
 
+/// Parse a duration string (e.g. "30 seconds", "0 seconds", "2 minutes", "500 ms") into
+/// microseconds, allowing zero. Used for the `allowedLateness` writeStream option. Returns
+/// `None` if unparseable so the caller can default.
+fn parse_duration_to_micros(s: &str) -> Option<i64> {
+    let lower = s.trim().to_lowercase();
+    let mut parts = lower.split_whitespace();
+    let n: i64 = parts.next()?.parse().ok()?;
+    let unit = parts.next().unwrap_or("seconds");
+    let micros = if unit.starts_with("ms") || unit.starts_with("millisecond") {
+        n.saturating_mul(1_000)
+    } else if unit.starts_with("min") {
+        n.saturating_mul(60_000_000)
+    } else if unit.starts_with("hour") || unit == "h" {
+        n.saturating_mul(3_600_000_000)
+    } else {
+        n.saturating_mul(1_000_000) // seconds (default)
+    };
+    Some(micros.max(0))
+}
+
 /// Parse a Spark `processingTime` interval (e.g. "5 seconds", "1 second", "500 milliseconds",
 /// "2 minutes") into a `Duration`. Defaults to 1s if unparseable; never zero (avoids a busy loop).
 fn parse_processing_interval(s: &str) -> std::time::Duration {
@@ -310,6 +330,16 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
     let reattachable = metadata.reattachable;
     let query_name = start.query_name.clone();
     let checkpoint_location = start.options.get("checkpointLocation").cloned();
+    // `outputMode("update")` → windowed-aggregation changelog (retract+insert) output instead of
+    // append-on-close, so late-but-in-bound data updates results (zero-loss convergence — see
+    // docs/design/streaming-update-retraction-mode.md). `allowedLateness` (a Vajra writeStream
+    // option; Spark has no such API) sets how long past a window's close its state is retained.
+    let update_mode = start.output_mode.eq_ignore_ascii_case("update");
+    let allowed_lateness_micros = start
+        .options
+        .get("allowedLateness")
+        .and_then(|s| parse_duration_to_micros(s))
+        .unwrap_or(0);
     // `availableNow`/`once` → bounded run-once. An explicit `processingTime` trigger →
     // CONTINUOUS micro-batch execution: re-plan + run a fresh bounded micro-batch every
     // interval (Spark `MicroBatchExecution` model), reusing the availableNow exactly-once +
@@ -339,6 +369,8 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
             checkpoint_location.clone(),
             // Realtime EO: the source emits Checkpoint{epoch} + pre-commits offsets at this cadence.
             Some(commit_interval.as_millis() as u64),
+            update_mode,
+            allowed_lateness_micros,
         )
         .await?;
         let stream = service.runner().execute(ctx, plan.clone()).await?;
@@ -365,8 +397,17 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
                 // picks up new data, processes only what's uncommitted, commits on clean end.
                 let plan = spec::Plan::Command(spec::CommandPlan::new(start.try_into()?));
                 let (plan, _info) =
-                    resolve_and_execute_plan_with_options(&ctx, config, plan, true, cp, None)
-                        .await?;
+                    resolve_and_execute_plan_with_options(
+                        &ctx,
+                        config,
+                        plan,
+                        true,
+                        cp,
+                        None,
+                        update_mode,
+                        allowed_lateness_micros,
+                    )
+                    .await?;
                 let stream = ctx
                     .extension::<JobService>()?
                     .runner()
@@ -396,6 +437,8 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
             bounded,
             checkpoint_location.clone(),
             None,
+            update_mode,
+            allowed_lateness_micros,
         )
         .await?;
         let stream = service.runner().execute(ctx, plan.clone()).await?;
