@@ -47,8 +47,14 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
 - **F5.0 spill primitive — DONE 2026-06-22:** `state_io::{write_spill,read_spill,delete_spill}` (numbered
   Arrow-IPC chunks ↔ `CheckpointStore`), unit-tested (`spill_chunks_roundtrip_and_gc`). Safe building
   block, not yet wired into the hot path.
-- **F5.1 wire spill into `WindowAccumExec`:** byte budget; spill `pending_rows` chunks over budget;
-  track spill handles in `AccumState` (+ snapshot/restore them in the epoch/EndOfData state so EO holds).
+- **F5.1 wire spill into `WindowAccumExec` — DONE + validated 2026-06-22 (commit):** per-instance byte
+  budget (`SAIL_STREAMING_STATE_BUDGET_BYTES`, default 128 MiB); over budget → spill `pending_rows`
+  chunk to the checkpoint store, evict from RAM; `gather_partials` folds spills back at every
+  finalize/snapshot (EO unchanged — the durable snapshot is always the full flattened state); finalize
+  GCs consumed spills. Validated: 200k keys, **256 KB budget → 23 spills**, output **200000 exact**
+  (no loss/dup across the spill round-trip). Bounds the ACCUMULATION phase. NOTE: budget is
+  per-partition (state is sharded by `StreamExchangeExec`), so it composes with parallelism
+  (Key-Groups analogue). Remaining peak is the finalize/snapshot read-back (F5.2).
 - **F5.2 streaming finalize:** a `SpillReadExec` that yields in-memory + spilled chunks LAZILY into the
   Final `AggregateExec` (never load all), under a bounded `MemoryPool`+`DiskManager` so DF spills its
   hash table; emit output batches incrementally.

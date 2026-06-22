@@ -147,6 +147,14 @@ struct AccumState {
     /// Continuous (realtime) EO only: the committed epoch restored on startup (F3-c). Set when
     /// `realtime/committed` exists; lets recovery restore exactly that epoch's per-epoch state.
     last_committed_epoch: Option<u64>,
+    /// F5 spillable state: approx in-memory bytes of `pending_rows`, and the indices of partial-state
+    /// chunks SPILLED to the checkpoint store (Arrow-IPC) when `pending_rows` exceeds the memory
+    /// budget — bounding accumulation RAM. Spills are read back + folded into the full state at each
+    /// finalize/snapshot (so EO is unchanged — the durable snapshot is always the full flattened
+    /// state). See docs/design/streaming-spillable-state-f5.md.
+    pending_bytes: usize,
+    spilled: Vec<u64>,
+    next_spill: u64,
 }
 
 /// Re-run the `Final` merge + emit at most once per this much watermark advance.
@@ -163,6 +171,9 @@ impl AccumState {
             restored: false,
             last_emitted: HashMap::new(),
             last_committed_epoch: None,
+            pending_bytes: 0,
+            spilled: vec![],
+            next_spill: 0,
         }
     }
 
@@ -400,6 +411,12 @@ impl ExecutionPlan for WindowAccumExec {
         let output_mode = self.output_mode;
         let allowed_lateness = self.allowed_lateness_micros;
         let num_group_cols = self.final_group_by.expr().len();
+        // F5: spill `pending_rows` to the checkpoint store when it exceeds this budget (bounds
+        // accumulation RAM). Default 128 MiB; override via SAIL_STREAMING_STATE_BUDGET_BYTES.
+        let state_budget_bytes: usize = std::env::var("SAIL_STREAMING_STATE_BUDGET_BYTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(128 * 1024 * 1024);
         let in_stream = self.input.execute(partition, context.clone())?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -445,6 +462,7 @@ impl ExecutionPlan for WindowAccumExec {
             let output_mode = output_mode;
             let allowed_lateness = allowed_lateness;
             let num_group_cols = num_group_cols;
+            let state_budget_bytes = state_budget_bytes;
             async move {
                 // Restore committed state on the first poll (open-window partials + watermark +
                 // emitted ends), for stateful exactly-once recovery across runs.
@@ -499,7 +517,33 @@ impl ExecutionPlan for WindowAccumExec {
                                 .await
                                 {
                                     Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
-                                    Ok(mut partials) => acc.pending_rows.append(&mut partials),
+                                    Ok(mut partials) => {
+                                        for b in &partials {
+                                            acc.pending_bytes += b.get_array_memory_size();
+                                        }
+                                        acc.pending_rows.append(&mut partials);
+                                    }
+                                }
+                                // F5: over budget → spill the in-memory partials to the checkpoint
+                                // store (Arrow-IPC chunk), evicting them from RAM. Folded back into
+                                // the full state at the next finalize/snapshot (EO unchanged).
+                                if acc.pending_bytes > state_budget_bytes && !acc.pending_rows.is_empty() {
+                                    if let Some(ck) = &ck {
+                                        let idx = acc.next_spill;
+                                        if crate::streaming::state_io::write_spill(
+                                            ck, &state_op_id, idx, &partial_schema, &acc.pending_rows,
+                                        )
+                                        .await
+                                        {
+                                            if std::env::var("VAJRA_F5_DEBUG").is_ok() {
+                                                eprintln!("F5_SPILL p{partition} idx={idx}");
+                                            }
+                                            acc.spilled.push(idx);
+                                            acc.next_spill += 1;
+                                            acc.pending_rows.clear();
+                                            acc.pending_bytes = 0;
+                                        }
+                                    }
                                 }
                             }
                             // No output yet; loop to read next event.
@@ -531,6 +575,8 @@ impl ExecutionPlan for WindowAccumExec {
                                     num_group_cols,
                                     &mut buf,
                                     ctx.clone(),
+                                    ck.as_ref(),
+                                    &state_op_id,
                                 )
                                 .await
                                 {
@@ -550,11 +596,17 @@ impl ExecutionPlan for WindowAccumExec {
                                 // (Do NOT flush; open windows carry over to the next run.)
                                 let mut meta = vec![acc.watermark_micros.unwrap_or(i64::MIN)];
                                 meta.extend(acc.emitted_ends.iter().copied());
+                                // F5: snapshot the FULL state (in-memory + spilled folded in) so the
+                                // committed blob is complete — recovery is unchanged by spilling.
+                                let full = gather_partials(
+                                    &acc.pending_rows, &acc.spilled, Some(ck), &state_op_id,
+                                )
+                                .await;
                                 crate::streaming::state_io::stage_state(
                                     ck,
                                     &state_op_id,
                                     &partial_schema,
-                                    &acc.pending_rows,
+                                    &full,
                                     &meta,
                                 )
                                 .await;
@@ -571,6 +623,8 @@ impl ExecutionPlan for WindowAccumExec {
                                     num_group_cols,
                                     &mut buf,
                                     ctx.clone(),
+                                    ck.as_ref(),
+                                    &state_op_id,
                                 )
                                 .await
                                 {
@@ -589,12 +643,19 @@ impl ExecutionPlan for WindowAccumExec {
                             if let Some(ck) = &ck {
                                 let mut meta = vec![acc.watermark_micros.unwrap_or(i64::MIN)];
                                 meta.extend(acc.emitted_ends.iter().copied());
+                                // F5: epoch snapshot captures the FULL state (memory + spilled). Do
+                                // NOT delete the spills here — the operator keeps running and they
+                                // remain live (only finalize, which consumes them, GCs them).
+                                let full = gather_partials(
+                                    &acc.pending_rows, &acc.spilled, Some(ck), &state_op_id,
+                                )
+                                .await;
                                 crate::streaming::state_io::stage_epoch_state(
                                     ck,
                                     &state_op_id,
                                     id,
                                     &partial_schema,
-                                    &acc.pending_rows,
+                                    &full,
                                     &meta,
                                 )
                                 .await;
@@ -630,6 +691,23 @@ impl ExecutionPlan for WindowAccumExec {
 /// - `Update`: emit a changelog (retract stale value + insert new value) for every window whose
 ///   aggregate changed; retain state until `end + allowed_lateness ≤ emit_wm` so late-but-in-bound
 ///   data updates the result instead of being dropped (zero-loss convergence).
+// Full partial state: in-memory `pending_rows` plus spilled chunks read back (F5), so spilling is
+// transparent to correctness/exactly-once. Used by every finalize and snapshot.
+async fn gather_partials(
+    pending: &[RecordBatch],
+    spilled: &[u64],
+    ck: Option<&CheckpointStore>,
+    op_id: &str,
+) -> Vec<RecordBatch> {
+    let mut out = pending.to_vec();
+    if let Some(ck) = ck {
+        for &idx in spilled {
+            out.extend(crate::streaming::state_io::read_spill(ck, op_id, idx).await);
+        }
+    }
+    out
+}
+
 #[expect(clippy::too_many_arguments)]
 async fn finalize_and_emit(
     acc: &mut AccumState,
@@ -642,10 +720,13 @@ async fn finalize_and_emit(
     num_group_cols: usize,
     buf: &mut VecDeque<FlowEvent>,
     context: Arc<TaskContext>,
+    ck: Option<&CheckpointStore>,
+    state_op_id: &str,
 ) -> Result<()> {
-    let partials = acc.pending_rows.clone();
+    // F5: fold spilled chunks back into the full partial state for the merge.
+    let partials = gather_partials(&acc.pending_rows, &acc.spilled, ck, state_op_id).await;
     let agg_batches = run_final_aggregate(
-        partials,
+        partials.clone(),
         final_group_by,
         aggr_exprs,
         partial_schema,
@@ -678,18 +759,29 @@ async fn finalize_and_emit(
                     mark_emitted_ends(agg_batch, wm, &mut acc.emitted_ends);
                 }
             }
-            // Bound state: keep only partials whose window is still open.
-            acc.pending_rows =
-                retain_open_window_rows(std::mem::take(&mut acc.pending_rows), emit_wm);
+            // Bound state: keep only partials (from the FULL set incl. spilled) whose window is open.
+            acc.pending_rows = retain_open_window_rows(partials, emit_wm);
         }
         WindowOutputMode::Update => {
             emit_changelog(acc, &agg_batches, emit_wm, allowed_lateness, num_group_cols, buf)?;
             // Retain windows still within the lateness bound (`end + L > wm` ⟺ `end > wm − L`).
             let retain_wm = emit_wm.map(|w| w.saturating_sub(allowed_lateness));
-            acc.pending_rows =
-                retain_open_window_rows(std::mem::take(&mut acc.pending_rows), retain_wm);
+            acc.pending_rows = retain_open_window_rows(partials, retain_wm);
         }
     }
+    // F5: spilled chunks were folded into emitted output + the retained pending_rows -> GC + reset
+    // the budget so the next accumulation phase starts fresh.
+    if let Some(ck) = ck {
+        for &idx in &acc.spilled {
+            crate::streaming::state_io::delete_spill(ck, state_op_id, idx).await;
+        }
+    }
+    acc.spilled.clear();
+    acc.pending_bytes = acc
+        .pending_rows
+        .iter()
+        .map(|b| b.get_array_memory_size())
+        .sum();
     Ok(())
 }
 
