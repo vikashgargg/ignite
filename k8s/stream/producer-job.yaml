@@ -27,7 +27,8 @@ spec:
             - { name: N_EVENTS, value: "100000000" }   # 100M (Flink baseline scale)
             - { name: N_KEYS, value: "1000" }
             - { name: EVENTS_PER_MS, value: "1000" }    # event-time density -> window span
-            - { name: PROCS, value: "12" }
+            - { name: N_PARTS, value: "16" }            # == topic partitions; one worker per partition
+            - { name: PROCS, value: "16" }
           command:
             - /bin/sh
             - -c
@@ -40,28 +41,35 @@ spec:
               BOOT=os.environ["BOOT"]; TOPIC=os.environ["TOPIC"]
               N=int(os.environ["N_EVENTS"]); K=int(os.environ["N_KEYS"])
               EPMS=int(os.environ["EVENTS_PER_MS"]); P=int(os.environ["PROCS"])
-              BASE=1700000000000
-              def worker(wid, lo, hi):
+              NP=int(os.environ["N_PARTS"]); BASE=1700000000000
+              # One worker per Kafka partition: worker `wid` owns partition `wid` and emits
+              # its events (the strided slice i = wid, wid+NP, ...) in INCREASING event-time.
+              # Because ts = BASE + i//EPMS is monotonic in i, each partition's offset order is
+              # event-time-ordered -> a 0-second watermark drops nothing. This is the canonical
+              # time-ordered keyed stream every windowed-agg benchmark (incl. Flink's) assumes;
+              # routing by explicit partition (not key-hash) is what guarantees the ordering.
+              def worker(wid):
                   p=Producer({"bootstrap.servers":BOOT,"linger.ms":50,
                               "batch.size":1048576,"compression.type":"lz4",
                               "queue.buffering.max.messages":2000000,
                               "queue.buffering.max.kbytes":1048576})
-                  for i in range(lo, hi):
+                  n=0
+                  for i in range(wid, N, NP):
                       k=i % K
                       ts=BASE + (i // EPMS)
                       v=json.dumps({"k":k,"ts":ts,"v":1})
                       while True:
                           try:
-                              p.produce(TOPIC, key=str(k), value=v); break
+                              p.produce(TOPIC, partition=wid, key=str(k), value=v); break
                           except BufferError:
                               p.poll(0.1)
-                      if (i & 0x3FFFF)==0: p.poll(0)
+                      n+=1
+                      if (n & 0x3FFFF)==0: p.poll(0)
                   p.flush()
-              chunk=(N + P - 1)//P
               t0=time.time()
-              procs=[mp.Process(target=worker,args=(w, w*chunk, min((w+1)*chunk, N))) for w in range(P)]
+              procs=[mp.Process(target=worker,args=(w,)) for w in range(P)]
               for pr in procs: pr.start()
               for pr in procs: pr.join()
               dt=time.time()-t0
-              print(f"PRODUCED N={N} keys={K} in {dt:.1f}s = {N/dt/1e6:.2f}M msg/s", flush=True)
+              print(f"PRODUCED N={N} keys={K} parts={NP} in {dt:.1f}s = {N/dt/1e6:.2f}M msg/s", flush=True)
               PY

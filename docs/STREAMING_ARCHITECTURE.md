@@ -1,0 +1,109 @@
+# Vajra Streaming Architecture (authoritative spec)
+
+**Purpose.** Single source of truth for Vajra's streaming engine: the component
+contracts, the full feature matrix, the honest gap register, and the validation gates.
+We build to *fill this matrix* — not to chase bugs. Every change must cite the cell it
+advances and meet that cell's done-criteria. Grounded in the Apache references, not copied
+from them: we take the proven designs and implement them prod-grade for a no-JVM, Arrow-native
+engine under the Spark API. See [[feedback_prod_grade_bar]], [[feedback_no_workarounds]].
+
+## 0. North-star correctness contract
+
+From Flink's dynamic-table model: **a continuous query's output must be semantically
+equivalent to the same query run in batch on a snapshot of the input.** Every streaming
+operator + sink is judged against this. Vajra's differential primitive is
+`FlowEvent::Data{ batch, retracted: BooleanArray }` — Flink's *retract stream*
+(`retracted=false` = INSERT / UPDATE_AFTER; `retracted=true` = UPDATE_BEFORE / DELETE).
+
+References (consulted, not copied):
+- Flink dynamic tables / changelog streams (append vs retract vs upsert; INSERT/UPDATE_BEFORE/UPDATE_AFTER/DELETE; upsert sinks need a unique key). https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/dev/table/concepts/dynamic_tables/
+- Flink fault tolerance: Chandy-Lamport async barrier snapshotting; alignment ⇒ exactly-once; replayable source + transactional/idempotent sink ⇒ end-to-end EO. https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/learn-flink/fault_tolerance/
+- Flink event time / watermarks: `watermark = maxEventTime − boundedOutOfOrderness`; allowedLateness re-fires windows; `sideOutputLateData` keeps too-late records. FLIP-27 (one split→watermark per subtask), FLIP-182 (watermark alignment).
+- RisingWave emit-on-window-close vs Flink emit-on-update (changelog). Materialize/differential-dataflow: retract+insert ⇒ eventual convergence, zero loss.
+- DataFusion: `ExecutionPlan`/`AggregateMode::{Partial,Final}`/`RowConverter`; physical codec for distributed plans.
+
+## 1. Component map (file ↔ responsibility ↔ contract)
+
+| Component | File | Responsibility | Contract |
+|---|---|---|---|
+| FlowEvent model | `sail-common-datafusion/src/streaming/event/` | `Data{batch,retracted}` + `Marker(Watermark/Checkpoint/EndOfData/...)`; encode/decode | Markers never overtake their data; retract row == a prior insert row verbatim |
+| Kafka source | `sail-data-source/src/formats/kafka/reader.rs` | bounded/realtime/unbounded reads; 1 instance per partition (FLIP-27) | Bounded read reaches captured end offsets (replayable); per-partition event-time order |
+| Watermark | `sail-physical-plan/src/streaming/watermark.rs` | emit `Watermark(maxTs−delay)`, monotonic, per-partition | Never regress; delay = bounded out-of-orderness |
+| Keyed exchange | `streaming/exchange.rs` | hash-shuffle by key N→M; MIN-merge watermarks at receiver | Same key→same partition; downstream watermark = MIN over inputs (FLIP-182) |
+| Barrier align | `streaming/barrier_align.rs` | N→1 Chandy-Lamport barrier alignment | Collect barrier from all N before forwarding one (EO) |
+| Window agg | `streaming/window_accum.rs` | event-time window agg; append + update(changelog)+allowedLateness | Append: emit-once-on-close. Update: retract+insert, retain until `end+L≤wm`, zero loss within L |
+| Dedup | `streaming/dedup.rs` | keyed dedup with watermark eviction | Exactly-once per key within watermark horizon |
+| Stream join | `streaming/stream_join.rs` | interval/equi join, per-side state | Bounded state via watermark; no spurious drops |
+| Collector | `streaming/collector.rs` | materialize changelog→table (bounded) | Net by row-identity: insert +1, retract −1; survivors = batch-equivalent result |
+| File sink | `sail-data-source` file write + `_spark_metadata` | append-only durable sink + EO commit log | Append-only; cannot represent retractions (see gaps) |
+| Kafka sink | `kafka/sink.rs` | EO Kafka producer (txn) | Transactional; upsert mode = key'd changelog (gap) |
+| Realtime file sink | `RealtimeFileSinkExec` | per-epoch atomic commit (realtime EO) | One atomic object per epoch (F4) |
+| State snapshot | `streaming/state_io.rs` | operator state stage/restore | Write-ahead; commit after output durable |
+| Distributed codec | `sail-execution/src/codec.rs` | (de)serialize physical plan across workers | Every exec field round-trips (else local-cluster/distributed diverges) |
+| Planner | `sail-session/src/planner.rs` | logical streaming node → physical exec | Preserve all node options onto exec |
+| Rewriter | `sail-plan/src/streaming/rewriter.rs` | optimized plan → streaming operators | Thread bounded/checkpoint/realtime/output-mode/lateness |
+| Executor | `sail-spark-connect/.../plan_executor.rs` | writeStream spec → streaming run options | Map trigger/outputMode/options to engine flags |
+
+## 2. Feature matrix (operator × output mode × sink × distribution)
+
+Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not built) · — n/a
+
+| Operator | append / file-sink / single | append / distributed | update(changelog) / collector / single | update / kafka-upsert | update / distributed |
+|---|---|---|---|---|---|
+| Windowed agg | ✅ (EKS vs Flink) | ✅ (EKS local-cluster) | ✅ operator e2e: out-of-order→batch-truth, 0 loss vs append drops (`update_mode_e2e_tests`); pyspark-vs-Spark diff gated on collect-path wiring | ⛔ upsert sink | ✅ codec round-trips update_mode+lateness (`test_round_trip_window_accum_exec`) |
+| Non-windowed agg | ✅ complete-mode | 🟡 | 🟡 | ⛔ | ⛔ |
+| Dedup | ✅ | ✅ | — | — | 🟡 |
+| Stream-stream join | ✅ | 🟡 | n/a (append) | — | 🟡 |
+| Kafka EO sink | ✅ (realtime EO) | ✅ | — | ⛔ | 🟡 |
+
+## 3. Gap register (severity: P0 blocks "replace both", P1 important, P2 nice)
+
+- **P0 — throughput**: windowed agg ~2.5× slower than Flink wall (EKS 100M, 2026-06-21:
+  Flink 17.4s/8.7GiB vs Vajra **44s**/2.4GiB). LOCALIZED by elimination at EKS scale:
+  (a) `from_json` = 3.67M rows/s single-thread (×16 ≫ 2.3M/s aggregate) ⇒ not it;
+  (b) `shuffle.partitions=1` (no exchange) = 43.6s ≈ 44s ⇒ exchange/parallelism not it;
+  (c) larger batch (128Ki) = worse (44s, 2.4GiB) ⇒ per-batch overhead not it;
+  (d) Flink reads 100M in ~10s ⇒ **broker serves ≥10M/s, not the cap**.
+  ⇒ **ROOT CAUSE: the Kafka *consumer* read path** (~2.3M/s vs Flink ~10M/s) — per-message
+  `to_vec` allocs (key+value) + `KafkaRow` + `build_batch` + rdkafka `StreamConsumer::next()`
+  per-message. **FIX IMPLEMENTED + LOCALLY VALIDATED (2026-06-21): 1.5M/s → 3.22M/s (2.1×)** via
+  (1) `KafkaArrowBuilders` — append message bytes straight into Arrow builders, no `to_vec`/`KafkaRow`;
+  (2) `apply_consumer_throughput_defaults` — rdkafka prefetch/fetch tuning (the dominant lever: the
+  local 1.5M/s was *fetch-config*-limited, not broker-capped — default `fetch.wait.max.ms=500` idled).
+  `KAFKA_BENCH` micro-bench on local 10M. **EKS-CONFIRMED 2026-06-22: 44s → 19.72s** (2.2×,
+  throughput 2.27→5.07M ev/s) on 100M — now **near-parity with Flink (17.4s)**, was 2.5× behind.
+  All 3 read paths (bounded/realtime/unbounded) share `KafkaArrowBuilders`. Tradeoff: peak mem
+  2.4→6.0 GiB from the 1 GiB×16 prefetch buffers (still < Flink's 8.7 GiB; `kafka.queued.max.messages.kbytes`
+  tunes it down). Correctness unchanged (every group 10000, 0 loss). Remaining ~13% wall gap to Flink
+  = window/sink compute (next lever, optional). Owner: `kafka/reader.rs`. **Largely RESOLVED.**
+- ~~P0 — update-mode distributed codec~~ **RESOLVED 2026-06-21**: `update_mode`/`allowed_lateness`
+  round-trip in `codec.rs` (proto fields 6/7 + `test_round_trip_window_accum_exec`). Update mode now
+  survives local-cluster/distributed planning.
+- **P1 — upsert/changelog sinks**: file sink is append-only; update mode needs upsert-kafka /
+  Delta-merge / collector(done) to land retractions. Blocks update@external-sink.
+- **P1 — late side output**: records later than `wm−L` are dropped (like append), not routed to a
+  `_late/` side output (Flink `sideOutputLateData`).
+- **P1 — changelog state checkpoint**: `last_emitted` (update mode) not snapshotted on EndOfData;
+  cross-run update recovery incomplete (append partial-state recovery is fine).
+- **P2 — complete mode on windows**: only append/update specialized; `complete` falls back to append.
+
+## 4. Validation gates (every feature must pass its tier before "done")
+
+1. **Unit** (in-crate, no I/O): operator logic, e.g. `window_accum::update_mode_tests` proves
+   retract+insert convergence; `collector` netting test. Fast, runs in CI.
+2. **Local Spark-diff** (`scripts/diff_test`, local Kafka in docker): same query on Vajra vs real
+   Spark 3.5.3; assert bit-equal (append) or converged-equal (update). No cloud cost.
+3. **EKS vs Flink** (bundled, paid): 100M head-to-head — correctness (per-group exact, 0 loss),
+   memory, throughput vs official Flink 1.19. One spend per milestone, torn down to $0 after.
+
+A cell is ✅ only when its tier-3 (or tier-2 for cloud-irrelevant features) gate is green and the
+result is recorded in [[project_streaming_vs_flink_eks2]].
+
+## 5. Prod-grade bar (per change)
+
+- Cites the matrix cell it advances + meets that cell's done-criteria.
+- Grounded in a named reference section above (not invented).
+- No regression: append path stays bit-identical (default), full suite + clippy `-D warnings` green.
+- Honest labeling: any MVP names its gap in §3 with severity.
+- Distributed-aware: if it adds an exec field, it round-trips in `codec.rs` (or is explicitly
+  single-node-only with a P0/P1 gap logged).

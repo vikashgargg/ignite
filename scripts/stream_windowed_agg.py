@@ -61,5 +61,13 @@ q = (agg.writeStream.format("parquet")
 q.awaitTermination()
 dt = time.time() - t0
 
-windows = s.read.parquet(OUT).count()
-print(f"VAJRA_WAGG events={N} wall_s={dt:.2f} throughput={N/dt/1e6:.3f}M_events/s windows={windows}", flush=True)
+out = s.read.parquet(OUT)
+windows = out.count()
+# total events that landed in windows == records actually read (under-read check);
+# distinct window/key cardinality == correctness check vs the known workload shape.
+row = out.agg(F.sum("count").alias("total"),
+              F.countDistinct("window").alias("n_win"),
+              F.countDistinct("k").alias("n_keys")).collect()[0]
+total, n_win, n_keys = row["total"], row["n_win"], row["n_keys"]
+print(f"VAJRA_WAGG events={N} wall_s={dt:.2f} throughput={N/dt/1e6:.3f}M_events/s "
+      f"groups={windows} total_events={total} n_windows={n_win} n_keys={n_keys}", flush=True)
