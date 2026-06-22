@@ -144,6 +144,9 @@ struct AccumState {
     /// full-row key for change detection, the emitted single-row batch to retract). Entries are
     /// dropped once `end + allowed_lateness ≤ watermark` (the window can no longer change).
     last_emitted: HashMap<OwnedRow, (i64, OwnedRow, RecordBatch)>,
+    /// Continuous (realtime) EO only: the committed epoch restored on startup (F3-c). Set when
+    /// `realtime/committed` exists; lets recovery restore exactly that epoch's per-epoch state.
+    last_committed_epoch: Option<u64>,
 }
 
 /// Re-run the `Final` merge + emit at most once per this much watermark advance.
@@ -159,6 +162,7 @@ impl AccumState {
             last_final_wm: None,
             restored: false,
             last_emitted: HashMap::new(),
+            last_committed_epoch: None,
         }
     }
 
@@ -446,8 +450,23 @@ impl ExecutionPlan for WindowAccumExec {
                 // emitted ends), for stateful exactly-once recovery across runs.
                 if !acc.restored {
                     if let Some(ck) = &ck {
-                        let (batches, meta) =
-                            crate::streaming::state_io::restore_state(ck, &state_op_id).await;
+                        // Continuous (realtime) EO restores the COMMITTED epoch's state (F3-c) —
+                        // the same epoch the source seeks offsets for (consistent global snapshot).
+                        // Micro-batch (no realtime/committed) restores the staged→committed blob.
+                        let (batches, meta) = match crate::streaming::state_io::committed_epoch(ck)
+                            .await
+                        {
+                            Some(epoch) => {
+                                acc.last_committed_epoch = Some(epoch);
+                                crate::streaming::state_io::restore_epoch_state(
+                                    ck,
+                                    &state_op_id,
+                                    epoch,
+                                )
+                                .await
+                            }
+                            None => crate::streaming::state_io::restore_state(ck, &state_op_id).await,
+                        };
                         acc.pending_rows = batches;
                         if let Some((wm, ends)) = meta.split_first() {
                             acc.watermark_micros = (*wm != i64::MIN).then_some(*wm);
@@ -560,9 +579,40 @@ impl ExecutionPlan for WindowAccumExec {
                             }
                             buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
                         }
+                        Some(Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id }))) => {
+                            // F3-c (continuous/realtime EO): WRITE-AHEAD this operator's keyed state
+                            // for the epoch BEFORE forwarding the barrier to the realtime sink (which
+                            // then atomically commits realtime/committed=id). On restart we restore
+                            // exactly the committed epoch's state — the same epoch the source seeks
+                            // offsets for ⇒ consistent global snapshot (Chandy-Lamport), exactly-once
+                            // across a crash for stateful continuous queries.
+                            if let Some(ck) = &ck {
+                                let mut meta = vec![acc.watermark_micros.unwrap_or(i64::MIN)];
+                                meta.extend(acc.emitted_ends.iter().copied());
+                                crate::streaming::state_io::stage_epoch_state(
+                                    ck,
+                                    &state_op_id,
+                                    id,
+                                    &partial_schema,
+                                    &acc.pending_rows,
+                                    &meta,
+                                )
+                                .await;
+                                // GC a small trailing window (never at/after the just-staged epoch).
+                                if id >= 2 {
+                                    crate::streaming::state_io::gc_epoch_state(
+                                        ck,
+                                        &state_op_id,
+                                        id - 2,
+                                    )
+                                    .await;
+                                }
+                                acc.last_committed_epoch = Some(id);
+                            }
+                            buf.push_back(FlowEvent::Marker(FlowMarker::Checkpoint { id }));
+                        }
                         Some(Ok(other)) => {
-                            // Watermark drives eviction; other markers (Checkpoint,
-                            // LatencyTracker) pass through.
+                            // Watermark drives eviction; other markers (LatencyTracker) pass through.
                             buf.push_back(other);
                         }
                     }

@@ -29,6 +29,16 @@ fn committed_key(operator_id: &str) -> String {
     format!("state/{operator_id}/committed")
 }
 
+/// Per-epoch state key for CONTINUOUS (realtime) exactly-once (F3-c). On each `Checkpoint{epoch}`
+/// barrier a stateful operator writes its state here (write-ahead, before the barrier reaches the
+/// realtime sink); the sink's atomic `realtime/committed={epoch,offsets}` then makes that epoch
+/// authoritative. On restart the operator restores exactly the COMMITTED epoch's state — the same
+/// epoch the source seeks offsets for — so state + offsets are a consistent global snapshot
+/// (Chandy-Lamport). Keyed per (operator, partition) by `operator_id`.
+fn epoch_key(operator_id: &str, epoch: u64) -> String {
+    format!("state/{operator_id}/epoch-{epoch}")
+}
+
 /// Serialize state into a single blob: `[u32 LE meta_len][meta_len × i64 LE][Arrow-IPC]`.
 fn encode_state(schema: &SchemaRef, batches: &[RecordBatch], meta: &[i64]) -> Option<Vec<u8>> {
     let mut out = Vec::new();
@@ -100,6 +110,49 @@ pub async fn restore_state(
     }
 }
 
+/// Write an operator's state for a specific epoch (continuous EO write-ahead — see [`epoch_key`]).
+/// Best-effort; a failure must not crash the query.
+pub async fn stage_epoch_state(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    epoch: u64,
+    schema: &SchemaRef,
+    batches: &[RecordBatch],
+    meta: &[i64],
+) {
+    if let Some(blob) = encode_state(schema, batches, meta) {
+        let _ = ck.put(&epoch_key(operator_id, epoch), Bytes::from(blob)).await;
+    }
+}
+
+/// Restore an operator's state staged at `epoch` (the committed epoch on restart), if present.
+pub async fn restore_epoch_state(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    epoch: u64,
+) -> (Vec<RecordBatch>, Vec<i64>) {
+    match ck.get(&epoch_key(operator_id, epoch)).await {
+        Ok(Some(bytes)) => decode_state(&bytes),
+        _ => (vec![], vec![]),
+    }
+}
+
+/// Best-effort delete of an old epoch's state object (GC — keep a small trailing window so a
+/// restart can always find the committed epoch; never delete at or after the committed epoch).
+pub async fn gc_epoch_state(ck: &CheckpointStore, operator_id: &str, epoch: u64) {
+    let _ = ck.delete(&epoch_key(operator_id, epoch)).await;
+}
+
+/// Read the committed epoch from the realtime/committed record (the single atomic object the
+/// realtime sink writes per epoch: JSON `{"epoch":N,"offsets":{...}}`). `None` if absent (a
+/// micro-batch run, or a fresh start). Used by stateful operators to pick which epoch's state to
+/// restore — the same epoch the Kafka source seeks offsets for.
+pub async fn committed_epoch(ck: &CheckpointStore) -> Option<u64> {
+    let bytes = ck.get("realtime/committed").await.ok().flatten()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    v.get("epoch")?.as_u64()
+}
+
 #[expect(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
@@ -127,7 +180,7 @@ mod tests {
         assert!(b.is_empty() && m.is_empty());
 
         // Stage + promote (commit) + restore.
-        stage_state(&ck, "window-0", &schema, &[batch.clone()], &[42, 100, 200]).await;
+        stage_state(&ck, "window-0", &schema, std::slice::from_ref(&batch), &[42, 100, 200]).await;
         ck.promote("state/window-0/staged", "state/window-0/committed")
             .await
             .unwrap();
@@ -135,5 +188,41 @@ mod tests {
         assert_eq!(m, vec![42, 100, 200]);
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].num_rows(), 3);
+    }
+
+    // F3-c: continuous EO restores EXACTLY the committed epoch's state (the same epoch the source
+    // seeks offsets for), not a later-staged-but-uncommitted epoch — else recovery would over-count.
+    #[tokio::test]
+    async fn epoch_state_restores_committed_epoch() {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let row = |x: i64| {
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![x]))]).unwrap()
+        };
+        let ck = CheckpointStore::from_store(Arc::new(InMemory::new()), StorePath::from("ck"));
+
+        // Operator wrote state for epochs 1, 2, 3 (3 = staged but NOT yet committed).
+        stage_epoch_state(&ck, "window-0", 1, &schema, &[row(11)], &[1]).await;
+        stage_epoch_state(&ck, "window-0", 2, &schema, &[row(22)], &[2]).await;
+        stage_epoch_state(&ck, "window-0", 3, &schema, &[row(33)], &[3]).await;
+
+        // Sink committed epoch 2 (its atomic realtime/committed record).
+        ck.put(
+            "realtime/committed",
+            Bytes::from(br#"{"epoch":2,"offsets":{"t:0":500}}"#.to_vec()),
+        )
+        .await
+        .unwrap();
+
+        // Recovery picks epoch 2 — not 3 (uncommitted, would over-count) nor 1 (stale).
+        assert_eq!(committed_epoch(&ck).await, Some(2));
+        let (b, m) = restore_epoch_state(&ck, "window-0", 2).await;
+        assert_eq!(m, vec![2]);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap().value(0), 22);
+
+        // GC drops an old epoch; committed epoch's state remains restorable.
+        gc_epoch_state(&ck, "window-0", 1).await;
+        assert!(restore_epoch_state(&ck, "window-0", 1).await.0.is_empty());
+        assert_eq!(restore_epoch_state(&ck, "window-0", 2).await.1, vec![2]);
     }
 }
