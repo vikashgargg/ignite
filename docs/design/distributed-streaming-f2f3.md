@@ -249,3 +249,20 @@ termination before the source produces). Next debugging target; gate with `dist_
 
 **Then:** distributed `EpochCoordinator` wiring + per-instance state snapshot (F3-c) for cross-worker
 continuous EO; `memory`-sink codec (dev convenience); multi-node Flink head-to-head (F3-d).
+
+### F3-c precise gap (code-scoped 2026-06-22)
+Baseline re-confirmed on current binary: `dist_streaming_smoke.py` **6/6** (local-cluster, 2 workers,
+Spark-matched). The ONE remaining stateful gap, located precisely:
+- State snapshot is already **per-partition** (`state_io` keys `state/window-{partition}/{staged,committed}`)
+  and fires on **`EndOfData`** ⇒ **micro-batch** stateful EO across restart works.
+- `WindowAccumExec` (and dedup/join) have **NO `FlowMarker::Checkpoint{epoch}` handling** — so in
+  **continuous/realtime** mode the keyed accumulator is **never snapshotted per epoch**. Continuous
+  *stateless* EO works (source seek + sink atomic commit, no operator state); continuous *stateful*
+  EO across crash would lose the in-flight window/join state.
+- **F3-c increment:** on `Checkpoint{epoch}`, stage per-(op,partition,epoch) keyed state; the realtime
+  sink's atomic `realtime/committed={epoch,offsets}` commit also promotes that epoch's operator state;
+  on restart, restore the committed epoch's state alongside the offset seek. Gate: a continuous
+  *stateful* (windowed-agg) EO-across-`kill -9` test at local-cluster (extend `dist_continuous_eo_crash.py`).
+  EO-critical (silent loss/dup on bad recovery) ⇒ implement carefully + gate before any claim.
+- **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
+  `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.
