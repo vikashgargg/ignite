@@ -292,5 +292,17 @@ sequence (multi-node distributed validation must be careful, not rushed):
    recovery-time. The credibility claim for "distributed stateful, on power with Flink."
 Acceptance: cross-node worker placement proven; distributed continuous-stateful EO across node loss;
 vs-Flink numbers recorded. Artifacts: `k8s/kind-multinode.yaml`, `k8s/sail.yaml`, F3-c gate scripts.
+
+**F3-d step 1 (KIND multi-node) — PASS 2026-06-22.** 3-node KIND (1 control-plane + 2 workers),
+`kubernetes-cluster` mode. A distributed query made the driver dynamically spawn **5 worker pods that
+landed CROSS-NODE** (workers on both `vajra-f3d-worker` and `-worker2`, verified `get pods -o wide`) —
+true multi-node distributed execution, not local-cluster in-process. `dist_streaming_smoke` **6/6**
+(batch.write / rate / file / windowed_file=97 / dedup=50 / join=200, every value Spark-matched) across
+the real multi-node cluster. **Prod insight (important):** the distributed sink needs **shared storage**
+— writing parquet to a worker pod's local `/tmp` fails cross-pod (reader on another pod sees no files);
+pointing outputs at the shared hostPath (`/tmp/sail`, the EKS analogue = S3, which the prior EKS runs
+used) makes it 6/6. So distributed streaming on Vajra requires object-store/shared sinks (already the
+F4 design). Remaining: F3-c continuous-stateful EO across a **worker-pod kill** (multi-node failover);
+then EKS multi-node + Flink (step 2/3).
 - **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
   `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.
