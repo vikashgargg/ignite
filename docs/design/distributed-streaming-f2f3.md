@@ -259,10 +259,15 @@ Spark-matched). The ONE remaining stateful gap, located precisely:
   **continuous/realtime** mode the keyed accumulator is **never snapshotted per epoch**. Continuous
   *stateless* EO works (source seek + sink atomic commit, no operator state); continuous *stateful*
   EO across crash would lose the in-flight window/join state.
-- **F3-c increment:** on `Checkpoint{epoch}`, stage per-(op,partition,epoch) keyed state; the realtime
-  sink's atomic `realtime/committed={epoch,offsets}` commit also promotes that epoch's operator state;
-  on restart, restore the committed epoch's state alongside the offset seek. Gate: a continuous
-  *stateful* (windowed-agg) EO-across-`kill -9` test at local-cluster (extend `dist_continuous_eo_crash.py`).
-  EO-critical (silent loss/dup on bad recovery) ⇒ implement carefully + gate before any claim.
+- **F3-c increment — IMPLEMENTED + UNIT-VALIDATED 2026-06-22 (commit a29ededb):** on `Checkpoint{epoch}`,
+  `WindowAccumExec` write-aheads per-(op,partition,epoch) keyed state (`state_io::stage_epoch_state`)
+  BEFORE forwarding the barrier to the realtime sink (which atomically commits
+  `realtime/committed={epoch,offsets}`); on restart it restores EXACTLY the committed epoch's state
+  (`committed_epoch` reads the sink's record; `restore_epoch_state`) — same epoch the source seeks ⇒
+  Chandy-Lamport consistent snapshot. GC keeps a trailing window. Unit test proves it restores the
+  committed epoch (not a later uncommitted one ⇒ no over-count, nor a stale one) + GC. 8/8 green.
+  **GATE PENDING (not claimed end-to-end):** full pyspark continuous-stateful (windowed-agg)
+  EO-across-`kill -9` on local-cluster — exercises the continuous windowed-agg→realtime-sink path
+  (may surface integration issues); the real claim awaits this gate green. EO-critical ⇒ no rush.
 - **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
   `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.
