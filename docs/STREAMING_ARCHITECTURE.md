@@ -58,6 +58,16 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
 
 ## 3. Gap register (severity: P0 blocks "replace both", P1 important, P2 nice)
 
+- **P0 — streaming windowed-agg silently caps at 65536 (2¹⁶) distinct keys (CORRECTNESS, found 2026-06-22).**
+  `scripts/state_scale_stress.py`: streaming event-time windowed COUNT drops every group past 65536
+  (input 70k→out 65536; 200k→out 65536; 50k→out 50k ok), while **batch `groupBy(k).count()` on the
+  same data = correct (200001)**. Parallelism-independent (`shuffle.partitions=1` also caps) ⇒ the cap
+  is in `WindowAccumExec` / its streaming input, NOT the exchange/merge. **Silent data loss at
+  cardinality > 64k — Flink handles billions of keys.** This is THE gap vs "prod-grade like Flink".
+  Likely a u16/`2^16` group-capacity in the partial/final aggregate or row-format path inside the
+  streaming window operator. Owner: `streaming/window_accum.rs`. Must fix before any large-state claim.
+  (Compounds with F5: even once uncapped, state is in-memory — no spill — so very large state OOMs.)
+
 - **P0 — throughput**: windowed agg ~2.5× slower than Flink wall (EKS 100M, 2026-06-21:
   Flink 17.4s/8.7GiB vs Vajra **44s**/2.4GiB). LOCALIZED by elimination at EKS scale:
   (a) `from_json` = 3.67M rows/s single-thread (×16 ≫ 2.3M/s aggregate) ⇒ not it;
