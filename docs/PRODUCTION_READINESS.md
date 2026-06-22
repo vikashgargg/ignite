@@ -62,10 +62,10 @@ all P0 items below are ✅ and published.
 ## 4. Reliability & Endurance  — **unproven under production conditions**
 | Item | Status | Acceptance criterion |
 |---|---|---|
-| Kafka → Delta 24 h soak | ⬜ | runs 24 h, no OOM/restart/leak; lag stays bounded (DoD item) |
+| Kafka → sink soak (24 h) | 🟡 | **harness built**: `scripts/stream_soak_chaos.sh` (`SOAK=1`) — continuous Kafka→parquet EO; asserts bounded lag + flat RSS + EO. Run pending (needs local binary + `.venvs/smoke`). |
 | Concurrency / multi-tenant load | ⬜ | N concurrent clients sustained; latency + correctness hold, no deadlock |
-| Failover / chaos | ⬜ | kill a worker and the scheduler mid-job → job completes or fails cleanly (HA) |
-| Memory stability over time | ⬜ | no unbounded growth across a long mixed workload (RSS flat) |
+| Failover / chaos | 🟡 | **harness built**: same `stream_soak_chaos.sh` hard-kills (`kill -9`) the server mid-stream + restarts → asserts EO across crash (contiguous, no loss/dup). Run pending. |
+| Memory stability over time | 🟡 | **harness built**: `stream_soak_chaos.sh` samples RSS every 10s → asserts `max/median < LEAK_RATIO` (no unbounded growth). Run pending. |
 | Graceful shutdown + backpressure | 🟡 | in-flight queries drain on SIGTERM; slow consumers don't unbound buffers — verify |
 | Crash recovery | 🟡 | streaming checkpoint recovery ✅; batch driver restart story documented |
 
