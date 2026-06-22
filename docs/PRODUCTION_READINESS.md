@@ -38,6 +38,7 @@ all P0 items below are ✅ and published.
 | **Re-confirm on current `phase4` build** | ⬜ | rebuild from branch, ClickBench within ±10% of the 60.11 s release number |
 | Same-box Spark ClickBench reference | ⬜ | run Spark on the same box → full 3-way (Vajra/LakeSail-published/Spark) |
 | Distributed TPC-H SF-100 < 60 s | ⬜ | 10-node K8s, 22/22, total < 60 s |
+| Realtime streaming latency (p50/p99) | 🟡 | `scripts/stream_latency.sh` — produce→Vajra realtime Kafka→Kafka→visible per-record. Smoke 2026-06-22 (**debug** build): p50 25 ms / p99 137 ms / max 142 ms, n=440k. Release build + Flink side-by-side (the "beats Flink tail-latency" claim) pending. |
 
 ## 3. Security & Hardening  — **first audit pass done; pentest still outstanding**
 > First-pass internal review done 2026-06-06 ([docs/THREAT_MODEL.md](THREAT_MODEL.md)):
