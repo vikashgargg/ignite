@@ -654,9 +654,11 @@ async fn finalize_and_emit(
     .await?;
     match output_mode {
         WindowOutputMode::Append => {
-            for agg_batch in agg_batches {
-                if let Some(mask) = window_emit_mask(&agg_batch, emit_wm, &mut acc.emitted_ends) {
-                    if let Ok(filtered) = compute::filter_record_batch(&agg_batch, &mask) {
+            // Emit using a SNAPSHOT of emitted ends (read-only) so ALL batches of a window that
+            // closed this finalize emit — a window with >8192 groups spans multiple agg batches.
+            for agg_batch in &agg_batches {
+                if let Some(mask) = window_emit_mask(agg_batch, emit_wm, &acc.emitted_ends) {
+                    if let Ok(filtered) = compute::filter_record_batch(agg_batch, &mask) {
                         if filtered.num_rows() > 0 {
                             let len = filtered.num_rows();
                             let mut b = BooleanBuilder::with_capacity(len);
@@ -667,6 +669,13 @@ async fn finalize_and_emit(
                             });
                         }
                     }
+                }
+            }
+            // Mark the closed window ends emitted ONCE, after all batches — so a LATER finalize
+            // (not later batches of THIS one) is suppressed.
+            if let Some(wm) = emit_wm {
+                for agg_batch in &agg_batches {
+                    mark_emitted_ends(agg_batch, wm, &mut acc.emitted_ends);
                 }
             }
             // Bound state: keep only partials whose window is still open.
@@ -901,32 +910,43 @@ fn window_end_micros(batch: &RecordBatch) -> Option<Vec<Option<i64>>> {
     None
 }
 
-/// Mask for aggregate-output rows whose window has closed (`end ≤ watermark`) and has
-/// not been emitted before. Records newly-emitted window ends so each window is emitted
-/// exactly once (append mode). `None` if no window column or no watermark yet.
+/// Mask for aggregate-output rows whose window has closed (`end ≤ watermark`) and has not been
+/// emitted in a PRIOR finalize. PURE — reads `emitted` but never mutates it. `None` if no window
+/// column or no watermark yet.
+///
+/// Mutating `emitted` here was a correctness bug: a single closed window with > `batch_size`
+/// (8192) groups is emitted by the final aggregate as MULTIPLE Arrow batches; inserting the
+/// window's `end` after the first batch made `window_emit_mask` suppress every subsequent batch of
+/// the SAME window in the same finalize (measured: 8 partitions × 8192 = 65536-key cap, silent
+/// loss past 64k keys). The caller now marks ends emitted ONCE, after processing all batches of the
+/// finalize (see `mark_emitted_ends`), so all batches of a window emit together and only a LATER
+/// finalize is suppressed.
 fn window_emit_mask(
     batch: &RecordBatch,
     watermark_micros: Option<i64>,
-    emitted: &mut HashSet<i64>,
+    emitted: &HashSet<i64>,
 ) -> Option<BooleanArray> {
     let wm = watermark_micros?;
     let ends = window_end_micros(batch)?;
-    // A window is emitted exactly once *across finalize calls* — but a keyed window has
-    // MANY rows per window end (one per group key), and ALL of them must emit together the
-    // first time the window closes. So test membership without mutating, then record the
-    // newly-closed ends afterward. (Using `emitted.insert(e)` in the loop would suppress
-    // every group row after the first for a given window end — collapsing keyed windows.)
     let mut b = BooleanBuilder::with_capacity(ends.len());
     for end in &ends {
         let emit = end.is_some_and(|e| e <= wm && !emitted.contains(&e));
         b.append_value(emit);
     }
-    for end in ends.into_iter().flatten() {
-        if end <= wm {
-            emitted.insert(end);
+    Some(b.finish())
+}
+
+/// Record every closed-window end (`end ≤ wm`) in `batch` as emitted, so a LATER finalize doesn't
+/// re-emit the window. Called once after ALL batches of a finalize are emitted (see the bug note on
+/// `window_emit_mask`).
+fn mark_emitted_ends(batch: &RecordBatch, wm: i64, emitted: &mut HashSet<i64>) {
+    if let Some(ends) = window_end_micros(batch) {
+        for end in ends.into_iter().flatten() {
+            if end <= wm {
+                emitted.insert(end);
+            }
         }
     }
-    Some(b.finish())
 }
 
 /// Keep only rows whose window is still open (`end > watermark`); drop closed-window
@@ -1190,11 +1210,50 @@ mod update_mode_e2e_tests {
         FlowEvent::append_only_data(batch)
     }
 
+    // n DISTINCT keys (k=0..n-1) in one window [start,end).
+    fn rows_distinct(schema: &SchemaRef, start: i64, end: i64, n: usize) -> FlowEvent {
+        let win = StructArray::from(vec![
+            (
+                Arc::new(Field::new("start", DataType::Timestamp(TimeUnit::Microsecond, None), false)),
+                Arc::new(TimestampMicrosecondArray::from(vec![start; n])) as Arc<dyn Array>,
+            ),
+            (
+                Arc::new(Field::new("end", DataType::Timestamp(TimeUnit::Microsecond, None), false)),
+                Arc::new(TimestampMicrosecondArray::from(vec![end; n])) as Arc<dyn Array>,
+            ),
+        ]);
+        let ks: Vec<i64> = (0..n as i64).collect();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(win), Arc::new(Int64Array::from(ks))],
+        )
+        .unwrap();
+        FlowEvent::append_only_data(batch)
+    }
+
     fn watermark(micros: i64) -> FlowEvent {
         FlowEvent::Marker(FlowMarker::Watermark {
             source: "test".to_string(),
             timestamp: DateTime::from_timestamp_micros(micros).unwrap(),
         })
+    }
+
+    // Regression: a closed window with > batch_size (8192) distinct keys is emitted by the final
+    // aggregate as MULTIPLE Arrow batches; all must emit. The bug capped each window at one batch
+    // (8192) — manifesting as a 65536 = 8 partitions × 8192 silent key cap. Here, 1 partition,
+    // 20000 keys in one window → must emit all 20000.
+    #[tokio::test]
+    async fn append_emits_all_keys_above_batch_size_no_cap() {
+        let s = data_schema();
+        let n = 20000usize; // > 8192
+        let events = vec![
+            rows_distinct(&s, 0, 10_000_000, n),
+            watermark(12_000_000), // close the window
+            FlowEvent::Marker(FlowMarker::EndOfData),
+        ];
+        let exec = window_exec(events, WindowOutputMode::Append, 0);
+        let result = run_and_net(exec).await;
+        assert_eq!(result.len(), n, "all {n} keys must emit (regression: was capped at 8192/partition)");
     }
 
     fn window_exec(events: Vec<FlowEvent>, mode: WindowOutputMode, lateness: i64) -> Arc<WindowAccumExec> {

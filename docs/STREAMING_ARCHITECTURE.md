@@ -58,7 +58,22 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
 
 ## 3. Gap register (severity: P0 blocks "replace both", P1 important, P2 nice)
 
-- **P0 — streaming windowed-agg silently caps at 65536 (2¹⁶) distinct keys (CORRECTNESS, found 2026-06-22).**
+- ~~P0 — streaming windowed-agg caps at 65536 distinct keys~~ **FIXED 2026-06-22** (commit): root cause
+  was `window_emit_mask` marking a window's `end` emitted after the FIRST agg batch, suppressing the
+  2nd+ batches of the SAME window in one finalize (a >8192-group window spans multiple batches) ⇒
+  8 partitions × 8192 = 65536. Fix: `window_emit_mask` is now PURE; `mark_emitted_ends` records ends
+  ONCE after all batches of the finalize. Verified input==output at 70k/200k; regression test
+  `append_emits_all_keys_above_batch_size_no_cap`. **This restores Flink-class CORRECTNESS (no silent
+  loss). But NOT yet Flink-class for LARGE/LONG state — two gaps remain (below).**
+- **P1 — `emitted_ends` grows unbounded** (never pruned; one `i64` per closed window forever). A
+  months-long stream with many windows leaks memory. Flink GCs window state past watermark+lateness.
+  Fix needs care (pruning too early ⇒ re-emit duplicates on late data — EO-critical): prune only ends
+  `< watermark − allowedLateness − window_span`. Tracked, not yet fixed.
+- **P0 — windowed-agg state is fully IN-MEMORY** (`pending_rows` + `run_final_aggregate` materializes
+  the whole output): a window larger than RAM OOMs. This is F5 — Flink spills keyed state to
+  RocksDB/ForSt (object-store + cache + async, REFERENCES §3). The 64k fix did NOT change this; it's
+  THE remaining gap for "Flink-class large state". (Original cap note kept below for history.)
+- **P0(hist) — streaming windowed-agg silently caps at 65536 (2¹⁶) distinct keys (found 2026-06-22, now fixed above).**
   `scripts/state_scale_stress.py`: streaming event-time windowed COUNT drops every group past 65536
   (input 70k→out 65536; 200k→out 65536; 50k→out 50k ok), while **batch `groupBy(k).count()` on the
   same data = correct (200001)**. Parallelism-independent (`shuffle.partitions=1` also caps) ⇒ the cap
