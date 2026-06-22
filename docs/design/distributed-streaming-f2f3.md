@@ -274,5 +274,23 @@ Spark-matched). The ONE remaining stateful gap, located precisely:
   exactly-once across a hard crash is validated end-to-end.** (Vajra allows windowed-agg under
   `Trigger.Continuous`; Spark forbids it.) Remaining for F2/F3: **F3-d** = true multi-NODE
   (`kubernetes-cluster`) gate vs Flink (this is all local-cluster = in-process workers on one box).
+
+### F3-d prod-grade plan (multi-node gate — scoped 2026-06-22)
+Topology grounded: `--mode kubernetes-cluster` (`k8s/sail.yaml`) runs a driver pod that **dynamically
+spawns worker pods via the k8s API** (`SAIL_KUBERNETES__WORKER_POD_TEMPLATE` + RBAC: `Role` pods/`*`,
+`vajra-user` SA + binding — all present) landing on **separate nodes**, Arrow-Flight shuffle between
+them — the real multi-node engine, distinct from local-cluster (in-process workers). Prod-grade
+sequence (multi-node distributed validation must be careful, not rushed):
+1. **Local de-risk on KIND (free)** — `k8s/kind-multinode.yaml` (1 control-plane + 2 workers). Rebuild
+   fresh `vajra:latest` (incl. F3-c) → `kind load` → `kubectl apply -k k8s/`. Run continuous stateful
+   (Kafka in-cluster → windowed-agg → sink); assert worker pods land on BOTH worker nodes (cross-node),
+   distributed 6/6 + F3-c continuous-stateful EO across a **worker-pod kill** (multi-node failover).
+   Gate before any cloud spend.
+2. **EKS multi-node** — ≥3 nodes (driver + ≥2 workers + Kafka); same pipeline; EO across a **node loss**
+   + correctness + throughput.
+3. **Flink head-to-head** — same Kafka→stateful→sink multi-node; throughput / latency / memory /
+   recovery-time. The credibility claim for "distributed stateful, on power with Flink."
+Acceptance: cross-node worker placement proven; distributed continuous-stateful EO across node loss;
+vs-Flink numbers recorded. Artifacts: `k8s/kind-multinode.yaml`, `k8s/sail.yaml`, F3-c gate scripts.
 - **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
   `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.
