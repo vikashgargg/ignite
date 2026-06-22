@@ -43,6 +43,33 @@ groups), not O(batches×groups).
 Head-to-head: Flink (RocksDB) on the same N — Vajra should match (hold state ≫ RAM) and ideally win
 on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
 
+## Build roadmap (tracked — this is a state backend, a multi-step change)
+- **F5.0 spill primitive — DONE 2026-06-22:** `state_io::{write_spill,read_spill,delete_spill}` (numbered
+  Arrow-IPC chunks ↔ `CheckpointStore`), unit-tested (`spill_chunks_roundtrip_and_gc`). Safe building
+  block, not yet wired into the hot path.
+- **F5.1 wire spill into `WindowAccumExec`:** byte budget; spill `pending_rows` chunks over budget;
+  track spill handles in `AccumState` (+ snapshot/restore them in the epoch/EndOfData state so EO holds).
+- **F5.2 streaming finalize:** a `SpillReadExec` that yields in-memory + spilled chunks LAZILY into the
+  Final `AggregateExec` (never load all), under a bounded `MemoryPool`+`DiskManager` so DF spills its
+  hash table; emit output batches incrementally.
+- **F5.3 retain/re-spill across finalize** (open windows survive bounded) + **compaction** (collapse
+  duplicate (window,k) partials).
+- **F5.4 gate:** `state_scale_stress.py` @ 10M–50M keys, small budget → input==output + **bounded RSS**;
+  head-to-head vs Flink/RocksDB at the same N.
+- Apply the same spill to dedup + stream-join state.
+
+## The bar — HIGHER than Flink (not just parity)
+- **Object-store-NATIVE state from day one.** Flink only got disaggregated state in 2.0 (ForSt, bolted
+  onto a local-RocksDB lineage); Vajra spills/checkpoints to object-store in ONE Arrow-IPC format from
+  the start — same blob for spill and checkpoint, no separate state serializer, no local-disk ceiling.
+- **Arrow-columnar state, zero-copy, vectorized restore** — vs RocksDB's row-oriented KV (serialize per
+  key). Restore = mmap/stream Arrow batches straight into the operator.
+- **No JVM / no GC** → no stop-the-world pauses during large-state spill/restore (Flink's tail-latency
+  pain under big RocksDB state).
+- **Unified with EO:** spilled state is already part of the per-epoch snapshot (F3-c) — spill and
+  exactly-once are the same mechanism, not two systems.
+Target: hold state ≫ RAM like Flink, **with less memory + better tail latency + simpler ops**.
+
 ## Honest scope
 Increment 1 (spill `pending_rows`) bounds the STATE-accumulation memory. Increment 2 (bounded-pool
 streaming final merge) bounds the OUTPUT/merge memory. Both are needed for full "no OOM at any N".

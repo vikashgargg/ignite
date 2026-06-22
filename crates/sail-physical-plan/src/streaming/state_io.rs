@@ -143,6 +143,49 @@ pub async fn gc_epoch_state(ck: &CheckpointStore, operator_id: &str, epoch: u64)
     let _ = ck.delete(&epoch_key(operator_id, epoch)).await;
 }
 
+/// F5 spill key: a numbered partial-state blob spilled out of RAM when the operator's in-memory
+/// state exceeds its budget. Arrow-IPC ↔ `CheckpointStore` (object-store = Flink-2.0-ForSt shape;
+/// REFERENCES §3/§5) — Vajra spills in Arrow with no JVM, beating RocksDB's local-disk-only model.
+/// See docs/design/streaming-spillable-state-f5.md.
+fn spill_key(operator_id: &str, index: u64) -> String {
+    format!("state/{operator_id}/spill-{index}")
+}
+
+/// Spill a chunk of partial-state batches to blob `index` (write-ahead, evicts them from RAM).
+/// Best-effort; on failure the caller keeps the batches in memory (correct, just not bounded).
+pub async fn write_spill(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    index: u64,
+    schema: &SchemaRef,
+    batches: &[RecordBatch],
+) -> bool {
+    match encode_state(schema, batches, &[]) {
+        Some(blob) => ck
+            .put(&spill_key(operator_id, index), Bytes::from(blob))
+            .await
+            .is_ok(),
+        None => false,
+    }
+}
+
+/// Read back a spilled chunk (for the finalize merge). Empty if absent/malformed.
+pub async fn read_spill(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    index: u64,
+) -> Vec<RecordBatch> {
+    match ck.get(&spill_key(operator_id, index)).await {
+        Ok(Some(bytes)) => decode_state(&bytes).0,
+        _ => vec![],
+    }
+}
+
+/// Delete a spilled chunk once consumed (GC).
+pub async fn delete_spill(ck: &CheckpointStore, operator_id: &str, index: u64) {
+    let _ = ck.delete(&spill_key(operator_id, index)).await;
+}
+
 /// Read the committed epoch from the realtime/committed record (the single atomic object the
 /// realtime sink writes per epoch: JSON `{"epoch":N,"offsets":{...}}`). `None` if absent (a
 /// micro-batch run, or a fresh start). Used by stateful operators to pick which epoch's state to
@@ -224,5 +267,29 @@ mod tests {
         gc_epoch_state(&ck, "window-0", 1).await;
         assert!(restore_epoch_state(&ck, "window-0", 1).await.0.is_empty());
         assert_eq!(restore_epoch_state(&ck, "window-0", 2).await.1, vec![2]);
+    }
+
+    // F5: spill primitive — write numbered partial-state chunks out of RAM, read them back for the
+    // finalize merge, GC when consumed (Arrow-IPC ↔ object-store; the building block for bounded state).
+    #[tokio::test]
+    async fn spill_chunks_roundtrip_and_gc() {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let chunk = |a: i64, b: i64| {
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![a, b]))]).unwrap()
+        };
+        let ck = CheckpointStore::from_store(Arc::new(InMemory::new()), StorePath::from("ck"));
+
+        assert!(write_spill(&ck, "window-0", 0, &schema, &[chunk(1, 2)]).await);
+        assert!(write_spill(&ck, "window-0", 1, &schema, &[chunk(3, 4)]).await);
+        // read each chunk back independently (lazy finalize streams them one at a time)
+        let c0 = read_spill(&ck, "window-0", 0).await;
+        let c1 = read_spill(&ck, "window-0", 1).await;
+        assert_eq!(c0.len(), 1);
+        assert_eq!(c0[0].num_rows(), 2);
+        assert_eq!(c1[0].column(0).as_any().downcast_ref::<Int64Array>().unwrap().value(0), 3);
+        // GC a consumed chunk
+        delete_spill(&ck, "window-0", 0).await;
+        assert!(read_spill(&ck, "window-0", 0).await.is_empty());
+        assert_eq!(read_spill(&ck, "window-0", 1).await.len(), 1);
     }
 }
