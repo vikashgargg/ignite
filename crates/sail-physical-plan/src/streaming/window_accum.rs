@@ -10,7 +10,10 @@ use datafusion::arrow::compute;
 use datafusion::arrow::compute::concat_batches;
 use datafusion::arrow::datatypes::{DataType, SchemaRef, TimeUnit};
 use datafusion::arrow::row::{OwnedRow, RowConverter, SortField};
-use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
+use datafusion::execution::memory_pool::FairSpillPool;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::{DiskManager, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::aggregate::AggregateFunctionExpr;
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode, PhysicalGroupBy};
@@ -101,6 +104,146 @@ impl ExecutionPlan for StaticBatchExec {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SpillSourceExec — LAZY input for the Final merge (F5.2). Yields the in-memory
+// `pending` partials, then reads each SPILLED chunk back from the checkpoint store
+// ONE AT A TIME (a chunk is materialized only while it flows through, then dropped).
+// So the merge's input never holds the whole (possibly ≫ RAM) state — peak input ≈
+// one chunk + the in-memory pending (both ≤ the spill budget). The Final AggregateExec
+// fed from this runs under a bounded MemoryPool (see `bounded_agg_context`) so it spills
+// its OWN hash table too — together they bound the finalize PEAK at large cardinality.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub(crate) struct SpillSourceExec {
+    pending: Vec<RecordBatch>,
+    spilled: Vec<u64>,
+    ck: Option<CheckpointStore>,
+    op_id: String,
+    schema: SchemaRef,
+    properties: Arc<PlanProperties>,
+}
+
+impl SpillSourceExec {
+    pub(crate) fn new(
+        pending: Vec<RecordBatch>,
+        spilled: Vec<u64>,
+        ck: Option<CheckpointStore>,
+        op_id: String,
+        schema: SchemaRef,
+    ) -> Self {
+        let props = Arc::new(PlanProperties::new(
+            EquivalenceProperties::new(schema.clone()),
+            datafusion::physical_expr::Partitioning::UnknownPartitioning(1),
+            EmissionType::Final,
+            Boundedness::Bounded,
+        ));
+        Self {
+            pending,
+            spilled,
+            ck,
+            op_id,
+            schema,
+            properties: props,
+        }
+    }
+}
+
+impl DisplayAs for SpillSourceExec {
+    fn fmt_as(
+        &self,
+        _t: datafusion::physical_plan::DisplayFormatType,
+        f: &mut std::fmt::Formatter,
+    ) -> std::fmt::Result {
+        write!(f, "SpillSourceExec(spilled={})", self.spilled.len())
+    }
+}
+
+impl ExecutionPlan for SpillSourceExec {
+    fn name(&self) -> &str {
+        "SpillSourceExec"
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn properties(&self) -> &Arc<PlanProperties> {
+        &self.properties
+    }
+    fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+        vec![]
+    }
+    fn with_new_children(
+        self: Arc<Self>,
+        _: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
+    }
+    fn execute(
+        &self,
+        _partition: usize,
+        _ctx: Arc<TaskContext>,
+    ) -> Result<SendableRecordBatchStream> {
+        let schema = self.schema.clone();
+        let pending = self.pending.clone(); // Arc-backed; in-memory, bounded by the spill budget
+        let spilled = self.spilled.clone();
+        let ck = self.ck.clone();
+        let op_id = self.op_id.clone();
+        // In-memory partials first.
+        let pending_stream = stream::iter(
+            pending
+                .into_iter()
+                .map(Ok::<_, datafusion_common::DataFusionError>),
+        );
+        // Then each spilled chunk, read back lazily one at a time (the inner future is polled
+        // only when the outer stream advances, so only one chunk is resident at a time).
+        let spill_stream = stream::iter(spilled).flat_map(move |idx| {
+            let ck = ck.clone();
+            let op_id = op_id.clone();
+            stream::once(async move {
+                match &ck {
+                    Some(ck) => crate::streaming::state_io::read_spill(ck, &op_id, idx).await,
+                    None => vec![],
+                }
+            })
+            .flat_map(|batches| {
+                stream::iter(
+                    batches
+                        .into_iter()
+                        .map(Ok::<_, datafusion_common::DataFusionError>),
+                )
+            })
+        });
+        let s = pending_stream.chain(spill_stream);
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, s)))
+    }
+}
+
+/// Build a TaskContext for the Final merge whose RuntimeEnv has a **bounded** memory pool
+/// (`FairSpillPool`) + an enabled DiskManager, so DataFusion's grouped-hash `AggregateExec`
+/// spills its hash table to disk under pressure instead of OOM-ing (REFERENCES §5). All other
+/// session state (config, UDFs) is inherited from the operator's context. F5.2.
+fn bounded_agg_context(base: &TaskContext, budget_bytes: usize) -> Result<Arc<TaskContext>> {
+    let mut dm: DiskManagerBuilder = DiskManager::builder();
+    dm.set_mode(DiskManagerMode::OsTmpDirectory);
+    // Generous on-disk ceiling: spilling must never be blocked by this cap (state ≫ RAM is the
+    // whole point); the MemoryPool — not the disk cap — governs when we spill.
+    dm.set_max_temp_directory_size(1024 * 1024 * 1024 * 1024); // 1 TiB
+    let runtime = RuntimeEnvBuilder::default()
+        .with_memory_pool(Arc::new(FairSpillPool::new(budget_bytes.max(1024 * 1024))))
+        .with_disk_manager_builder(dm)
+        .build()
+        .map(Arc::new)?;
+    Ok(Arc::new(TaskContext::new(
+        base.task_id(),
+        base.session_id(),
+        base.session_config().clone(),
+        base.scalar_functions().clone(),
+        base.aggregate_functions().clone(),
+        base.window_functions().clone(),
+        runtime,
+    )))
+}
+
 /// Output semantics of the window operator (Spark `outputMode`, extended with Flink-style
 /// allowed-lateness for zero-loss late-data convergence — see
 /// docs/design/streaming-update-retraction-mode.md).
@@ -155,6 +298,20 @@ struct AccumState {
     pending_bytes: usize,
     spilled: Vec<u64>,
     next_spill: u64,
+    /// F5.2: an in-flight `Final` merge driven INCREMENTALLY (one output batch per poll) so the
+    /// finalize never materializes the whole result in `buf` — peak output is bounded to a couple
+    /// of in-flight events. While `Some`, the unfold loop drives this before reading new input
+    /// (so a finalize completes before the next marker — preserves barrier order).
+    active_merge: Option<SendableRecordBatchStream>,
+    /// Append-mode: window ends emitted DURING the active merge, applied to `emitted_ends` only when
+    /// the merge completes — so every output batch of one finalize sees the SAME pre-finalize
+    /// snapshot of `emitted_ends` (this is the invariant whose violation caused the 64K-cap bug).
+    merge_newly_emitted: HashSet<i64>,
+    /// The emit watermark of the active merge (the close threshold for this finalize).
+    merge_emit_wm: Option<i64>,
+    /// The marker (Watermark / EndOfData) to emit AFTER the active merge's output drains, so window
+    /// output precedes the marker.
+    after_merge_marker: Option<FlowEvent>,
 }
 
 /// Re-run the `Final` merge + emit at most once per this much watermark advance.
@@ -174,6 +331,10 @@ impl AccumState {
             pending_bytes: 0,
             spilled: vec![],
             next_spill: 0,
+            active_merge: None,
+            merge_newly_emitted: HashSet::new(),
+            merge_emit_wm: None,
+            after_merge_marker: None,
         }
     }
 
@@ -498,6 +659,62 @@ impl ExecutionPlan for WindowAccumExec {
                     if let Some(ev) = buf.pop_front() {
                         return Some((Ok(ev), (input, acc, buf, ctx)));
                     }
+                    // F5.2: if a finalize merge is in flight, drive it ONE output batch at a time
+                    // (incremental emit — the result never fully materializes in `buf`). Complete it
+                    // before reading new input, so a finalize finishes before the next marker.
+                    if acc.active_merge.is_some() {
+                        // Pull one batch, releasing the &mut borrow of `acc.active_merge` before we
+                        // touch other `acc` fields below.
+                        let next = match acc.active_merge.as_mut() {
+                            Some(m) => m.next().await,
+                            None => None,
+                        };
+                        match next {
+                            Some(Err(e)) => return Some((Err(e), (input, acc, buf, ctx))),
+                            Some(Ok(agg_batch)) => {
+                                if let Err(e) = consume_merge_batch(
+                                    &mut acc,
+                                    &agg_batch,
+                                    output_mode,
+                                    allowed_lateness,
+                                    num_group_cols,
+                                    &mut buf,
+                                ) {
+                                    return Some((Err(e), (input, acc, buf, ctx)));
+                                }
+                                continue; // loop back to drain produced events from `buf`
+                            }
+                            None => {
+                                // Merge complete: apply the deferred emitted-ends snapshot (append),
+                                // rebuild the RETAINED open-window state (lazily, re-spilling over
+                                // budget), then emit the deferred marker.
+                                if output_mode == WindowOutputMode::Append {
+                                    let newly = std::mem::take(&mut acc.merge_newly_emitted);
+                                    acc.emitted_ends.extend(newly);
+                                }
+                                let retain_wm = match output_mode {
+                                    WindowOutputMode::Append => acc.merge_emit_wm,
+                                    WindowOutputMode::Update => acc
+                                        .merge_emit_wm
+                                        .map(|w| w.saturating_sub(allowed_lateness)),
+                                };
+                                rebuild_retained_state(
+                                    &mut acc,
+                                    retain_wm,
+                                    ck.as_ref(),
+                                    &state_op_id,
+                                    &partial_schema,
+                                    state_budget_bytes,
+                                )
+                                .await;
+                                acc.active_merge = None;
+                                if let Some(marker) = acc.after_merge_marker.take() {
+                                    buf.push_back(marker);
+                                }
+                                continue;
+                            }
+                        }
+                    }
                     // Then read from input.
                     match input.next().await {
                         None => return None,
@@ -564,29 +781,36 @@ impl ExecutionPlan for WindowAccumExec {
                             };
                             if should_final {
                                 acc.last_final_wm = wm;
-                                if let Err(e) = finalize_and_emit(
-                                    &mut acc,
+                                // F5.2: start a RESUMABLE merge; its output (then this watermark
+                                // marker) is emitted incrementally by the active-merge driver above.
+                                match begin_finalize(
+                                    &acc,
                                     &final_group_by,
                                     &aggr_exprs,
                                     &partial_schema,
-                                    wm,
-                                    output_mode,
-                                    allowed_lateness,
-                                    num_group_cols,
-                                    &mut buf,
-                                    ctx.clone(),
                                     ck.as_ref(),
                                     &state_op_id,
-                                )
-                                .await
-                                {
-                                    return Some((Err(e), (input, acc, buf, ctx)));
+                                    ctx.clone(),
+                                    state_budget_bytes,
+                                ) {
+                                    Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
+                                    Ok(stream) => {
+                                        acc.active_merge = Some(stream);
+                                        acc.merge_emit_wm = wm;
+                                        acc.merge_newly_emitted.clear();
+                                        acc.after_merge_marker =
+                                            Some(FlowEvent::Marker(FlowMarker::Watermark {
+                                                source,
+                                                timestamp,
+                                            }));
+                                    }
                                 }
+                            } else {
+                                buf.push_back(FlowEvent::Marker(FlowMarker::Watermark {
+                                    source,
+                                    timestamp,
+                                }));
                             }
-                            buf.push_back(FlowEvent::Marker(FlowMarker::Watermark {
-                                source,
-                                timestamp,
-                            }));
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::EndOfData))) => {
                             if let Some(ck) = &ck {
@@ -610,28 +834,31 @@ impl ExecutionPlan for WindowAccumExec {
                                     &meta,
                                 )
                                 .await;
+                                buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
                             } else {
-                                // No checkpoint: flush all remaining windows (terminal).
-                                if let Err(e) = finalize_and_emit(
-                                    &mut acc,
+                                // No checkpoint: flush ALL remaining windows (terminal), resumably —
+                                // emit_wm = i64::MAX closes every window. The EndOfData marker is
+                                // emitted after the output drains.
+                                match begin_finalize(
+                                    &acc,
                                     &final_group_by,
                                     &aggr_exprs,
                                     &partial_schema,
-                                    Some(i64::MAX),
-                                    output_mode,
-                                    allowed_lateness,
-                                    num_group_cols,
-                                    &mut buf,
-                                    ctx.clone(),
                                     ck.as_ref(),
                                     &state_op_id,
-                                )
-                                .await
-                                {
-                                    return Some((Err(e), (input, acc, buf, ctx)));
+                                    ctx.clone(),
+                                    state_budget_bytes,
+                                ) {
+                                    Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
+                                    Ok(stream) => {
+                                        acc.active_merge = Some(stream);
+                                        acc.merge_emit_wm = Some(i64::MAX);
+                                        acc.merge_newly_emitted.clear();
+                                        acc.after_merge_marker =
+                                            Some(FlowEvent::Marker(FlowMarker::EndOfData));
+                                    }
                                 }
                             }
-                            buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id }))) => {
                             // F3-c (continuous/realtime EO): WRITE-AHEAD this operator's keyed state
@@ -708,81 +935,149 @@ async fn gather_partials(
     out
 }
 
-#[expect(clippy::too_many_arguments)]
-async fn finalize_and_emit(
-    acc: &mut AccumState,
+/// F5.2: start a `Final` merge as a STREAM over a LAZY [`SpillSourceExec`] input (so the
+/// possibly-≫RAM partial state is never fully materialized — spilled chunks are read one at a
+/// time) run under a bounded-pool [`bounded_agg_context`] (so DataFusion spills its hash table).
+/// The caller stores the returned stream in `acc.active_merge` and drains it incrementally.
+fn begin_finalize(
+    acc: &AccumState,
     final_group_by: &PhysicalGroupBy,
     aggr_exprs: &[Arc<AggregateFunctionExpr>],
     partial_schema: &SchemaRef,
-    emit_wm: Option<i64>,
+    ck: Option<&CheckpointStore>,
+    state_op_id: &str,
+    context: Arc<TaskContext>,
+    state_budget_bytes: usize,
+) -> Result<SendableRecordBatchStream> {
+    let input = Arc::new(SpillSourceExec::new(
+        acc.pending_rows.clone(), // Arc-backed; bounded by the spill budget
+        acc.spilled.clone(),
+        ck.cloned(),
+        state_op_id.to_string(),
+        partial_schema.clone(),
+    ));
+    let merge_ctx = bounded_agg_context(&context, state_budget_bytes)?;
+    let agg = AggregateExec::try_new(
+        AggregateMode::Final,
+        final_group_by.clone(),
+        aggr_exprs.to_vec(),
+        vec![None; aggr_exprs.len()],
+        input,
+        partial_schema.clone(),
+    )?;
+    agg.execute(0, merge_ctx)
+}
+
+/// Emit ONE output batch of the in-flight finalize merge (called once per `active_merge` poll).
+/// Append: filter closed windows against the PRE-finalize `emitted_ends` snapshot (so every batch
+/// of one finalize emits — the 64K-cap invariant) and record newly-closed ends in
+/// `merge_newly_emitted` (applied to `emitted_ends` only when the merge completes). Update: emit a
+/// changelog delta for this batch.
+fn consume_merge_batch(
+    acc: &mut AccumState,
+    agg_batch: &RecordBatch,
     output_mode: WindowOutputMode,
     allowed_lateness: i64,
     num_group_cols: usize,
     buf: &mut VecDeque<FlowEvent>,
-    context: Arc<TaskContext>,
-    ck: Option<&CheckpointStore>,
-    state_op_id: &str,
 ) -> Result<()> {
-    // F5: fold spilled chunks back into the full partial state for the merge.
-    let partials = gather_partials(&acc.pending_rows, &acc.spilled, ck, state_op_id).await;
-    let agg_batches = run_final_aggregate(
-        partials.clone(),
-        final_group_by,
-        aggr_exprs,
-        partial_schema,
-        context,
-    )
-    .await?;
     match output_mode {
         WindowOutputMode::Append => {
-            // Emit using a SNAPSHOT of emitted ends (read-only) so ALL batches of a window that
-            // closed this finalize emit — a window with >8192 groups spans multiple agg batches.
-            for agg_batch in &agg_batches {
-                if let Some(mask) = window_emit_mask(agg_batch, emit_wm, &acc.emitted_ends) {
-                    if let Ok(filtered) = compute::filter_record_batch(agg_batch, &mask) {
-                        if filtered.num_rows() > 0 {
-                            let len = filtered.num_rows();
-                            let mut b = BooleanBuilder::with_capacity(len);
-                            b.append_n(len, false);
-                            buf.push_back(FlowEvent::Data {
-                                batch: filtered,
-                                retracted: b.finish(),
-                            });
-                        }
+            if let Some(mask) = window_emit_mask(agg_batch, acc.merge_emit_wm, &acc.emitted_ends) {
+                if let Ok(filtered) = compute::filter_record_batch(agg_batch, &mask) {
+                    if filtered.num_rows() > 0 {
+                        let len = filtered.num_rows();
+                        let mut b = BooleanBuilder::with_capacity(len);
+                        b.append_n(len, false);
+                        buf.push_back(FlowEvent::Data {
+                            batch: filtered,
+                            retracted: b.finish(),
+                        });
                     }
                 }
             }
-            // Mark the closed window ends emitted ONCE, after all batches — so a LATER finalize
-            // (not later batches of THIS one) is suppressed.
-            if let Some(wm) = emit_wm {
-                for agg_batch in &agg_batches {
-                    mark_emitted_ends(agg_batch, wm, &mut acc.emitted_ends);
-                }
+            if let Some(wm) = acc.merge_emit_wm {
+                mark_emitted_ends(agg_batch, wm, &mut acc.merge_newly_emitted);
             }
-            // Bound state: keep only partials (from the FULL set incl. spilled) whose window is open.
-            acc.pending_rows = retain_open_window_rows(partials, emit_wm);
+            Ok(())
         }
         WindowOutputMode::Update => {
-            emit_changelog(acc, &agg_batches, emit_wm, allowed_lateness, num_group_cols, buf)?;
-            // Retain windows still within the lateness bound (`end + L > wm` ⟺ `end > wm − L`).
-            let retain_wm = emit_wm.map(|w| w.saturating_sub(allowed_lateness));
-            acc.pending_rows = retain_open_window_rows(partials, retain_wm);
+            let wm = acc.merge_emit_wm;
+            emit_changelog(
+                acc,
+                std::slice::from_ref(agg_batch),
+                wm,
+                allowed_lateness,
+                num_group_cols,
+                buf,
+            )
         }
     }
-    // F5: spilled chunks were folded into emitted output + the retained pending_rows -> GC + reset
-    // the budget so the next accumulation phase starts fresh.
+}
+
+/// F5.2: after a finalize merge completes, rebuild the RETAINED open-window partial state, bounded.
+/// Re-scans the prior state (in-memory `pending_rows` then each spilled chunk, ONE at a time),
+/// keeps only still-open windows (`retain_open_window_rows`), and re-accumulates them — re-spilling
+/// to FRESH indices when over budget — then GCs the consumed spills. Peak ≈ one chunk + budget, so
+/// the retained state can itself be ≫ RAM (continuous queries with many open windows).
+async fn rebuild_retained_state(
+    acc: &mut AccumState,
+    retain_wm: Option<i64>,
+    ck: Option<&CheckpointStore>,
+    state_op_id: &str,
+    partial_schema: &SchemaRef,
+    state_budget_bytes: usize,
+) {
+    let old_pending = std::mem::take(&mut acc.pending_rows);
+    let old_spilled = std::mem::take(&mut acc.spilled);
+    acc.pending_bytes = 0;
+    let mut new_pending: Vec<RecordBatch> = vec![];
+    let mut new_bytes = 0usize;
+
+    // Absorb a chunk of partials: keep open windows, accumulate, spill over budget to a fresh index.
+    macro_rules! absorb {
+        ($chunk:expr) => {{
+            for kept in retain_open_window_rows($chunk, retain_wm) {
+                new_bytes += kept.get_array_memory_size();
+                new_pending.push(kept);
+            }
+            if new_bytes > state_budget_bytes && !new_pending.is_empty() {
+                if let Some(ck) = ck {
+                    let idx = acc.next_spill;
+                    if crate::streaming::state_io::write_spill(
+                        ck,
+                        state_op_id,
+                        idx,
+                        partial_schema,
+                        &new_pending,
+                    )
+                    .await
+                    {
+                        acc.spilled.push(idx);
+                        acc.next_spill += 1;
+                        new_pending.clear();
+                        new_bytes = 0;
+                    }
+                }
+            }
+        }};
+    }
+
+    for batch in old_pending {
+        absorb!(vec![batch]);
+    }
     if let Some(ck) = ck {
-        for &idx in &acc.spilled {
+        for &idx in &old_spilled {
+            let chunk = crate::streaming::state_io::read_spill(ck, state_op_id, idx).await;
+            absorb!(chunk);
+        }
+        // GC the consumed OLD spills (their retained rows are now in new_pending / fresh spills).
+        for &idx in &old_spilled {
             crate::streaming::state_io::delete_spill(ck, state_op_id, idx).await;
         }
     }
-    acc.spilled.clear();
-    acc.pending_bytes = acc
-        .pending_rows
-        .iter()
-        .map(|b| b.get_array_memory_size())
-        .sum();
-    Ok(())
+    acc.pending_rows = new_pending;
+    acc.pending_bytes = new_bytes;
 }
 
 /// Build a `BooleanArray` of `len` copies of `v` (the per-row `retracted` flag).
@@ -911,35 +1206,6 @@ async fn run_partial_aggregate(
         if batch.num_rows() > 0 {
             out.push(batch);
         }
-    }
-    Ok(out)
-}
-
-/// `Final`-mode merge of accumulated partial states → final aggregate results.
-/// `final_group_by` references the group columns of `partial_schema` by position.
-async fn run_final_aggregate(
-    partials: Vec<RecordBatch>,
-    final_group_by: &PhysicalGroupBy,
-    aggr_exprs: &[Arc<AggregateFunctionExpr>],
-    partial_schema: &SchemaRef,
-    context: Arc<TaskContext>,
-) -> Result<Vec<RecordBatch>> {
-    if partials.is_empty() {
-        return Ok(vec![]);
-    }
-    let static_input = Arc::new(StaticBatchExec::new(partials, partial_schema.clone()));
-    let agg = AggregateExec::try_new(
-        AggregateMode::Final,
-        final_group_by.clone(),
-        aggr_exprs.to_vec(),
-        vec![None; aggr_exprs.len()],
-        static_input,
-        partial_schema.clone(),
-    )?;
-    let mut stream = agg.execute(0, context)?;
-    let mut out = vec![];
-    while let Some(batch) = stream.next().await {
-        out.push(batch?);
     }
     Ok(out)
 }

@@ -85,6 +85,14 @@ Source: https://datafusion.apache.org/
   it via `state_io` Arrow-IPC ↔ `CheckpointStore` (object-store = ForSt §3) with a local memory cache;
   AND run the final merge under a bounded `MemoryPool` so DataFusion spills the hash table. Two
   complementary spills = state ≫ RAM, like Flink RocksDB/ForSt.
+- **MEASURED 2026-06-23 (F5.1+F5.2 done):** both spills wired into `WindowAccumExec` (F5.1 accumulation
+  spill, F5.2 lazy `SpillSourceExec` input + bounded-pool resumable+incremental finalize). Validated
+  out==N EXACT at N=200k/500k/1M/5M, both 4 MiB (in-RAM) and 256 KB (spilling) budgets; spills scale
+  23→56→120→602; 5M distinct keys under a 256 KB per-partition budget, no OOM/error. **LESSON for
+  measuring "bounded state":** process RSS is a BAD proxy when (a) the sink is O(N) (parquet dump of N
+  rows dominates), and (b) runs are sub-second so jemalloc retains freed pages (RSS = high-water, not
+  working set). To prove bounded peak you need a **bounded/streaming sink + sustained stream + the
+  operator's `MemoryPool` reservation/metrics**, not process RSS. (Informs the F5.4 gate design.)
 
 ---
 

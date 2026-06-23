@@ -7557,6 +7557,7 @@ dependencies = [
  "sail-catalog",
  "sail-common-datafusion",
  "sail-logical-plan",
+ "serde_json",
  "tokio",
  "tokio-stream",
 ]

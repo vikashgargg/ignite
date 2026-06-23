@@ -55,13 +55,31 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   (no loss/dup across the spill round-trip). Bounds the ACCUMULATION phase. NOTE: budget is
   per-partition (state is sharded by `StreamExchangeExec`), so it composes with parallelism
   (Key-Groups analogue). Remaining peak is the finalize/snapshot read-back (F5.2).
-- **F5.2 streaming finalize:** a `SpillReadExec` that yields in-memory + spilled chunks LAZILY into the
-  Final `AggregateExec` (never load all), under a bounded `MemoryPool`+`DiskManager` so DF spills its
-  hash table; emit output batches incrementally.
+- **F5.2 streaming finalize — DONE + validated 2026-06-23 (commit):** `SpillSourceExec` yields the
+  in-memory pending + each spilled chunk LAZILY (one at a time) into the Final `AggregateExec`, run
+  under `bounded_agg_context` (a `FairSpillPool(budget)` + `DiskManager` so DataFusion spills its OWN
+  hash table). The merge is RESUMABLE (`AccumState.active_merge`, driven one output batch per poll in
+  the unfold loop) so the result is emitted INCREMENTALLY — `buf` never holds the whole result; the
+  trailing watermark/EndOfData marker is deferred until the output drains (barrier order preserved).
+  `rebuild_retained_state` re-spills the open windows after each finalize. The 64K-cap invariant holds:
+  `emitted_ends` is applied a SNAPSHOT during the merge and updated only on completion (so every output
+  batch of one finalize emits). **Validated** (`scripts/f5_validate.sh`, COUNT, N keys/one window):
+  out == N EXACT at N = 200k / 500k / 1M / **5M**, at BOTH a 4 MiB (in-RAM) and a 256 KB (spilling)
+  per-partition budget; spills engage + scale monotonically (23 → 56 → 120 → **602** at 256 KB), no
+  errors, no OOM — 5M distinct keys handled under a 256 KB budget (old in-RAM path would hold all 5M
+  partials; pre-F5.1 would cap at 64K). HONEST: process RSS is still ~O(N) at these scales (1.25 GiB @
+  5M) because the **parquet output sink + Spark-Connect result path are O(N)** and sub-second runs
+  don't let jemalloc release pages — process RSS is not the right instrument. Operator state IS bounded
+  (spill + incremental emit); a clean FLAT-RSS-vs-Flink measurement needs a bounded sink + sustained
+  stream = F5.4.
 - **F5.3 retain/re-spill across finalize** (open windows survive bounded) + **compaction** (collapse
   duplicate (window,k) partials).
-- **F5.4 gate:** `state_scale_stress.py` @ 10M–50M keys, small budget → input==output + **bounded RSS**;
-  head-to-head vs Flink/RocksDB at the same N.
+- **F5.4 gate:** @ 10M–50M keys, small budget → input==output + **bounded RSS**; head-to-head vs
+  Flink/RocksDB. NOTE (learned in F5.2): use a **bounded/streaming sink** (not a parquet dump of N
+  rows) and a **sustained stream** (so jemalloc reaches steady state), and measure the **operator's
+  memory reservation** (DataFusion `MemoryPool` accounting / metrics), not just process RSS — at
+  sub-second batch runs with an O(N) sink, process RSS is dominated by the sink + allocator retention,
+  not the operator working set.
 - Apply the same spill to dedup + stream-join state.
 
 ## The bar — HIGHER than Flink (not just parity)
