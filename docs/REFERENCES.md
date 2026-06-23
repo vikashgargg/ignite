@@ -74,6 +74,12 @@ https://datafusion.apache.org/ballista/contributors-guide/architecture.html · F
 Source: https://datafusion.apache.org/
 - Arrow-native columnar `ExecutionPlan`s; `AggregateMode::{Partial,Final}`; `RowConverter` for
   row-format keys; physical-plan codec for distributed serialization; vectorized operators.
+- **`AggregateMode::PartialReduce` (53.1, used by F5.3 compaction):** input = intermediate accumulator
+  state, output = intermediate accumulator state (the tree-reduce merge step: combine many partials
+  into fewer partials WITHOUT finalizing; input/output schema both = the Partial-mode schema). This is
+  the correct primitive to compact accumulated streaming partial state (collapse duplicate (window,key)
+  partials to one accumulator/key) — no hand-rolled accumulator `merge`. (`Final` would finalize and
+  lose mergeability for non-summable aggs like AVG.)
 - **Spill (for F5):** DataFusion's grouped-hash `AggregateExec` **spills its hash table to disk**
   under memory pressure via `RuntimeEnv` → `MemoryPool` (bounded, e.g. `FairSpillPool`) +
   `DiskManager` (temp spill files). Available in our pinned 53.1.0 (`RuntimeEnv` already used;

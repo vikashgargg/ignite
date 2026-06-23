@@ -72,8 +72,18 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   don't let jemalloc release pages — process RSS is not the right instrument. Operator state IS bounded
   (spill + incremental emit); a clean FLAT-RSS-vs-Flink measurement needs a bounded sink + sustained
   stream = F5.4.
-- **F5.3 retain/re-spill across finalize** (open windows survive bounded) + **compaction** (collapse
-  duplicate (window,k) partials).
+- **F5.3 compaction — DONE + validated 2026-06-23 (commit):** `compact_partials` merges the per-batch
+  partial pile-up into ONE partial per (window,key) WITHOUT finalizing, via DataFusion
+  `AggregateMode::PartialReduce` (input = accumulator state, output = accumulator state — the official
+  tree-reduce merge step; no hand-rolled accumulator merging). Wired **compact-before-spill** (Data
+  handler: over budget → compact, then spill only if still over) + **compact-on-retain**
+  (`rebuild_retained_state` collapses carried-forward open windows so long/large/update-mode windows
+  stay O(distinct), not O(batches×groups)). Kill-switch `VAJRA_F5_NO_COMPACT`. Errors propagate (never
+  silently drop state). **Validated A/B** (`scripts/f5_compact_validate.sh`, 100k keys × 20 rounds =
+  2M rows, 2 MiB budget): out == 100000 EXACT both ways (correctness-preserving); spills **24 (OFF) →
+  0 (ON)** — compaction collapses recurring-key partials to the distinct set, eliminating spill when
+  the distinct state fits budget (Flink keyed-accumulator parity). Retain across finalize was already
+  done in F5.2 (`rebuild_retained_state` keeps open windows); F5.3 adds the compaction.
 - **F5.4 gate:** @ 10M–50M keys, small budget → input==output + **bounded RSS**; head-to-head vs
   Flink/RocksDB. NOTE (learned in F5.2): use a **bounded/streaming sink** (not a parquet dump of N
   rows) and a **sustained stream** (so jemalloc reaches steady state), and measure the **operator's

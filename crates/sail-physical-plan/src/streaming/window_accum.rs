@@ -578,6 +578,9 @@ impl ExecutionPlan for WindowAccumExec {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(128 * 1024 * 1024);
+        // F5.3: compaction (PartialReduce of accumulated partials) is on by default; kill-switch for
+        // A/B and safety.
+        let compact_enabled = std::env::var("VAJRA_F5_NO_COMPACT").is_err();
         let in_stream = self.input.execute(partition, context.clone())?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -624,6 +627,7 @@ impl ExecutionPlan for WindowAccumExec {
             let allowed_lateness = allowed_lateness;
             let num_group_cols = num_group_cols;
             let state_budget_bytes = state_budget_bytes;
+            let compact_enabled = compact_enabled;
             async move {
                 // Restore committed state on the first poll (open-window partials + watermark +
                 // emitted ends), for stateful exactly-once recovery across runs.
@@ -698,15 +702,22 @@ impl ExecutionPlan for WindowAccumExec {
                                         .merge_emit_wm
                                         .map(|w| w.saturating_sub(allowed_lateness)),
                                 };
-                                rebuild_retained_state(
+                                if let Err(e) = rebuild_retained_state(
                                     &mut acc,
                                     retain_wm,
                                     ck.as_ref(),
                                     &state_op_id,
                                     &partial_schema,
                                     state_budget_bytes,
+                                    &final_group_by,
+                                    &aggr_exprs,
+                                    ctx.clone(),
+                                    compact_enabled,
                                 )
-                                .await;
+                                .await
+                                {
+                                    return Some((Err(e), (input, acc, buf, ctx)));
+                                }
                                 acc.active_merge = None;
                                 if let Some(marker) = acc.after_merge_marker.take() {
                                     buf.push_back(marker);
@@ -741,9 +752,38 @@ impl ExecutionPlan for WindowAccumExec {
                                         acc.pending_rows.append(&mut partials);
                                     }
                                 }
-                                // F5: over budget → spill the in-memory partials to the checkpoint
-                                // store (Arrow-IPC chunk), evicting them from RAM. Folded back into
-                                // the full state at the next finalize/snapshot (EO unchanged).
+                                // F5.3: over budget → first COMPACT (PartialReduce) to collapse the
+                                // duplicate (window,key) partials that accumulate one-per-batch, so
+                                // in-memory state trends to O(distinct open groups) (Flink keeps one
+                                // accumulator per key) — cuts both RAM and spill volume. Only worth it
+                                // when there are multiple batches to merge.
+                                if compact_enabled
+                                    && acc.pending_bytes > state_budget_bytes
+                                    && acc.pending_rows.len() > 1
+                                {
+                                    match compact_partials(
+                                        std::mem::take(&mut acc.pending_rows),
+                                        &final_group_by,
+                                        &aggr_exprs,
+                                        &partial_schema,
+                                        ctx.clone(),
+                                    )
+                                    .await
+                                    {
+                                        Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
+                                        Ok(compacted) => {
+                                            acc.pending_bytes = compacted
+                                                .iter()
+                                                .map(|b| b.get_array_memory_size())
+                                                .sum();
+                                            acc.pending_rows = compacted;
+                                        }
+                                    }
+                                }
+                                // F5: STILL over budget after compaction → spill the in-memory
+                                // partials to the checkpoint store (Arrow-IPC chunk), evicting them
+                                // from RAM. Folded back into the full state at the next
+                                // finalize/snapshot (EO unchanged).
                                 if acc.pending_bytes > state_budget_bytes && !acc.pending_rows.is_empty() {
                                     if let Some(ck) = &ck {
                                         let idx = acc.next_spill;
@@ -1020,6 +1060,7 @@ fn consume_merge_batch(
 /// keeps only still-open windows (`retain_open_window_rows`), and re-accumulates them — re-spilling
 /// to FRESH indices when over budget — then GCs the consumed spills. Peak ≈ one chunk + budget, so
 /// the retained state can itself be ≫ RAM (continuous queries with many open windows).
+#[expect(clippy::too_many_arguments)]
 async fn rebuild_retained_state(
     acc: &mut AccumState,
     retain_wm: Option<i64>,
@@ -1027,7 +1068,11 @@ async fn rebuild_retained_state(
     state_op_id: &str,
     partial_schema: &SchemaRef,
     state_budget_bytes: usize,
-) {
+    final_group_by: &PhysicalGroupBy,
+    aggr_exprs: &[Arc<AggregateFunctionExpr>],
+    context: Arc<TaskContext>,
+    compact_enabled: bool,
+) -> Result<()> {
     let old_pending = std::mem::take(&mut acc.pending_rows);
     let old_spilled = std::mem::take(&mut acc.spilled);
     acc.pending_bytes = 0;
@@ -1076,8 +1121,19 @@ async fn rebuild_retained_state(
             crate::streaming::state_io::delete_spill(ck, state_op_id, idx).await;
         }
     }
+    // F5.3: compact the carried-forward open-window remainder so long-lived windows (large windows /
+    // update-mode within allowed-lateness) keep ONE partial per (window,key) instead of piling up
+    // across finalizes. A compaction error is a genuine fault — propagate it (never silently drop
+    // state).
+    if compact_enabled && new_pending.len() > 1 {
+        new_pending =
+            compact_partials(new_pending, final_group_by, aggr_exprs, partial_schema, context)
+                .await?;
+        new_bytes = new_pending.iter().map(|b| b.get_array_memory_size()).sum();
+    }
     acc.pending_rows = new_pending;
     acc.pending_bytes = new_bytes;
+    Ok(())
 }
 
 /// Build a `BooleanArray` of `len` copies of `v` (the per-row `retracted` flag).
@@ -1176,6 +1232,43 @@ fn emit_changelog(
     acc.last_emitted
         .retain(|_, (end, _, _)| end.saturating_add(allowed_lateness) > wm);
     Ok(())
+}
+
+/// F5.3 compaction: merge many partial-state rows into ONE per `(window, key)` group WITHOUT
+/// finalizing, via DataFusion's `AggregateMode::PartialReduce` (input = intermediate accumulator
+/// state, output = intermediate accumulator state — the tree-reduce merge step; see the pinned
+/// `datafusion-physical-plan` `AggregateMode` docs). Input and output schema are both
+/// `partial_schema`, so the compacted partials are a drop-in replacement that the `Final` merge
+/// still consumes identically. Collapses the per-batch partial pile-up so open-window state trends
+/// to O(distinct groups) (like a Flink keyed accumulator) instead of O(batches × groups).
+async fn compact_partials(
+    partials: Vec<RecordBatch>,
+    final_group_by: &PhysicalGroupBy,
+    aggr_exprs: &[Arc<AggregateFunctionExpr>],
+    partial_schema: &SchemaRef,
+    context: Arc<TaskContext>,
+) -> Result<Vec<RecordBatch>> {
+    if partials.len() <= 1 {
+        return Ok(partials);
+    }
+    let input = Arc::new(StaticBatchExec::new(partials, partial_schema.clone()));
+    let agg = AggregateExec::try_new(
+        AggregateMode::PartialReduce,
+        final_group_by.clone(),
+        aggr_exprs.to_vec(),
+        vec![None; aggr_exprs.len()],
+        input,
+        partial_schema.clone(),
+    )?;
+    let mut stream = agg.execute(0, context)?;
+    let mut out = vec![];
+    while let Some(batch) = stream.next().await {
+        let batch = batch?;
+        if batch.num_rows() > 0 {
+            out.push(batch);
+        }
+    }
+    Ok(out)
 }
 
 /// `Partial`-mode pre-aggregation of `batches` → partial state rows (one per
