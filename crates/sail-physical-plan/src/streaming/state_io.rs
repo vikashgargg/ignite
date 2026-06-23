@@ -196,6 +196,147 @@ pub async fn committed_epoch(ck: &CheckpointStore) -> Option<u64> {
     v.get("epoch")?.as_u64()
 }
 
+// ---------------------------------------------------------------------------
+// Incremental checkpointing (Flink ForSt-class, unified with F5 spill).
+//
+// A checkpoint is a MANIFEST that REFERENCES the operator's immutable spill chunks (the SST-analog;
+// REFERENCES §3b) + a small in-RAM residual, rather than re-copying the whole state. The bulk
+// (spilled chunks) was written off the barrier critical path during F5 spill, so a checkpoint writes
+// only O(residual + manifest) — not O(total state). Chunks are immutable + refcounted: GC'd only
+// when no retained epoch's manifest references them (= Flink SharedStateRegistry).
+// See docs/design/streaming-incremental-checkpoint.md.
+// ---------------------------------------------------------------------------
+
+fn manifest_key(operator_id: &str, epoch: u64) -> String {
+    format!("state/{operator_id}/epoch-{epoch}/manifest")
+}
+fn residual_key(operator_id: &str, epoch: u64) -> String {
+    format!("state/{operator_id}/epoch-{epoch}/residual")
+}
+
+/// Manifest blob: `[u32 meta_len][meta_len × i64][u32 n_chunks][n_chunks × u64]` (LE) — the meta
+/// vector + the referenced spill-chunk ids. Dependency-free, mirrors `encode_state`'s framing.
+fn encode_manifest(meta: &[i64], chunks: &[u64]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + meta.len() * 8 + chunks.len() * 8);
+    out.extend_from_slice(&(meta.len() as u32).to_le_bytes());
+    for v in meta {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&(chunks.len() as u32).to_le_bytes());
+    for c in chunks {
+        out.extend_from_slice(&c.to_le_bytes());
+    }
+    out
+}
+
+fn decode_manifest(bytes: &[u8]) -> (Vec<i64>, Vec<u64>) {
+    let mut off = 0usize;
+    let read_u32 = |bytes: &[u8], off: usize| -> Option<u32> {
+        bytes.get(off..off + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap_or([0; 4])))
+    };
+    let Some(meta_len) = read_u32(bytes, off) else {
+        return (vec![], vec![]);
+    };
+    off += 4;
+    let mut meta = Vec::with_capacity(meta_len as usize);
+    for _ in 0..meta_len {
+        let Some(s) = bytes.get(off..off + 8) else {
+            return (meta, vec![]);
+        };
+        meta.push(i64::from_le_bytes(s.try_into().unwrap_or([0; 8])));
+        off += 8;
+    }
+    let Some(n_chunks) = read_u32(bytes, off) else {
+        return (meta, vec![]);
+    };
+    off += 4;
+    let mut chunks = Vec::with_capacity(n_chunks as usize);
+    for _ in 0..n_chunks {
+        let Some(s) = bytes.get(off..off + 8) else {
+            return (meta, chunks);
+        };
+        chunks.push(u64::from_le_bytes(s.try_into().unwrap_or([0; 8])));
+        off += 8;
+    }
+    (meta, chunks)
+}
+
+/// Incrementally stage an epoch: write only the small in-RAM `residual` + a manifest that REFERENCES
+/// the already-persisted spill `chunks`. Does NOT re-copy the chunk blobs (they are immutable and
+/// were written during spill). Best-effort. The residual carries the same `schema` as the chunks.
+pub async fn stage_epoch_incremental(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    epoch: u64,
+    schema: &SchemaRef,
+    residual: &[RecordBatch],
+    chunks: &[u64],
+    meta: &[i64],
+) {
+    if let Some(blob) = encode_state(schema, residual, &[]) {
+        let _ = ck
+            .put(&residual_key(operator_id, epoch), Bytes::from(blob))
+            .await;
+    }
+    let _ = ck
+        .put(
+            &manifest_key(operator_id, epoch),
+            Bytes::from(encode_manifest(meta, chunks)),
+        )
+        .await;
+}
+
+/// Restore the full state of an epoch staged incrementally: read the manifest, then the residual +
+/// every referenced chunk. Returns `(residual ++ chunks, meta)`. Empty if the manifest is absent.
+pub async fn restore_epoch_incremental(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    epoch: u64,
+) -> (Vec<RecordBatch>, Vec<i64>) {
+    let Ok(Some(mbytes)) = ck.get(&manifest_key(operator_id, epoch)).await else {
+        return (vec![], vec![]);
+    };
+    let (meta, chunks) = decode_manifest(&mbytes);
+    let mut batches = match ck.get(&residual_key(operator_id, epoch)).await {
+        Ok(Some(rbytes)) => decode_state(&rbytes).0,
+        _ => vec![],
+    };
+    for id in chunks {
+        batches.extend(read_spill(ck, operator_id, id).await);
+    }
+    (batches, meta)
+}
+
+/// Drop a subsumed epoch's manifest + residual (NOT its chunks — those may still be referenced by a
+/// retained epoch; clean chunks via [`gc_unreferenced_chunks`]).
+pub async fn gc_epoch_incremental(ck: &CheckpointStore, operator_id: &str, epoch: u64) {
+    let _ = ck.delete(&manifest_key(operator_id, epoch)).await;
+    let _ = ck.delete(&residual_key(operator_id, epoch)).await;
+}
+
+/// SharedStateRegistry-style chunk GC: delete every `candidate` chunk that is referenced by NONE of
+/// the `retained_epochs`' manifests. (Caller supplies the candidate set = chunks it may delete, e.g.
+/// the operator's known chunk ids.) A chunk shared by a retained epoch survives.
+pub async fn gc_unreferenced_chunks(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    retained_epochs: &[u64],
+    candidates: &[u64],
+) {
+    let mut referenced = std::collections::HashSet::new();
+    for &e in retained_epochs {
+        if let Ok(Some(mbytes)) = ck.get(&manifest_key(operator_id, e)).await {
+            let (_, chunks) = decode_manifest(&mbytes);
+            referenced.extend(chunks);
+        }
+    }
+    for &c in candidates {
+        if !referenced.contains(&c) {
+            delete_spill(ck, operator_id, c).await;
+        }
+    }
+}
+
 #[expect(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
@@ -291,5 +432,60 @@ mod tests {
         delete_spill(&ck, "window-0", 0).await;
         assert!(read_spill(&ck, "window-0", 0).await.is_empty());
         assert_eq!(read_spill(&ck, "window-0", 1).await.len(), 1);
+    }
+
+    // Incremental checkpoint: two epochs SHARE chunks (only the delta + manifest are written per
+    // epoch); restore reassembles the full state; refcount GC keeps shared chunks alive while a
+    // retained epoch references them and drops the rest (Flink SharedStateRegistry — REFERENCES §3b).
+    #[tokio::test]
+    async fn incremental_checkpoint_shares_chunks_and_refcounts() {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let chunk = |a: i64| {
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![a]))]).unwrap()
+        };
+        let ck = CheckpointStore::from_store(Arc::new(InMemory::new()), StorePath::from("ck"));
+        let op = "window-0";
+
+        // Three immutable chunks already on the store (written during spill).
+        for (i, v) in [10i64, 20, 30].into_iter().enumerate() {
+            assert!(write_spill(&ck, op, i as u64, &schema, &[chunk(v)]).await);
+        }
+
+        // Epoch 1: references chunks [0,1] + a small residual (value 100), meta [5].
+        stage_epoch_incremental(&ck, op, 1, &schema, &[chunk(100)], &[0, 1], &[5]).await;
+        // Epoch 2: SHARES chunks [0,1], adds new chunk 2, residual (value 200), meta [6].
+        stage_epoch_incremental(&ck, op, 2, &schema, &[chunk(200)], &[0, 1, 2], &[6]).await;
+
+        // Restore each epoch = residual ++ referenced chunks (full state, incrementally assembled).
+        let sum = |bs: &[RecordBatch]| -> i64 {
+            bs.iter()
+                .flat_map(|b| {
+                    let a = b.column(0).as_any().downcast_ref::<Int64Array>().unwrap().clone();
+                    (0..b.num_rows()).map(move |i| a.value(i)).collect::<Vec<_>>()
+                })
+                .sum()
+        };
+        let (b1, m1) = restore_epoch_incremental(&ck, op, 1).await;
+        assert_eq!(m1, vec![5]);
+        assert_eq!(sum(&b1), 100 + 10 + 20, "epoch1 = residual + chunks 0,1");
+        let (b2, m2) = restore_epoch_incremental(&ck, op, 2).await;
+        assert_eq!(m2, vec![6]);
+        assert_eq!(sum(&b2), 200 + 10 + 20 + 30, "epoch2 = residual + chunks 0,1,2");
+
+        // Subsume epoch 1 (retain only {2}); GC its manifest+residual, then unreferenced chunks.
+        gc_epoch_incremental(&ck, op, 1).await;
+        gc_unreferenced_chunks(&ck, op, &[2], &[0, 1, 2]).await;
+        // chunks 0,1,2 are all referenced by epoch 2 -> all survive; epoch 2 still restores fully.
+        let (b2b, _) = restore_epoch_incremental(&ck, op, 2).await;
+        assert_eq!(sum(&b2b), 200 + 10 + 20 + 30, "epoch2 intact after epoch1 subsumed");
+        // epoch 1's manifest is gone.
+        assert!(restore_epoch_incremental(&ck, op, 1).await.0.is_empty());
+
+        // Now subsume epoch 2 as well (retain none); all chunks become unreferenced -> deleted.
+        gc_epoch_incremental(&ck, op, 2).await;
+        gc_unreferenced_chunks(&ck, op, &[], &[0, 1, 2]).await;
+        for i in 0..3u64 {
+            assert!(read_spill(&ck, op, i).await.is_empty(), "chunk {i} GC'd when unreferenced");
+        }
     }
 }

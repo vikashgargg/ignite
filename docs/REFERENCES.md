@@ -59,6 +59,31 @@ VLDB'25 https://www.vldb.org/pvldb/vol18/p4846-mei.pdf
   is mandatory** (no-cache remote = −48%). Design state object-store-native with tiered local cache +
   async access (Arrow/Parquet state format) from day one.
 
+### 3b. Incremental + async checkpointing (Flink large-state) — fetched 2026-06-24
+Sources: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/ops/state/large_state_tuning/ ·
+.../docs/ops/state/checkpoints/
+- **Incremental checkpoint = record only the CHANGES since the last completed checkpoint**, not a
+  full self-contained backup. For RocksDB this = the **SST files** created since the last checkpoint
+  are uploaded; **unchanged SST files are REFERENCED (shared), not re-uploaded**. Local hard-links ⇒
+  no extra disk for active files (RocksDB + local-recovery dirs must be one physical device).
+- **Checkpoint dir layout:** `shared/` (files referenced by ≥1 checkpoint — the SST blobs),
+  `exclusive/chk-N/` (one checkpoint only), `taskowned/` (never dropped by the coordinator). A new
+  checkpoint **reuses files from the previous** via the shared dir.
+- **SharedStateRegistry + refcount:** a shared file is deleted only when **no retained checkpoint
+  references it**; on subsumption (chk-N+1 done ⇒ chk-N cleaned) only files no longer referenced are
+  removed. Prevents premature deletion.
+- **Async:** the native checkpoint (hard-link of SSTs) is fast/local; the **upload to DFS is async**
+  and does not block the dataflow — barriers keep flowing.
+- **Implication for Vajra (THE unlock):** our F5 **spill chunks are already immutable, numbered
+  Arrow-IPC blobs** = a perfect SST-analog. So incremental checkpointing is nearly free: a checkpoint
+  = a **manifest** listing {referenced chunk-ids + a small in-RAM residual blob + meta}; spilled
+  chunks (the bulk) are **referenced, not re-uploaded** (they were written out-of-band during spill,
+  off the barrier critical path). Refcount chunks by referencing-epoch; GC a chunk only when no
+  retained epoch references it (= SharedStateRegistry). Checkpoint cost = O(residual + new chunks),
+  not O(total state). **Spill and incremental-checkpoint become ONE mechanism + ONE Arrow format —
+  vs Flink bolting ForSt onto a RocksDB lineage.** Requires changing the F5 chunk lifecycle from
+  consumed-on-finalize to **immutable + refcounted**. Design: docs/design/streaming-incremental-checkpoint.md.
+
 ## 4. Arrow Flight + Flight Shuffle (DataFusion Ballista 53.0.0, 2026-05)
 Sources: https://datafusion.apache.org/blog/output/2026/05/24/datafusion-ballista-53.0.0/ ·
 https://datafusion.apache.org/ballista/contributors-guide/architecture.html · Flight bench arxiv 2204.03032
