@@ -105,7 +105,23 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   memory reservation** (DataFusion `MemoryPool` accounting / metrics), not just process RSS — at
   sub-second batch runs with an O(N) sink, process RSS is dominated by the sink + allocator retention,
   not the operator working set.
-- Apply the same spill to dedup + stream-join state.
+- **F5-join (stream-stream join spill) — DONE + tested 2026-06-24 (commit):** `StreamJoinExec`'s
+  per-side buffers (`JoinAccum.left_buf/right_buf`) spill over `SAIL_STREAMING_STATE_BUDGET_BYTES` to
+  the object-store (`state_io`, same primitive). The join builds the hash on the small INCOMING batch
+  and **streams the OTHER side's buffer (in-RAM + spilled) as the probe** via `SpillSourceExec` — so
+  join memory is bounded by the incoming batch, not the (≫RAM) buffer. Inner-join only (planner-enforced,
+  symmetric): a right-side arrival swaps the join keys and reorders the output back to left++right
+  (`reorder_right_left_to_left_right`). Interval eviction is spill-aware (`evict_respill_side`: gather →
+  evict → re-spill); EndOfData snapshot gathers the full state (spilling transparent to EO). Tested:
+  `inner_join_streaming_probe_emits_all_pairs` (both arrival orders, multi-match), `reorder_*` (column
+  blocks), `join_probes_spilled_buffer` (right buffer fully spilled → probe reads it back, join correct).
+  No `StreamJoinExec` plan fields added → codec unaffected. REMAINING: e2e spill-at-scale validation
+  (analogous to `f5_validate.sh`, a SQL interval-join with a tiny budget); dedup spill (below).
+- **dedup spill — assessment:** `StreamDeduplicateExec.seen: HashMap<key,event_time>` is already
+  bounded by watermark eviction (`dropDuplicatesWithinWatermark` — Flink's bounded model); the
+  no-watermark `dropDuplicates`-over-all-time case is unbounded-by-design in Flink too (needs state
+  TTL/RocksDB). A spillable keyed point-lookup map (LSM/bloom) is a larger design than the scan-based
+  window/join buffers; queued separately — lower priority since the watermark path already bounds it.
 
 ## The bar — HIGHER than Flink (not just parity)
 - **Object-store-NATIVE state from day one.** Flink only got disaggregated state in 2.0 (ForSt, bolted

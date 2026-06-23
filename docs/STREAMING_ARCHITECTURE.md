@@ -53,7 +53,7 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
 | Windowed agg | ✅ (EKS vs Flink) | ✅ (EKS local-cluster) | ✅ operator e2e: out-of-order→batch-truth, 0 loss vs append drops (`update_mode_e2e_tests`); pyspark-vs-Spark diff gated on collect-path wiring | ⛔ upsert sink | ✅ codec round-trips update_mode+lateness (`test_round_trip_window_accum_exec`) |
 | Non-windowed agg | ✅ complete-mode | 🟡 | 🟡 | ⛔ | ⛔ |
 | Dedup | ✅ | ✅ | — | — | 🟡 |
-| Stream-stream join | ✅ | 🟡 | n/a (append) | — | 🟡 |
+| Stream-stream join | ✅ + F5 spill (buffer→object-store, streamed probe; `inner_join_streaming_probe_emits_all_pairs`, `join_probes_spilled_buffer`) | 🟡 | n/a (append) | — | 🟡 |
 | Kafka EO sink | ✅ (realtime EO) | ✅ | — | ⛔ | 🟡 |
 
 ## 3. Gap register (severity: P0 blocks "replace both", P1 important, P2 nice)
