@@ -45,10 +45,13 @@ for N in $NS; do
   SPARK_REMOTE="sc://localhost:$PORT" DIR="$DIR" OUT="$OUT" CK="$CK" \
     "$PY" scripts/state_scale_stress.py 2>&1 | grep -E "BATCH|STREAMING" | sed "s/^/[N=$N] /" || true
   SPILLS=$(grep -c "F5_SPILL" "$ROOT/server_$N.log" || true)
+  # F5.4: max operator-resident state across partitions — the bounded-memory proof (should stay
+  # ≈ budget regardless of N, independent of the O(N) parquet sink).
+  PEAK_PEND=$(grep "F5_PEAK" "$ROOT/server_$N.log" 2>/dev/null | sed -E 's/.*peak_pending_bytes=([0-9]+).*/\1/' | sort -n | tail -1)
   kill "$SRV" 2>/dev/null || true; wait "$SRV" 2>/dev/null || true
   kill "$SMP" 2>/dev/null || true
   PEAK_KB=$(cat "$ROOT/peak_$N" 2>/dev/null || echo "?")
-  echo "[N=$N] peak_RSS_MiB=$(( ${PEAK_KB:-0} / 1024 ))  spill_events=$SPILLS  budget_MiB=$(( BUDGET/1024/1024 ))"
+  echo "[N=$N] peak_RSS_MiB=$(( ${PEAK_KB:-0} / 1024 ))  OPERATOR_peak_pending_KiB=$(( ${PEAK_PEND:-0} / 1024 ))  spill_events=$SPILLS  budget_KiB=$(( BUDGET/1024 ))"
   echo "----"
 done
 echo "root=$ROOT (inspect server_*.log for spill traces)"

@@ -84,6 +84,18 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   0 (ON)** — compaction collapses recurring-key partials to the distinct set, eliminating spill when
   the distinct state fits budget (Flink keyed-accumulator parity). Retain across finalize was already
   done in F5.2 (`rebuild_retained_state` keeps open windows); F5.3 adds the compaction.
+  - **OPEN BUG (found 2026-06-24, made compaction OPT-IN `VAJRA_F5_COMPACT=1`, default OFF):** the
+    **compact-THEN-spill** path loses closed-window state on UNIQUE keys → streaming query emits NO
+    output. A/B at 1M unique keys / 1 MiB budget: compaction OFF → out 1,000,000 EXACT (24 spills);
+    compaction ON → **no output**. The 2M-row A/B above missed it because compaction there produced 0
+    spills (the compact+spill combo was never exercised). Compaction in-memory (no spill) emits
+    correctly, so the fault is specific to spilling COMPACTED partials. First hypothesis: `compact_partials`
+    (PartialReduce) output column ORDER/schema vs `partial_schema` — `write_spill` encodes with
+    `partial_schema`; if PartialReduce reorders columns the IPC round-trip mislabels them so
+    `window_end_micros` can't find closed windows at the Final merge. Fix needs a focused unit test:
+    windowed partials → compact → write_spill → read_spill → Final merge → assert window `end` detected
+    + counts correct. Until fixed, default OFF = the F5.2-validated-correct path (spilling alone already
+    bounds state; compaction is only an optimization).
 - **F5.4 gate:** @ 10M–50M keys, small budget → input==output + **bounded RSS**; head-to-head vs
   Flink/RocksDB. NOTE (learned in F5.2): use a **bounded/streaming sink** (not a parquet dump of N
   rows) and a **sustained stream** (so jemalloc reaches steady state), and measure the **operator's

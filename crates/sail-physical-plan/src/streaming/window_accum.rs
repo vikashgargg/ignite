@@ -298,6 +298,11 @@ struct AccumState {
     pending_bytes: usize,
     spilled: Vec<u64>,
     next_spill: u64,
+    /// F5.4 instrumentation: high-water mark of in-RAM resident partial state (`pending_bytes`). The
+    /// operator's bounded-memory proof: this stays ≈ the spill budget regardless of cardinality
+    /// (excess is spilled to object-store), independent of the O(N) output sink. Logged at EndOfData
+    /// under `VAJRA_F5_DEBUG`.
+    peak_pending_bytes: usize,
     /// F5.2: an in-flight `Final` merge driven INCREMENTALLY (one output batch per poll) so the
     /// finalize never materializes the whole result in `buf` — peak output is bounded to a couple
     /// of in-flight events. While `Some`, the unfold loop drives this before reading new input
@@ -331,6 +336,7 @@ impl AccumState {
             pending_bytes: 0,
             spilled: vec![],
             next_spill: 0,
+            peak_pending_bytes: 0,
             active_merge: None,
             merge_newly_emitted: HashSet::new(),
             merge_emit_wm: None,
@@ -578,9 +584,12 @@ impl ExecutionPlan for WindowAccumExec {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(128 * 1024 * 1024);
-        // F5.3: compaction (PartialReduce of accumulated partials) is on by default; kill-switch for
-        // A/B and safety.
-        let compact_enabled = std::env::var("VAJRA_F5_NO_COMPACT").is_err();
+        // F5.3: compaction (PartialReduce of accumulated partials) collapses recurring-key partial
+        // pile-up. OPT-IN (default OFF) — the compact-THEN-spill path has an open correctness bug
+        // (spilled compacted partials lose closed-window state on unique keys → silent no-emit; see
+        // docs/STREAMING_ARCHITECTURE.md gap register / docs/design/streaming-spillable-state-f5.md).
+        // Enable only when validated for a workload: VAJRA_F5_COMPACT=1.
+        let compact_enabled = std::env::var("VAJRA_F5_COMPACT").is_ok();
         let in_stream = self.input.execute(partition, context.clone())?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -750,6 +759,10 @@ impl ExecutionPlan for WindowAccumExec {
                                             acc.pending_bytes += b.get_array_memory_size();
                                         }
                                         acc.pending_rows.append(&mut partials);
+                                        // F5.4: capture the resident-state high-water BEFORE
+                                        // compaction/spill evict it (the true peak in-RAM moment).
+                                        acc.peak_pending_bytes =
+                                            acc.peak_pending_bytes.max(acc.pending_bytes);
                                     }
                                 }
                                 // F5.3: over budget → first COMPACT (PartialReduce) to collapse the
@@ -853,6 +866,14 @@ impl ExecutionPlan for WindowAccumExec {
                             }
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::EndOfData))) => {
+                            if std::env::var("VAJRA_F5_DEBUG").is_ok() {
+                                eprintln!(
+                                    "F5_PEAK p{partition} peak_pending_bytes={} spilled_chunks={} budget={}",
+                                    acc.peak_pending_bytes,
+                                    acc.next_spill,
+                                    state_budget_bytes
+                                );
+                            }
                             if let Some(ck) = &ck {
                                 // Checkpointed run (availableNow/once): SNAPSHOT the open-window
                                 // partial state (write-ahead) so windows spanning runs complete
