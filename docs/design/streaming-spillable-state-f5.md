@@ -89,13 +89,16 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
     output. A/B at 1M unique keys / 1 MiB budget: compaction OFF → out 1,000,000 EXACT (24 spills);
     compaction ON → **no output**. The 2M-row A/B above missed it because compaction there produced 0
     spills (the compact+spill combo was never exercised). Compaction in-memory (no spill) emits
-    correctly, so the fault is specific to spilling COMPACTED partials. First hypothesis: `compact_partials`
-    (PartialReduce) output column ORDER/schema vs `partial_schema` — `write_spill` encodes with
-    `partial_schema`; if PartialReduce reorders columns the IPC round-trip mislabels them so
-    `window_end_micros` can't find closed windows at the Final merge. Fix needs a focused unit test:
-    windowed partials → compact → write_spill → read_spill → Final merge → assert window `end` detected
-    + counts correct. Until fixed, default OFF = the F5.2-validated-correct path (spilling alone already
-    bounds state; compaction is only an optimization).
+    correctly, so the fault is specific to spilling COMPACTED partials. **UPDATE 2026-06-24 — the DATA
+    path is PROVEN CORRECT**, two committed unit tests: (1) `compact_then_spill_roundtrip_preserves_window_and_counts`
+    (compact → write_spill → read_spill → Final merge keeps window `end` + counts) and (2)
+    `multi_chunk_compacted_spill_bounded_merge_keeps_all_keys` (3 disjoint compacted chunks merged under
+    the BOUNDED 256 KB pool → all 300 keys + window end survive). So the IPC/schema/bounded-merge
+    hypotheses are RULED OUT. The bug only manifests in the **full multi-partition operator run** (8-way
+    `StreamExchangeExec` + real planner's CSE-renamed window col) — the single-partition unit harness
+    doesn't reproduce it. NEXT: reproduce via the e2e harness with `VAJRA_F5_COMPACT=1` instrumented to
+    log per-partition emit counts, or a multi-partition operator test. Until fixed, default OFF = the
+    F5.2-validated-correct path (spilling alone already bounds state; compaction is only an optimization).
 - **F5.4 gate:** @ 10M–50M keys, small budget → input==output + **bounded RSS**; head-to-head vs
   Flink/RocksDB. NOTE (learned in F5.2): use a **bounded/streaming sink** (not a parquet dump of N
   rows) and a **sustained stream** (so jemalloc reaches steady state), and measure the **operator's

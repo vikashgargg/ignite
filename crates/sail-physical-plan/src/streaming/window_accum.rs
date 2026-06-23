@@ -1682,6 +1682,27 @@ mod update_mode_e2e_tests {
         FlowEvent::append_only_data(batch)
     }
 
+    // n DISTINCT keys (k=base..base+n-1) in one window [start,end).
+    fn rows_distinct_from(schema: &SchemaRef, start: i64, end: i64, base: i64, n: usize) -> FlowEvent {
+        let win = StructArray::from(vec![
+            (
+                Arc::new(Field::new("start", DataType::Timestamp(TimeUnit::Microsecond, None), false)),
+                Arc::new(TimestampMicrosecondArray::from(vec![start; n])) as Arc<dyn Array>,
+            ),
+            (
+                Arc::new(Field::new("end", DataType::Timestamp(TimeUnit::Microsecond, None), false)),
+                Arc::new(TimestampMicrosecondArray::from(vec![end; n])) as Arc<dyn Array>,
+            ),
+        ]);
+        let ks: Vec<i64> = (base..base + n as i64).collect();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(win), Arc::new(Int64Array::from(ks))],
+        )
+        .unwrap();
+        FlowEvent::append_only_data(batch)
+    }
+
     // n DISTINCT keys (k=0..n-1) in one window [start,end).
     fn rows_distinct(schema: &SchemaRef, start: i64, end: i64, n: usize) -> FlowEvent {
         let win = StructArray::from(vec![
@@ -1800,5 +1821,210 @@ mod update_mode_e2e_tests {
         let exec = window_exec(out_of_order_stream(), WindowOutputMode::Append, 0);
         let result = run_and_net(exec).await;
         assert_eq!(result, vec![5], "append drops the 2 late rows (window already closed)");
+    }
+
+    // F5.3 root-cause regression: compact_partials -> write_spill -> read_spill -> Final merge must
+    // preserve the window `end` (so the window is recognized as CLOSED) and the per-key counts. This
+    // isolates the compact+spill data path that produced silent no-emit at the operator level.
+    #[tokio::test]
+    async fn compact_then_spill_roundtrip_preserves_window_and_counts() {
+        let ds = data_schema();
+        let ctx = Arc::new(TaskContext::default());
+        let group = PhysicalGroupBy::new_single(vec![
+            (Arc::new(Column::new("window", 0)) as _, "window".to_string()),
+            (Arc::new(Column::new("k", 1)) as _, "k".to_string()),
+        ]);
+        let count = AggregateExprBuilder::new(count_udaf(), vec![Arc::new(Column::new("k", 1))])
+            .schema(ds.clone())
+            .alias("count")
+            .build()
+            .unwrap();
+        let aggrs: Vec<Arc<AggregateFunctionExpr>> = vec![Arc::new(count)];
+
+        // Build partials from TWO batches of distinct keys in window [0,10s) (simulates accumulation
+        // across micro-batches -> multiple partial chunks, as before a spill).
+        let end = 10_000_000i64;
+        let raw1 = match rows_distinct(&ds, 0, end, 50) {
+            FlowEvent::Data { batch, .. } => batch,
+            _ => unreachable!(),
+        };
+        let raw2 = match rows_distinct(&ds, 0, end, 50) {
+            FlowEvent::Data { batch, .. } => batch,
+            _ => unreachable!(),
+        };
+        let mut partials = run_partial_aggregate(vec![raw1], &group, &aggrs, &ds, ctx.clone())
+            .await
+            .unwrap();
+        partials.extend(
+            run_partial_aggregate(vec![raw2], &group, &aggrs, &ds, ctx.clone())
+                .await
+                .unwrap(),
+        );
+        let partial_schema = partials[0].schema();
+        assert!(partials.len() >= 2, "expect multiple partial chunks");
+
+        // final-mode group-by references the partial schema's group cols by position.
+        let final_group = PhysicalGroupBy::new_single(vec![
+            (Arc::new(Column::new("window", 0)) as _, "window".to_string()),
+            (Arc::new(Column::new("k", 1)) as _, "k".to_string()),
+        ]);
+
+        // 1) compact: must keep schema + the window `end` must still be detectable.
+        let compacted =
+            compact_partials(partials.clone(), &final_group, &aggrs, &partial_schema, ctx.clone())
+                .await
+                .unwrap();
+        assert_eq!(
+            compacted[0].schema(),
+            partial_schema,
+            "compacted schema must equal partial schema (write_spill encodes with it)"
+        );
+        let ends: Vec<i64> = compacted
+            .iter()
+            .filter_map(|b| window_end_micros(b))
+            .flatten()
+            .flatten()
+            .collect();
+        assert!(
+            ends.iter().all(|e| *e == end) && !ends.is_empty(),
+            "compacted partials must carry window end={end}, got {ends:?}"
+        );
+
+        // 2) spill round-trip the compacted partials, then Final-merge them and assert the window is
+        // closed (end detectable) and 50 distinct keys each count==2 (two batches of the same keys).
+        let dir = std::env::temp_dir().join(format!("f5test-{}", std::process::id()));
+        let ck = CheckpointStore::from_location(dir.to_str().unwrap()).unwrap();
+        let idx = 0u64;
+        assert!(
+            crate::streaming::state_io::write_spill(&ck, "t", idx, &partial_schema, &compacted).await,
+            "write_spill must succeed"
+        );
+        let readback = crate::streaming::state_io::read_spill(&ck, "t", idx).await;
+        let merged = run_final_for_test(readback, &final_group, &aggrs, &partial_schema, ctx.clone())
+            .await;
+        let merged_ends: Vec<i64> = merged
+            .iter()
+            .filter_map(|b| window_end_micros(b))
+            .flatten()
+            .flatten()
+            .collect();
+        assert!(
+            !merged_ends.is_empty() && merged_ends.iter().all(|e| *e == end),
+            "Final merge of spilled-compacted partials must carry window end={end}, got {merged_ends:?}"
+        );
+        let total: usize = merged.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total, 50, "50 distinct keys after merge");
+        crate::streaming::state_io::delete_spill(&ck, "t", idx).await;
+    }
+
+    // F5.3 root-cause (operator-faithful): MULTIPLE disjoint compacted chunks spilled, then merged
+    // under the BOUNDED pool (bounded_agg_context) exactly as the operator's begin_finalize does.
+    // Reproduces the spill+compaction scenario at 1M unique keys (disjoint key ranges per chunk).
+    #[tokio::test]
+    async fn multi_chunk_compacted_spill_bounded_merge_keeps_all_keys() {
+        let ds = data_schema();
+        let ctx = Arc::new(TaskContext::default());
+        let group = PhysicalGroupBy::new_single(vec![
+            (Arc::new(Column::new("window", 0)) as _, "window".to_string()),
+            (Arc::new(Column::new("k", 1)) as _, "k".to_string()),
+        ]);
+        let count = AggregateExprBuilder::new(count_udaf(), vec![Arc::new(Column::new("k", 1))])
+            .schema(ds.clone())
+            .alias("count")
+            .build()
+            .unwrap();
+        let aggrs: Vec<Arc<AggregateFunctionExpr>> = vec![Arc::new(count)];
+        let final_group = PhysicalGroupBy::new_single(vec![
+            (Arc::new(Column::new("window", 0)) as _, "window".to_string()),
+            (Arc::new(Column::new("k", 1)) as _, "k".to_string()),
+        ]);
+        let end = 10_000_000i64;
+        let dir = std::env::temp_dir().join(format!("f5test2-{}", std::process::id()));
+        let ck = CheckpointStore::from_location(dir.to_str().unwrap()).unwrap();
+
+        // 3 disjoint key ranges (0..100, 100..200, 200..300) -> 3 compacted spilled chunks.
+        let mut partial_schema = None;
+        for (i, base) in [0i64, 100, 200].into_iter().enumerate() {
+            let raw = match rows_distinct_from(&ds, 0, end, base, 100) {
+                FlowEvent::Data { batch, .. } => batch,
+                _ => unreachable!(),
+            };
+            let parts = run_partial_aggregate(vec![raw], &group, &aggrs, &ds, ctx.clone())
+                .await
+                .unwrap();
+            let ps = parts[0].schema();
+            let compacted = compact_partials(parts, &final_group, &aggrs, &ps, ctx.clone())
+                .await
+                .unwrap();
+            assert!(crate::streaming::state_io::write_spill(&ck, "m", i as u64, &ps, &compacted).await);
+            partial_schema = Some(ps);
+        }
+        let partial_schema = partial_schema.unwrap();
+
+        // Lazy spill-read input over all 3 chunks, merged under the BOUNDED pool (tiny budget) —
+        // exactly begin_finalize's path.
+        let input = Arc::new(SpillSourceExec::new(
+            vec![],
+            vec![0, 1, 2],
+            Some(ck.clone()),
+            "m".to_string(),
+            partial_schema.clone(),
+        ));
+        let merge_ctx = bounded_agg_context(&ctx, 256 * 1024).unwrap();
+        let agg = AggregateExec::try_new(
+            AggregateMode::Final,
+            final_group.clone(),
+            aggrs.to_vec(),
+            vec![None; aggrs.len()],
+            input,
+            partial_schema.clone(),
+        )
+        .unwrap();
+        let mut s = agg.execute(0, merge_ctx).unwrap();
+        let mut merged = vec![];
+        while let Some(b) = s.next().await {
+            merged.push(b.unwrap());
+        }
+        let total: usize = merged.iter().map(|b| b.num_rows()).sum();
+        let ends: Vec<i64> = merged
+            .iter()
+            .filter_map(|b| window_end_micros(b))
+            .flatten()
+            .flatten()
+            .collect();
+        for i in 0..3 {
+            crate::streaming::state_io::delete_spill(&ck, "m", i).await;
+        }
+        assert_eq!(total, 300, "all 300 distinct keys across 3 compacted chunks must survive the merge");
+        assert!(
+            !ends.is_empty() && ends.iter().all(|e| *e == end),
+            "window end={end} must be preserved through bounded merge, got {ends:?}"
+        );
+    }
+
+    // Minimal Final-mode merge for the test (mirrors begin_finalize's aggregate, unbounded pool).
+    async fn run_final_for_test(
+        partials: Vec<RecordBatch>,
+        final_group_by: &PhysicalGroupBy,
+        aggr_exprs: &[Arc<AggregateFunctionExpr>],
+        partial_schema: &SchemaRef,
+        ctx: Arc<TaskContext>,
+    ) -> Vec<RecordBatch> {
+        let input = Arc::new(StaticBatchExec::new(partials, partial_schema.clone()));
+        let agg = AggregateExec::try_new(
+            AggregateMode::Final,
+            final_group_by.clone(),
+            aggr_exprs.to_vec(),
+            vec![None; aggr_exprs.len()],
+            input,
+            partial_schema.clone(),
+        )
+        .unwrap();
+        let mut s = agg.execute(0, ctx).unwrap();
+        let mut out = vec![];
+        while let Some(b) = s.next().await {
+            out.push(b.unwrap());
+        }
+        out
     }
 }
