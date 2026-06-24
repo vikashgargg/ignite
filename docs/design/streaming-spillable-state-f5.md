@@ -57,8 +57,11 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   (Key-Groups analogue). Remaining peak is the finalize/snapshot read-back (F5.2).
 - **F5.2 streaming finalize — DONE + validated 2026-06-23 (commit):** `SpillSourceExec` yields the
   in-memory pending + each spilled chunk LAZILY (one at a time) into the Final `AggregateExec`, run
-  under `bounded_agg_context` (a `FairSpillPool(budget)` + `DiskManager` so DataFusion spills its OWN
-  hash table). The merge is RESUMABLE (`AccumState.active_merge`, driven one output batch per poll in
+  under `bounded_agg_context` (a `FairSpillPool` + `DiskManager` so DataFusion spills its OWN hash
+  table). NOTE (fixed 2026-06-24): the finalize pool is DECOUPLED from the accumulation budget and
+  floored at **64 MiB** — the grouped-hash aggregate needs headroom for its own spill-sort, and a
+  too-tight pool fails with `ResourcesExhausted`. The O(N)-bounding knob is the accumulation budget
+  (`pending_rows` spill, measured by `peak_pending`); the finalize pool is a fixed transient cap. The merge is RESUMABLE (`AccumState.active_merge`, driven one output batch per poll in
   the unfold loop) so the result is emitted INCREMENTALLY — `buf` never holds the whole result; the
   trailing watermark/EndOfData marker is deferred until the output drains (barrier order preserved).
   `rebuild_retained_state` re-spills the open windows after each finalize. The 64K-cap invariant holds:

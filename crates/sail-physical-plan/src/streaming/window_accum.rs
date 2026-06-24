@@ -228,8 +228,15 @@ fn bounded_agg_context(base: &TaskContext, budget_bytes: usize) -> Result<Arc<Ta
     // Generous on-disk ceiling: spilling must never be blocked by this cap (state ≫ RAM is the
     // whole point); the MemoryPool — not the disk cap — governs when we spill.
     dm.set_max_temp_directory_size(1024 * 1024 * 1024 * 1024); // 1 TiB
+    // The finalize aggregate's working-memory pool is DECOUPLED from the (possibly tiny) accumulation
+    // spill budget: the grouped-hash aggregate needs enough headroom to perform its own spill-sort
+    // (a too-tight pool fails with ResourcesExhausted "Failed to reserve memory for sort during
+    // spill"). Floor at 64 MiB — large enough to always spill cleanly, still bounds huge state
+    // (groups beyond the floor spill to disk). The O(N)-bounding knob is the accumulation budget
+    // (`pending_rows` spill, measured by F5.4 `peak_pending`), not this transient finalize pool.
+    let finalize_pool = budget_bytes.max(64 * 1024 * 1024);
     let runtime = RuntimeEnvBuilder::default()
-        .with_memory_pool(Arc::new(FairSpillPool::new(budget_bytes.max(1024 * 1024))))
+        .with_memory_pool(Arc::new(FairSpillPool::new(finalize_pool)))
         .with_disk_manager_builder(dm)
         .build()
         .map(Arc::new)?;
@@ -317,6 +324,17 @@ struct AccumState {
     /// The marker (Watermark / EndOfData) to emit AFTER the active merge's output drains, so window
     /// output precedes the marker.
     after_merge_marker: Option<FlowEvent>,
+    /// inc-ckpt.2 (gated `VAJRA_INC_CKPT`, default OFF): incremental checkpointing — the
+    /// `Checkpoint{epoch}` snapshot is a MANIFEST referencing the immutable spill chunks + a small
+    /// residual, not a full re-copy (see docs/design/streaming-incremental-checkpoint.md). When on,
+    /// finalize must NOT delete chunks a retained epoch still references — it defers them to
+    /// `gc_candidates`, GC'd by the in-memory SharedStateRegistry (`epoch_chunks`) on subsumption.
+    inc_ckpt: bool,
+    /// Last retained epochs' referenced chunk-id sets (trailing window) — in-memory refcount source.
+    epoch_chunks: VecDeque<(u64, Vec<u64>)>,
+    /// Chunks dropped from the working set by finalize, pending refcount GC (deleted only once no
+    /// retained epoch references them).
+    gc_candidates: Vec<u64>,
 }
 
 /// Re-run the `Final` merge + emit at most once per this much watermark advance.
@@ -341,6 +359,9 @@ impl AccumState {
             merge_newly_emitted: HashSet::new(),
             merge_emit_wm: None,
             after_merge_marker: None,
+            inc_ckpt: false,
+            epoch_chunks: VecDeque::new(),
+            gc_candidates: vec![],
         }
     }
 
@@ -590,6 +611,10 @@ impl ExecutionPlan for WindowAccumExec {
         // docs/STREAMING_ARCHITECTURE.md gap register / docs/design/streaming-spillable-state-f5.md).
         // Enable only when validated for a workload: VAJRA_F5_COMPACT=1.
         let compact_enabled = std::env::var("VAJRA_F5_COMPACT").is_ok();
+        // inc-ckpt.2: incremental checkpointing for the continuous Checkpoint{epoch} path. OPT-IN
+        // (default OFF) until continuous-mode e2e-validated — the full-snapshot path stays default so
+        // the gate cannot regress proven EO. Must be set consistently across a job's restarts.
+        let inc_ckpt_enabled = std::env::var("VAJRA_INC_CKPT").is_ok();
         let in_stream = self.input.execute(partition, context.clone())?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -614,7 +639,8 @@ impl ExecutionPlan for WindowAccumExec {
         // the last committed snapshot, for stateful exactly-once recovery across runs.
         // Per-partition state id so each parallel instance snapshots/restores independently.
         let state_op_id = format!("window-{partition}");
-        let acc = AccumState::new();
+        let mut acc = AccumState::new();
+        acc.inc_ckpt = inc_ckpt_enabled;
         // Build the checkpoint store synchronously (no I/O); the actual restore is async and runs
         // on the first poll below (execute() is sync). Per-partition state id so each parallel
         // instance snapshots/restores independently.
@@ -650,12 +676,22 @@ impl ExecutionPlan for WindowAccumExec {
                         {
                             Some(epoch) => {
                                 acc.last_committed_epoch = Some(epoch);
-                                crate::streaming::state_io::restore_epoch_state(
-                                    ck,
-                                    &state_op_id,
-                                    epoch,
-                                )
-                                .await
+                                if acc.inc_ckpt {
+                                    // inc-ckpt.2: manifest → residual + referenced chunks → full.
+                                    crate::streaming::state_io::restore_epoch_incremental(
+                                        ck,
+                                        &state_op_id,
+                                        epoch,
+                                    )
+                                    .await
+                                } else {
+                                    crate::streaming::state_io::restore_epoch_state(
+                                        ck,
+                                        &state_op_id,
+                                        epoch,
+                                    )
+                                    .await
+                                }
                             }
                             None => crate::streaming::state_io::restore_state(ck, &state_op_id).await,
                         };
@@ -931,30 +967,76 @@ impl ExecutionPlan for WindowAccumExec {
                             if let Some(ck) = &ck {
                                 let mut meta = vec![acc.watermark_micros.unwrap_or(i64::MIN)];
                                 meta.extend(acc.emitted_ends.iter().copied());
-                                // F5: epoch snapshot captures the FULL state (memory + spilled). Do
-                                // NOT delete the spills here — the operator keeps running and they
-                                // remain live (only finalize, which consumes them, GCs them).
-                                let full = gather_partials(
-                                    &acc.pending_rows, &acc.spilled, Some(ck), &state_op_id,
-                                )
-                                .await;
-                                crate::streaming::state_io::stage_epoch_state(
-                                    ck,
-                                    &state_op_id,
-                                    id,
-                                    &partial_schema,
-                                    &full,
-                                    &meta,
-                                )
-                                .await;
-                                // GC a small trailing window (never at/after the just-staged epoch).
-                                if id >= 2 {
-                                    crate::streaming::state_io::gc_epoch_state(
+                                if acc.inc_ckpt {
+                                    // inc-ckpt.2: INCREMENTAL snapshot — write only the small in-RAM
+                                    // residual + a manifest REFERENCING the already-persisted spill
+                                    // chunks (no full re-copy). Cost = O(residual + new chunks).
+                                    crate::streaming::state_io::stage_epoch_incremental(
                                         ck,
                                         &state_op_id,
-                                        id - 2,
+                                        id,
+                                        &partial_schema,
+                                        &acc.pending_rows,
+                                        &acc.spilled,
+                                        &meta,
                                     )
                                     .await;
+                                    // SharedStateRegistry: retain a trailing window of epochs
+                                    // {id-1, id}; subsume id-2 and GC chunks no retained epoch (or
+                                    // the live working set) references.
+                                    acc.epoch_chunks.push_back((id, acc.spilled.clone()));
+                                    acc.epoch_chunks.retain(|(e, _)| *e + 2 > id); // keep e > id-2
+                                    if id >= 2 {
+                                        crate::streaming::state_io::gc_epoch_incremental(
+                                            ck,
+                                            &state_op_id,
+                                            id - 2,
+                                        )
+                                        .await;
+                                    }
+                                    let mut referenced: HashSet<u64> =
+                                        acc.spilled.iter().copied().collect();
+                                    for (_, cs) in &acc.epoch_chunks {
+                                        referenced.extend(cs.iter().copied());
+                                    }
+                                    let mut still = vec![];
+                                    for c in std::mem::take(&mut acc.gc_candidates) {
+                                        if referenced.contains(&c) {
+                                            still.push(c);
+                                        } else {
+                                            crate::streaming::state_io::delete_spill(
+                                                ck,
+                                                &state_op_id,
+                                                c,
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                    acc.gc_candidates = still;
+                                } else {
+                                    // F5: full epoch snapshot (memory + spilled). Do NOT delete the
+                                    // spills here — finalize, which consumes them, GCs them.
+                                    let full = gather_partials(
+                                        &acc.pending_rows, &acc.spilled, Some(ck), &state_op_id,
+                                    )
+                                    .await;
+                                    crate::streaming::state_io::stage_epoch_state(
+                                        ck,
+                                        &state_op_id,
+                                        id,
+                                        &partial_schema,
+                                        &full,
+                                        &meta,
+                                    )
+                                    .await;
+                                    if id >= 2 {
+                                        crate::streaming::state_io::gc_epoch_state(
+                                            ck,
+                                            &state_op_id,
+                                            id - 2,
+                                        )
+                                        .await;
+                                    }
                                 }
                                 acc.last_committed_epoch = Some(id);
                             }
@@ -1138,8 +1220,15 @@ async fn rebuild_retained_state(
             absorb!(chunk);
         }
         // GC the consumed OLD spills (their retained rows are now in new_pending / fresh spills).
-        for &idx in &old_spilled {
-            crate::streaming::state_io::delete_spill(ck, state_op_id, idx).await;
+        // Under incremental checkpointing a RETAINED epoch may still reference these chunks, so
+        // DEFER deletion to the SharedStateRegistry refcount GC (`gc_candidates`, cleaned at the next
+        // Checkpoint subsumption) instead of deleting now.
+        if acc.inc_ckpt {
+            acc.gc_candidates.extend(old_spilled.iter().copied());
+        } else {
+            for &idx in &old_spilled {
+                crate::streaming::state_io::delete_spill(ck, state_op_id, idx).await;
+            }
         }
     }
     // F5.3: compact the carried-forward open-window remainder so long-lived windows (large windows /
@@ -1766,6 +1855,68 @@ mod update_mode_e2e_tests {
                 .unwrap()
                 .with_output_mode(mode, lateness),
         )
+    }
+
+    fn window_exec_ck(events: Vec<FlowEvent>, ckpt: &str) -> Arc<WindowAccumExec> {
+        let ds = data_schema();
+        let src = Arc::new(FlowEventSource::new(events, ds.clone()));
+        let group = PhysicalGroupBy::new_single(vec![
+            (Arc::new(Column::new("window", 0)) as _, "window".to_string()),
+            (Arc::new(Column::new("k", 1)) as _, "k".to_string()),
+        ]);
+        let count = AggregateExprBuilder::new(count_udaf(), vec![Arc::new(Column::new("k", 1))])
+            .schema(ds.clone())
+            .alias("count")
+            .build()
+            .unwrap();
+        Arc::new(
+            WindowAccumExec::try_new(
+                src,
+                group,
+                vec![Arc::new(count)],
+                ds,
+                "k".to_string(),
+                0,
+                Some(ckpt.to_string()),
+            )
+            .unwrap(),
+        )
+    }
+
+    // inc-ckpt.2: a Checkpoint{epoch} under VAJRA_INC_CKPT stages an INCREMENTAL snapshot (manifest
+    // referencing the spilled chunks + residual); restoring that epoch must reconstruct the FULL
+    // pre-checkpoint partial state. Forces spill with a tiny budget. The window stays OPEN (no
+    // watermark) so no finalize mutates state before the checkpoint.
+    #[tokio::test]
+    async fn inc_ckpt_epoch_snapshot_restores_full_state() {
+        std::env::set_var("VAJRA_INC_CKPT", "1");
+        std::env::set_var("SAIL_STREAMING_STATE_BUDGET_BYTES", "4096"); // tiny → force spill
+        let dir = std::env::temp_dir().join(format!("incckpt-{}", std::process::id()));
+        let s = data_schema();
+        let n = 5000usize; // distinct keys; partials ≫ 4096 → spill before the checkpoint
+        let events = vec![
+            rows_distinct(&s, 0, 10_000_000, n),
+            FlowEvent::Marker(FlowMarker::Checkpoint { id: 1 }),
+            FlowEvent::Marker(FlowMarker::EndOfData),
+        ];
+        let exec = window_exec_ck(events, dir.to_str().unwrap());
+        // Drive the operator to completion so the Checkpoint{1} handler runs.
+        let stream = exec.execute(0, Arc::new(TaskContext::default())).unwrap();
+        let mut decoded = DecodedFlowEventStream::try_new(stream).unwrap();
+        while let Some(ev) = decoded.next().await {
+            let _ = ev.unwrap();
+        }
+        // Restore epoch 1 incrementally → residual + referenced chunks = all n partials.
+        let ck = CheckpointStore::from_location(dir.to_str().unwrap()).unwrap();
+        let (batches, _meta) =
+            crate::streaming::state_io::restore_epoch_incremental(&ck, "window-0", 1).await;
+        let rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        std::env::remove_var("VAJRA_INC_CKPT");
+        std::env::remove_var("SAIL_STREAMING_STATE_BUDGET_BYTES");
+        assert_eq!(
+            rows, n,
+            "incremental epoch-1 snapshot must reconstruct all {n} partials (residual + chunks)"
+        );
     }
 
     // Net the emitted changelog into the final per-key count (collector semantics): a retract row
