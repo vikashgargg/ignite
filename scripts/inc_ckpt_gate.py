@@ -22,6 +22,7 @@ from pyspark.sql.types import StructType, StructField, LongType, IntegerType
 
 PORT, PHASE = sys.argv[1], sys.argv[2]
 N = int(os.environ.get("N", "2000"))
+RUN_SECS = int(os.environ.get("RUN", "10"))
 OUT, CK, TOPIC, BOOT = "/tmp/incckpt_out", "/tmp/incckpt_ck", "incckpt_eo", "localhost:9092"
 BASE = 1700000000000
 s = SparkSession.builder.remote(f"sc://localhost:{PORT}").getOrCreate()
@@ -61,11 +62,11 @@ if PHASE == "w1":
     import shutil
     shutil.rmtree(OUT, ignore_errors=True); shutil.rmtree(CK, ignore_errors=True)
     produce([0, 1, 2])
-    run(10)
+    run(RUN_SECS)
     print("W1 committed rows=", s.read.parquet(OUT).count())
 elif PHASE == "check":
     produce([3, 4, 5], extra_ts=BASE + 70000)
-    run(10)
+    run(RUN_SECS)
     rows = s.read.parquet(OUT).select(F.col("window.start").alias("ws"), "k", "count").collect()
     keyset = set((str(r["ws"]), r["k"]) for r in rows)
     n = len(rows)

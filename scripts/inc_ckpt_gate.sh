@@ -22,8 +22,13 @@ KPOD=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1)
 docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic incckpt_eo >/dev/null 2>&1; sleep 2
 docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic incckpt_eo --partitions 4 --replication-factor 1 >/dev/null 2>&1
 
-start() { RUST_LOG=warn VAJRA_INC_CKPT=1 SAIL_STREAMING_STATE_BUDGET_BYTES="$BUDGET" \
-  "$BIN" server --ip 127.0.0.1 --port "$PORT" --mode local-cluster --workers 2 >/tmp/incckpt_server.log 2>&1 & echo $!; }
+# INC=1 (default) enables incremental checkpointing; INC=0 runs the full-snapshot baseline (A/B).
+INC="${INC:-1}"
+start() {
+  if [ "$INC" = "1" ]; then INCENV="VAJRA_INC_CKPT=1"; else INCENV="VAJRA_INC_CKPT_OFF=1"; fi
+  RUST_LOG=warn env $INCENV SAIL_STREAMING_STATE_BUDGET_BYTES="$BUDGET" \
+    "$BIN" server --ip 127.0.0.1 --port "$PORT" --mode local-cluster --workers 2 >/tmp/incckpt_server.log 2>&1 & echo $!;
+}
 
 echo "=== inc-ckpt.4 gate: N=$N keys, budget=$BUDGET bytes, VAJRA_INC_CKPT=1 ==="
 SRV=$(start); for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done

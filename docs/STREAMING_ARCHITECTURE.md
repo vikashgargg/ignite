@@ -58,6 +58,19 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
 
 ## 3. Gap register (severity: P0 blocks "replace both", P1 important, P2 nice)
 
+- **P0 — continuous stateful EO has boundary DUPLICATES across a hard crash at cardinality**
+  (found 2026-06-24 by `scripts/inc_ckpt_gate.sh`). N=500 keys / 8 partitions, parquet sink,
+  `trigger(continuous)`, kill-9 → restart: output = 3012 rows vs 3000 expected (+12 dups), all 6
+  windows + all keys present, but ~12 (window,key) pairs re-emitted. **Pre-existing** — reproduces
+  with incremental checkpointing OFF, so NOT an inc-ckpt bug. `f3c_stateful_crash` (N=2) passes
+  because its crash never straddles an emit, masking this. Hypothesis: the **parquet sink is not
+  transactional/2PC-committed with the state+offset checkpoint** (REFERENCES §2 end-to-end EO needs a
+  transactional sink) — windows emitted between the last committed checkpoint and the crash are
+  re-emitted on restart. The realtime EO FILE sink (F1b, marker-driven atomic `realtime/committed`)
+  does NOT cover the parquet sink path. Fix = transactional/idempotent sink (output atomic with the
+  checkpoint), Flink 2PC-style. BLOCKS flipping `VAJRA_INC_CKPT` default-on (the inc-ckpt gate can't
+  pass until the underlying sink-EO holds) AND is a real EO gap for the parquet continuous path.
+
 - ~~P0 — streaming windowed-agg caps at 65536 distinct keys~~ **FIXED 2026-06-22** (commit): root cause
   was `window_emit_mask` marking a window's `end` emitted after the FIRST agg batch, suppressing the
   2nd+ batches of the SAME window in one finalize (a >8192-group window spans multiple batches) ⇒
