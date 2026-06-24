@@ -776,6 +776,11 @@ impl ExecutionPlan for WindowAccumExec {
                         None => return None,
                         Some(Err(e)) => return Some((Err(e), (input, acc, buf, ctx))),
                         Some(Ok(FlowEvent::Data { batch, .. })) => {
+                            // P1 fix: DROP data for windows already past `end + allowedLateness`
+                            // (Flink late-data rule). Such rows can no longer affect output, and
+                            // dropping them is what makes pruning `emitted_ends` (below, on the
+                            // watermark) safe from re-emit. No-op until a watermark is known.
+                            let batch = drop_late_rows(batch, acc.watermark_micros, allowed_lateness);
                             // Incremental pre-aggregation: reduce the batch to partial
                             // state (one row per window-group) immediately, instead of
                             // buffering raw rows. Keeps state O(#open windows), not O(#rows).
@@ -860,6 +865,15 @@ impl ExecutionPlan for WindowAccumExec {
                         }))) => {
                             acc.set_watermark(timestamp.timestamp_micros());
                             let wm = acc.watermark_micros;
+                            // P1 fix: prune `emitted_ends` for windows finalized past
+                            // `end + allowedLateness` — they can no longer be re-encountered (late
+                            // data for them is dropped above), so the dedup marker is no longer
+                            // needed. Bounds the set to the active-lateness horizon (Flink GCs window
+                            // state at end+lateness) instead of one i64 per closed window forever.
+                            if let Some(w) = wm {
+                                acc.emitted_ends
+                                    .retain(|&e| e.saturating_add(allowed_lateness) >= w);
+                            }
                             // Throttle the Final merge/emit (Partial pre-agg already ran per
                             // batch): only when the watermark advanced past the threshold —
                             // windows still emit exactly once, within the threshold of close.
@@ -1510,6 +1524,27 @@ fn mark_emitted_ends(batch: &RecordBatch, wm: i64, emitted: &mut HashSet<i64>) {
     }
 }
 
+/// P1 fix (Flink late-data rule): drop rows whose window is finalized past `end + allowedLateness`
+/// (`end + lateness < watermark`) — they can no longer change any output. Rows with no determinable
+/// window end, or no watermark yet, are kept (conservative).
+fn drop_late_rows(batch: RecordBatch, watermark_micros: Option<i64>, allowed_lateness: i64) -> RecordBatch {
+    let Some(wm) = watermark_micros else {
+        return batch;
+    };
+    let Some(ends) = window_end_micros(&batch) else {
+        return batch;
+    };
+    let mut mask = BooleanBuilder::with_capacity(ends.len());
+    for end in ends {
+        // keep if open enough: end + lateness >= watermark (or no end)
+        mask.append_value(end.is_none_or(|e| e.saturating_add(allowed_lateness) >= wm));
+    }
+    match compute::filter_record_batch(&batch, &mask.finish()) {
+        Ok(filtered) => filtered,
+        Err(_) => batch, // on error, keep (safe — dedup via emitted_ends still suppresses)
+    }
+}
+
 /// Keep only rows whose window is still open (`end > watermark`); drop closed-window
 /// rows so pending state stays bounded. Keeps everything if the watermark or window
 /// column can't be determined.
@@ -1972,6 +2007,29 @@ mod update_mode_e2e_tests {
         let exec = window_exec(out_of_order_stream(), WindowOutputMode::Append, 0);
         let result = run_and_net(exec).await;
         assert_eq!(result, vec![5], "append drops the 2 late rows (window already closed)");
+    }
+
+    // P1 fix: after the watermark advances FAR past a window's end (so `emitted_ends` prunes its
+    // marker), late data for that long-closed window must STILL NOT re-emit — because late-drop
+    // removes it at ingestion. This is what makes pruning `emitted_ends` safe (bounded + no re-emit).
+    #[tokio::test]
+    async fn append_pruned_emitted_ends_no_reemit_on_late() {
+        let s = data_schema();
+        let events = vec![
+            rows(&s, 0, 10_000_000, 1, 5),                  // window [0,10s), 5 rows
+            watermark(12_000_000),                           // close → emit count 5
+            watermark(100_000_000),                          // wm ≫ end → prune emitted_ends{10s}
+            rows(&s, 0, 10_000_000, 1, 3),                  // LATE rows for the pruned window
+            watermark(101_000_000),
+            FlowEvent::Marker(FlowMarker::EndOfData),
+        ];
+        let exec = window_exec(events, WindowOutputMode::Append, 0);
+        let result = run_and_net(exec).await;
+        assert_eq!(
+            result,
+            vec![5],
+            "late data for a pruned/closed window must be dropped, not re-emitted"
+        );
     }
 
     // F5.3 root-cause regression: compact_partials -> write_spill -> read_spill -> Final merge must

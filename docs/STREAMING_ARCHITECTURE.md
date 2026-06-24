@@ -65,10 +65,12 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   ONCE after all batches of the finalize. Verified input==output at 70k/200k; regression test
   `append_emits_all_keys_above_batch_size_no_cap`. **This restores Flink-class CORRECTNESS (no silent
   loss). But NOT yet Flink-class for LARGE/LONG state — two gaps remain (below).**
-- **P1 — `emitted_ends` grows unbounded** (never pruned; one `i64` per closed window forever). A
-  months-long stream with many windows leaks memory. Flink GCs window state past watermark+lateness.
-  Fix needs care (pruning too early ⇒ re-emit duplicates on late data — EO-critical): prune only ends
-  `< watermark − allowedLateness − window_span`. Tracked, not yet fixed.
+- ~~P1 — `emitted_ends` grows unbounded~~ **FIXED 2026-06-24** (commit): two coupled parts —
+  `drop_late_rows` drops data past `end + allowedLateness` at ingestion (Flink late-data rule), and
+  the watermark handler prunes `emitted_ends.retain(|e| e + allowedLateness ≥ wm)`. Late-drop makes
+  the prune re-emit-safe (a pruned window can't be re-encountered). Bounded to the active-lateness
+  horizon. Tests: `append_mode_drops_late` + `update_mode_converges_zero_loss` (behavior preserved) +
+  `append_pruned_emitted_ends_no_reemit_on_late` (no re-emit after prune). 19/19 streaming tests.
 - **P0 — windowed-agg state is fully IN-MEMORY** (`pending_rows` + `run_final_aggregate` materializes
   the whole output): a window larger than RAM OOMs. This is F5 — Flink spills keyed state to
   RocksDB/ForSt (object-store + cache + async, REFERENCES §3). The 64k fix did NOT change this; it's
