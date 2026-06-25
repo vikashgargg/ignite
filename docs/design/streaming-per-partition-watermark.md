@@ -36,7 +36,28 @@ per-partition aware:
 emits monotone MIN−delay once `len==n`. Unit test: partition 0 racing ahead + partition 1 lagging ⇒
 emitted watermark tracks the LAGGING partition (min), and nothing emits until both seen.
 
-### Step 2 (integration, next): plumbing + gate
+### Step 2 — CONFIRMED a real multi-component change, not plumbing (2026-06-25)
+Blockers found (one batched read; record so never re-derived):
+- `WatermarkNode` is created at SQL resolution (`resolver/query/misc.rs:205`) — BEFORE the streaming
+  rewriter, so no source/partition-count context there.
+- `rewrite_streaming_plan` is SYNC; `count_kafka_partitions` is ASYNC; `StreamSource` has NO
+  partition-count accessor. So the exact `N` can't be threaded at plan time without new machinery.
+- The user projection drops the source `partition` column before the watermark.
+CRUX = get the exact Kafka partition count `N` to `WatermarkExec` (withhold-until-all-N-seen needs the
+real N: an over-estimate stalls forever, under-estimate still races). Options:
+  (a) add a sync partition-count accessor to the Kafka `StreamSource` (cached from metadata) + thread
+      `N` + `partition_col` onto `WatermarkNode` in the rewriter (which has the source), planner passes
+      to `WatermarkExec.with_partition_watermark`; AND preserve the `partition` column to the watermark
+      (augment the projection chain, or have the realtime decode keep it).
+  (b) EXECUTION-TIME discovery: `WatermarkExec` learns `N` from the source via a one-time control
+      signal (e.g. the realtime source emits an initial `partitions=N` marker) — avoids plan-time async.
+  Recommendation: (b) is cleaner (no async-at-plan, no projection surgery for N) but needs a new
+  control marker; (a) reuses existing markers but needs projection preservation + a sync accessor.
+CHEAP PROVE-IT path (if validating the mechanism before the full change): gate query keeps `partition`
+(`select k, et, partition`) + planner enables per-partition when `partition` ∈ input schema with N from
+an env override; confirm `inc_ckpt_gate.sh PARTS=4` → 0 dups. Then generalize.
+
+### Step 2 (integration): plumbing + gate
 The realtime rewriter must keep the source `partition` column reaching `WatermarkExec` (the user
 projection drops it; thread it through, then strip after) and pass `num_partitions`. Then verify
 `scripts/inc_ckpt_gate.sh PARTS=4` → 0 dups (NOCRASH) and EO PASS (with crash). Likely also resolves
