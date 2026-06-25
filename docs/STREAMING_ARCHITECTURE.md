@@ -78,6 +78,17 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   across the epoch boundary at 8 partitions. NEXT = instrument a continuous run to log which epoch
   commits which (window,key) and find the double-commit; do NOT build a redundant sink. Still BLOCKS
   flipping `VAJRA_INC_CKPT` default-on.
+  **ROOT-CAUSED 2026-06-25 (artifact inspection, no extra runs):** the "dups" are NOT re-emits of the
+  same value — they are **un-merged PARTIAL COUNTS that sum to the true count**: e.g. (W0,k170)→{epoch0:3,
+  epoch24:7} (=10), (W0,k200)→{epoch0:8,epoch24:2}, and crucially (W2,k254)→{epoch24:7, epoch24:3}
+  — TWO rows for one (window,key) in the SAME committed epoch. So a single window-key's partials are
+  emitted un-merged as separate rows instead of one merged count. Reproduces at `shuffle.partitions=1`
+  too. ⇒ NOT a sink/inc-ckpt issue: it's a **multi-partition keyed-aggregation merge/shuffle
+  correctness bug** (one key's partials split across partitions/finalizes and not merged) — the SAME
+  recurring theme as the F5.3 compaction multi-partition bug + the EKS-scale issues. Diagnostic method
+  (cheap): read each committed `<out>/<epoch>/*.parquet` and find any (window,key) in >1 epoch or >1
+  row. FIX TARGET = the keyed shuffle / Final-merge so all partials for a (window,key) land+merge in
+  one place before emit. This is THE core multi-partition correctness gap to fix for prod-grade.
 
 - ~~P0 — streaming windowed-agg caps at 65536 distinct keys~~ **FIXED 2026-06-22** (commit): root cause
   was `window_emit_mask` marking a window's `end` emitted after the FIRST agg batch, suppressing the

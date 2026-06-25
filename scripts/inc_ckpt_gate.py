@@ -25,7 +25,11 @@ N = int(os.environ.get("N", "2000"))
 RUN_SECS = int(os.environ.get("RUN", "10"))
 OUT, CK, TOPIC, BOOT = "/tmp/incckpt_out", "/tmp/incckpt_ck", "incckpt_eo", "localhost:9092"
 BASE = 1700000000000
-s = SparkSession.builder.remote(f"sc://localhost:{PORT}").getOrCreate()
+_b = SparkSession.builder.remote(f"sc://localhost:{PORT}")
+_shuf = os.environ.get("SHUFFLE")
+if _shuf:
+    _b = _b.config("spark.sql.shuffle.partitions", _shuf)
+s = _b.getOrCreate()
 schema = StructType([StructField("k", IntegerType()), StructField("ts", LongType())])
 
 
