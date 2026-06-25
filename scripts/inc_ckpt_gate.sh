@@ -26,7 +26,7 @@ docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:
 INC="${INC:-1}"
 start() {
   if [ "$INC" = "1" ]; then INCENV="VAJRA_INC_CKPT=1"; else INCENV="VAJRA_INC_CKPT_OFF=1"; fi
-  RUST_LOG=warn env $INCENV SAIL_STREAMING_STATE_BUDGET_BYTES="$BUDGET" \
+  RUST_LOG=warn env $INCENV SAIL_STREAMING_STATE_BUDGET_BYTES="$BUDGET" VAJRA_WM_PARTITIONS="${PARTS:-4}" \
     "$BIN" server --ip 127.0.0.1 --port "$PORT" --mode local-cluster --workers 2 >/tmp/incckpt_server.log 2>&1 & echo $!;
 }
 
