@@ -66,10 +66,18 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   because its crash never straddles an emit, masking this. Hypothesis: the **parquet sink is not
   transactional/2PC-committed with the state+offset checkpoint** (REFERENCES §2 end-to-end EO needs a
   transactional sink) — windows emitted between the last committed checkpoint and the crash are
-  re-emitted on restart. The realtime EO FILE sink (F1b, marker-driven atomic `realtime/committed`)
-  does NOT cover the parquet sink path. Fix = transactional/idempotent sink (output atomic with the
-  checkpoint), Flink 2PC-style. BLOCKS flipping `VAJRA_INC_CKPT` default-on (the inc-ckpt gate can't
-  pass until the underlying sink-EO holds) AND is a real EO gap for the parquet continuous path.
+  re-emitted on restart.
+  **DIAGNOSIS CORRECTED 2026-06-25 (traced the routing):** the transactional sink ALREADY EXISTS and
+  IS used here — `Trigger.Continuous` → `RealtimeFileSinkExec` (epoch-atomic `_spark_metadata` +
+  `realtime/committed`, F1b EO 10k/10k), and the read path honors the commit log
+  (`committed_urls_if_logged` → only committed files). So this is NOT a missing-sink issue; building a
+  new sink would be redundant. The ~12 dups are a REAL committed-epoch re-emit, narrowed to one of:
+  (1) the MULTI-PARTITION realtime-sink commit coordination (`num_partitions>1`: each task writes a
+  per-epoch done-marker, the LAST writes the global commit — a race/double-commit under crash+replay
+  that N=2/single-sink f3c never stresses), or (2) window operator state/emit-vs-offset misalignment
+  across the epoch boundary at 8 partitions. NEXT = instrument a continuous run to log which epoch
+  commits which (window,key) and find the double-commit; do NOT build a redundant sink. Still BLOCKS
+  flipping `VAJRA_INC_CKPT` default-on.
 
 - ~~P0 — streaming windowed-agg caps at 65536 distinct keys~~ **FIXED 2026-06-22** (commit): root cause
   was `window_emit_mask` marking a window's `end` emitted after the FIRST agg batch, suppressing the
