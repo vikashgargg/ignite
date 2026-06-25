@@ -87,8 +87,19 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   correctness bug** (one key's partials split across partitions/finalizes and not merged) — the SAME
   recurring theme as the F5.3 compaction multi-partition bug + the EKS-scale issues. Diagnostic method
   (cheap): read each committed `<out>/<epoch>/*.parquet` and find any (window,key) in >1 epoch or >1
-  row. FIX TARGET = the keyed shuffle / Final-merge so all partials for a (window,key) land+merge in
-  one place before emit. This is THE core multi-partition correctness gap to fix for prod-grade.
+  row. **EXACT ROOT CAUSE CONFIRMED 2026-06-25** (minimal repro: `PARTS=1` Kafka → PASS 1800/1800,
+  0 dups; `PARTS=4` → partial-count splits; reproduces with NO crash). It is NOT keyed-shuffle/merge
+  (routing by `k` is correct), NOT sink/inc-ckpt. It's **per-partition watermarking in the REALTIME
+  source**: `kafka/reader.rs:279` forces realtime/continuous `parallelism = 1` (for per-epoch barrier
+  coordination), so ONE source instance reads ALL N Kafka partitions interleaved out of event-time
+  order; the `withWatermark` watermark is then a single **global max-et that races past slower
+  partitions**, closing windows before all their events arrive → partial counts (`3+7=10`). The
+  BOUNDED path already avoids this with one-instance-per-Kafka-partition (reader.rs:270-278 comment
+  documents the exact hazard); the realtime path does not. **FIX** = realtime source emits a watermark
+  = **MIN over per-Kafka-partition max-et** (track event-time per partition inside the single instance,
+  emit the min — Flink per-partition watermark), OR run realtime multi-instance with coordinated
+  per-instance epoch barriers + exchange MIN-merge. VERIFY with `scripts/inc_ckpt_gate.sh PARTS=4`
+  (must reach 0 dups). This is THE core continuous-mode correctness gap to fix for prod-grade.
 
 - ~~P0 — streaming windowed-agg caps at 65536 distinct keys~~ **FIXED 2026-06-22** (commit): root cause
   was `window_emit_mask` marking a window's `end` emitted after the FIRST agg batch, suppressing the

@@ -20,7 +20,7 @@ KPOD=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1)
 [ -x "$BIN" ] || { echo "FATAL: no vajra binary (cargo build -p sail-cli --bin vajra)"; exit 2; }
 
 docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic incckpt_eo >/dev/null 2>&1; sleep 2
-docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic incckpt_eo --partitions 4 --replication-factor 1 >/dev/null 2>&1
+docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic incckpt_eo --partitions ${PARTS:-4} --replication-factor 1 >/dev/null 2>&1
 
 # INC=1 (default) enables incremental checkpointing; INC=0 runs the full-snapshot baseline (A/B).
 INC="${INC:-1}"
@@ -34,10 +34,14 @@ echo "=== inc-ckpt.4 gate: N=$N keys, budget=$BUDGET bytes, VAJRA_INC_CKPT=1 ===
 SRV=$(start); for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done
 echo "--- phase w1 (server $SRV) ---"
 N="$N" "$PY" "$ROOT/scripts/inc_ckpt_gate.py" "$PORT" w1 2>&1 | grep -E "W1|Error|Traceback" | head
-echo "--- HARD CRASH: kill -9 $SRV ---"
-kill -9 "$SRV" 2>/dev/null; sleep 3
-SRV=$(start); for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done
-echo "--- restarted $SRV; phase check (EO via incremental restore) ---"
+if [ "${NOCRASH:-0}" = "1" ]; then
+  echo "--- NOCRASH mode: same server, no kill (isolates multi-partition merge from crash-EO) ---"
+else
+  echo "--- HARD CRASH: kill -9 $SRV ---"
+  kill -9 "$SRV" 2>/dev/null; sleep 3
+  SRV=$(start); for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done
+  echo "--- restarted $SRV; phase check (EO via incremental restore) ---"
+fi
 N="$N" "$PY" "$ROOT/scripts/inc_ckpt_gate.py" "$PORT" check 2>&1 | grep -E "CHECK|INC_CKPT_EO|Error|Traceback" | head
 RC=${PIPESTATUS[0]}
 kill -9 "$SRV" 2>/dev/null; wait 2>/dev/null
