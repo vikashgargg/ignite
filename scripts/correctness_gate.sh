@@ -40,23 +40,28 @@ record() {
 }
 
 # --- continuous cells via inc_ckpt_gate.sh (C5 single-partition GREEN, C6 multi-partition XFAIL) ---
-run_continuous() { # PARTS  -> echoes "pass" if 0 dups else "fail"
+run_continuous() { # PARTS  -> "pass" if 0 dups (no-dup invariant) else "fail"
   INC=0 NOCRASH=1 PARTS="$1" N="${N:-300}" BUDGET=16384 RUN="${RUN:-40}" \
-    bash scripts/inc_ckpt_gate.sh >/tmp/cgate_$1.log 2>&1
+    bash scripts/inc_ckpt_gate.sh >/tmp/cgate_c$1.log 2>&1
   local d; d=$(dup_count /tmp/incckpt_out 2>/dev/null || echo 99)
   [ "${d:-99}" = "0" ] && echo pass || echo fail
+}
+run_continuous_crash() { # PARTS -> "pass" if EO across crash (INC_CKPT_EO ... PASS) else "fail"
+  INC=0 PARTS="$1" N="${N:-300}" BUDGET=16384 RUN="${RUN:-25}" \
+    bash scripts/inc_ckpt_gate.sh >/tmp/cgate_crash$1.log 2>&1
+  grep -q "INC_CKPT_EO_ACROSS_CRASH PASS" /tmp/cgate_crash$1.log && echo pass || echo fail
 }
 
 echo "=== streaming correctness gate ==="
 record "C5 continuous, 1 partition, no-dup"            GREEN "$(run_continuous 1)"
 record "C6 continuous, 4 partitions SCRAMBLED, no-dup" XFAIL "$(run_continuous 4)"
+record "C7 continuous + crash, 4 partitions, EO"       XFAIL "$(run_continuous_crash 4)"
 
-# --- availableNow / crash / bounded-mem cells: wire to existing harnesses (TODO: assert contract) ---
-ROWS+=("  [TODO ] C1 availableNow 1M no-dup           -> state_scale_stress.py")
-ROWS+=("  [TODO ] C2 availableNow 10M tiny-budget peak -> f5_validate.sh (F5_PEAK)")
-ROWS+=("  [TODO ] C3 availableNow 8-part SCRAMBLED     -> state_scale_stress + skew producer")
-ROWS+=("  [TODO ] C4 availableNow + crash EO           -> f3c_stateful_crash.sh")
-ROWS+=("  [TODO ] C7 continuous + crash 4-part EO      -> inc_ckpt_gate.sh (drop NOCRASH) [XFAIL]")
+# --- availableNow / bounded-mem cells: wire to self-contained harnesses (TODO: parse + assert) ---
+ROWS+=("  [TODO ] C1 availableNow 1M no-dup            -> f5_validate.sh (out_rows==N)")
+ROWS+=("  [TODO ] C2 availableNow 10M tiny-budget peak -> f5_validate.sh (F5_PEAK ~budget)")
+ROWS+=("  [TODO ] C3 availableNow 8-part SCRAMBLED     -> needs availableNow-Kafka skew producer")
+ROWS+=("  [TODO ] C4 availableNow + crash EO           -> f3c_stateful_crash.sh (F3C_STATEFUL_EO PASS)")
 
 printf '%s\n' "${ROWS[@]}"
 echo "GREEN pass=$PASS fail=$FAIL | XFAIL ok=$XOK unexpectedly-passing=$XBROKE"
