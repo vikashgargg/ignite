@@ -12,14 +12,16 @@ DIR=/tmp/h2h/events; FLINK_IMG=flink:1.19-scala_2.12
 
 echo "=== gen $N events, $K keys -> $DIR ==="
 rm -rf /tmp/h2h; mkdir -p "$DIR"
-"$PY" - "$N" "$K" "$DIR" <<'PY'
+NWIN="${NWIN:-10}"   # spread all N events over NWIN 10s-windows so OUTPUT (K*NWIN) << input N
+"$PY" - "$N" "$K" "$DIR" "$NWIN" <<'PY'
 import sys
-n,k,d=int(sys.argv[1]),int(sys.argv[2]),sys.argv[3]
-base=1700000000000
+n,k,d,nwin=int(sys.argv[1]),int(sys.argv[2]),sys.argv[3],int(sys.argv[4])
+base=1700000000000; span_ms=nwin*10000
 with open(d+"/part.json","w") as f:
     for i in range(n):
-        # k cycles 0..K; ts advances 1s every full round of K keys -> well-defined 10s windows
-        f.write('{"k":%d,"ts":%d,"v":1}\n' % (i % k, base + (i // k) * 1000))
+        # k cycles 0..K; ts spreads events across nwin windows -> agg output = K*nwin rows (tiny vs N),
+        # so the sink (parquet for Vajra, blackhole for Flink) is negligible for BOTH -> fair throughput.
+        f.write('{"k":%d,"ts":%d,"v":1}\n' % (i % k, base + (i * span_ms) // n))
 PY
 echo "data: $(du -sh $DIR | cut -f1)"
 
@@ -48,10 +50,16 @@ docker run -d --name h2h_flink -v /tmp/h2h:/data "$FLINK_IMG" bash -c '
   /opt/flink/bin/sql-client.sh -f /data/flink_job.sql >/tmp/flink_out.log 2>&1
   E=$(date +%s)
   echo "FLINK_WALL=$((E - S))" >> /tmp/flink_out.log
+  # Clean compute time = the job execution duration from the REST API (excludes cluster+client JVM
+  # startup). Take the longest job duration (the windowed-agg INSERT). curl-less fallback to wall.
+  echo "FLINK_JOB_MS=$(curl -s localhost:8081/jobs/overview 2>/dev/null | grep -oE "\"duration\":[0-9]+" | grep -oE "[0-9]+" | sort -n | tail -1)" >> /tmp/flink_out.log
   sleep 86400' >/dev/null
 # wait for the job to finish
 for i in $(seq 1 600); do docker exec h2h_flink grep -q "FLINK_WALL=" /tmp/flink_out.log 2>/dev/null && break; sleep 2; done
 FLINK_WALL=$(docker exec h2h_flink sh -c 'grep -oE "FLINK_WALL=[0-9.]+" /tmp/flink_out.log | cut -d= -f2')
+FLINK_JOB_MS=$(docker exec h2h_flink sh -c 'grep -oE "FLINK_JOB_MS=[0-9]+" /tmp/flink_out.log | cut -d= -f2')
+# Clean Flink compute seconds = REST job duration if available, else wall.
+FLINK_S=$(awk -v j="${FLINK_JOB_MS:-0}" -v w="${FLINK_WALL:-0}" 'BEGIN{print (j>0?j/1000:w)}')
 FLINK_MEM=$(docker exec h2h_flink sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0')
 docker exec h2h_flink sh -c 'grep -iE "Complete execution|Exception|error" /tmp/flink_out.log | head -3'
 docker rm -f h2h_flink >/dev/null 2>&1
@@ -69,9 +77,9 @@ VAJRA_MEM_KB=$(cat /tmp/h2h_vajra_peak 2>/dev/null || echo 0)
 
 # ---------------- compare ----------------
 echo "================= LOCAL HEAD-TO-HEAD (N=$N, K=$K) ================="
-awk -v n="$N" -v fw="${FLINK_WALL:-0}" -v fm="${FLINK_MEM:-0}" -v vw="${VAJRA_WALL:-0}" -v vmk="${VAJRA_MEM_KB:-0}" 'BEGIN{
-  printf "Flink : wall=%.1fs  throughput=%.2fM ev/s  peakRSS=%.2f GiB\n", fw, (fw>0?n/fw/1e6:0), fm/1073741824;
-  printf "Vajra : wall=%.1fs  throughput=%.2fM ev/s  peakRSS=%.2f GiB\n", vw, (vw>0?n/vw/1e6:0), vmk/1048576;
-  if(fw>0&&vw>0) printf "Vajra throughput vs Flink: %.2fx ; memory: %.2fx\n", fw/vw, (vmk/1048576)/(fm/1073741824);
+awk -v n="$N" -v fs="${FLINK_S:-0}" -v fw="${FLINK_WALL:-0}" -v fm="${FLINK_MEM:-0}" -v vw="${VAJRA_WALL:-0}" -v vmk="${VAJRA_MEM_KB:-0}" 'BEGIN{
+  printf "Flink : compute=%.1fs (wall=%.0fs)  throughput=%.2fM ev/s  peakRSS=%.2f GiB\n", fs, fw, (fs>0?n/fs/1e6:0), fm/1073741824;
+  printf "Vajra : wall=%.1fs              throughput=%.2fM ev/s  peakRSS=%.2f GiB\n", vw, (vw>0?n/vw/1e6:0), vmk/1048576;
+  if(fs>0&&vw>0) printf "Vajra vs Flink: throughput %.2fx ; memory %.2fx less\n", fs/vw, (fm/1073741824)/(vmk/1048576);
 }'
-echo "(note: Flink wall includes ~5s cluster+client startup; use large N so it is negligible)"
+echo "(Flink compute = REST job duration, excludes JVM/cluster startup; output K*NWIN rows << N so sink is fair both sides)"
