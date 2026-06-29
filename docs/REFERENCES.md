@@ -42,6 +42,15 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/concepts
 - **EO end-to-end** = alignment + **replayable source** + **transactional/idempotent sink**.
   Embarrassingly-parallel dataflows are EO even in at-least-once (alignment only matters at joins/shuffles).
 - **Savepoints** = manual, persistent checkpoints for upgrades/rescale.
+- **Per-partition watermark + `WatermarkStrategy.withIdleness(Duration)`:** each source split/partition
+  tracks its own watermark; the operator watermark = MIN across splits (a window closes only when ALL
+  active partitions pass it — prevents premature close on cross-partition event-time skew). **Idleness:**
+  a partition with no events for the timeout is EXCLUDED from the MIN so the watermark never STALLS on
+  an idle/absent partition (liveness vs completeness tradeoff). **Vajra impl (WatermarkExec):** per-
+  partition (max_et,last_seen); watermark = MIN over partitions active within `idle_timeout`; startup
+  grace withholds until all N seen OR grace elapses; a periodic tick excludes newly-idle partitions even
+  with no input. This is the safety that makes per-partition non-blocking (a withhold-until-all-N
+  version with NO idleness HUNG for 3h). See docs/design/streaming-per-partition-watermark.md.
 - **Implication for Vajra:** our `StreamBarrierAlignExec` (N→1 Chandy-Lamport) + `state_io` +
   Kafka replay + EO sink mirror this. **Owe:** unaligned-checkpoint option (low-latency EO),
   Key-Group-style rescale for state, savepoints. `FlowEvent::Marker(Checkpoint{epoch})` is the barrier.
