@@ -395,19 +395,29 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 let n_parts = std::env::var("VAJRA_WM_PARTITIONS")
                     .ok()
                     .and_then(|v| v.parse::<usize>().ok());
-                // Streaming data schemas use unqualified internal names (#N), so the source
-                // `partition` column can't be matched by name here. Prove-it: it's the lone Int32
-                // column (event-time is Timestamp, keys are Int64). The general path will tag it.
-                let part_col = n_parts.and_then(|_| {
-                    data_schema
-                        .fields()
-                        .iter()
-                        .find(|f| *f.data_type() == datafusion::arrow::datatypes::DataType::Int32)
-                        .map(|f| f.name().clone())
-                });
-                let exec = match (part_col, n_parts) {
-                    (Some(col), Some(n)) if n > 1 => exec.with_partition_watermark(col, n),
-                    _ => exec,
+                // Per-partition watermark: prefer the rewriter-set WatermarkNode fields (general
+                // path); else fall back to the prove-it heuristic (env N + lone Int32 column, since
+                // streaming schemas use #N names so the source `partition` can't be matched by name).
+                let exec = if let (Some(col), n) = (&node.partition_col, node.num_partitions) {
+                    if n > 1 && data_schema.index_of(col).is_ok() {
+                        exec.with_partition_watermark(col.clone(), n)
+                    } else {
+                        exec
+                    }
+                } else {
+                    let part_col = n_parts.and_then(|_| {
+                        data_schema
+                            .fields()
+                            .iter()
+                            .find(|f| {
+                                *f.data_type() == datafusion::arrow::datatypes::DataType::Int32
+                            })
+                            .map(|f| f.name().clone())
+                    });
+                    match (part_col, n_parts) {
+                        (Some(col), Some(n)) if n > 1 => exec.with_partition_watermark(col, n),
+                        _ => exec,
+                    }
                 };
                 Arc::new(exec)
             }
