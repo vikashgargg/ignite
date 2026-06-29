@@ -488,4 +488,67 @@ mod tests {
             assert!(read_spill(&ck, op, i).await.is_empty(), "chunk {i} GC'd when unreferenced");
         }
     }
+
+    // PROVES the Flink-beating property: an incremental checkpoint writes O(residual + manifest) per
+    // epoch — BOUNDED even as total state GROWS — whereas a full snapshot re-copies O(total state)
+    // every epoch. Exercises the real `stage_epoch_incremental` path and measures actual store bytes.
+    // REFERENCES §3b (ForSt/SharedStateRegistry); docs/design/streaming-incremental-checkpoint.md.
+    #[tokio::test]
+    async fn incremental_checkpoint_write_is_o_delta_not_o_state() {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let big = |n: i64| {
+            RecordBatch::try_new(
+                schema.clone(),
+                vec![Arc::new(Int64Array::from((0..n).collect::<Vec<_>>()))],
+            )
+            .unwrap()
+        };
+        let ck = CheckpointStore::from_store(Arc::new(InMemory::new()), StorePath::from("ck"));
+        let op = "window-0";
+        let residual = big(1); // small in-RAM tail (constant)
+        let chunk_rows = 2000i64; // each spilled chunk is large
+        let n_epochs = 8u64;
+
+        // Spill chunks ahead (immutable; written off the barrier path during F5 spill).
+        for i in 0..n_epochs {
+            assert!(write_spill(&ck, op, i, &schema, &[big(chunk_rows)]).await);
+        }
+
+        let mut prev_inc = 0usize;
+        let mut last_inc = 0usize;
+        let mut last_full = 0usize;
+        for e in 1..=n_epochs {
+            // Epoch e's state GROWS: it references e chunks + the small residual.
+            let chunks: Vec<u64> = (0..e).collect();
+            stage_epoch_incremental(&ck, op, e, &schema, &[residual.clone()], &chunks, &[e as i64])
+                .await;
+            // Bytes WRITTEN for this checkpoint = residual blob + manifest (NOT the chunk blobs).
+            let r = ck.get(&residual_key(op, e)).await.ok().flatten().map_or(0, |b| b.len());
+            let m = ck.get(&manifest_key(op, e)).await.ok().flatten().map_or(0, |b| b.len());
+            let inc = r + m;
+            // Full-snapshot baseline: residual ++ ALL e chunk batches re-copied every epoch.
+            let mut all = vec![residual.clone()];
+            for _ in 0..e {
+                all.push(big(chunk_rows));
+            }
+            let full = encode_state(&schema, &all, &[]).map_or(0, |b| b.len());
+
+            // Per-epoch incremental growth is only the manifest's extra chunk ref (~8B), NOT a chunk.
+            if e > 1 {
+                assert!(
+                    inc.saturating_sub(prev_inc) <= 32,
+                    "epoch {e}: incremental write grew by {} bytes — must be ~8B/chunk-ref, not O(state)",
+                    inc.saturating_sub(prev_inc)
+                );
+            }
+            prev_inc = inc;
+            last_inc = inc;
+            last_full = full;
+        }
+        // At scale, the incremental checkpoint is an order of magnitude smaller than a full snapshot.
+        assert!(
+            last_inc * 10 < last_full,
+            "incremental {last_inc}B must be << full {last_full}B at {n_epochs} epochs"
+        );
+    }
 }
