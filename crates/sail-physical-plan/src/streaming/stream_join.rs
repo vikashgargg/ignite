@@ -277,6 +277,9 @@ impl JoinAccum {
 
 const JOIN_LEFT_OP: &str = "join-0-left";
 const JOIN_RIGHT_OP: &str = "join-0-right";
+/// Single snapshot epoch for the join's incremental checkpoint (the join takes one EndOfData
+/// snapshot; the manifest references its already-persisted spill chunks). See state_io inc-ckpt.
+const JOIN_SNAPSHOT_EPOCH: u64 = 1;
 
 /// Per-side spill budget (bytes); over this a side's buffer spills cold batches to the checkpoint
 /// store. Shared with the window operator's budget env. Default 128 MiB.
@@ -560,10 +563,30 @@ impl ExecutionPlan for StreamJoinExec {
                 // buffers; they re-spill over budget as the join proceeds (EO unchanged by spilling).
                 if !acc.restored {
                     if let Some(ck) = &ck {
-                        let (lb, meta) =
-                            crate::streaming::state_io::restore_state(ck, JOIN_LEFT_OP).await;
-                        let (rb, _) =
-                            crate::streaming::state_io::restore_state(ck, JOIN_RIGHT_OP).await;
+                        // inc-ckpt.2b (gated VAJRA_INC_CKPT): restore the incremental snapshot (residual
+                        // + chunks referenced by the manifest); else the legacy full snapshot. Both
+                        // load back as in-RAM buffers (they re-spill over budget as the join proceeds).
+                        let inc = std::env::var("VAJRA_INC_CKPT").is_ok();
+                        let (lb, meta) = if inc {
+                            crate::streaming::state_io::restore_epoch_incremental(
+                                ck,
+                                JOIN_LEFT_OP,
+                                JOIN_SNAPSHOT_EPOCH,
+                            )
+                            .await
+                        } else {
+                            crate::streaming::state_io::restore_state(ck, JOIN_LEFT_OP).await
+                        };
+                        let (rb, _) = if inc {
+                            crate::streaming::state_io::restore_epoch_incremental(
+                                ck,
+                                JOIN_RIGHT_OP,
+                                JOIN_SNAPSHOT_EPOCH,
+                            )
+                            .await
+                        } else {
+                            crate::streaming::state_io::restore_state(ck, JOIN_RIGHT_OP).await
+                        };
                         acc.left_bytes = lb.iter().map(|b| b.get_array_memory_size()).sum();
                         acc.right_bytes = rb.iter().map(|b| b.get_array_memory_size()).sum();
                         acc.left_buf = lb;
@@ -726,41 +749,68 @@ impl ExecutionPlan for StreamJoinExec {
                             // it survives a restart; the runner commits it after the output is
                             // durable. Spilling is transparent to recovery.
                             if let Some(ck) = &ck {
-                                let lfull = gather_side(
-                                    &acc.left_buf,
-                                    &acc.left_spilled,
-                                    Some(ck),
-                                    JOIN_LEFT_OP,
-                                )
-                                .await;
-                                let rfull = gather_side(
-                                    &acc.right_buf,
-                                    &acc.right_spilled,
-                                    Some(ck),
-                                    JOIN_RIGHT_OP,
-                                )
-                                .await;
                                 let meta = vec![
                                     acc.lwm.unwrap_or(i64::MIN),
                                     acc.rwm.unwrap_or(i64::MIN),
                                     acc.last_wm.unwrap_or(i64::MIN),
                                 ];
-                                crate::streaming::state_io::stage_state(
-                                    ck,
-                                    JOIN_LEFT_OP,
-                                    &left_schema,
-                                    &lfull,
-                                    &meta,
-                                )
-                                .await;
-                                crate::streaming::state_io::stage_state(
-                                    ck,
-                                    JOIN_RIGHT_OP,
-                                    &right_schema,
-                                    &rfull,
-                                    &[],
-                                )
-                                .await;
+                                if std::env::var("VAJRA_INC_CKPT").is_ok() {
+                                    // inc-ckpt.2b (O(delta)): write only the in-RAM residual + a
+                                    // manifest referencing the already-persisted spill chunks — no
+                                    // re-gather/re-write of the spilled bulk (it was written off the
+                                    // barrier path during spill). Restore folds residual ++ chunks back.
+                                    crate::streaming::state_io::stage_epoch_incremental(
+                                        ck,
+                                        JOIN_LEFT_OP,
+                                        JOIN_SNAPSHOT_EPOCH,
+                                        &left_schema,
+                                        &acc.left_buf,
+                                        &acc.left_spilled,
+                                        &meta,
+                                    )
+                                    .await;
+                                    crate::streaming::state_io::stage_epoch_incremental(
+                                        ck,
+                                        JOIN_RIGHT_OP,
+                                        JOIN_SNAPSHOT_EPOCH,
+                                        &right_schema,
+                                        &acc.right_buf,
+                                        &acc.right_spilled,
+                                        &[],
+                                    )
+                                    .await;
+                                } else {
+                                    let lfull = gather_side(
+                                        &acc.left_buf,
+                                        &acc.left_spilled,
+                                        Some(ck),
+                                        JOIN_LEFT_OP,
+                                    )
+                                    .await;
+                                    let rfull = gather_side(
+                                        &acc.right_buf,
+                                        &acc.right_spilled,
+                                        Some(ck),
+                                        JOIN_RIGHT_OP,
+                                    )
+                                    .await;
+                                    crate::streaming::state_io::stage_state(
+                                        ck,
+                                        JOIN_LEFT_OP,
+                                        &left_schema,
+                                        &lfull,
+                                        &meta,
+                                    )
+                                    .await;
+                                    crate::streaming::state_io::stage_state(
+                                        ck,
+                                        JOIN_RIGHT_OP,
+                                        &right_schema,
+                                        &rfull,
+                                        &[],
+                                    )
+                                    .await;
+                                }
                             }
                             buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
                         }
