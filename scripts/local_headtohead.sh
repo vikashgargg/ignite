@@ -44,10 +44,10 @@ echo "=== Flink run ==="
 docker rm -f h2h_flink >/dev/null 2>&1
 docker run -d --name h2h_flink -v /tmp/h2h:/data "$FLINK_IMG" bash -c '
   /opt/flink/bin/start-cluster.sh >/dev/null 2>&1; sleep 6
-  S=$(date +%s.%N)
+  S=$(date +%s)
   /opt/flink/bin/sql-client.sh -f /data/flink_job.sql >/tmp/flink_out.log 2>&1
-  E=$(date +%s.%N)
-  echo "FLINK_WALL=$(echo "$E - $S" | bc)" >> /tmp/flink_out.log
+  E=$(date +%s)
+  echo "FLINK_WALL=$((E - S))" >> /tmp/flink_out.log
   sleep 86400' >/dev/null
 # wait for the job to finish
 for i in $(seq 1 600); do docker exec h2h_flink grep -q "FLINK_WALL=" /tmp/flink_out.log 2>/dev/null && break; sleep 2; done
