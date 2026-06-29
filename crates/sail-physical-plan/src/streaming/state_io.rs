@@ -737,7 +737,7 @@ mod tests {
         for e in 1..=n_epochs {
             // Epoch e's state GROWS: it references e chunks + the small residual.
             let chunks: Vec<u64> = (0..e).collect();
-            stage_epoch_incremental(&ck, op, e, &schema, &[residual.clone()], &chunks, &[e as i64])
+            stage_epoch_incremental(&ck, op, e, &schema, std::slice::from_ref(&residual), &chunks, &[e as i64])
                 .await;
             // Bytes WRITTEN for this checkpoint = residual blob + manifest (NOT the chunk blobs).
             let r = ck.get(&residual_key(op, e)).await.ok().flatten().map_or(0, |b| b.len());

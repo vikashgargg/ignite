@@ -2090,7 +2090,7 @@ mod update_mode_e2e_tests {
         );
         let ends: Vec<i64> = compacted
             .iter()
-            .filter_map(|b| window_end_micros(b))
+            .filter_map(window_end_micros)
             .flatten()
             .flatten()
             .collect();
@@ -2113,7 +2113,7 @@ mod update_mode_e2e_tests {
             .await;
         let merged_ends: Vec<i64> = merged
             .iter()
-            .filter_map(|b| window_end_micros(b))
+            .filter_map(window_end_micros)
             .flatten()
             .flatten()
             .collect();
@@ -2197,7 +2197,7 @@ mod update_mode_e2e_tests {
         let total: usize = merged.iter().map(|b| b.num_rows()).sum();
         let ends: Vec<i64> = merged
             .iter()
-            .filter_map(|b| window_end_micros(b))
+            .filter_map(window_end_micros)
             .flatten()
             .flatten()
             .collect();
