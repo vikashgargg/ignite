@@ -523,13 +523,24 @@ pub async fn restore_keyed_range_recompute_auto(
     new_m: usize,
     g: u16,
     key_cols: &[usize],
-) -> Vec<RecordBatch> {
+) -> (Vec<RecordBatch>, Vec<i64>) {
     let old_m = restore_parallelism(ck, op_base, epoch).await.unwrap_or(new_m).max(1);
     let (lo, hi) = instance_key_group_range(new_instance, new_m, g);
     let mut out = vec![];
+    // Aggregate meta across the old instances this new instance pulls from: watermark = MIN
+    // (conservative — never advance past the slowest old instance), emitted_ends = UNION (never
+    // re-emit a window any old instance already emitted). Matches the operator's `[wm, ends..]` meta.
+    let mut min_wm: Option<i64> = None;
+    let mut ends: std::collections::BTreeSet<i64> = std::collections::BTreeSet::new();
     for i in 0..old_m {
         let op = format!("{op_base}-{i}");
-        let (batches, _meta) = restore_epoch_incremental(ck, &op, epoch).await;
+        let (batches, meta) = restore_epoch_incremental(ck, &op, epoch).await;
+        if let Some((wm, e)) = meta.split_first() {
+            if *wm != i64::MIN {
+                min_wm = Some(min_wm.map_or(*wm, |m: i64| m.min(*wm)));
+            }
+            ends.extend(e.iter().copied());
+        }
         for b in batches {
             if let Some(f) = filter_to_key_group_range_recompute(&b, key_cols, g, lo, hi) {
                 if f.num_rows() > 0 {
@@ -538,7 +549,9 @@ pub async fn restore_keyed_range_recompute_auto(
             }
         }
     }
-    out
+    let mut meta = vec![min_wm.unwrap_or(i64::MIN)];
+    meta.extend(ends);
+    (out, meta)
 }
 
 fn parallelism_key(op_base: &str, epoch: u64) -> String {
@@ -957,7 +970,7 @@ mod tests {
         for new_m in [2usize, 8] {
             let mut seen: Vec<i64> = vec![];
             for ni in 0..new_m {
-                let batches =
+                let (batches, _meta) =
                     restore_keyed_range_recompute_auto(&ck, "win", 1, ni, new_m, g, &[0]).await;
                 let (lo, hi) = instance_key_group_range(ni, new_m, g);
                 for b in &batches {
