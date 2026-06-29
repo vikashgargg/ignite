@@ -12,9 +12,11 @@
 //! with marker broadcast (which `RepartitionExec` cannot express).
 
 use std::any::Any;
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch};
+use datafusion::arrow::compute::concat_batches;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning, PhysicalExprRef};
 use datafusion::physical_plan::metrics::Time;
@@ -319,15 +321,23 @@ async fn distribute(
     hash_keys: Vec<PhysicalExprRef>,
     n: usize,
 ) {
-    // `input_partition`/`num_input_partitions` only matter for round-robin; unused for Hash.
-    let mut partitioner =
-        match BatchPartitioner::try_new(Partitioning::Hash(hash_keys, n), Time::default(), 0, 1) {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = senders[0].send(Err(e)).await;
-                return;
-            }
-        };
+    // Route by KEY-GROUP (rescale-stable): hash keys into a fixed `g` key-groups, then map each
+    // key-group to its owning output instance via `key_group_owner` — the SAME math as the rescale
+    // state ownership (`instance_key_group_range`), so a key always lands on the instance that owns its
+    // state at any parallelism. (Plain `hash % n` is not rescale-stable.) `g >= n` recommended.
+    let g = crate::streaming::state_io::DEFAULT_KEY_GROUPS;
+    let mut partitioner = match BatchPartitioner::try_new(
+        Partitioning::Hash(hash_keys, g as usize),
+        Time::default(),
+        0,
+        1,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = senders[0].send(Err(e)).await;
+            return;
+        }
+    };
     while let Some(item) = input.next().await {
         match item {
             Ok(batch) if is_marker_batch(&batch) => {
@@ -338,22 +348,41 @@ async fn distribute(
                 }
             }
             Ok(batch) => {
-                // Hash-route the data batch into per-partition sub-batches (sync), then send.
-                let mut parts: Vec<(usize, RecordBatch)> = Vec::new();
-                let res = partitioner.partition(batch, |idx, sub| {
-                    parts.push((idx, sub));
+                // Hash into key-groups, then coalesce per OWNING instance (contiguous key-groups map
+                // to the same instance) so we send one batch per instance, not one per key-group.
+                let sch = batch.schema();
+                let mut kg_parts: Vec<(usize, RecordBatch)> = Vec::new();
+                let res = partitioner.partition(batch, |kg, sub| {
+                    kg_parts.push((kg, sub));
                     Ok(())
                 });
                 if let Err(e) = res {
                     let _ = senders[0].send(Err(e)).await;
                     return;
                 }
-                for (idx, sub) in parts {
+                let mut by_instance: BTreeMap<usize, Vec<RecordBatch>> = BTreeMap::new();
+                for (kg, sub) in kg_parts {
                     if sub.num_rows() == 0 {
                         continue;
                     }
-                    if senders[idx].send(Ok(sub)).await.is_err() {
-                        return;
+                    let owner = crate::streaming::state_io::key_group_owner(kg as u16, n, g);
+                    by_instance.entry(owner).or_default().push(sub);
+                }
+                for (owner, subs) in by_instance {
+                    let merged = match subs.len() {
+                        1 => subs.into_iter().next(),
+                        _ => match concat_batches(&sch, &subs) {
+                            Ok(b) => Some(b),
+                            Err(e) => {
+                                let _ = senders[0].send(Err(e.into())).await;
+                                return;
+                            }
+                        },
+                    };
+                    if let Some(b) = merged {
+                        if senders[owner].send(Ok(b)).await.is_err() {
+                            return;
+                        }
                     }
                 }
             }

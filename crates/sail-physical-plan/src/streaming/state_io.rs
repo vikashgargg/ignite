@@ -240,6 +240,20 @@ pub fn instance_key_group_range(i: usize, m: usize, g: u16) -> (u16, u16) {
     (lo as u16, hi as u16)
 }
 
+/// The instance (of `m`) that OWNS key-group `kg` — the inverse of [`instance_key_group_range`]. Used
+/// by the exchange to route a row to its owning downstream instance, so live routing and rescale
+/// ownership use the SAME math (route by key-group, not `hash % m`, so rescale is a re-assignment).
+pub fn key_group_owner(kg: u16, m: usize, g: u16) -> usize {
+    if m == 0 || g == 0 {
+        return 0;
+    }
+    // Exact inverse of `instance_key_group_range`'s floor split: owner = ceil((kg+1)*m / g) - 1
+    // (plain floor(kg*m/g) is wrong at range boundaries). Assumes m <= g (Flink maxParallelism rule).
+    let g = g as usize;
+    let owner = ((kg as usize + 1) * m).div_ceil(g);
+    owner.saturating_sub(1).min(m - 1)
+}
+
 /// Select the chunk ids whose key-group coverage intersects the owned range `[lo, hi)` — the chunks a
 /// rescaled instance must read. `kg_ranges[k]` is chunk `chunks[k]`'s `[kg_lo, kg_hi)` coverage; if it
 /// is empty/short (legacy manifest with no KG info) the chunk is assumed to cover ALL key-groups and is
@@ -639,6 +653,16 @@ mod tests {
             }
         }
         assert!(covered.iter().all(|&c| c == 1), "key-groups must tile exactly once: {covered:?}");
+        // key_group_owner is the inverse of instance_key_group_range: every kg's owner's range
+        // contains it (so exchange routing agrees with rescale ownership), for several M incl. M=128.
+        for m in [1usize, 2, 3, 5, 8, 128] {
+            for kg in 0..128u16 {
+                let owner = key_group_owner(kg, m, 128);
+                assert!(owner < m);
+                let (lo, hi) = instance_key_group_range(owner, m, 128);
+                assert!(lo <= kg && kg < hi, "kg {kg} owner {owner} range [{lo},{hi}) m={m}");
+            }
+        }
 
         // Manifest with per-chunk KG coverage round-trips through the OPTIONAL trailing section.
         let meta = vec![7i64, -1];
