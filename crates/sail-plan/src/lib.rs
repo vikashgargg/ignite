@@ -46,7 +46,6 @@ pub async fn resolve_and_execute_plan(
 /// data and then end, so the streaming query terminates. `update_mode` +
 /// `allowed_lateness_micros` select the windowed-aggregation changelog (update) output
 /// (see docs/design/streaming-update-retraction-mode.md); default false/0 = append.
-#[expect(clippy::too_many_arguments)]
 pub async fn resolve_and_execute_plan_with_options(
     ctx: &SessionContext,
     config: Arc<PlanConfig>,

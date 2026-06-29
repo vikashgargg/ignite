@@ -30,7 +30,7 @@ _shuf = os.environ.get("SHUFFLE")
 if _shuf:
     _b = _b.config("spark.sql.shuffle.partitions", _shuf)
 s = _b.getOrCreate()
-schema = StructType([StructField("k", LongType()), StructField("ts", LongType())])  # k Long so `partition` is the lone Int32 (prove-it detection)
+schema = StructType([StructField("k", IntegerType()), StructField("ts", LongType())])  # k Long so `partition` is the lone Int32 (prove-it detection)
 
 
 def produce(windows, extra_ts=None):
@@ -50,9 +50,9 @@ def produce(windows, extra_ts=None):
 def run(seconds):
     raw = (s.readStream.format("kafka").option("kafka.bootstrap.servers", BOOT)
            .option("subscribe", TOPIC).option("startingOffsets", "earliest").load())
-    # Keep the Kafka `partition` column so per-partition WatermarkExec can see it (prove-it path).
-    parsed = (raw.select(F.from_json(F.col("value").cast("string"), schema).alias("e"), F.col("partition"))
-              .select(F.col("e.k").alias("k"), (F.col("e.ts") / 1000).cast("timestamp").alias("et"), F.col("partition")))
+    # GENERAL query (drops partition): rewriter now auto-preserves the source partition column.
+    parsed = (raw.select(F.from_json(F.col("value").cast("string"), schema).alias("e"))
+              .select(F.col("e.k").alias("k"), (F.col("e.ts") / 1000).cast("timestamp").alias("et")))
     agg = parsed.withWatermark("et", "0 seconds").groupBy(F.window("et", "10 seconds"), "k").count()
     q = (agg.writeStream.format("parquet").option("path", OUT).option("checkpointLocation", CK)
          .outputMode("append").trigger(continuous="1 second").start())

@@ -55,7 +55,7 @@ pub struct KafkaSinkExec {
     extra: HashMap<String, String>,
     /// `true` = exactly-once via Kafka transactions (Flink `KafkaSink` EXACTLY_ONCE /
     /// read-process-write): per epoch, `send_offsets_to_transaction(source offsets, group)`
-    /// + `commit_transaction`, so produced records and consumed offsets commit atomically;
+    /// then `commit_transaction`, so produced records and consumed offsets commit atomically;
     /// a stable `transactional.id` fences orphaned txns on restart. `read_committed`
     /// consumers never see aborted/in-flight records. `false` = at-least-once (default).
     exactly_once: bool,
