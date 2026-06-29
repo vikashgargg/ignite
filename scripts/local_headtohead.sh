@@ -12,16 +12,18 @@ DIR=/tmp/h2h/events; FLINK_IMG=flink:1.19-scala_2.12
 
 echo "=== gen $N events, $K keys -> $DIR ==="
 rm -rf /tmp/h2h; mkdir -p "$DIR"
-NWIN="${NWIN:-10}"   # spread all N events over NWIN 10s-windows so OUTPUT (K*NWIN) << input N
-"$PY" - "$N" "$K" "$DIR" "$NWIN" <<'PY'
+NWIN="${NWIN:-10}"; NF="${NF:-8}"   # NWIN: spread events over NWIN windows (output K*NWIN << N → fair sink)
+                                     # NF: split input into NF files so BOTH engines read in parallel
+                                     # (Flink splits a single file; Vajra is 1-file-1-task, so equal
+                                     # files = equal parallelism = fair throughput).
+"$PY" - "$N" "$K" "$DIR" "$NWIN" "$NF" <<'PY'
 import sys
-n,k,d,nwin=int(sys.argv[1]),int(sys.argv[2]),sys.argv[3],int(sys.argv[4])
+n,k,d,nwin,nf=int(sys.argv[1]),int(sys.argv[2]),sys.argv[3],int(sys.argv[4]),int(sys.argv[5])
 base=1700000000000; span_ms=nwin*10000
-with open(d+"/part.json","w") as f:
-    for i in range(n):
-        # k cycles 0..K; ts spreads events across nwin windows -> agg output = K*nwin rows (tiny vs N),
-        # so the sink (parquet for Vajra, blackhole for Flink) is negligible for BOTH -> fair throughput.
-        f.write('{"k":%d,"ts":%d,"v":1}\n' % (i % k, base + (i * span_ms) // n))
+fs=[open(d+f"/part-{j}.json","w") for j in range(nf)]
+for i in range(n):
+    fs[i % nf].write('{"k":%d,"ts":%d,"v":1}\n' % (i % k, base + (i * span_ms) // n))
+for f in fs: f.close()
 PY
 echo "data: $(du -sh $DIR | cut -f1)"
 
