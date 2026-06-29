@@ -31,6 +31,21 @@ per-partition aware:
 - (Follow-up) idleness: a partition with no data for a timeout contributes +∞ so the watermark isn't
   stalled forever by a truly idle partition (Flink `withIdleness`). Not needed for the gate.
 
+### ⚠️ CRITICAL (found 2026-06-29): withhold-until-all-N has NO idleness fallback → HANG
+The general step-2 attempt (rewriter auto-preserves the source `partition` col + sets N) was
+implemented and BUILT, but on the gate (general query, PARTS=4) it **HUNG for 3+ hours**: the
+per-partition watermark **withholds the watermark until all N partitions are seen**, and when that
+never happens (partition not correctly reaching WatermarkExec, OR fewer than N distinct partitions in
+the data), the watermark **never advances → windows never close → `availableNow` never terminates**.
+A pipeline that can **stall forever is WORSE than the dup bug** it fixes. **This latent risk is in the
+MECHANISM itself** — the prove-it only passed because all N partitions got data.
+**REQUIRED before enabling per-partition anywhere:** an **idleness/timeout guard** (Flink
+`withIdleness`) — a partition with no data for a bound contributes +∞ so the MIN advances; never stall.
+AND verify partition detection actually reaches WatermarkExec (the hang suggests it may not have in the
+general query). Step-2 populator REVERTED (commit clean); mechanism + gated prove-it + step-1 plumbing
+remain. Redo step-2 ONLY after the idleness guard + a SHORT bounded test (never a 40s×continuous run
+that can hang for hours).
+
 ### Step 1 (THIS change): the mechanism + unit test
 `WatermarkExec::with_partition_watermark(col, n)`; execute tracks `HashMap<i64,i64>` (partition→max_et),
 emits monotone MIN−delay once `len==n`. Unit test: partition 0 racing ahead + partition 1 lagging ⇒
