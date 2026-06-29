@@ -480,6 +480,50 @@ pub async fn restore_keyed_range(
     out
 }
 
+fn parallelism_key(op_base: &str, epoch: u64) -> String {
+    format!("state/{op_base}/epoch-{epoch}/parallelism")
+}
+
+/// Record the parallelism `m` a checkpoint was taken at (Flink stores this in checkpoint metadata) so
+/// a rescaled restore knows how many old per-instance states (`<op_base>-0..m-1`) to union. Idempotent
+/// — each instance writes the same value.
+pub async fn stage_parallelism(ck: &CheckpointStore, op_base: &str, epoch: u64, m: usize) {
+    let _ = ck
+        .put(
+            &parallelism_key(op_base, epoch),
+            Bytes::from((m as u32).to_le_bytes().to_vec()),
+        )
+        .await;
+}
+
+/// Read the parallelism a checkpoint was taken at, or `None` if absent (legacy / same-parallelism).
+pub async fn restore_parallelism(ck: &CheckpointStore, op_base: &str, epoch: u64) -> Option<usize> {
+    let bytes = ck.get(&parallelism_key(op_base, epoch)).await.ok().flatten()?;
+    let arr: [u8; 4] = bytes.as_ref().get(0..4)?.try_into().ok()?;
+    Some(u32::from_le_bytes(arr) as usize)
+}
+
+/// Operator-facing rescale restore: NEW instance `new_instance` of `new_m` gathers the rows it owns
+/// for `epoch`, auto-discovering the OLD parallelism (`<op_base>-<i>` per old instance) from the staged
+/// `parallelism` marker. Combines [`restore_parallelism`] + [`instance_key_group_range`] +
+/// [`restore_keyed_range`] — the single call a rescaled operator makes. Falls back to `new_m` old
+/// instances if the marker is absent (same-parallelism / legacy).
+pub async fn restore_keyed_range_auto(
+    ck: &CheckpointStore,
+    op_base: &str,
+    epoch: u64,
+    new_instance: usize,
+    new_m: usize,
+    g: u16,
+    kg_col: usize,
+) -> Vec<RecordBatch> {
+    let old_m = restore_parallelism(ck, op_base, epoch).await.unwrap_or(new_m).max(1);
+    let old_ops: Vec<String> = (0..old_m).map(|i| format!("{op_base}-{i}")).collect();
+    let refs: Vec<&str> = old_ops.iter().map(String::as_str).collect();
+    let (lo, hi) = instance_key_group_range(new_instance, new_m, g);
+    restore_keyed_range(ck, &refs, epoch, lo, hi, kg_col).await
+}
+
 /// Drop a subsumed epoch's manifest + residual (NOT its chunks — those may still be referenced by a
 /// retained epoch; clean chunks via [`gc_unreferenced_chunks`]).
 pub async fn gc_epoch_incremental(ck: &CheckpointStore, operator_id: &str, epoch: u64) {
@@ -815,16 +859,16 @@ mod tests {
             assert!(write_spill(&ck, &op, 0, &schema, &[batch]).await);
             stage_epoch_incremental_kg(&ck, &op, 1, &schema, &[], &[0], &[], &[(lo, hi)]).await;
         }
-        let old_ops: Vec<String> = (0..old_m).map(|i| format!("win-{i}")).collect();
-        let refs: Vec<&str> = old_ops.iter().map(String::as_str).collect();
+        stage_parallelism(&ck, "win", 1, old_m).await; // record old M for auto-discovery on restore
 
-        // Restore at NEW parallelisms (scale down to 2, up to 8): each new instance gathers only its
-        // KG range; the union must be every key exactly once, each in its owner's range.
+        // Restore at NEW parallelisms (scale down to 2, up to 8) via the operator-facing auto path
+        // (discovers old M itself): each new instance gathers only its KG range; the union must be
+        // every key exactly once, each in its owner's range.
         for new_m in [2usize, 8] {
             let mut seen: Vec<i64> = vec![];
             for ni in 0..new_m {
                 let (lo, hi) = instance_key_group_range(ni, new_m, g);
-                let batches = restore_keyed_range(&ck, &refs, 1, lo, hi, 1).await;
+                let batches = restore_keyed_range_auto(&ck, "win", 1, ni, new_m, g, 1).await;
                 for b in &batches {
                     let keys = b.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
                     let kgs = b.column(1).as_any().downcast_ref::<Int32Array>().unwrap();
