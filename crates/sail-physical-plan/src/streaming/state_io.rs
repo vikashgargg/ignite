@@ -494,6 +494,53 @@ pub async fn restore_keyed_range(
     out
 }
 
+/// Filter a state batch to rows whose key-group (RECOMPUTED from the `key_cols` via `vajra_key_groups`,
+/// matching the exchange) is in `[lo, hi)`. Avoids storing a kg column in state (which would fight the
+/// agg schema) — kg is derived from the group key already present. `key_cols` = the routing key column
+/// indices (group-by keys minus the window).
+pub fn filter_to_key_group_range_recompute(
+    batch: &RecordBatch,
+    key_cols: &[usize],
+    g: u16,
+    lo: u16,
+    hi: u16,
+) -> Option<RecordBatch> {
+    let arrays: Vec<ArrayRef> = key_cols.iter().map(|i| batch.column(*i).clone()).collect();
+    let kgs = vajra_key_groups(&arrays, g, batch.num_rows()).ok()?;
+    let mask: BooleanArray = kgs.iter().map(|kg| Some(*kg >= lo && *kg < hi)).collect();
+    filter_record_batch(batch, &mask).ok()
+}
+
+/// Operator-facing rescale restore with kg RECOMPUTED from the key (no kg column in state, no spill-path
+/// change — the window/join just swaps its restore call to this). NEW instance `new_instance` of
+/// `new_m` gathers its rows for `epoch` from the union of OLD instances' incremental state
+/// (`<op_base>-<i>`, old M auto-discovered), filtering each by recomputed kg ∈ its owned range.
+pub async fn restore_keyed_range_recompute_auto(
+    ck: &CheckpointStore,
+    op_base: &str,
+    epoch: u64,
+    new_instance: usize,
+    new_m: usize,
+    g: u16,
+    key_cols: &[usize],
+) -> Vec<RecordBatch> {
+    let old_m = restore_parallelism(ck, op_base, epoch).await.unwrap_or(new_m).max(1);
+    let (lo, hi) = instance_key_group_range(new_instance, new_m, g);
+    let mut out = vec![];
+    for i in 0..old_m {
+        let op = format!("{op_base}-{i}");
+        let (batches, _meta) = restore_epoch_incremental(ck, &op, epoch).await;
+        for b in batches {
+            if let Some(f) = filter_to_key_group_range_recompute(&b, key_cols, g, lo, hi) {
+                if f.num_rows() > 0 {
+                    out.push(f);
+                }
+            }
+        }
+    }
+    out
+}
+
 fn parallelism_key(op_base: &str, epoch: u64) -> String {
     format!("state/{op_base}/epoch-{epoch}/parallelism")
 }
@@ -871,6 +918,59 @@ mod tests {
             Ok(())
         })
         .unwrap();
+    }
+
+    // PROVES the no-spill-change rescale path: state has NO kg column (just key+val, as the window's
+    // partial-agg output would); restore RECOMPUTES kg from the key and redistributes exactly across
+    // M→M′. This is what the window operator will call (restore-only swap).
+    #[tokio::test]
+    async fn rescale_recompute_redistributes_exactly() {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        let g = 8u16;
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Int64, false),
+            Field::new("val", DataType::Int64, false),
+        ]));
+        let ck = CheckpointStore::from_store(Arc::new(InMemory::new()), StorePath::from("ck"));
+        let n_keys = 200i64;
+        let kg_of = |k: i64| -> u16 {
+            let a: ArrayRef = Arc::new(Int64Array::from(vec![k]));
+            vajra_key_groups(&[a], g, 1).unwrap()[0]
+        };
+        // Stage at M=4: instance i holds keys whose recomputed kg ∈ its range (NO kg column stored).
+        let old_m = 4usize;
+        for i in 0..old_m {
+            let (lo, hi) = instance_key_group_range(i, old_m, g);
+            let keys: Vec<i64> = (0..n_keys).filter(|k| kg_of(*k) >= lo && kg_of(*k) < hi).collect();
+            let vals: Vec<i64> = keys.iter().map(|k| k * 10).collect();
+            let batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![Arc::new(Int64Array::from(keys)), Arc::new(Int64Array::from(vals))],
+            )
+            .unwrap();
+            let op = format!("win-{i}");
+            assert!(write_spill(&ck, &op, 0, &schema, &[batch]).await);
+            stage_epoch_incremental(&ck, &op, 1, &schema, &[], &[0], &[]).await;
+        }
+        stage_parallelism(&ck, "win", 1, old_m).await;
+
+        for new_m in [2usize, 8] {
+            let mut seen: Vec<i64> = vec![];
+            for ni in 0..new_m {
+                let batches =
+                    restore_keyed_range_recompute_auto(&ck, "win", 1, ni, new_m, g, &[0]).await;
+                let (lo, hi) = instance_key_group_range(ni, new_m, g);
+                for b in &batches {
+                    let keys = b.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+                    for r in 0..b.num_rows() {
+                        assert!(kg_of(keys.value(r)) >= lo && kg_of(keys.value(r)) < hi);
+                        seen.push(keys.value(r));
+                    }
+                }
+            }
+            seen.sort_unstable();
+            assert_eq!(seen, (0..n_keys).collect::<Vec<_>>(), "recompute rescale M'={new_m}: exact");
+        }
     }
 
     // PROVES rescale correctness: stage keyed state at parallelism M (each instance owns its KG range,
