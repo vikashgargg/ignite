@@ -15,9 +15,12 @@
 use std::io::Cursor;
 
 use bytes::Bytes;
-use datafusion::arrow::array::{Array, BooleanArray, Int32Array};
+use datafusion::arrow::array::{Array, ArrayRef, BooleanArray, Int32Array};
 use datafusion::arrow::compute::filter_record_batch;
 use datafusion::arrow::datatypes::SchemaRef;
+use datafusion::physical_plan::hash_utils::create_hashes;
+use datafusion::physical_plan::repartition::REPARTITION_RANDOM_STATE;
+use datafusion_common::Result;
 use datafusion::arrow::ipc::reader::FileReader as IpcFileReader;
 use datafusion::arrow::ipc::writer::FileWriter as IpcFileWriter;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -254,6 +257,17 @@ pub fn key_group_owner(kg: u16, m: usize, g: u16) -> usize {
     let g = g as usize;
     let owner = ((kg as usize + 1) * m).div_ceil(g);
     owner.saturating_sub(1).min(m - 1)
+}
+
+/// Per-row key-group for the given key `arrays`, computed with the SAME hash DataFusion's hash
+/// repartition uses (`REPARTITION_RANDOM_STATE`, seed 0) — so it MATCHES `StreamExchangeExec` routing
+/// by construction (the exchange's `BatchPartitioner` uses the same const). A stateful operator tags
+/// its state with this kg at spill; rescale restore filters by it. `arrays` = the routing/group key
+/// columns (the same keys the exchange shuffled on).
+pub fn vajra_key_groups(arrays: &[ArrayRef], g: u16, n_rows: usize) -> Result<Vec<u16>> {
+    let mut hashes = vec![0u64; n_rows];
+    create_hashes(arrays, REPARTITION_RANDOM_STATE.random_state(), &mut hashes)?;
+    Ok(hashes.iter().map(|h| key_group(*h, g)).collect())
 }
 
 /// Select the chunk ids whose key-group coverage intersects the owned range `[lo, hi)` — the chunks a
@@ -818,6 +832,45 @@ mod tests {
         let (_, lc, lkg) = decode_manifest(&legacy);
         assert!(lkg.is_empty());
         assert_eq!(chunks_for_range(&lc, &lkg, 2, 5), vec![10, 20, 30]);
+    }
+
+    // PROVES the kg the operator tags state with MATCHES the exchange's routing: route a batch through
+    // BatchPartitioner(Hash, G) (what StreamExchangeExec uses) and assert every row's partition equals
+    // vajra_key_groups(row). Guards against hash/seed drift — the basis for rescale state ownership.
+    #[test]
+    fn vajra_key_groups_matches_exchange_routing() {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_expr::expressions::col;
+        use datafusion::physical_expr::Partitioning;
+        use datafusion::physical_plan::metrics::Time;
+        use datafusion::physical_plan::repartition::BatchPartitioner;
+        let g = 16u16;
+        let schema = Arc::new(Schema::new(vec![Field::new("k", DataType::Int64, false)]));
+        let keys: Vec<i64> = (0..500).collect();
+        let batch =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(keys.clone()))])
+                .unwrap();
+        let mine = vajra_key_groups(&[batch.column(0).clone()], g, batch.num_rows()).unwrap();
+        let key_col = col("k", &schema).unwrap();
+        let mut bp = BatchPartitioner::try_new(
+            Partitioning::Hash(vec![key_col], g as usize),
+            Time::default(),
+            0,
+            1,
+        )
+        .unwrap();
+        bp.partition(batch.clone(), |idx, sub| {
+            let ks = sub.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+            for r in 0..sub.num_rows() {
+                let pos = ks.value(r) as usize; // keys are 0..500 ⇒ value == original index
+                assert_eq!(
+                    mine[pos] as usize, idx,
+                    "vajra_key_groups must equal the exchange's BatchPartitioner partition"
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
     }
 
     // PROVES rescale correctness: stage keyed state at parallelism M (each instance owns its KG range,
