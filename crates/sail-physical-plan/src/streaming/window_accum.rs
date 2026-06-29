@@ -33,6 +33,50 @@ use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
 use sail_common_datafusion::streaming::event::FlowEvent;
 
 // ---------------------------------------------------------------------------
+// Throughput attribution (Phase A, env VAJRA_WM_PROF) — see docs/design/eks-throughput-capstone.md.
+// The window operator is downstream of the single-instance source→from_json→watermark→exchange. If it
+// is INPUT-STARVED (input_wait ≈ wall), the bottleneck is upstream (prime suspect: single-instance
+// from_json parse); if it is BUSY (work ≈ wall), the bottleneck is the window itself. Statics sum
+// across the M window instances; dumped once at EndOfData. Zero cost when the env var is unset.
+// ---------------------------------------------------------------------------
+mod prof {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    pub static INPUT_WAIT_NS: AtomicU64 = AtomicU64::new(0);
+    pub static FINALIZE_NS: AtomicU64 = AtomicU64::new(0);
+    pub static ROWS: AtomicU64 = AtomicU64::new(0);
+    static START: OnceLock<Instant> = OnceLock::new();
+
+    pub fn enabled() -> bool {
+        std::env::var("VAJRA_WM_PROF").is_ok()
+    }
+    pub fn mark_start() {
+        START.get_or_init(Instant::now);
+    }
+    pub fn add(c: &AtomicU64, ns: u64) {
+        c.fetch_add(ns, Ordering::Relaxed);
+    }
+    pub fn add_rows(n: u64) {
+        ROWS.fetch_add(n, Ordering::Relaxed);
+    }
+    pub fn dump(tag: &str) {
+        let wall = START.get().map_or(0, |s| s.elapsed().as_nanos() as u64);
+        let iw = INPUT_WAIT_NS.load(Ordering::Relaxed);
+        let fz = FINALIZE_NS.load(Ordering::Relaxed);
+        let rows = ROWS.load(Ordering::Relaxed);
+        let pct = |x: u64| x.saturating_mul(100).checked_div(wall).unwrap_or(0);
+        eprintln!(
+            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) finalize={}ms({}%) rows={} \
+             => {} (input_wait%>=60 ⇒ UPSTREAM-bound i.e. source/from_json; finalize% high ⇒ window-bound)",
+            wall / 1_000_000, iw / 1_000_000, pct(iw), fz / 1_000_000, pct(fz), rows,
+            if pct(iw) >= 60 { "STARVED(upstream)" } else { "BUSY(window)" },
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // StaticBatchExec — feeds Vec<RecordBatch> into AggregateExec
 // ---------------------------------------------------------------------------
 
@@ -620,6 +664,9 @@ impl ExecutionPlan for WindowAccumExec {
         // instances' state (Flink key-groups; REFERENCES §2b). Off by default → same-parallelism
         // restore is unchanged (no regression). Requires VAJRA_INC_CKPT staging format.
         let rescale_enabled = std::env::var("VAJRA_RESCALE").is_ok();
+        if prof::enabled() {
+            prof::mark_start();
+        }
         let in_stream = self.input.execute(partition, context.clone())?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -741,11 +788,16 @@ impl ExecutionPlan for WindowAccumExec {
                     // before reading new input, so a finalize finishes before the next marker.
                     if acc.active_merge.is_some() {
                         // Pull one batch, releasing the &mut borrow of `acc.active_merge` before we
-                        // touch other `acc` fields below.
+                        // touch other `acc` fields below. (Phase A: time the finalize merge — if this
+                        // dominates the wall, the window's Final-agg/spill is the bottleneck.)
+                        let _fz = prof::enabled().then(std::time::Instant::now);
                         let next = match acc.active_merge.as_mut() {
                             Some(m) => m.next().await,
                             None => None,
                         };
+                        if let Some(t) = _fz {
+                            prof::add(&prof::FINALIZE_NS, t.elapsed().as_nanos() as u64);
+                        }
                         match next {
                             Some(Err(e)) => return Some((Err(e), (input, acc, buf, ctx))),
                             Some(Ok(agg_batch)) => {
@@ -799,11 +851,18 @@ impl ExecutionPlan for WindowAccumExec {
                             }
                         }
                     }
-                    // Then read from input.
-                    match input.next().await {
+                    // Then read from input. (Phase A: time the input-wait — if it dominates the wall,
+                    // the window is STARVED and the bottleneck is upstream, not the window.)
+                    let _iw = prof::enabled().then(std::time::Instant::now);
+                    let next = input.next().await;
+                    if let Some(t) = _iw {
+                        prof::add(&prof::INPUT_WAIT_NS, t.elapsed().as_nanos() as u64);
+                    }
+                    match next {
                         None => return None,
                         Some(Err(e)) => return Some((Err(e), (input, acc, buf, ctx))),
                         Some(Ok(FlowEvent::Data { batch, .. })) => {
+                            prof::add_rows(batch.num_rows() as u64);
                             // P1 fix: DROP data for windows already past `end + allowedLateness`
                             // (Flink late-data rule). Such rows can no longer affect output, and
                             // dropping them is what makes pruning `emitted_ends` (below, on the
@@ -944,6 +1003,9 @@ impl ExecutionPlan for WindowAccumExec {
                             }
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::EndOfData))) => {
+                            if prof::enabled() {
+                                prof::dump(&format!("p{partition}"));
+                            }
                             if std::env::var("VAJRA_F5_DEBUG").is_ok() {
                                 eprintln!(
                                     "F5_PEAK p{partition} peak_pending_bytes={} spilled_chunks={} budget={}",
@@ -1000,6 +1062,9 @@ impl ExecutionPlan for WindowAccumExec {
                             }
                         }
                         Some(Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id }))) => {
+                            if prof::enabled() {
+                                prof::dump(&format!("p{partition}/ep{id}")); // continuous: per-epoch
+                            }
                             // F3-c (continuous/realtime EO): WRITE-AHEAD this operator's keyed state
                             // for the epoch BEFORE forwarding the barrier to the realtime sink (which
                             // then atomically commits realtime/committed=id). On restart we restore
