@@ -57,13 +57,13 @@ use sail_physical_plan::repartition::ExplicitRepartitionExec;
 use sail_physical_plan::schema_pivot::SchemaPivotExec;
 use sail_physical_plan::show_string::ShowStringExec;
 use sail_physical_plan::spark_partition_id::SparkPartitionIdExec;
+use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
 use sail_physical_plan::streaming::collector::StreamCollectorExec;
 use sail_physical_plan::streaming::dedup::StreamDeduplicateExec;
+use sail_physical_plan::streaming::exchange::StreamExchangeExec;
 use sail_physical_plan::streaming::filter::StreamFilterExec;
 use sail_physical_plan::streaming::limit::StreamLimitExec;
 use sail_physical_plan::streaming::source_adapter::StreamSourceAdapterExec;
-use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
-use sail_physical_plan::streaming::exchange::StreamExchangeExec;
 use sail_physical_plan::streaming::stream_join::StreamJoinExec;
 use sail_physical_plan::streaming::watermark::WatermarkExec;
 use sail_physical_plan::streaming::window_accum::WindowAccumExec;
@@ -287,13 +287,13 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             use sail_common_datafusion::streaming::event::schema::is_flow_event_schema;
             if is_flow_event_schema(&input.schema()) {
                 match partitioning {
-                    datafusion::physical_expr::Partitioning::Hash(keys, n) if n > 1 => {
-                        Arc::new(sail_physical_plan::streaming::exchange::StreamExchangeExec::try_new(
+                    datafusion::physical_expr::Partitioning::Hash(keys, n) if n > 1 => Arc::new(
+                        sail_physical_plan::streaming::exchange::StreamExchangeExec::try_new(
                             input.clone(),
                             keys,
                             n,
-                        )?)
-                    }
+                        )?,
+                    ),
                     _ => input.clone(),
                 }
             } else {
@@ -358,18 +358,14 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
             let [input] = physical_inputs else {
                 return internal_err!("WatermarkNode requires exactly one physical input");
             };
-            // If upstream is parallel (e.g. a multi-partition Kafka source reading partitions
-            // concurrently), barrier-align N→1 BEFORE deriving the watermark. The source emits
-            // no watermarks itself, so merging first and computing a single event-time watermark
-            // over the full stream is correct and avoids the per-partition-watermark hazard
-            // (a fast partition advancing event-time and prematurely closing windows — the
-            // failure mode Flink guards against with per-split watermarks + MIN alignment).
-            let input: Arc<dyn ExecutionPlan> =
-                if input.properties().output_partitioning().partition_count() > 1 {
-                    Arc::new(StreamBarrierAlignExec::new(input.clone()))
-                } else {
-                    input.clone()
-                };
+            // Parallel watermark (Flink keyBy model): derive the watermark PER input partition
+            // (WatermarkExec preserves the input partitioning) and let the downstream keyed
+            // StreamExchangeExec MIN-merge them at the receiver — see exchange.rs
+            // `merge_output_subchannels` and docs/design/parallel-windowed-agg.md. This keeps the
+            // source/parse N-way instead of funneling all rows through one instance just to stamp
+            // watermarks. Operators that require a single watermark stream (dedup, window-only)
+            // funnel their own input below.
+            let input: Arc<dyn ExecutionPlan> = input.clone();
             let data_schema = Arc::new(
                 sail_common_datafusion::streaming::event::schema::try_from_flow_event_schema(
                     &input.schema(),
@@ -384,12 +380,47 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                     internal_datafusion_err!("WatermarkExec input schema {names:?}: {e}")
                 })?,
             );
-            Arc::new(WatermarkExec::try_new(
-                input.clone(),
-                node.event_time_col.clone(),
-                node.delay_micros,
-                data_schema,
-            )?)
+            {
+                let exec = WatermarkExec::try_new(
+                    input.clone(),
+                    node.event_time_col.clone(),
+                    node.delay_micros,
+                    data_schema.clone(),
+                )?;
+                // Per-partition watermark (fixes premature window close when one realtime source
+                // instance reads N out-of-order Kafka partitions; see
+                // docs/design/streaming-per-partition-watermark.md). Enabled when the source
+                // `partition` column reaches here AND the partition count N is provided. Prove-it
+                // step: N via `VAJRA_WM_PARTITIONS`; the general path threads N from the source.
+                let n_parts = std::env::var("VAJRA_WM_PARTITIONS")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok());
+                // Per-partition watermark: prefer the rewriter-set WatermarkNode partition col (general
+                // path — enabled whenever the col is present; N is unused, the grace is pure-time);
+                // else the prove-it heuristic (env N + lone Int32 col) for the manual-keep query.
+                let exec = if let (Some(col), n) = (&node.partition_col, node.num_partitions) {
+                    if data_schema.index_of(col).is_ok() {
+                        exec.with_partition_watermark(col.clone(), n)
+                    } else {
+                        exec
+                    }
+                } else {
+                    let part_col = n_parts.and_then(|_| {
+                        data_schema
+                            .fields()
+                            .iter()
+                            .find(|f| {
+                                *f.data_type() == datafusion::arrow::datatypes::DataType::Int32
+                            })
+                            .map(|f| f.name().clone())
+                    });
+                    match (part_col, n_parts) {
+                        (Some(col), Some(n)) if n > 1 => exec.with_partition_watermark(col, n),
+                        _ => exec,
+                    }
+                };
+                Arc::new(exec)
+            }
         } else if let Some(node) = node.as_any().downcast_ref::<StreamDeduplicateNode>() {
             let [input] = physical_inputs else {
                 return internal_err!("StreamDeduplicateExec requires exactly one physical input");
@@ -402,6 +433,15 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                     logical_input.schema().inner(),
                 )?,
             );
+            // Dedup keeps a single keyed state + one watermark stream; funnel a parallel
+            // (per-partition-watermark) input N→1 first (the watermark funnel that used to live in
+            // WatermarkNode now lives with the operators that need it).
+            let input: Arc<dyn ExecutionPlan> =
+                if input.properties().output_partitioning().partition_count() > 1 {
+                    Arc::new(StreamBarrierAlignExec::new(input.clone()))
+                } else {
+                    input.clone()
+                };
             Arc::new(StreamDeduplicateExec::try_new(
                 input.clone(),
                 node.key_cols.clone(),
@@ -424,8 +464,9 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                     logical_input.schema().inner(),
                 )?,
             );
-            let data_dfschema =
-                Arc::new(datafusion_common::DFSchema::try_from(data_schema.as_ref().clone())?);
+            let data_dfschema = Arc::new(datafusion_common::DFSchema::try_from(
+                data_schema.as_ref().clone(),
+            )?);
             // Build physical group expressions.
             let group_exprs: Vec<(Arc<dyn datafusion_physical_expr::PhysicalExpr>, String)> = node
                 .group_exprs
@@ -479,24 +520,38 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                     .collect::<datafusion_common::Result<_>>()?;
             // Parallel keyed path: hash the (watermarked) input by group key into N
             // partitions, run N independent window instances, then merge for the sink.
+            // Keyed: hash the (per-partition-watermarked) input by group key into N partitions.
+            // StreamExchangeExec handles N→M (parallel source: parallel hash + per-output watermark
+            // MIN at the receiver — Flink keyBy) and 1→M (single-partition source). Window-only
+            // (no key) must run as ONE instance, so funnel a parallel input N→1 first.
             let window_input: Arc<dyn ExecutionPlan> = if window_parallelism > 1 {
                 Arc::new(StreamExchangeExec::try_new(
                     input.clone(),
                     window_hash_keys,
                     window_parallelism,
                 )?)
+            } else if input.properties().output_partitioning().partition_count() > 1 {
+                Arc::new(StreamBarrierAlignExec::new(input.clone()))
             } else {
                 input.clone()
             };
-            let window: Arc<dyn ExecutionPlan> = Arc::new(WindowAccumExec::try_new(
-                window_input,
-                physical_group_by,
-                aggr_exprs,
-                data_schema,
-                node.event_time_col.clone(),
-                node.delay_micros,
-                node.checkpoint_location.clone(),
-            )?);
+            let window_output_mode = if node.update_mode {
+                sail_physical_plan::streaming::window_accum::WindowOutputMode::Update
+            } else {
+                sail_physical_plan::streaming::window_accum::WindowOutputMode::Append
+            };
+            let window: Arc<dyn ExecutionPlan> = Arc::new(
+                WindowAccumExec::try_new(
+                    window_input,
+                    physical_group_by,
+                    aggr_exprs,
+                    data_schema,
+                    node.event_time_col.clone(),
+                    node.delay_micros,
+                    node.checkpoint_location.clone(),
+                )?
+                .with_output_mode(window_output_mode, node.allowed_lateness_micros),
+            );
             if window_parallelism > 1 {
                 // Barrier-aligning N->1 merge: a strict superset of a plain coalesce — it fans the N
                 // keyed window instances back into one partition AND aligns broadcast
@@ -527,9 +582,12 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                     right_logical.schema().inner(),
                 )?,
             );
-            let left_df = Arc::new(datafusion_common::DFSchema::try_from(left_data.as_ref().clone())?);
-            let right_df =
-                Arc::new(datafusion_common::DFSchema::try_from(right_data.as_ref().clone())?);
+            let left_df = Arc::new(datafusion_common::DFSchema::try_from(
+                left_data.as_ref().clone(),
+            )?);
+            let right_df = Arc::new(datafusion_common::DFSchema::try_from(
+                right_data.as_ref().clone(),
+            )?);
             // The join `on`/`filter` come from an explicit equality condition, so their
             // column refs are relation-qualified (e.g. `a."#2"`), but each side's data
             // schema is unqualified. Internal `#N` ids are globally unique, so strip the
@@ -538,12 +596,14 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 e.clone()
                     .transform(|node| {
                         Ok(match node {
-                            datafusion_expr::Expr::Column(c) => datafusion_common::tree_node::Transformed::yes(
-                                datafusion_expr::Expr::Column(datafusion_common::Column::new(
-                                    None::<datafusion_common::TableReference>,
-                                    c.name,
-                                )),
-                            ),
+                            datafusion_expr::Expr::Column(c) => {
+                                datafusion_common::tree_node::Transformed::yes(
+                                    datafusion_expr::Expr::Column(datafusion_common::Column::new(
+                                        None::<datafusion_common::TableReference>,
+                                        c.name,
+                                    )),
+                                )
+                            }
                             other => datafusion_common::tree_node::Transformed::no(other),
                         })
                     })
@@ -554,8 +614,10 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 .on
                 .iter()
                 .map(|(l, r)| {
-                    let lp = planner.create_physical_expr(&strip_quals(l), &left_df, session_state)?;
-                    let rp = planner.create_physical_expr(&strip_quals(r), &right_df, session_state)?;
+                    let lp =
+                        planner.create_physical_expr(&strip_quals(l), &left_df, session_state)?;
+                    let rp =
+                        planner.create_physical_expr(&strip_quals(r), &right_df, session_state)?;
                     Ok((lp, rp))
                 })
                 .collect::<datafusion_common::Result<Vec<_>>>()?;
@@ -579,9 +641,21 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 .right_event_time
                 .as_ref()
                 .and_then(|c| right_data.index_of(c).ok());
+            // Stream-stream join keeps per-side keyed state + one watermark stream per side; funnel
+            // a parallel (per-partition-watermark) side N→1 first (matches the dedup/window-only
+            // handling now that WatermarkNode no longer funnels).
+            let funnel_if_parallel = |p: &Arc<dyn ExecutionPlan>| -> Arc<dyn ExecutionPlan> {
+                if p.properties().output_partitioning().partition_count() > 1 {
+                    Arc::new(StreamBarrierAlignExec::new(p.clone()))
+                } else {
+                    p.clone()
+                }
+            };
+            let left = funnel_if_parallel(left);
+            let right = funnel_if_parallel(right);
             Arc::new(StreamJoinExec::try_new(
-                left.clone(),
-                right.clone(),
+                left,
+                right,
                 on,
                 node.join_type,
                 left_data,
@@ -645,8 +719,9 @@ fn shift_physical_columns(
         if let Some(c) = e.as_any().downcast_ref::<Column>() {
             let idx = c.index() + by;
             let name = target.field(idx).name();
-            Ok(Transformed::yes(Arc::new(Column::new(name, idx))
-                as Arc<dyn datafusion_physical_expr::PhysicalExpr>))
+            Ok(Transformed::yes(
+                Arc::new(Column::new(name, idx)) as Arc<dyn datafusion_physical_expr::PhysicalExpr>
+            ))
         } else {
             Ok(Transformed::no(e))
         }

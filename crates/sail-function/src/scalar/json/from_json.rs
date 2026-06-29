@@ -225,6 +225,13 @@ fn from_json_inner(args: &[ArrayRef], session_timezone: &str) -> Result<ArrayRef
 }
 
 /// Parse JSON strings into a StructArray.
+///
+/// Uses Rust `serde_json` per row. MEASURED 2026-06-22: a columnar `arrow-json` Decoder fast path
+/// was ~parity with this (0.418 vs 0.410 M rows/s on nested records; wash on tiny records) — the
+/// Arroyo "2.3×" figure is arrow-json-Rust vs **Java/Jackson** (i.e. vs Flink), not vs Rust
+/// serde_json. Our parse is already Rust (no JVM) so it already beats Flink's per-record JVM
+/// deserialize; arrow-json adds NDJSON-rebuild complexity for ~0 gain over this, so it was reverted.
+/// See docs/REFERENCES.md §6.
 fn parse_json_to_struct(
     rows: &StringArray,
     fields: &Fields,
@@ -1556,3 +1563,55 @@ mod tests {
         Ok(())
     }
 }
+
+#[expect(clippy::expect_used)]
+#[cfg(test)]
+mod from_json_bench {
+    use std::time::Instant;
+
+    use datafusion::arrow::array::StringArray;
+
+    use super::*;
+
+    // Throughput of the current from_json struct parse path. Run:
+    //   FROMJSON_BENCH=1 cargo test -p sail-function --release from_json_bench -- --nocapture --ignored
+    #[test]
+    #[ignore]
+    fn bench_from_json_struct() {
+        if std::env::var("FROMJSON_BENCH").ok().as_deref() != Some("1") {
+            return;
+        }
+        let n: usize = 2_000_000;
+        // Realistic record (strings + nested struct), where columnar arrow-json shows its edge —
+        // BENCH_SMALL=1 uses the tiny 3-int record instead (parse not the bottleneck there).
+        let (json, schema_str): (Vec<String>, &str) =
+            if std::env::var("BENCH_SMALL").ok().as_deref() == Some("1") {
+                (
+                    (0..n).map(|i| format!("{{\"k\":{},\"ts\":1700000000000,\"v\":1}}", i % 1000)).collect(),
+                    "k INT, ts BIGINT, v INT",
+                )
+            } else {
+                (
+                    (0..n)
+                        .map(|i| format!(
+                            "{{\"id\":{i},\"user\":\"user_{}\",\"event\":\"click\",\"url\":\"https://example.com/page/{}\",\"ok\":true,\"geo\":{{\"lat\":12,\"lon\":77,\"city\":\"BLR\"}}}}",
+                            i % 100000, i % 5000
+                        ))
+                        .collect(),
+                    "id BIGINT, user STRING, event STRING, url STRING, ok BOOLEAN, geo STRUCT<lat INT, lon INT, city STRING>",
+                )
+            };
+        let rows = StringArray::from(json);
+        let schema = StringArray::from(vec![schema_str]);
+        let args: Vec<ArrayRef> = vec![Arc::new(rows), Arc::new(schema)];
+        let t0 = Instant::now();
+        let out = from_json_inner(&args, "UTC").expect("parse");
+        let dt = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "FROMJSON_BENCH rows={n} out_len={} wall_s={dt:.3} throughput={:.3}M_rows/s",
+            out.len(),
+            n as f64 / dt / 1e6
+        );
+    }
+}
+

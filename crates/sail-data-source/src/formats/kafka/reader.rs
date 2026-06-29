@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use datafusion::arrow::array::{
-    ArrayRef, BinaryArray, Int32Array, Int64Array, RecordBatch, StringArray,
-    TimestampMillisecondArray,
+    ArrayBuilder, ArrayRef, BinaryBuilder, Int32Builder, Int64Builder, RecordBatch, StringBuilder,
+    TimestampMillisecondBuilder,
 };
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use datafusion::catalog::Session;
@@ -15,12 +15,12 @@ use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{arrow_datafusion_err, exec_datafusion_err, plan_err, Result};
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{Message, Timestamp};
-use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
+use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
 use sail_common_datafusion::streaming::event::FlowEvent;
@@ -35,6 +35,14 @@ use crate::formats::kafka::options::KafkaReadOptions;
 /// 2 GiB array risk by ~16x headroom — the byte-driven analogue of DataFusion's
 /// row-based `batch_size`.
 const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
+
+/// Wall-clock stall tolerance (ms) for a bounded read: once `remaining > 0` but no message
+/// has arrived for this long, the residual offsets are deemed unreachable (log compaction /
+/// aborted-txn control records inflating the high watermark) and the read completes. Derived
+/// into a consecutive-empty-poll budget from `fetch_timeout_ms`, so the tolerance is the same
+/// wall time regardless of poll granularity. Large enough that a transient fetch hiccup never
+/// ends a read early; small enough to bound the tail wait on genuinely gapped topics.
+const BOUNDED_STALL_TOLERANCE_MS: u64 = 10_000;
 
 /// Realtime data-flush cadence (ms) — DECOUPLED from the epoch/commit interval. The
 /// realtime source emits accumulated rows this often (no barrier) so records flow with
@@ -152,6 +160,54 @@ async fn write_staged_epoch_offsets(
     }
 }
 
+/// Count the total partitions across the subscribed topics (one source instance per partition —
+/// Spark `KafkaSourceRDD` / Flink FLIP-27). Returns `None` if metadata can't be fetched (caller
+/// falls back to `target_partitions`). Runs the blocking rdkafka metadata RPC off the async runtime.
+async fn count_kafka_partitions(options: &KafkaReadOptions) -> Option<usize> {
+    let topics_csv = options.subscribe.clone()?;
+    let bootstrap = options.bootstrap_servers.clone();
+    let group = options.group_id.clone();
+    let extra = options.extra.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut cfg = ClientConfig::new();
+        cfg.set("bootstrap.servers", &bootstrap);
+        cfg.set("group.id", &group);
+        cfg.set("enable.auto.commit", "false");
+        for (k, v) in &extra {
+            cfg.set(k.as_str(), v.as_str());
+        }
+        let consumer: StreamConsumer = cfg.create().ok()?;
+        let timeout = Duration::from_secs(30);
+        let mut total = 0usize;
+        for topic in topics_csv
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        {
+            let md = consumer.fetch_metadata(Some(topic), timeout).ok()?;
+            let t = md.topics().iter().find(|t| t.name() == topic)?;
+            total += t.partitions().len();
+        }
+        (total > 0).then_some(total)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Apply high-throughput consumer defaults (librdkafka tuning) BEFORE user `kafka.*` options, so
+/// users can still override. Vajra's bounded catch-up read needs to saturate the broker (Flink
+/// reaches ~10M ev/s via aggressive fetch settings; rdkafka defaults prefetch too little). These
+/// raise the prefetch queue + per-fetch byte budget + socket buffers and shorten the fetch wait.
+/// See docs/STREAMING_ARCHITECTURE.md P0 throughput.
+fn apply_consumer_throughput_defaults(cfg: &mut ClientConfig) {
+    cfg.set("queued.min.messages", "1000000"); // prefetch up to 1M msgs per partition
+    cfg.set("queued.max.messages.kbytes", "1048576"); // 1 GiB local prefetch (librdkafka max ~2 GiB)
+    cfg.set("fetch.message.max.bytes", "10485760"); // 10 MiB (matches broker message.max.bytes)
+    cfg.set("fetch.wait.max.ms", "50"); // don't idle 500ms waiting to fill a fetch
+    cfg.set("socket.receive.buffer.bytes", "16777216"); // 16 MiB socket rx buffer
+}
+
 /// Spark-compatible Kafka source schema (7 columns).
 pub fn kafka_data_schema() -> Schema {
     Schema::new(vec![
@@ -211,14 +267,21 @@ impl StreamSource for KafkaStreamSource {
         let projection = projection
             .cloned()
             .unwrap_or_else(|| (0..self.schema.fields.len()).collect());
-        // Parallel source read for the bounded (availableNow / micro-batch) path: one
-        // execution partition per `target_partitions`, each owning a disjoint subset of
-        // Kafka partitions (parallel read + from_json). The realtime continuous path stays
-        // single (parallelism=1) — its per-epoch barrier coordination across instances is a
-        // separate concern. Capped at target_partitions; the executor caps effective work at
-        // the number of Kafka partitions (extra instances read nothing).
+        // Parallel source read for the bounded (availableNow / micro-batch) path: ONE execution
+        // instance per Kafka partition (Spark `KafkaSourceRDD` one-task-per-TopicPartition / Flink
+        // FLIP-27 one-split-per-partition). This is REQUIRED for event-time correctness: an
+        // instance reading multiple partitions interleaves their records out of event-time order,
+        // so the per-instance `max` watermark races past a slower partition's data and the keyed
+        // window operator drops it as "late" (measured ~7% loss at 16 partitions / 8 instances).
+        // One partition per instance keeps each instance's stream event-time ordered, so its
+        // watermark is monotone and the downstream MIN-merge is correct. The realtime continuous
+        // path stays single (parallelism=1) — its per-epoch barrier coordination is separate.
         let parallelism = if bounded {
-            state.config().target_partitions().max(1)
+            let n_parts = count_kafka_partitions(&self.options).await;
+            // Fall back to target_partitions if metadata is unavailable; never below 1.
+            n_parts
+                .unwrap_or_else(|| state.config().target_partitions())
+                .max(1)
         } else {
             1
         };
@@ -395,7 +458,13 @@ impl ExecutionPlan for KafkaSourceExec {
         let full_schema = Arc::new(kafka_data_schema());
         let projected_schema = self.projected_schema.clone();
         let max_batch = options.max_batch_size;
+        // Per-poll fetch timeout (small -> responsive batching / low latency).
         let timeout = Duration::from_millis(options.fetch_timeout_ms);
+        // Broker control-plane calls (metadata, watermarks, committed offsets) are
+        // request/response round-trips, NOT data polls — they must NOT inherit the small
+        // poll timeout (at e.g. 10ms they'd spuriously fail before any data is read). Use a
+        // generous fixed floor so these never flake, independent of poll granularity.
+        let meta_timeout = timeout.max(Duration::from_secs(30));
 
         // Bounded micro-batch read with exactly-once offsets (Spark `KafkaMicroBatchStream` model):
         // assign + seek to committed (or earliest/latest) start offsets, read up to the current end
@@ -408,6 +477,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 cfg.set("bootstrap.servers", &options.bootstrap_servers);
                 cfg.set("group.id", &options.group_id);
                 cfg.set("enable.auto.commit", "false");
+                apply_consumer_throughput_defaults(&mut cfg);
                 for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
                 let consumer: StreamConsumer = match cfg.create() {
                     Ok(c) => c,
@@ -440,7 +510,7 @@ impl ExecutionPlan for KafkaSourceExec {
                     let mut pairs: Vec<(String, i32)> = vec![];
                     for topic in &topics {
                         let md = consumer
-                            .fetch_metadata(Some(topic), timeout)
+                            .fetch_metadata(Some(topic), meta_timeout)
                             .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
@@ -454,7 +524,7 @@ impl ExecutionPlan for KafkaSourceExec {
                             continue; // owned by another instance
                         }
                         let (low, high) = consumer
-                            .fetch_watermarks(&topic, part, timeout)
+                            .fetch_watermarks(&topic, part, meta_timeout)
                             .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
                         let start = committed
                             .get(&(topic.clone(), part))
@@ -487,8 +557,32 @@ impl ExecutionPlan for KafkaSourceExec {
                     ends.iter().map(|(k, e)| (e - next.get(k).copied().unwrap_or(*e)).max(0)).sum()
                 };
                 let mut msg_stream = consumer.stream();
+                // A bounded (availableNow / micro-batch) read MUST reach each partition's
+                // captured end offset — that snapshot is exactly what Spark's
+                // `KafkaMicroBatchStream` and Flink's bounded Kafka source read to. A
+                // transient fetch timeout (slow broker, cross-node fetch latency, rebalance)
+                // is NOT end-of-data: treating one empty poll as "done" silently under-reads
+                // (measured ~5% short at 100M on EKS). So we KEEP polling while `remaining > 0`
+                // and only conclude the residual offsets are unreachable after a bounded
+                // wall-clock stall with zero progress (covers genuine offset gaps from log
+                // compaction / aborted-txn control records, so we never hang nor under-read).
+                let timeout_ms = options.fetch_timeout_ms.max(1);
+                let max_empty_polls: u32 =
+                    ((BOUNDED_STALL_TOLERANCE_MS / timeout_ms).max(5)) as u32;
+                let mut empty_polls: u32 = 0;
+                // Drain librdkafka's buffered messages without arming a per-message timer
+                // (the throughput path). `VAJRA_KAFKA_LEGACY_POLL=1` forces the old
+                // one-timer-per-message poll + small batch — a kill-switch / A-B measurement lever.
+                let fast_drain =
+                    std::env::var("VAJRA_KAFKA_LEGACY_POLL").ok().as_deref() != Some("1");
+                // Arrow batch row target. MEASURED 2026-06-21 (EKS 100M): bumping this to 128 Ki
+                // for the catch-up read did NOT help wall time (44s vs 41.8s) and raised peak
+                // memory (2.4 GiB vs 1.3 GiB) — per-batch operator overhead is not the bottleneck
+                // (that's the Kafka consumer read path; see docs/STREAMING_ARCHITECTURE.md P0). So
+                // keep the configured size (DataFusion default 8 Ki), bounded by the byte cap below.
+                let target_batch = max_batch;
                 while remaining(&next) > 0 {
-                    let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
+                    let mut builders = KafkaArrowBuilders::with_capacity(target_batch);
                     // Flush on EITHER a row cap OR a byte cap. The byte cap is the
                     // real safety guarantee: Arrow Utf8/Binary use i32 offsets (2 GiB
                     // per array), and the overflow is byte-driven, so a row count alone
@@ -496,45 +590,82 @@ impl ExecutionPlan for KafkaSourceExec {
                     // every variable-length column safely under the i32 limit regardless
                     // of payload size — matching how Arrow/DataFusion size-bound batches.
                     let mut batch_bytes: usize = 0;
-                    while rows.len() < max_batch
+                    let mut stream_ended = false;
+                    while builders.len() < target_batch
                         && batch_bytes < MAX_BATCH_BYTES
                         && remaining(&next) > 0
                     {
-                        match tokio::time::timeout(timeout, msg_stream.next()).await {
-                            Ok(Some(Ok(msg))) => {
-                                let tp = (msg.topic().to_string(), msg.partition());
+                        // Fast path: take a message librdkafka's fetch thread already buffered,
+                        // WITHOUT arming a per-message tokio timer (at 1e8 msgs the timer
+                        // registration dominates CPU). Only when nothing is buffered do we either
+                        // flush the rows we have or — if empty — await with the poll timeout, which
+                        // drives stall detection / EndOfData.
+                        let msg_opt = if fast_drain {
+                            match msg_stream.next().now_or_never() {
+                                Some(item) => item,
+                                None => {
+                                    if builders.len() > 0 {
+                                        break; // buffer drained: flush this batch, don't block
+                                    }
+                                    match tokio::time::timeout(timeout, msg_stream.next()).await {
+                                        Ok(item) => item,
+                                        Err(_) => break, // transient poll timeout: outer stall budget
+                                    }
+                                }
+                            }
+                        } else {
+                            // Legacy: arm a fresh timeout per message (kill-switch / A-B baseline).
+                            match tokio::time::timeout(timeout, msg_stream.next()).await {
+                                Ok(item) => item,
+                                Err(_) => break,
+                            }
+                        };
+                        match msg_opt {
+                            Some(Ok(msg)) => {
+                                empty_polls = 0; // made progress -> reset the stall budget
+                                let part = msg.partition();
+                                let topic = msg.topic();
+                                // One String alloc per message for the offset-map key (reused for
+                                // the end-offset lookup and the `next` insert).
+                                let tp = (topic.to_string(), part);
                                 let end = ends.get(&tp).copied().unwrap_or(i64::MIN);
-                                if msg.offset() >= end { continue; } // past this batch's snapshot
+                                let off = msg.offset();
+                                if off >= end { continue; } // past this batch's snapshot
                                 let (ts_ms, ts_type) = match msg.timestamp() {
                                     Timestamp::NotAvailable => (-1i64, -1i32),
                                     Timestamp::CreateTime(ms) => (ms, 0i32),
                                     Timestamp::LogAppendTime(ms) => (ms, 1i32),
                                 };
-                                let key = msg.key().map(|k| k.to_vec());
-                                let value = msg.payload().map(|v| v.to_vec());
-                                batch_bytes += value.as_ref().map_or(0, |v| v.len())
-                                    + key.as_ref().map_or(0, |k| k.len())
-                                    + msg.topic().len();
-                                rows.push(KafkaRow {
-                                    key,
-                                    value,
-                                    topic: msg.topic().to_string(),
-                                    partition: msg.partition(),
-                                    offset: msg.offset(),
-                                    timestamp_ms: ts_ms,
-                                    timestamp_type: ts_type,
-                                });
-                                next.insert(tp, msg.offset() + 1);
+                                let key = msg.key();
+                                let value = msg.payload();
+                                batch_bytes += value.map_or(0, |v| v.len())
+                                    + key.map_or(0, |k| k.len())
+                                    + topic.len();
+                                // Append borrowed bytes straight into the Arrow buffers (no to_vec).
+                                builders.append(key, value, topic, part, off, ts_ms, ts_type);
+                                next.insert(tp, off + 1);
                             }
-                            Ok(Some(Err(e))) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
-                            Ok(None) => break,
-                            Err(_) => break, // timeout: no more messages available right now
+                            Some(Err(e)) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
+                            None => { stream_ended = true; break; } // consumer stream closed
                         }
                     }
-                    if rows.is_empty() { break; }
-                    match build_batch(&full_schema, &projection, &rows) {
-                        Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
-                        Err(e) => { yield Err(e); return; }
+                    if builders.len() > 0 {
+                        match builders.finish_projected(&full_schema, &projection) {
+                            Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                            Err(e) => { yield Err(e); return; }
+                        }
+                        continue;
+                    }
+                    // Empty batch with `remaining > 0`: either the consumer stream closed,
+                    // or a poll timed out before any data arrived. The latter is transient —
+                    // retry until we either make progress or exhaust the stall budget, so a
+                    // momentary fetch hiccup never prematurely ends a bounded read.
+                    if stream_ended {
+                        break;
+                    }
+                    empty_polls += 1;
+                    if empty_polls >= max_empty_polls {
+                        break; // genuinely stalled: residual offsets are unreachable (gaps)
                     }
                 }
 
@@ -581,6 +712,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 cfg.set("bootstrap.servers", &options.bootstrap_servers);
                 cfg.set("group.id", &options.group_id);
                 cfg.set("enable.auto.commit", "false");
+                apply_consumer_throughput_defaults(&mut cfg);
                 for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
                 let consumer: StreamConsumer = match cfg.create() {
                     Ok(c) => c,
@@ -593,7 +725,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 let resolve = || -> std::result::Result<Vec<(String, i32, i64)>, String> {
                     let mut out = vec![];
                     for topic in &topics {
-                        let md = consumer.fetch_metadata(Some(topic), timeout)
+                        let md = consumer.fetch_metadata(Some(topic), meta_timeout)
                             .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
@@ -608,7 +740,7 @@ impl ExecutionPlan for KafkaSourceExec {
                             let mut one = rdkafka::TopicPartitionList::new();
                             let _ = one.add_partition(topic, part);
                             let group_off = consumer
-                                .committed_offsets(one, timeout)
+                                .committed_offsets(one, meta_timeout)
                                 .ok()
                                 .and_then(|t| t.find_partition(topic, part).map(|e| e.offset()))
                                 .and_then(|o| match o {
@@ -620,7 +752,7 @@ impl ExecutionPlan for KafkaSourceExec {
                             {
                                 Some(o) => o,
                                 None => {
-                                    let (low, high) = consumer.fetch_watermarks(topic, part, timeout)
+                                    let (low, high) = consumer.fetch_watermarks(topic, part, meta_timeout)
                                         .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
                                     if earliest { low } else { high }
                                 }
@@ -647,7 +779,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 }
 
                 let mut msg_stream = consumer.stream();
-                let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
+                let mut builders = KafkaArrowBuilders::with_capacity(max_batch);
                 let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let mut timer = tokio::time::interval(Duration::from_millis(interval_ms.max(1)));
                 timer.tick().await; // discard the immediate first tick
@@ -662,12 +794,12 @@ impl ExecutionPlan for KafkaSourceExec {
                         // Epoch boundary: flush buffered data, then pre-commit offsets + emit barrier.
                         // `biased` + data-flush-first guarantees the marker never overtakes its data.
                         _ = timer.tick() => {
-                            if !rows.is_empty() {
-                                match build_batch(&full_schema, &projection, &rows) {
+                            if builders.len() > 0 {
+                                let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch));
+                                match b.finish_projected(&full_schema, &projection) {
                                     Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
                                     Err(e) => { yield Err(e); return; }
                                 }
-                                rows.clear();
                                 batch_bytes = 0;
                             }
                             write_staged_epoch_offsets(&ck, epoch, &next).await;
@@ -677,12 +809,12 @@ impl ExecutionPlan for KafkaSourceExec {
                         // Low-latency flush: emit accumulated rows (no barrier) so records flow
                         // with ~ms latency instead of waiting for the (coarser) epoch tick.
                         _ = flush_timer.tick() => {
-                            if !rows.is_empty() {
-                                match build_batch(&full_schema, &projection, &rows) {
+                            if builders.len() > 0 {
+                                let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch));
+                                match b.finish_projected(&full_schema, &projection) {
                                     Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
                                     Err(e) => { yield Err(e); return; }
                                 }
-                                rows.clear();
                                 batch_bytes = 0;
                             }
                         }
@@ -694,31 +826,26 @@ impl ExecutionPlan for KafkaSourceExec {
                                         Timestamp::CreateTime(ms) => (ms, 0i32),
                                         Timestamp::LogAppendTime(ms) => (ms, 1i32),
                                     };
-                                    let tp = (m.topic().to_string(), m.partition());
-                                    next.insert(tp, m.offset() + 1);
-                                    let key = m.key().map(|k| k.to_vec());
-                                    let value = m.payload().map(|v| v.to_vec());
-                                    batch_bytes += value.as_ref().map_or(0, |v| v.len())
-                                        + key.as_ref().map_or(0, |k| k.len())
-                                        + m.topic().len();
-                                    rows.push(KafkaRow {
-                                        key,
-                                        value,
-                                        topic: m.topic().to_string(),
-                                        partition: m.partition(),
-                                        offset: m.offset(),
-                                        timestamp_ms: ts_ms,
-                                        timestamp_type: ts_type,
-                                    });
+                                    let topic = m.topic();
+                                    let part = m.partition();
+                                    let off = m.offset();
+                                    let key = m.key();
+                                    let value = m.payload();
+                                    batch_bytes += value.map_or(0, |v| v.len())
+                                        + key.map_or(0, |k| k.len())
+                                        + topic.len();
+                                    next.insert((topic.to_string(), part), off + 1);
+                                    // Append borrowed bytes straight into the Arrow buffers (no to_vec).
+                                    builders.append(key, value, topic, part, off, ts_ms, ts_type);
                                     // Flush on row OR byte cap for throughput (epoch still delimits
                                     // the commit; mid-epoch batches just carry data forward). Byte cap
                                     // keeps Utf8/Binary columns under Arrow's i32 offset limit.
-                                    if rows.len() >= max_batch || batch_bytes >= MAX_BATCH_BYTES {
-                                        match build_batch(&full_schema, &projection, &rows) {
+                                    if builders.len() >= max_batch || batch_bytes >= MAX_BATCH_BYTES {
+                                        let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch));
+                                        match b.finish_projected(&full_schema, &projection) {
                                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
                                             Err(e) => { yield Err(e); return; }
                                         }
-                                        rows.clear();
                                         batch_bytes = 0;
                                     }
                                 }
@@ -740,6 +867,7 @@ impl ExecutionPlan for KafkaSourceExec {
             cfg.set("group.id", &options.group_id);
             cfg.set("enable.auto.commit", "true");
             cfg.set("session.timeout.ms", "6000");
+            apply_consumer_throughput_defaults(&mut cfg);
             cfg.set(
                 "auto.offset.reset",
                 match options.starting_offsets.to_lowercase().as_str() {
@@ -793,11 +921,11 @@ impl ExecutionPlan for KafkaSourceExec {
 
             // Collect messages into micro-batches.
             loop {
-                let mut rows: Vec<KafkaRow> = Vec::with_capacity(max_batch);
+                let mut builders = KafkaArrowBuilders::with_capacity(max_batch);
                 let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let deadline = tokio::time::Instant::now() + timeout;
 
-                while rows.len() < max_batch && batch_bytes < MAX_BATCH_BYTES {
+                while builders.len() < max_batch && batch_bytes < MAX_BATCH_BYTES {
                     let remaining =
                         deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {
@@ -810,20 +938,21 @@ impl ExecutionPlan for KafkaSourceExec {
                                 Timestamp::CreateTime(ms) => (ms, 0i32),
                                 Timestamp::LogAppendTime(ms) => (ms, 1i32),
                             };
-                            let key = msg.key().map(|k| k.to_vec());
-                            let value = msg.payload().map(|v| v.to_vec());
-                            batch_bytes += value.as_ref().map_or(0, |v| v.len())
-                                + key.as_ref().map_or(0, |k| k.len())
+                            let key = msg.key();
+                            let value = msg.payload();
+                            batch_bytes += value.map_or(0, |v| v.len())
+                                + key.map_or(0, |k| k.len())
                                 + msg.topic().len();
-                            rows.push(KafkaRow {
+                            // Append borrowed bytes straight into the Arrow buffers (no to_vec).
+                            builders.append(
                                 key,
                                 value,
-                                topic: msg.topic().to_string(),
-                                partition: msg.partition(),
-                                offset: msg.offset(),
-                                timestamp_ms: ts_ms,
-                                timestamp_type: ts_type,
-                            });
+                                msg.topic(),
+                                msg.partition(),
+                                msg.offset(),
+                                ts_ms,
+                                ts_type,
+                            );
                         }
                         Ok(Some(Err(e))) => {
                             yield Err(exec_datafusion_err!("Kafka error: {e}"));
@@ -834,11 +963,11 @@ impl ExecutionPlan for KafkaSourceExec {
                     }
                 }
 
-                if rows.is_empty() {
+                if builders.len() == 0 {
                     continue;
                 }
 
-                match build_batch(&full_schema, &projection, &rows) {
+                match builders.finish_projected(&full_schema, &projection) {
                     Ok(batch) => yield Ok(batch),
                     Err(e) => yield Err(e),
                 }
@@ -855,43 +984,155 @@ impl ExecutionPlan for KafkaSourceExec {
 // Helpers
 // ---------------------------------------------------------------------------
 
-struct KafkaRow {
-    key: Option<Vec<u8>>,
-    value: Option<Vec<u8>>,
-    topic: String,
-    partition: i32,
-    offset: i64,
-    timestamp_ms: i64,
-    timestamp_type: i32,
+/// Builds the Spark Kafka batch by appending each message's bytes DIRECTLY into Arrow
+/// builders — one copy into the final contiguous Arrow buffer, with no per-message `Vec`
+/// allocation, no intermediate `KafkaRow`, and no second copy in `build_batch`. This is the
+/// zero-extra-copy consume path (Arrow-native; cf. docs/REFERENCES.md §4/§5) and the fix for
+/// the measured consumer-read-path bottleneck (docs/STREAMING_ARCHITECTURE.md P0 throughput).
+struct KafkaArrowBuilders {
+    key: BinaryBuilder,
+    value: BinaryBuilder,
+    topic: StringBuilder,
+    partition: Int32Builder,
+    offset: Int64Builder,
+    timestamp: TimestampMillisecondBuilder,
+    timestamp_type: Int32Builder,
 }
 
-fn build_batch(
-    full_schema: &SchemaRef,
-    projection: &[usize],
-    rows: &[KafkaRow],
-) -> Result<RecordBatch> {
-    let keys: Vec<Option<&[u8]>> = rows.iter().map(|r| r.key.as_deref()).collect();
-    let values: Vec<Option<&[u8]>> = rows.iter().map(|r| r.value.as_deref()).collect();
-    let topics: Vec<&str> = rows.iter().map(|r| r.topic.as_str()).collect();
-    let partitions: Vec<i32> = rows.iter().map(|r| r.partition).collect();
-    let offsets: Vec<i64> = rows.iter().map(|r| r.offset).collect();
-    let timestamps: Vec<i64> = rows.iter().map(|r| r.timestamp_ms).collect();
-    let timestamp_types: Vec<i32> = rows.iter().map(|r| r.timestamp_type).collect();
+impl KafkaArrowBuilders {
+    fn with_capacity(n: usize) -> Self {
+        Self {
+            key: BinaryBuilder::with_capacity(n, 0),
+            value: BinaryBuilder::with_capacity(n, 0),
+            topic: StringBuilder::with_capacity(n, 0),
+            partition: Int32Builder::with_capacity(n),
+            offset: Int64Builder::with_capacity(n),
+            timestamp: TimestampMillisecondBuilder::with_capacity(n),
+            timestamp_type: Int32Builder::with_capacity(n),
+        }
+    }
 
-    let all_columns: Vec<ArrayRef> = vec![
-        Arc::new(BinaryArray::from(keys)) as ArrayRef,
-        Arc::new(BinaryArray::from(values)) as ArrayRef,
-        Arc::new(StringArray::from(topics)) as ArrayRef,
-        Arc::new(Int32Array::from(partitions)) as ArrayRef,
-        Arc::new(Int64Array::from(offsets)) as ArrayRef,
-        Arc::new(TimestampMillisecondArray::from(timestamps)) as ArrayRef,
-        Arc::new(Int32Array::from(timestamp_types)) as ArrayRef,
-    ];
+    fn len(&self) -> usize {
+        self.offset.len()
+    }
 
-    let full_batch = RecordBatch::try_new(Arc::clone(full_schema), all_columns)
-        .map_err(|e| arrow_datafusion_err!(e))?;
+    /// Append one Kafka message (borrowed bytes copied straight into the Arrow buffers).
+    fn append(
+        &mut self,
+        key: Option<&[u8]>,
+        value: Option<&[u8]>,
+        topic: &str,
+        partition: i32,
+        offset: i64,
+        ts_ms: i64,
+        ts_type: i32,
+    ) {
+        self.key.append_option(key);
+        self.value.append_option(value);
+        self.topic.append_value(topic);
+        self.partition.append_value(partition);
+        self.offset.append_value(offset);
+        self.timestamp.append_value(ts_ms);
+        self.timestamp_type.append_value(ts_type);
+    }
 
-    full_batch
-        .project(projection)
-        .map_err(|e| arrow_datafusion_err!(e))
+    /// Finish into the projected Spark Kafka record batch.
+    fn finish_projected(mut self, full_schema: &SchemaRef, projection: &[usize]) -> Result<RecordBatch> {
+        let columns: Vec<ArrayRef> = vec![
+            Arc::new(self.key.finish()),
+            Arc::new(self.value.finish()),
+            Arc::new(self.topic.finish()),
+            Arc::new(self.partition.finish()),
+            Arc::new(self.offset.finish()),
+            Arc::new(self.timestamp.finish()),
+            Arc::new(self.timestamp_type.finish()),
+        ];
+        RecordBatch::try_new(Arc::clone(full_schema), columns)
+            .map_err(|e| arrow_datafusion_err!(e))?
+            .project(projection)
+            .map_err(|e| arrow_datafusion_err!(e))
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Local read-throughput micro-benchmark (ignored unless KAFKA_BENCH=1).
+// Drives KafkaSourceExec directly across all partitions against a pre-loaded
+// local Kafka topic and reports rows/sec — used to A/B the bounded read path
+// (now_or_never drain + topic intern + larger batch) without any cloud cost.
+// Run: KAFKA_BENCH=1 BENCH_BOOTSTRAP=localhost:9092 BENCH_TOPIC=repro_under \
+//      BENCH_PARTS=16 cargo test -p sail-data-source --release kafka_read_bench -- --nocapture --ignored
+// ---------------------------------------------------------------------------
+#[expect(clippy::expect_used)]
+#[cfg(test)]
+mod bench {
+    use std::sync::Arc;
+    use std::time::Instant;
+
+    use datafusion::execution::TaskContext;
+    use datafusion::physical_plan::ExecutionPlan;
+    use futures::StreamExt;
+
+    use super::{kafka_data_schema, KafkaSourceExec};
+    use crate::formats::kafka::options::KafkaReadOptions;
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn kafka_read_bench() {
+        if std::env::var("KAFKA_BENCH").ok().as_deref() != Some("1") {
+            eprintln!("set KAFKA_BENCH=1 to run");
+            return;
+        }
+        let boot = std::env::var("BENCH_BOOTSTRAP").unwrap_or_else(|_| "localhost:9092".into());
+        let topic = std::env::var("BENCH_TOPIC").unwrap_or_else(|_| "repro_under".into());
+        let parts: usize = std::env::var("BENCH_PARTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
+
+        let options = KafkaReadOptions::from_options(vec![
+            ("kafka.bootstrap.servers".into(), boot),
+            ("subscribe".into(), topic.clone()),
+            ("startingOffsets".into(), "earliest".into()),
+        ])
+        .expect("options");
+
+        let schema = Arc::new(kafka_data_schema());
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+        let exec = Arc::new(
+            KafkaSourceExec::try_new(options, schema, projection, true, None, None, parts)
+                .expect("exec"),
+        );
+
+        let t0 = Instant::now();
+        let mut handles = vec![];
+        for p in 0..parts {
+            let exec = Arc::clone(&exec);
+            handles.push(tokio::spawn(async move {
+                let ctx = Arc::new(TaskContext::default());
+                let mut s = exec.execute(p, ctx).expect("execute");
+                let mut rows: u64 = 0;
+                let mut batches: u64 = 0;
+                while let Some(b) = s.next().await {
+                    let b = b.expect("batch");
+                    rows += b.num_rows() as u64;
+                    batches += 1;
+                }
+                (rows, batches)
+            }));
+        }
+        let mut total_rows = 0u64;
+        let mut total_batches = 0u64;
+        for h in handles {
+            let (r, b) = h.await.expect("join");
+            total_rows += r;
+            total_batches += b;
+        }
+        let dt = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "KAFKA_READ_BENCH topic={topic} parts={parts} rows={total_rows} batches={total_batches} \
+             wall_s={dt:.3} throughput={:.3}M_rows/s",
+            total_rows as f64 / dt / 1e6
+        );
+    }
 }

@@ -25,11 +25,11 @@ use object_store::path::Path as StorePath;
 use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::encoding::DecodedFlowEventStream;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
-use sail_common_datafusion::streaming::event::stream::FlowEventStream;
-use sail_common_datafusion::streaming::event::FlowEvent;
 use sail_common_datafusion::streaming::event::schema::{
     try_from_flow_event_schema, MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
 };
+use sail_common_datafusion::streaming::event::stream::FlowEventStream;
+use sail_common_datafusion::streaming::event::FlowEvent;
 
 #[derive(Debug)]
 pub struct FlowEventToDataExec {
@@ -334,7 +334,11 @@ impl DisplayAs for ParallelStreamSinkExec {
         _t: datafusion::physical_plan::DisplayFormatType,
         f: &mut std::fmt::Formatter,
     ) -> std::fmt::Result {
-        write!(f, "ParallelStreamSinkExec: partitions={}", self.children.len())
+        write!(
+            f,
+            "ParallelStreamSinkExec: partitions={}",
+            self.children.len()
+        )
     }
 }
 

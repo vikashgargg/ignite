@@ -1,0 +1,57 @@
+# Short-lived, cost-shaped EKS cluster for the Vajra-vs-Flink STREAMING head-to-head.
+# Topology mirrors the published benchmark: a dedicated Kafka node (role=kafka) and
+# a 16-vCPU compute node (role=compute) on which Flink and Vajra run SEQUENTIALLY
+# (never concurrently) against the SAME shared Kafka topic — true like-for-like.
+#
+# Cost levers:
+#   - Graviton (arm64) SPOT nodes (~70% cheaper; matches the arm64 ECR image)
+#   - NAT gateway DISABLED + public-subnet nodes (saves ~$0.045/hr)
+#   - Spot vCPU budget: 16 (c7g.4xlarge) + 8 (m7g.2xlarge) = 24 < 32 quota
+#   - One CloudFormation stack -> `eksctl delete cluster` tears it ALL down.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: vajra-stream-ht
+  region: ap-south-1
+  version: "1.31"
+
+vpc:
+  nat:
+    gateway: Disable
+
+managedNodeGroups:
+  - name: compute
+    amiFamily: AmazonLinux2023
+    instanceTypes: ["c7g.4xlarge"]   # 16 vCPU, 32 GB — Flink TM / Vajra local-cluster
+    spot: true
+    desiredCapacity: 1
+    minSize: 0
+    maxSize: 1
+    volumeSize: 80
+    volumeType: gp3
+    privateNetworking: false
+    labels: { role: compute }
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+  - name: kafka
+    amiFamily: AmazonLinux2023
+    instanceTypes: ["m7g.2xlarge"]   # 8 vCPU, 32 GB — dedicated Kafka broker
+    spot: true
+    desiredCapacity: 1
+    minSize: 0
+    maxSize: 1
+    volumeSize: 80
+    volumeType: gp3
+    privateNetworking: false
+    labels: { role: kafka }
+    iam:
+      attachPolicyARNs:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore

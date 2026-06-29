@@ -249,3 +249,66 @@ termination before the source produces). Next debugging target; gate with `dist_
 
 **Then:** distributed `EpochCoordinator` wiring + per-instance state snapshot (F3-c) for cross-worker
 continuous EO; `memory`-sink codec (dev convenience); multi-node Flink head-to-head (F3-d).
+
+### F3-c precise gap (code-scoped 2026-06-22)
+Baseline re-confirmed on current binary: `dist_streaming_smoke.py` **6/6** (local-cluster, 2 workers,
+Spark-matched). The ONE remaining stateful gap, located precisely:
+- State snapshot is already **per-partition** (`state_io` keys `state/window-{partition}/{staged,committed}`)
+  and fires on **`EndOfData`** ⇒ **micro-batch** stateful EO across restart works.
+- `WindowAccumExec` (and dedup/join) have **NO `FlowMarker::Checkpoint{epoch}` handling** — so in
+  **continuous/realtime** mode the keyed accumulator is **never snapshotted per epoch**. Continuous
+  *stateless* EO works (source seek + sink atomic commit, no operator state); continuous *stateful*
+  EO across crash would lose the in-flight window/join state.
+- **F3-c increment — IMPLEMENTED + UNIT-VALIDATED 2026-06-22 (commit a29ededb):** on `Checkpoint{epoch}`,
+  `WindowAccumExec` write-aheads per-(op,partition,epoch) keyed state (`state_io::stage_epoch_state`)
+  BEFORE forwarding the barrier to the realtime sink (which atomically commits
+  `realtime/committed={epoch,offsets}`); on restart it restores EXACTLY the committed epoch's state
+  (`committed_epoch` reads the sink's record; `restore_epoch_state`) — same epoch the source seeks ⇒
+  Chandy-Lamport consistent snapshot. GC keeps a trailing window. Unit test proves it restores the
+  committed epoch (not a later uncommitted one ⇒ no over-count, nor a stale one) + GC. 8/8 green.
+  **GATE PASS (e2e, 2026-06-22, commit) — `scripts/f3c_stateful_crash.sh`:** continuous windowed-agg
+  (Kafka→`groupBy(window,k).count()`→realtime parquet, `Trigger.Continuous`) on local-cluster (2 workers).
+  W0,W1 commit pre-crash; W2's events are produced pre-crash with its window OPEN at a `kill -9`. After
+  crash+restart+wave2 → **12 rows (W0..W5 × 2 keys), every count=10, no dup (W0/W1 not re-emitted),
+  no loss (W2=10 survived)** ⇒ `F3C_STATEFUL_EO_ACROSS_CRASH PASS`. **Distributed continuous STATEFUL
+  exactly-once across a hard crash is validated end-to-end.** (Vajra allows windowed-agg under
+  `Trigger.Continuous`; Spark forbids it.) Remaining for F2/F3: **F3-d** = true multi-NODE
+  (`kubernetes-cluster`) gate vs Flink (this is all local-cluster = in-process workers on one box).
+
+### F3-d prod-grade plan (multi-node gate — scoped 2026-06-22)
+Topology grounded: `--mode kubernetes-cluster` (`k8s/sail.yaml`) runs a driver pod that **dynamically
+spawns worker pods via the k8s API** (`SAIL_KUBERNETES__WORKER_POD_TEMPLATE` + RBAC: `Role` pods/`*`,
+`vajra-user` SA + binding — all present) landing on **separate nodes**, Arrow-Flight shuffle between
+them — the real multi-node engine, distinct from local-cluster (in-process workers). Prod-grade
+sequence (multi-node distributed validation must be careful, not rushed):
+1. **Local de-risk on KIND (free)** — `k8s/kind-multinode.yaml` (1 control-plane + 2 workers). Rebuild
+   fresh `vajra:latest` (incl. F3-c) → `kind load` → `kubectl apply -k k8s/`. Run continuous stateful
+   (Kafka in-cluster → windowed-agg → sink); assert worker pods land on BOTH worker nodes (cross-node),
+   distributed 6/6 + F3-c continuous-stateful EO across a **worker-pod kill** (multi-node failover).
+   Gate before any cloud spend.
+2. **EKS multi-node** — ≥3 nodes (driver + ≥2 workers + Kafka); same pipeline; EO across a **node loss**
+   + correctness + throughput.
+3. **Flink head-to-head** — same Kafka→stateful→sink multi-node; throughput / latency / memory /
+   recovery-time. The credibility claim for "distributed stateful, on power with Flink."
+Acceptance: cross-node worker placement proven; distributed continuous-stateful EO across node loss;
+vs-Flink numbers recorded. Artifacts: `k8s/kind-multinode.yaml`, `k8s/sail.yaml`, F3-c gate scripts.
+
+**F3-d step 1 (KIND multi-node) — PASS 2026-06-22.** 3-node KIND (1 control-plane + 2 workers),
+`kubernetes-cluster` mode. A distributed query made the driver dynamically spawn **5 worker pods that
+landed CROSS-NODE** (workers on both `vajra-f3d-worker` and `-worker2`, verified `get pods -o wide`) —
+true multi-node distributed execution, not local-cluster in-process. `dist_streaming_smoke` **6/6**
+(batch.write / rate / file / windowed_file=97 / dedup=50 / join=200, every value Spark-matched) across
+the real multi-node cluster. **Prod insight (important):** the distributed sink needs **shared storage**
+— writing parquet to a worker pod's local `/tmp` fails cross-pod (reader on another pod sees no files);
+pointing outputs at the shared hostPath (`/tmp/sail`, the EKS analogue = S3, which the prior EKS runs
+used) makes it 6/6. So distributed streaming on Vajra requires object-store/shared sinks (already the
+F4 design). **Multi-node WORKER-POD-KILL failover — PASS 2026-06-22 (stateless continuous).** Continuous
+Kafka→parquet on the 3-node KIND cluster (driver spawns 5 workers); deleted a running worker pod
+(`kubectl delete pod --force`) MID-STREAM; query stayed alive, driver recovered; produced wave2;
+final durable output = **6000 distinct, contiguous 0..5999, 0 dup/loss** ⇒
+`MULTINODE_WORKER_FAILOVER_EO PASS`. The multi-node failover mechanism (worker loss → reschedule →
+EO recovery from the shared checkpoint) works. Remaining: the SAME across worker-kill with a
+*stateful* windowed-agg (F3-c on multi-node — extends this with per-epoch state recovery); then
+EKS multi-node (real node loss) + Flink head-to-head (step 2/3).
+- **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
+  `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.

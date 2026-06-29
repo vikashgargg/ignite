@@ -36,6 +36,13 @@ pub struct WindowAccumNode {
     /// Streaming `checkpointLocation`, when set — for operator-state snapshot/restore
     /// (stateful exactly-once recovery; see docs/design/streaming-exactly-once.md).
     pub checkpoint_location: Option<String>,
+    /// `outputMode("update")`: emit a changelog (retract stale + insert new) instead of
+    /// append-on-close, so late-but-in-bound data updates the result (see
+    /// docs/design/streaming-update-retraction-mode.md). Default false (append).
+    pub update_mode: bool,
+    /// Update mode only: retain a closed window this long (micros) past its end so late data
+    /// updates it rather than being dropped. From the `allowedLateness` writeStream option.
+    pub allowed_lateness_micros: i64,
 }
 
 impl WindowAccumNode {
@@ -58,7 +65,16 @@ impl WindowAccumNode {
             output_schema,
             data_schema,
             checkpoint_location,
+            update_mode: false,
+            allowed_lateness_micros: 0,
         }
+    }
+
+    /// Set changelog (update) output + allowed lateness. Default is append (today's behavior).
+    pub fn with_output_mode(mut self, update_mode: bool, allowed_lateness_micros: i64) -> Self {
+        self.update_mode = update_mode;
+        self.allowed_lateness_micros = allowed_lateness_micros.max(0);
+        self
     }
 
     pub fn input(&self) -> &Arc<LogicalPlan> {
@@ -126,6 +142,7 @@ impl UserDefinedLogicalNodeCore for WindowAccumNode {
             self.output_schema.clone(),
             self.data_schema.clone(),
             self.checkpoint_location.clone(),
-        ))
+        )
+        .with_output_mode(self.update_mode, self.allowed_lateness_micros))
     }
 }

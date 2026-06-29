@@ -247,15 +247,15 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
             // reads only files not yet committed (cross-run exactly-once), and reads them in
             // parallel — built on the same listing config as the batch reader.
             return Ok(provider_as_source(Arc::new(
-                sail_common_datafusion::streaming::source::StreamSourceTableProvider::new(Arc::new(
-                    crate::formats::file_stream::FileStreamSource::new(
+                sail_common_datafusion::streaming::source::StreamSourceTableProvider::new(
+                    Arc::new(crate::formats::file_stream::FileStreamSource::new(
                         urls,
                         listing_options,
                         schema,
                         constraints,
                         max_files_per_trigger,
-                    ),
-                )),
+                    )),
+                ),
             )));
         }
 
@@ -329,7 +329,9 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         let flow_input = Arc::clone(&input);
         let n_parts = input.properties().output_partitioning().partition_count();
         let input: Arc<dyn ExecutionPlan> = if streaming {
-            Arc::new(crate::streaming_decode::FlowEventToDataExec::try_new(input)?)
+            Arc::new(crate::streaming_decode::FlowEventToDataExec::try_new(
+                input,
+            )?)
         } else {
             input
         };
@@ -390,16 +392,18 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                         ),
                     ));
                 }
-                return Ok(Arc::new(crate::streaming_decode::ParallelStreamSinkExec::new(
-                    children,
-                )));
+                return Ok(Arc::new(
+                    crate::streaming_decode::ParallelStreamSinkExec::new(children),
+                ));
             }
-            return Ok(Arc::new(crate::streaming_decode::RealtimeFileSinkExec::new(
-                flow_input,
-                object_store_url.clone(),
-                base,
-                commit_log_checkpoint.clone(),
-            )));
+            return Ok(Arc::new(
+                crate::streaming_decode::RealtimeFileSinkExec::new(
+                    flow_input,
+                    object_store_url.clone(),
+                    base,
+                    commit_log_checkpoint.clone(),
+                ),
+            ));
         }
         // We do not need to specify the exact data type for partition columns,
         // since the type is inferred from the record batch during writing.
@@ -483,14 +487,14 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
         // to the empty-schema completion stream the streaming driver expects.
         let finalize = |writer: Arc<dyn ExecutionPlan>| -> Arc<dyn ExecutionPlan> {
             match &commit_ctx {
-                Some((batch_id, base)) => Arc::new(
-                    crate::streaming_decode::StreamingSinkCommitExec::new(
+                Some((batch_id, base)) => {
+                    Arc::new(crate::streaming_decode::StreamingSinkCommitExec::new(
                         writer,
                         object_store_url.clone(),
                         base.clone(),
                         *batch_id,
-                    ),
-                ),
+                    ))
+                }
                 None => Arc::new(crate::streaming_decode::EmptySinkAdapterExec::new(writer)),
             }
         };
@@ -511,7 +515,9 @@ impl<T: FormatFactory> TableFormat for ListingTableFormat<T> {
                     .await?;
                 children.push(sink_i);
             }
-            let parallel = Arc::new(crate::streaming_decode::ParallelStreamSinkExec::new(children));
+            let parallel = Arc::new(crate::streaming_decode::ParallelStreamSinkExec::new(
+                children,
+            ));
             return Ok(finalize(parallel));
         }
         let writer = format
@@ -560,4 +566,3 @@ async fn committed_urls_if_logged(
     }
     Ok(any_logged.then_some(out))
 }
-

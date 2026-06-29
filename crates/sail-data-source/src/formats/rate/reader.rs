@@ -14,8 +14,8 @@ use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{arrow_datafusion_err, plan_err, Result};
 use futures::{Stream, StreamExt};
-use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
+use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::event::marker::FlowMarker;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
@@ -477,8 +477,12 @@ mod tests {
     // streaming query terminates. An unbounded source would hang this collect.
     #[tokio::test]
     async fn bounded_rate_source_terminates() {
-        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], true, None).unwrap();
-        assert!(matches!(exec.properties().boundedness, Boundedness::Bounded));
+        let exec =
+            RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], true, None).unwrap();
+        assert!(matches!(
+            exec.properties().boundedness,
+            Boundedness::Bounded
+        ));
         let stream = exec.execute(0, Arc::new(TaskContext::default())).unwrap();
         // The outer unwrap panics (failing the test) if the source does not terminate.
         let batches = tokio::time::timeout(Duration::from_secs(10), stream.try_collect::<Vec<_>>())
@@ -491,7 +495,8 @@ mod tests {
     // Default (continuous) rate source stays unbounded.
     #[tokio::test]
     async fn unbounded_rate_source_is_unbounded() {
-        let exec = RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], false, None).unwrap();
+        let exec =
+            RateSourceExec::try_new(options(), rate_schema(), vec![0, 1], false, None).unwrap();
         assert!(matches!(
             exec.properties().boundedness,
             Boundedness::Unbounded { .. }

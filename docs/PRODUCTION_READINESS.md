@@ -38,6 +38,8 @@ all P0 items below are ✅ and published.
 | **Re-confirm on current `phase4` build** | ⬜ | rebuild from branch, ClickBench within ±10% of the 60.11 s release number |
 | Same-box Spark ClickBench reference | ⬜ | run Spark on the same box → full 3-way (Vajra/LakeSail-published/Spark) |
 | Distributed TPC-H SF-100 < 60 s | ⬜ | 10-node K8s, 22/22, total < 60 s |
+| Large-state (high key cardinality) | ❌ | **BUG found 2026-06-22** (`scripts/state_scale_stress.py`): streaming windowed-agg silently caps at **65536 distinct keys** (drops the rest); batch groupBy is correct at 200k. P0 correctness gap vs Flink (handles billions). Also F5: state is in-memory (no spill) ⇒ very large state OOMs. |
+| Realtime streaming latency (p50/p99) | 🟡 | `scripts/stream_latency.sh` — produce→Vajra realtime Kafka→Kafka→visible per-record. Smoke 2026-06-22 (**debug** build): p50 25 ms / p99 137 ms / max 142 ms, n=440k. Release build + Flink side-by-side (the "beats Flink tail-latency" claim) pending. |
 
 ## 3. Security & Hardening  — **first audit pass done; pentest still outstanding**
 > First-pass internal review done 2026-06-06 ([docs/THREAT_MODEL.md](THREAT_MODEL.md)):
@@ -62,10 +64,10 @@ all P0 items below are ✅ and published.
 ## 4. Reliability & Endurance  — **unproven under production conditions**
 | Item | Status | Acceptance criterion |
 |---|---|---|
-| Kafka → Delta 24 h soak | ⬜ | runs 24 h, no OOM/restart/leak; lag stays bounded (DoD item) |
+| Kafka → sink soak (24 h) | 🟡 | `scripts/stream_soak_chaos.sh` — **smoke PASSED 2026-06-22** (120s/20k-s: 2.36M rows EO, flat RSS); 24 h `SOAK=1` run still pending for the GA DoD. |
 | Concurrency / multi-tenant load | ⬜ | N concurrent clients sustained; latency + correctness hold, no deadlock |
-| Failover / chaos | ⬜ | kill a worker and the scheduler mid-job → job completes or fails cleanly (HA) |
-| Memory stability over time | ⬜ | no unbounded growth across a long mixed workload (RSS flat) |
+| Failover / chaos | ✅ | **PASSED 2026-06-22**: `stream_soak_chaos.sh` hard-kills (`kill -9`) the server mid-stream + restarts → durable output exactly-once across the crash (2,360,000 rows, **0 loss, 0 dup, contiguous**). |
+| Memory stability over time | 🟡 | **smoke PASSED**: RSS median 127 MB / max 142 MB = flat (1.11× < 1.5) across crash/restart; flat over 24 h still pending. |
 | Graceful shutdown + backpressure | 🟡 | in-flight queries drain on SIGTERM; slow consumers don't unbound buffers — verify |
 | Crash recovery | 🟡 | streaming checkpoint recovery ✅; batch driver restart story documented |
 

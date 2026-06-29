@@ -1177,6 +1177,8 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 event_time_col,
                 delay_micros,
                 checkpoint_location,
+                update_mode,
+                allowed_lateness_micros,
             }) => {
                 let input = self.try_decode_plan(&input, ctx)?;
                 // Recover the group-by + aggregates from the template AggregateExec.
@@ -1190,15 +1192,23 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 let group_exprs = agg.group_expr().clone();
                 let aggr_exprs = agg.aggr_expr().to_vec();
                 let data_input_schema = agg.input().schema();
-                Ok(Arc::new(WindowAccumExec::try_new(
-                    input,
-                    group_exprs,
-                    aggr_exprs,
-                    data_input_schema,
-                    event_time_col,
-                    delay_micros,
-                    checkpoint_location,
-                )?))
+                let mode = if update_mode {
+                    sail_physical_plan::streaming::window_accum::WindowOutputMode::Update
+                } else {
+                    sail_physical_plan::streaming::window_accum::WindowOutputMode::Append
+                };
+                Ok(Arc::new(
+                    WindowAccumExec::try_new(
+                        input,
+                        group_exprs,
+                        aggr_exprs,
+                        data_input_schema,
+                        event_time_col,
+                        delay_micros,
+                        checkpoint_location,
+                    )?
+                    .with_output_mode(mode, allowed_lateness_micros),
+                ))
             }
             NodeKind::RealtimeFileSink(gen::RealtimeFileSinkExecNode {
                 input,
@@ -2277,6 +2287,11 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 event_time_col: window.event_time_col().to_string(),
                 delay_micros: window.delay_micros(),
                 checkpoint_location: window.checkpoint_location().map(str::to_string),
+                update_mode: matches!(
+                    window.output_mode(),
+                    sail_physical_plan::streaming::window_accum::WindowOutputMode::Update
+                ),
+                allowed_lateness_micros: window.allowed_lateness_micros(),
             })
         } else if let Some(sink) = node.as_any().downcast_ref::<RealtimeFileSinkExec>() {
             let input = self.try_encode_plan(sink.input().clone())?;
@@ -4758,15 +4773,21 @@ mod tests {
             .build()?;
         let flow_schema = Arc::new(to_flow_event_schema(&data_schema));
         let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema));
-        let window: Arc<dyn ExecutionPlan> = Arc::new(WindowAccumExec::try_new(
-            child,
-            group,
-            vec![Arc::new(count)],
-            data_schema,
-            "ts".to_string(),
-            2_000,
-            Some("file:///tmp/wck".to_string()),
-        )?);
+        let window: Arc<dyn ExecutionPlan> = Arc::new(
+            WindowAccumExec::try_new(
+                child,
+                group,
+                vec![Arc::new(count)],
+                data_schema,
+                "ts".to_string(),
+                2_000,
+                Some("file:///tmp/wck".to_string()),
+            )?
+            .with_output_mode(
+                sail_physical_plan::streaming::window_accum::WindowOutputMode::Update,
+                30_000_000,
+            ),
+        );
 
         let buf = codec.try_encode_plan(window)?;
         // Decode against a context whose registry has the aggregate UDFs (workers have these); the
@@ -4783,6 +4804,12 @@ mod tests {
         assert_eq!(w.checkpoint_location(), Some("file:///tmp/wck"));
         assert_eq!(w.aggr_exprs().len(), 1, "aggregate round-trips");
         assert_eq!(w.group_exprs().expr().len(), 1, "group-by round-trips");
+        assert_eq!(
+            w.output_mode(),
+            sail_physical_plan::streaming::window_accum::WindowOutputMode::Update,
+            "update mode round-trips (distributed)"
+        );
+        assert_eq!(w.allowed_lateness_micros(), 30_000_000, "allowed lateness round-trips");
         Ok(())
     }
 

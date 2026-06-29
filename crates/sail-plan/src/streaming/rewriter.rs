@@ -43,6 +43,15 @@ struct StreamingRewriter {
     /// `Trigger.Continuous` epoch-commit interval (millis), threaded to sources for realtime
     /// exactly-once (source emits `Checkpoint{epoch}` + pre-commits offsets at this cadence).
     realtime_interval_ms: Option<u64>,
+    /// `outputMode("update")`: window aggregation emits a changelog (retract+insert) instead of
+    /// append-on-close. Default false (append). See docs/design/streaming-update-retraction-mode.md.
+    update_mode: bool,
+    /// Update mode only: `allowedLateness` window-state retention past close (micros).
+    allowed_lateness_micros: i64,
+    /// Per-partition watermark (realtime): the source `partition` column name, set when a realtime
+    /// Kafka stream source is seen (force-kept past projection pruning), preserved through projections,
+    /// and attached to the WatermarkNode so WatermarkExec does MIN-over-partitions with idleness.
+    preserve_partition: Option<String>,
 }
 
 impl StreamingRewriter {
@@ -66,17 +75,25 @@ impl StreamingRewriter {
             // to the marker-aware `StreamExchangeExec` (keyed) for parallel stateless processing; the
             // sink writer re-aligns N→1 via `StreamBarrierAlignExec`. (See planner.rs.)
             Ok(Transformed::no(LogicalPlan::Extension(extension)))
+        } else if let Some(wm) = node.as_any().downcast_ref::<WatermarkNode>() {
+            // Per-partition watermark: if a source `partition` column was preserved to here, attach it
+            // so WatermarkExec does MIN-over-partitions with a pure-time startup grace + idleness. No
+            // partition-count N needed (passed 0): the grace is time-based, not count-based.
+            if let Some(p) = self.preserve_partition.clone() {
+                Ok(Transformed::yes(LogicalPlan::Extension(Extension {
+                    node: Arc::new(wm.clone().with_partition_watermark(p, 0)),
+                })))
+            } else {
+                Ok(Transformed::no(LogicalPlan::Extension(extension)))
+            }
         } else if node.as_any().is::<FileWriteNode>()
             || node.as_any().is::<ForeachBatchSinkNode>()
             || node.as_any().is::<MemorySinkNode>()
             || node.as_any().is::<BarrierNode>()
-            || node.as_any().is::<WatermarkNode>()
         {
             // Passthrough nodes left untouched by the streaming rewriter:
             // - FileWriteNode / ForeachBatchSinkNode / MemorySinkNode: sinks.
             // - BarrierNode: TODO — real streaming support.
-            // - WatermarkNode: transparent passthrough, consumed by the parent
-            //   Aggregate handler for event-time window detection.
             Ok(Transformed::no(LogicalPlan::Extension(extension)))
         } else {
             plan_err!("unsupported extension node for streaming: {node:?}")
@@ -96,6 +113,17 @@ impl TreeNodeRewriter for StreamingRewriter {
                 } = projection;
                 expr.insert(0, col(MARKER_FIELD_NAME));
                 expr.insert(1, col(RETRACTED_FIELD_NAME));
+                // Per-partition watermark: carry the source `partition` column up if the user's
+                // projection would drop it, so it reaches the WatermarkNode (harmless extra column).
+                if let Some(p) = &self.preserve_partition {
+                    let have = input.schema().has_column_with_unqualified_name(p);
+                    let kept = expr
+                        .iter()
+                        .any(|e| matches!(e, Expr::Column(c) if c.name() == *p));
+                    if have && !kept {
+                        expr.push(col(p));
+                    }
+                }
                 Ok(Transformed::yes(LogicalPlan::Projection(
                     Projection::try_new(expr, input)?,
                 )))
@@ -267,7 +295,8 @@ impl TreeNodeRewriter for StreamingRewriter {
                             )?),
                             agg_output_schema,
                             self.checkpoint_location.clone(),
-                        )),
+                        )
+                        .with_output_mode(self.update_mode, self.allowed_lateness_micros)),
                     })));
                 }
 
@@ -440,12 +469,30 @@ impl TreeNodeRewriter for StreamingRewriter {
                             filters,
                             fetch,
                         } = scan;
+                        // Per-partition watermark (realtime): the Kafka `partition` column gets pruned
+                        // by projection pushdown (the user query doesn't reference it), so force it back
+                        // into the scan projection and record its name to thread to the WatermarkNode.
+                        // Idleness guard in WatermarkExec means this can never stall.
+                        let mut projection = projection.clone();
+                        if self.realtime_interval_ms.is_some() {
+                            let full = provider.schema();
+                            if let Some(pidx) =
+                                full.fields().iter().position(|f| f.name() == "partition")
+                            {
+                                if let Some(p) = projection.as_mut() {
+                                    if !p.contains(&pidx) {
+                                        p.push(pidx);
+                                    }
+                                }
+                                self.preserve_partition = Some(full.field(pidx).name().to_string());
+                            }
+                        }
                         Ok(Transformed::yes(LogicalPlan::Extension(Extension {
                             node: Arc::new(StreamSourceWrapperNode::try_new(
                                 table_name.clone(),
                                 source,
                                 names,
-                                projection.clone(),
+                                projection,
                                 filters.clone(),
                                 *fetch,
                                 self.bounded,
@@ -620,6 +667,8 @@ pub fn rewrite_streaming_plan(
     bounded: bool,
     checkpoint_location: Option<String>,
     realtime_interval_ms: Option<u64>,
+    update_mode: bool,
+    allowed_lateness_micros: i64,
 ) -> Result<LogicalPlan> {
     // Systemic qualifier normalization: streaming operators decode flow events into the
     // **unqualified** data schema, while the resolver tags columns with a synthetic
@@ -632,6 +681,9 @@ pub fn rewrite_streaming_plan(
         bounded,
         checkpoint_location,
         realtime_interval_ms,
+        update_mode,
+        allowed_lateness_micros,
+        preserve_partition: None,
     })?;
     let plan = node.data;
 

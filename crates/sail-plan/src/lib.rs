@@ -38,12 +38,14 @@ pub async fn resolve_and_execute_plan(
     config: Arc<PlanConfig>,
     plan: spec::Plan,
 ) -> PlanResult<(Arc<dyn ExecutionPlan>, Vec<StringifiedPlan>)> {
-    resolve_and_execute_plan_with_options(ctx, config, plan, false, None, None).await
+    resolve_and_execute_plan_with_options(ctx, config, plan, false, None, None, false, 0).await
 }
 
 /// Like [`resolve_and_execute_plan`], but allows requesting bounded streaming
 /// execution (trigger `availableNow`/`once`): stream sources scan the available
-/// data and then end, so the streaming query terminates.
+/// data and then end, so the streaming query terminates. `update_mode` +
+/// `allowed_lateness_micros` select the windowed-aggregation changelog (update) output
+/// (see docs/design/streaming-update-retraction-mode.md); default false/0 = append.
 pub async fn resolve_and_execute_plan_with_options(
     ctx: &SessionContext,
     config: Arc<PlanConfig>,
@@ -51,6 +53,8 @@ pub async fn resolve_and_execute_plan_with_options(
     bounded: bool,
     checkpoint_location: Option<String>,
     realtime_interval_ms: Option<u64>,
+    update_mode: bool,
+    allowed_lateness_micros: i64,
 ) -> PlanResult<(Arc<dyn ExecutionPlan>, Vec<StringifiedPlan>)> {
     let mut info = vec![];
     let resolver = PlanResolver::new(ctx, config);
@@ -61,7 +65,14 @@ pub async fn resolve_and_execute_plan_with_options(
     let plan = session_state.optimize(&plan)?;
     let streaming = is_streaming_plan(&plan)?;
     let plan = if streaming {
-        rewrite_streaming_plan(plan, bounded, checkpoint_location, realtime_interval_ms)?
+        rewrite_streaming_plan(
+            plan,
+            bounded,
+            checkpoint_location,
+            realtime_interval_ms,
+            update_mode,
+            allowed_lateness_micros,
+        )?
     } else {
         plan
     };
