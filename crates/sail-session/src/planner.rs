@@ -395,11 +395,11 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 let n_parts = std::env::var("VAJRA_WM_PARTITIONS")
                     .ok()
                     .and_then(|v| v.parse::<usize>().ok());
-                // Per-partition watermark: prefer the rewriter-set WatermarkNode fields (general
-                // path); else fall back to the prove-it heuristic (env N + lone Int32 column, since
-                // streaming schemas use #N names so the source `partition` can't be matched by name).
+                // Per-partition watermark: prefer the rewriter-set WatermarkNode partition col (general
+                // path — enabled whenever the col is present; N is unused, the grace is pure-time);
+                // else the prove-it heuristic (env N + lone Int32 col) for the manual-keep query.
                 let exec = if let (Some(col), n) = (&node.partition_col, node.num_partitions) {
-                    if n > 1 && data_schema.index_of(col).is_ok() {
+                    if data_schema.index_of(col).is_ok() {
                         exec.with_partition_watermark(col.clone(), n)
                     } else {
                         exec

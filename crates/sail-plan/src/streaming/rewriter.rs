@@ -77,15 +77,11 @@ impl StreamingRewriter {
             Ok(Transformed::no(LogicalPlan::Extension(extension)))
         } else if let Some(wm) = node.as_any().downcast_ref::<WatermarkNode>() {
             // Per-partition watermark: if a source `partition` column was preserved to here, attach it
-            // + N (startup-grace completeness hint; idleness means a wrong/missing N can't stall, only
-            // affects cold-start). N from VAJRA_WM_PARTITIONS for now; auto-from-source is follow-up.
+            // so WatermarkExec does MIN-over-partitions with a pure-time startup grace + idleness. No
+            // partition-count N needed (passed 0): the grace is time-based, not count-based.
             if let Some(p) = self.preserve_partition.clone() {
-                let n = std::env::var("VAJRA_WM_PARTITIONS")
-                    .ok()
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .unwrap_or(1);
                 Ok(Transformed::yes(LogicalPlan::Extension(Extension {
-                    node: Arc::new(wm.clone().with_partition_watermark(p, n)),
+                    node: Arc::new(wm.clone().with_partition_watermark(p, 0)),
                 })))
             } else {
                 Ok(Transformed::no(LogicalPlan::Extension(extension)))

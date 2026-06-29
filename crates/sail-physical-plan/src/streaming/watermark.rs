@@ -350,9 +350,10 @@ fn update_per_partition(
 /// Flink per-partition watermark with idleness (REFERENCES §2). Returns the watermark candidate
 /// (pre-delay) = MIN over partitions that are ACTIVE (seen within `idle_timeout`), so an idle
 /// partition can never stall the watermark. During the startup grace (`now - start < idle_timeout`)
-/// it WITHHOLDS until all `num_partitions` are seen (completeness on cold start); after the grace it
-/// proceeds on whatever is active. `None` = withhold/no-data. Pure (takes `now`) so it's unit-tested
-/// deterministically — the bug this replaces (withhold-until-all-N forever) HUNG for 3h.
+/// it WITHHOLDS unconditionally (pure-time, no partition-count) so all partitions report their first
+/// record before any window can close; after the grace it proceeds on whatever is active. `None` =
+/// withhold/no-data. Pure (takes `now`) so it's unit-tested deterministically — the bug this replaces
+/// (withhold-until-all-N forever, which needed N and could HANG 3h) is gone.
 fn active_partition_watermark(
     per_part: &PerPartState,
     num_partitions: usize,
@@ -363,10 +364,12 @@ fn active_partition_watermark(
     if per_part.is_empty() {
         return None;
     }
-    // Startup grace: hold back for completeness until all N partitions have reported — but only
-    // while within the grace window, so a never-arriving partition can't block forever.
-    let in_grace = now.duration_since(start) < idle_timeout;
-    if num_partitions > 1 && per_part.len() < num_partitions && in_grace {
+    // Startup grace (pure-time, Flink bounded-out-of-orderness): withhold the first watermark until
+    // the grace elapses so every partition reports its first record (the realtime source reads ALL
+    // partitions in ONE instance, so they all produce within the grace) → no premature first-window
+    // close. No partition-count N needed — that's why `num_partitions` is no longer read here.
+    let _ = num_partitions;
+    if now.duration_since(start) < idle_timeout {
         return None;
     }
     // MIN over ACTIVE partitions (idle ones excluded → never stalls).
@@ -391,27 +394,28 @@ mod tests {
 
     use super::*;
 
-    // Idleness guard (the fix for the 3h hang): startup grace withholds until all N seen, but an
-    // IDLE partition is excluded from the MIN so the watermark NEVER stalls (Flink withIdleness).
+    // Pure-time startup grace + idleness (no partition-count N): withhold all watermarks until the
+    // grace elapses (so every partition reports first → no premature first-window close), then emit
+    // MIN over ACTIVE partitions, excluding idle ones so it NEVER stalls (Flink withIdleness).
     #[test]
     fn active_partition_watermark_grace_and_idle_exclusion() {
         use std::collections::HashMap;
         use std::time::{Duration, Instant};
         let idle = Duration::from_millis(2000);
         let t0 = Instant::now();
-        // (1) startup grace: only p0 seen, N=2, within grace → withhold for completeness.
+        // (1) within the startup grace → withhold unconditionally (even with data, no N needed).
         let mut m: HashMap<i64, (i64, Instant)> = HashMap::new();
         m.insert(0, (100, t0));
-        assert_eq!(active_partition_watermark(&m, 2, t0, idle, t0 + Duration::from_millis(500)), None);
-        // (2) both seen within grace → MIN over active.
         m.insert(1, (50, t0 + Duration::from_millis(500)));
-        assert_eq!(active_partition_watermark(&m, 2, t0, idle, t0 + Duration::from_millis(600)), Some(50));
+        assert_eq!(active_partition_watermark(&m, 0, t0, idle, t0 + Duration::from_millis(600)), None);
+        // (2) after the grace, both active → MIN over active.
+        assert_eq!(active_partition_watermark(&m, 0, t0, idle, t0 + Duration::from_millis(2100)), Some(50));
         // (3) NO STALL: p0 idle (last seen 3s ago > idle) is EXCLUDED even though its et=30 is the
         //     min; watermark advances on the active p1 (70). Without exclusion this would stall/regress.
         let mut m2: HashMap<i64, (i64, Instant)> = HashMap::new();
         m2.insert(0, (30, t0)); // idle
         m2.insert(1, (70, t0 + Duration::from_millis(2900))); // active
-        assert_eq!(active_partition_watermark(&m2, 2, t0, idle, t0 + Duration::from_millis(3000)), Some(70));
+        assert_eq!(active_partition_watermark(&m2, 0, t0, idle, t0 + Duration::from_millis(3000)), Some(70));
     }
 
     fn schema() -> SchemaRef {
@@ -495,7 +499,13 @@ mod tests {
                 wms.push(timestamp.timestamp_micros() / sec);
             }
         }
-        // No watermark before both partitions seen; then the lagging MIN (50s), then 100s. Never 120.
-        assert_eq!(wms, vec![50, 100], "per-partition watermark = min over partitions, withheld until all seen");
+        // Invariant (timing-robust): the per-partition watermark NEVER leaks past the lagging MIN —
+        // it must never emit the global max (120s) while p0 is at 100s. The pure-time startup grace may
+        // withhold the early watermarks in this fast bounded stream; the exact grace/MIN sequence is
+        // covered deterministically by `active_partition_watermark_grace_and_idle_exclusion`.
+        assert!(
+            wms.iter().all(|w| *w <= 100),
+            "per-partition wm must never leak past the lagging min; got {wms:?}"
+        );
     }
 }
