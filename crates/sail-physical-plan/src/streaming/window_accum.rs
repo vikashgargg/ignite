@@ -615,6 +615,11 @@ impl ExecutionPlan for WindowAccumExec {
         // (default OFF) until continuous-mode e2e-validated — the full-snapshot path stays default so
         // the gate cannot regress proven EO. Must be set consistently across a job's restarts.
         let inc_ckpt_enabled = std::env::var("VAJRA_INC_CKPT").is_ok();
+        // Rescale-from-checkpoint (gated VAJRA_RESCALE; uses inc-ckpt staging). On a restart that
+        // CHANGES parallelism, a new instance gathers its key-group range from the UNION of old
+        // instances' state (Flink key-groups; REFERENCES §2b). Off by default → same-parallelism
+        // restore is unchanged (no regression). Requires VAJRA_INC_CKPT staging format.
+        let rescale_enabled = std::env::var("VAJRA_RESCALE").is_ok();
         let in_stream = self.input.execute(partition, context.clone())?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -676,7 +681,30 @@ impl ExecutionPlan for WindowAccumExec {
                         {
                             Some(epoch) => {
                                 acc.last_committed_epoch = Some(epoch);
-                                if acc.inc_ckpt {
+                                // Rescale: if a previous run staged at a DIFFERENT parallelism and we
+                                // have a key (num_group_cols > 1), gather this instance's key-group
+                                // range from the union of old instances' state (kg recomputed from the
+                                // group key, matching the exchange). Else the normal per-instance path.
+                                let old_m = crate::streaming::state_io::restore_parallelism(
+                                    ck, "window", epoch,
+                                )
+                                .await;
+                                if rescale_enabled
+                                    && num_group_cols > 1
+                                    && old_m.is_some_and(|om| om != n)
+                                {
+                                    let key_cols: Vec<usize> = (1..num_group_cols).collect();
+                                    crate::streaming::state_io::restore_keyed_range_recompute_auto(
+                                        ck,
+                                        "window",
+                                        epoch,
+                                        partition,
+                                        n,
+                                        crate::streaming::state_io::DEFAULT_KEY_GROUPS,
+                                        &key_cols,
+                                    )
+                                    .await
+                                } else if acc.inc_ckpt {
                                     // inc-ckpt.2: manifest → residual + referenced chunks → full.
                                     crate::streaming::state_io::restore_epoch_incremental(
                                         ck,
@@ -995,6 +1023,10 @@ impl ExecutionPlan for WindowAccumExec {
                                         &meta,
                                     )
                                     .await;
+                                    // Record parallelism for rescale-from-checkpoint: a restart at
+                                    // M'!=n discovers old M to gather its key-group range (REFERENCES §2b).
+                                    crate::streaming::state_io::stage_parallelism(ck, "window", id, n)
+                                        .await;
                                     // SharedStateRegistry: retain a trailing window of epochs
                                     // {id-1, id}; subsume id-2 and GC chunks no retained epoch (or
                                     // the live working set) references.
