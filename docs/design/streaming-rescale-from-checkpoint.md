@@ -58,6 +58,21 @@ SharedStateRegistry). Flink must read + re-serialize the moved key-groups out of
 **cheaper + faster** on Vajra, on the same substrate that already gives O(delta) checkpoints + 6.6×
 memory.
 
+## STATUS (2026-06-29) — primitive layer DONE + PROVEN; operator wiring remains
+- ✅ Steps 1–2 + 3a + auto: `key_group`/`instance_key_group_range`/`key_group_owner`; exchange routes
+  by kg→owner (rescale-stable); manifest per-chunk KG-range + `chunks_for_range`; `restore_keyed_range`
+  + `restore_keyed_range_auto` (discovers old M via `stage_parallelism`); proven exact
+  (`rescale_redistributes_keyed_state_exactly`: M=4 → M′∈{2,8}, no loss/dup). Grounded REFERENCES §2b.
+- ⬜ **Remaining 3b = operator wiring, target `WindowAccumExec`** (NOT `StreamJoinExec` — that rejects
+  `partition!=0`, i.e. runs single-instance, so rescale N/A there). In the window execute: (a) tag the
+  kg column at spill, hashing the group key with the SAME hasher the exchange uses (so kg matches
+  routing) — or have the exchange tag `__kg` once and carry it through; (b) per-instance state key
+  `window-0-<partition>` + `stage_parallelism(partition_count)`; (c) restore via
+  `restore_keyed_range_auto(op_base, epoch, partition, partition_count, g, kg_col)`. Then the **rescale
+  crash gate** (checkpoint at M, kill, restore at M′≠M, assert completeness/no-dup/EO) — needs a live
+  Kafka run. This is deliberate surgery on the largest function + a slow gate; do it as a dedicated
+  pass, not rushed.
+
 ## Build steps (incremental, each locally testable — no EKS)
 1. **KG primitive + manifest extension:** `kg(key)`, add KG-range vector to encode/decode_manifest
    (back-compat). Unit test: round-trip + intersection selection. *(deterministic, like the O(delta)
