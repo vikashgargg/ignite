@@ -164,6 +164,11 @@ impl ExecutionPlan for WatermarkExec {
             .as_ref()
             .and_then(|c| data_schema.index_of(c).ok());
         let num_partitions = self.num_partitions;
+        // Flink withIdleness: a partition idle for this long is EXCLUDED from the watermark MIN so
+        // the watermark never stalls (REFERENCES §2). Also the startup grace — withhold the first
+        // watermark until all `num_partitions` are seen OR this elapses (whichever first), so we
+        // never block forever waiting for a partition that won't come. 2s.
+        let idle_timeout = std::time::Duration::from_millis(2000);
         let in_stream = self.input.execute(partition, context)?;
         let input_stream = DecodedFlowEventStream::try_new(in_stream).map_err(|e| {
             let names: Vec<_> = self
@@ -176,11 +181,14 @@ impl ExecutionPlan for WatermarkExec {
             datafusion_common::exec_datafusion_err!("WatermarkExec decode (input {names:?}): {e}")
         })?;
 
+        // Per-partition state: partition -> (max_et, last_seen instant). `start` for the startup grace.
+        type PerPart = std::collections::HashMap<i64, (i64, std::time::Instant)>;
         type State = (
             DecodedFlowEventStream,
-            Option<i64>,                       // global max_ts (single-partition path)
-            std::collections::HashMap<i64, i64>, // per-partition max_et (per-partition path)
-            Option<i64>,                       // last emitted watermark (monotonic)
+            Option<i64>,    // global max_ts (single-partition path)
+            PerPart,        // per-partition (max_et, last_seen)
+            Option<i64>,    // last emitted watermark (monotonic)
+            std::time::Instant, // operator start (startup grace)
             VecDeque<FlowEvent>,
         );
         let init: State = (
@@ -188,36 +196,64 @@ impl ExecutionPlan for WatermarkExec {
             None,
             std::collections::HashMap::new(),
             None,
+            std::time::Instant::now(),
             VecDeque::new(),
         );
 
         let event_stream = stream::unfold(
             init,
-            move |(mut input, mut max_ts, mut per_part, mut last_wm, mut pending)| async move {
+            move |(mut input, mut max_ts, mut per_part, mut last_wm, start, mut pending)| async move {
                 loop {
                     if let Some(ev) = pending.pop_front() {
-                        return Some((Ok(ev), (input, max_ts, per_part, last_wm, pending)));
+                        return Some((Ok(ev), (input, max_ts, per_part, last_wm, start, pending)));
                     }
-                    match input.next().await {
-                        None => return None,
-                        Some(Err(e)) => {
-                            return Some((Err(e), (input, max_ts, per_part, last_wm, pending)))
+                    // Per-partition path: race the input against a periodic tick so an IDLE partition
+                    // is excluded (and the watermark advances) even when no new data arrives — this is
+                    // what makes withIdleness non-blocking (no tick on the global path).
+                    let next = if part_idx.is_some() {
+                        tokio::select! {
+                            biased;
+                            item = input.next() => Some(item),
+                            _ = tokio::time::sleep(idle_timeout / 4) => None, // tick → recompute
                         }
-                        Some(Ok(FlowEvent::Data { batch, retracted })) => {
-                            // Candidate watermark from this batch (before delay), or None if we
-                            // can't/shouldn't advance yet.
-                            let candidate: Option<i64> = match (event_time_idx, part_idx) {
-                                // Flink per-partition: update each partition's max_et, then the
-                                // watermark = MIN across partitions, but only once all N are seen.
-                                (Some(et_i), Some(p_i)) => {
-                                    update_per_partition(&batch, et_i, p_i, &mut per_part);
-                                    if per_part.len() >= num_partitions {
-                                        per_part.values().copied().min()
-                                    } else {
-                                        None // withhold until every partition has reported
+                    } else {
+                        Some(input.next().await)
+                    };
+                    match next {
+                        // ---- per-partition idle TICK (no new data): recompute MIN over active ----
+                        None => {
+                            if let Some(m) = active_partition_watermark(
+                                &per_part, num_partitions, start, idle_timeout, std::time::Instant::now(),
+                            ) {
+                                let wm = m - delay;
+                                if last_wm.is_none_or(|l| wm > l) {
+                                    last_wm = Some(wm);
+                                    if let Some(ts) = DateTime::from_timestamp_micros(wm) {
+                                        return Some((
+                                            Ok(FlowEvent::Marker(FlowMarker::Watermark {
+                                                source: "watermark".to_string(),
+                                                timestamp: ts,
+                                            })),
+                                            (input, max_ts, per_part, last_wm, start, pending),
+                                        ));
                                     }
                                 }
-                                // Single global max (default).
+                            }
+                            // nothing to emit this tick; loop to poll again
+                        }
+                        Some(None) => return None, // input ended
+                        Some(Some(Err(e))) => {
+                            return Some((Err(e), (input, max_ts, per_part, last_wm, start, pending)))
+                        }
+                        Some(Some(Ok(FlowEvent::Data { batch, retracted }))) => {
+                            let candidate: Option<i64> = match (event_time_idx, part_idx) {
+                                (Some(et_i), Some(p_i)) => {
+                                    let now = std::time::Instant::now();
+                                    update_per_partition(&batch, et_i, p_i, &mut per_part, now);
+                                    active_partition_watermark(
+                                        &per_part, num_partitions, start, idle_timeout, now,
+                                    )
+                                }
                                 (Some(et_i), None) => {
                                     let col = batch.column(et_i);
                                     if matches!(
@@ -237,7 +273,6 @@ impl ExecutionPlan for WatermarkExec {
                                 _ => None,
                             };
                             pending.push_back(FlowEvent::Data { batch, retracted });
-                            // Emit a watermark only when it advances (monotonic).
                             if let Some(m) = candidate {
                                 let wm = m - delay;
                                 if last_wm.is_none_or(|l| wm > l) {
@@ -253,8 +288,11 @@ impl ExecutionPlan for WatermarkExec {
                                 }
                             }
                         }
-                        Some(Ok(other)) => {
-                            return Some((Ok(other), (input, max_ts, per_part, last_wm, pending)));
+                        Some(Some(Ok(other))) => {
+                            return Some((
+                                Ok(other),
+                                (input, max_ts, per_part, last_wm, start, pending),
+                            ));
                         }
                     }
                 }
@@ -266,14 +304,18 @@ impl ExecutionPlan for WatermarkExec {
     }
 }
 
-/// Update `per_part[partition] = max(existing, max event_time of that partition's rows in `batch`)`.
-/// Reads the µs event-time column and the (Int32) partition column row-wise. Rows with a null
-/// partition or non-µs event-time are skipped.
+/// Per-partition state: partition id -> (max event_time µs, last-seen instant). The instant drives
+/// Flink-style idleness (REFERENCES §2).
+type PerPartState = std::collections::HashMap<i64, (i64, std::time::Instant)>;
+
+/// Update each partition's `(max_et, last_seen=now)` from a batch's µs event-time + (Int32/Int64)
+/// partition column. Null/uncomparable rows skipped.
 fn update_per_partition(
     batch: &RecordBatch,
     et_idx: usize,
     part_idx: usize,
-    per_part: &mut std::collections::HashMap<i64, i64>,
+    per_part: &mut PerPartState,
+    now: std::time::Instant,
 ) {
     let Some(et) = batch
         .column(et_idx)
@@ -295,8 +337,44 @@ fn update_per_partition(
             _ => continue,
         };
         let e = et.value(i);
-        per_part.entry(p).and_modify(|m| *m = (*m).max(e)).or_insert(e);
+        per_part
+            .entry(p)
+            .and_modify(|(m, ts)| {
+                *m = (*m).max(e);
+                *ts = now;
+            })
+            .or_insert((e, now));
     }
+}
+
+/// Flink per-partition watermark with idleness (REFERENCES §2). Returns the watermark candidate
+/// (pre-delay) = MIN over partitions that are ACTIVE (seen within `idle_timeout`), so an idle
+/// partition can never stall the watermark. During the startup grace (`now - start < idle_timeout`)
+/// it WITHHOLDS until all `num_partitions` are seen (completeness on cold start); after the grace it
+/// proceeds on whatever is active. `None` = withhold/no-data. Pure (takes `now`) so it's unit-tested
+/// deterministically — the bug this replaces (withhold-until-all-N forever) HUNG for 3h.
+fn active_partition_watermark(
+    per_part: &PerPartState,
+    num_partitions: usize,
+    start: std::time::Instant,
+    idle_timeout: std::time::Duration,
+    now: std::time::Instant,
+) -> Option<i64> {
+    if per_part.is_empty() {
+        return None;
+    }
+    // Startup grace: hold back for completeness until all N partitions have reported — but only
+    // while within the grace window, so a never-arriving partition can't block forever.
+    let in_grace = now.duration_since(start) < idle_timeout;
+    if num_partitions > 1 && per_part.len() < num_partitions && in_grace {
+        return None;
+    }
+    // MIN over ACTIVE partitions (idle ones excluded → never stalls).
+    per_part
+        .values()
+        .filter(|(_, last)| now.duration_since(*last) < idle_timeout)
+        .map(|(et, _)| *et)
+        .min()
 }
 
 #[cfg(test)]
@@ -312,6 +390,29 @@ mod tests {
     use sail_common_datafusion::streaming::event::FlowEvent;
 
     use super::*;
+
+    // Idleness guard (the fix for the 3h hang): startup grace withholds until all N seen, but an
+    // IDLE partition is excluded from the MIN so the watermark NEVER stalls (Flink withIdleness).
+    #[test]
+    fn active_partition_watermark_grace_and_idle_exclusion() {
+        use std::collections::HashMap;
+        use std::time::{Duration, Instant};
+        let idle = Duration::from_millis(2000);
+        let t0 = Instant::now();
+        // (1) startup grace: only p0 seen, N=2, within grace → withhold for completeness.
+        let mut m: HashMap<i64, (i64, Instant)> = HashMap::new();
+        m.insert(0, (100, t0));
+        assert_eq!(active_partition_watermark(&m, 2, t0, idle, t0 + Duration::from_millis(500)), None);
+        // (2) both seen within grace → MIN over active.
+        m.insert(1, (50, t0 + Duration::from_millis(500)));
+        assert_eq!(active_partition_watermark(&m, 2, t0, idle, t0 + Duration::from_millis(600)), Some(50));
+        // (3) NO STALL: p0 idle (last seen 3s ago > idle) is EXCLUDED even though its et=30 is the
+        //     min; watermark advances on the active p1 (70). Without exclusion this would stall/regress.
+        let mut m2: HashMap<i64, (i64, Instant)> = HashMap::new();
+        m2.insert(0, (30, t0)); // idle
+        m2.insert(1, (70, t0 + Duration::from_millis(2900))); // active
+        assert_eq!(active_partition_watermark(&m2, 2, t0, idle, t0 + Duration::from_millis(3000)), Some(70));
+    }
 
     fn schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
