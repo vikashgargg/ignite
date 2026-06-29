@@ -214,10 +214,58 @@ fn residual_key(operator_id: &str, epoch: u64) -> String {
     format!("state/{operator_id}/epoch-{epoch}/residual")
 }
 
-/// Manifest blob: `[u32 meta_len][meta_len × i64][u32 n_chunks][n_chunks × u64]` (LE) — the meta
-/// vector + the referenced spill-chunk ids. Dependency-free, mirrors `encode_state`'s framing.
+/// Default key-group count (= max parallelism), like Flink's `maxParallelism`. Keys are pre-partitioned
+/// into G key-groups so rescale re-assigns key-group RANGES to instances (REFERENCES §2). Fixed at job
+/// start.
+pub const DEFAULT_KEY_GROUPS: u16 = 128;
+
+/// Map a key's hash to its key-group `[0, g)`. Stable across parallelism changes → the unit of
+/// keyed-state redistribution on rescale.
+pub fn key_group(key_hash: u64, g: u16) -> u16 {
+    if g == 0 {
+        0
+    } else {
+        (key_hash % g as u64) as u16
+    }
+}
+
+/// Instance `i` of `m` owns the contiguous key-group range `[lo, hi)` (Flink-style even split).
+pub fn instance_key_group_range(i: usize, m: usize, g: u16) -> (u16, u16) {
+    if m == 0 {
+        return (0, g);
+    }
+    let g = g as usize;
+    let lo = i * g / m;
+    let hi = (i + 1) * g / m;
+    (lo as u16, hi as u16)
+}
+
+/// Select the chunk ids whose key-group coverage intersects the owned range `[lo, hi)` — the chunks a
+/// rescaled instance must read. `kg_ranges[k]` is chunk `chunks[k]`'s `[kg_lo, kg_hi)` coverage; if it
+/// is empty/short (legacy manifest with no KG info) the chunk is assumed to cover ALL key-groups and is
+/// always selected (the always-correct filter path).
+pub fn chunks_for_range(chunks: &[u64], kg_ranges: &[(u16, u16)], lo: u16, hi: u16) -> Vec<u64> {
+    chunks
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| match kg_ranges.get(*k) {
+            Some(&(clo, chi)) => clo < hi && lo < chi, // ranges overlap
+            None => true,                              // no KG info ⇒ may hold any key
+        })
+        .map(|(_, &c)| c)
+        .collect()
+}
+
+/// Manifest blob: `[u32 meta_len][meta_len × i64][u32 n_chunks][n_chunks × u64][u32 n_kg][n_kg ×
+/// (u16,u16)]` (LE) — meta + referenced spill-chunk ids + each chunk's key-group `[lo,hi)` coverage
+/// (for rescale). The KG section is OPTIONAL/trailing: legacy manifests stop after chunks and decode
+/// with empty KG ranges (⇒ treated as "covers all key-groups"). Mirrors `encode_state`'s framing.
 fn encode_manifest(meta: &[i64], chunks: &[u64]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8 + meta.len() * 8 + chunks.len() * 8);
+    encode_manifest_kg(meta, chunks, &[])
+}
+
+fn encode_manifest_kg(meta: &[i64], chunks: &[u64], kg_ranges: &[(u16, u16)]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(12 + meta.len() * 8 + chunks.len() * 8 + kg_ranges.len() * 4);
     out.extend_from_slice(&(meta.len() as u32).to_le_bytes());
     for v in meta {
         out.extend_from_slice(&v.to_le_bytes());
@@ -226,39 +274,59 @@ fn encode_manifest(meta: &[i64], chunks: &[u64]) -> Vec<u8> {
     for c in chunks {
         out.extend_from_slice(&c.to_le_bytes());
     }
+    out.extend_from_slice(&(kg_ranges.len() as u32).to_le_bytes());
+    for (lo, hi) in kg_ranges {
+        out.extend_from_slice(&lo.to_le_bytes());
+        out.extend_from_slice(&hi.to_le_bytes());
+    }
     out
 }
 
-fn decode_manifest(bytes: &[u8]) -> (Vec<i64>, Vec<u64>) {
+fn decode_manifest(bytes: &[u8]) -> (Vec<i64>, Vec<u64>, Vec<(u16, u16)>) {
     let mut off = 0usize;
     let read_u32 = |bytes: &[u8], off: usize| -> Option<u32> {
         bytes.get(off..off + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap_or([0; 4])))
     };
     let Some(meta_len) = read_u32(bytes, off) else {
-        return (vec![], vec![]);
+        return (vec![], vec![], vec![]);
     };
     off += 4;
     let mut meta = Vec::with_capacity(meta_len as usize);
     for _ in 0..meta_len {
         let Some(s) = bytes.get(off..off + 8) else {
-            return (meta, vec![]);
+            return (meta, vec![], vec![]);
         };
         meta.push(i64::from_le_bytes(s.try_into().unwrap_or([0; 8])));
         off += 8;
     }
     let Some(n_chunks) = read_u32(bytes, off) else {
-        return (meta, vec![]);
+        return (meta, vec![], vec![]);
     };
     off += 4;
     let mut chunks = Vec::with_capacity(n_chunks as usize);
     for _ in 0..n_chunks {
         let Some(s) = bytes.get(off..off + 8) else {
-            return (meta, chunks);
+            return (meta, chunks, vec![]);
         };
         chunks.push(u64::from_le_bytes(s.try_into().unwrap_or([0; 8])));
         off += 8;
     }
-    (meta, chunks)
+    // Optional trailing key-group section (legacy manifests end here ⇒ empty).
+    let mut kg_ranges = vec![];
+    if let Some(n_kg) = read_u32(bytes, off) {
+        off += 4;
+        let read_u16 = |off: usize| -> Option<u16> {
+            bytes.get(off..off + 2).map(|s| u16::from_le_bytes(s.try_into().unwrap_or([0; 2])))
+        };
+        for _ in 0..n_kg {
+            let (Some(lo), Some(hi)) = (read_u16(off), read_u16(off + 2)) else {
+                break;
+            };
+            kg_ranges.push((lo, hi));
+            off += 4;
+        }
+    }
+    (meta, chunks, kg_ranges)
 }
 
 /// Incrementally stage an epoch: write only the small in-RAM `residual` + a manifest that REFERENCES
@@ -296,7 +364,7 @@ pub async fn restore_epoch_incremental(
     let Ok(Some(mbytes)) = ck.get(&manifest_key(operator_id, epoch)).await else {
         return (vec![], vec![]);
     };
-    let (meta, chunks) = decode_manifest(&mbytes);
+    let (meta, chunks, _kg_ranges) = decode_manifest(&mbytes);
     let mut batches = match ck.get(&residual_key(operator_id, epoch)).await {
         Ok(Some(rbytes)) => decode_state(&rbytes).0,
         _ => vec![],
@@ -326,7 +394,7 @@ pub async fn gc_unreferenced_chunks(
     let mut referenced = std::collections::HashSet::new();
     for &e in retained_epochs {
         if let Ok(Some(mbytes)) = ck.get(&manifest_key(operator_id, e)).await {
-            let (_, chunks) = decode_manifest(&mbytes);
+            let (_, chunks, _) = decode_manifest(&mbytes);
             referenced.extend(chunks);
         }
     }
@@ -550,5 +618,46 @@ mod tests {
             last_inc * 10 < last_full,
             "incremental {last_inc}B must be << full {last_full}B at {n_epochs} epochs"
         );
+    }
+
+    // Rescale step 1: key-groups + manifest KG-range round-trip + chunk selection for a rescaled
+    // instance's owned range, with legacy (no-KG) back-compat. REFERENCES §2 (Flink key-groups).
+    #[test]
+    fn rescale_key_groups_manifest_and_selection() {
+        // key_group is stable in [0,g); instance ranges tile [0,g) without gaps/overlap.
+        assert_eq!(key_group(0, 0), 0); // g=0 guard
+        for h in [0u64, 1, 127, 128, 300, u64::MAX] {
+            assert!(key_group(h, 128) < 128);
+        }
+        // 8 key-groups across 3 instances tile [0,8) exactly once.
+        let m = 3;
+        let mut covered = vec![0u8; 8];
+        for i in 0..m {
+            let (lo, hi) = instance_key_group_range(i, m, 8);
+            for kg in lo..hi {
+                covered[kg as usize] += 1;
+            }
+        }
+        assert!(covered.iter().all(|&c| c == 1), "key-groups must tile exactly once: {covered:?}");
+
+        // Manifest with per-chunk KG coverage round-trips through the OPTIONAL trailing section.
+        let meta = vec![7i64, -1];
+        let chunks = vec![10u64, 20, 30];
+        let kg = vec![(0u16, 3u16), (3, 6), (6, 8)]; // chunk 10→kg[0,3), 20→[3,6), 30→[6,8)
+        let blob = encode_manifest_kg(&meta, &chunks, &kg);
+        let (dm, dc, dkg) = decode_manifest(&blob);
+        assert_eq!((dm, dc, dkg), (meta.clone(), chunks.clone(), kg.clone()));
+
+        // Rescaled instance owning [2,5) must read chunks 10 (covers [0,3)) and 20 (covers [3,6)).
+        assert_eq!(chunks_for_range(&chunks, &kg, 2, 5), vec![10, 20]);
+        // Instance owning [6,8) reads only chunk 30.
+        assert_eq!(chunks_for_range(&chunks, &kg, 6, 8), vec![30]);
+
+        // Legacy back-compat: encode_manifest (no KG) decodes with empty KG ranges, and selection then
+        // returns ALL chunks (a chunk with unknown coverage may hold any key — always-correct path).
+        let legacy = encode_manifest(&meta, &chunks);
+        let (_, lc, lkg) = decode_manifest(&legacy);
+        assert!(lkg.is_empty());
+        assert_eq!(chunks_for_range(&lc, &lkg, 2, 5), vec![10, 20, 30]);
     }
 }
