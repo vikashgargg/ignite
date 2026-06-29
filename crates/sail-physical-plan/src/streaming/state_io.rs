@@ -15,6 +15,8 @@
 use std::io::Cursor;
 
 use bytes::Bytes;
+use datafusion::arrow::array::{Array, BooleanArray, Int32Array};
+use datafusion::arrow::compute::filter_record_batch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::ipc::reader::FileReader as IpcFileReader;
 use datafusion::arrow::ipc::writer::FileWriter as IpcFileWriter;
@@ -389,6 +391,95 @@ pub async fn restore_epoch_incremental(
     (batches, meta)
 }
 
+/// Like [`stage_epoch_incremental`] but records each chunk's key-group `[lo,hi)` coverage in the
+/// manifest, so a rescaled instance can select chunks by key-group range without reading them
+/// (Flink rescalable-state, key-groups written in order — REFERENCES §2b). `kg_ranges[k]` is
+/// `chunks[k]`'s coverage; empty ⇒ legacy "covers all" (always-correct row-filter path).
+pub async fn stage_epoch_incremental_kg(
+    ck: &CheckpointStore,
+    operator_id: &str,
+    epoch: u64,
+    schema: &SchemaRef,
+    residual: &[RecordBatch],
+    chunks: &[u64],
+    meta: &[i64],
+    kg_ranges: &[(u16, u16)],
+) {
+    if let Some(blob) = encode_state(schema, residual, &[]) {
+        let _ = ck
+            .put(&residual_key(operator_id, epoch), Bytes::from(blob))
+            .await;
+    }
+    let _ = ck
+        .put(
+            &manifest_key(operator_id, epoch),
+            Bytes::from(encode_manifest_kg(meta, chunks, kg_ranges)),
+        )
+        .await;
+}
+
+/// Filter a state batch to rows whose key-group column value is in `[lo, hi)` — the rows a rescaled
+/// instance owns. `kg_col` is the index of the Int32 key-group column the operator tags state with at
+/// spill (Flink stores the key-group alongside state). Returns `None` if the column isn't Int32.
+pub fn filter_to_key_group_range(
+    batch: &RecordBatch,
+    kg_col: usize,
+    lo: u16,
+    hi: u16,
+) -> Option<RecordBatch> {
+    let col = batch.column(kg_col).as_any().downcast_ref::<Int32Array>()?;
+    let mask: BooleanArray = (0..col.len())
+        .map(|i| {
+            if col.is_null(i) {
+                Some(false)
+            } else {
+                let v = col.value(i);
+                Some(v >= lo as i32 && v < hi as i32)
+            }
+        })
+        .collect();
+    filter_record_batch(batch, &mask).ok()
+}
+
+/// Rescale restore (parallelism M → M′): gather the rows the NEW instance owning key-group range
+/// `[lo, hi)` must hold, from the union of the OLD instances' incremental manifests (`old_ops`) for
+/// `epoch`. KG-aligned chunks are skipped/selected by manifest range (`chunks_for_range`); selected +
+/// legacy chunks are read and row-filtered by `kg_col` (the always-correct path). This is Flink
+/// rescalable-state redistribution (key-groups; REFERENCES §2b) on immutable Arrow chunks — selection
+/// is a manifest lookup, no whole-state rewrite. `residual` rows are always read + filtered.
+pub async fn restore_keyed_range(
+    ck: &CheckpointStore,
+    old_ops: &[&str],
+    epoch: u64,
+    lo: u16,
+    hi: u16,
+    kg_col: usize,
+) -> Vec<RecordBatch> {
+    let mut out = vec![];
+    let push_filtered = |batches: Vec<RecordBatch>, out: &mut Vec<RecordBatch>| {
+        for b in batches {
+            if let Some(f) = filter_to_key_group_range(&b, kg_col, lo, hi) {
+                if f.num_rows() > 0 {
+                    out.push(f);
+                }
+            }
+        }
+    };
+    for op in old_ops {
+        let Ok(Some(mbytes)) = ck.get(&manifest_key(op, epoch)).await else {
+            continue;
+        };
+        let (_meta, chunks, kg_ranges) = decode_manifest(&mbytes);
+        if let Ok(Some(rbytes)) = ck.get(&residual_key(op, epoch)).await {
+            push_filtered(decode_state(&rbytes).0, &mut out);
+        }
+        for id in chunks_for_range(&chunks, &kg_ranges, lo, hi) {
+            push_filtered(read_spill(ck, op, id).await, &mut out);
+        }
+    }
+    out
+}
+
 /// Drop a subsumed epoch's manifest + residual (NOT its chunks — those may still be referenced by a
 /// retained epoch; clean chunks via [`gc_unreferenced_chunks`]).
 pub async fn gc_epoch_incremental(ck: &CheckpointStore, operator_id: &str, epoch: u64) {
@@ -683,5 +774,74 @@ mod tests {
         let (_, lc, lkg) = decode_manifest(&legacy);
         assert!(lkg.is_empty());
         assert_eq!(chunks_for_range(&lc, &lkg, 2, 5), vec![10, 20, 30]);
+    }
+
+    // PROVES rescale correctness: stage keyed state at parallelism M (each instance owns its KG range,
+    // one KG-aligned chunk), then restore at M' != M and assert every original key is owned by EXACTLY
+    // ONE new instance (no loss, no dup) and all rows land in their owner's KG range. This is Flink
+    // rescalable-state redistribution (key-groups; REFERENCES §2b) on immutable Arrow chunks.
+    #[tokio::test]
+    async fn rescale_redistributes_keyed_state_exactly() {
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        let g = 8u16;
+        // state schema: (key i64, kg i32 [tagged at spill], val i64). kg_col = 1.
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Int64, false),
+            Field::new("kg", DataType::Int32, false),
+            Field::new("val", DataType::Int64, false),
+        ]));
+        let ck = CheckpointStore::from_store(Arc::new(InMemory::new()), StorePath::from("ck"));
+        let n_keys = 200i64;
+        let kg_of = |k: i64| (k % g as i64) as i32; // synthetic stable key→key-group
+
+        // Stage at OLD parallelism M=4: instance i holds keys whose kg ∈ its range, as one KG-aligned
+        // chunk; the manifest records that chunk's [lo,hi) coverage.
+        let old_m = 4usize;
+        for i in 0..old_m {
+            let (lo, hi) = instance_key_group_range(i, old_m, g);
+            let keys: Vec<i64> = (0..n_keys).filter(|k| (kg_of(*k) as u16) >= lo && (kg_of(*k) as u16) < hi).collect();
+            let kgs: Vec<i32> = keys.iter().map(|k| kg_of(*k)).collect();
+            let vals: Vec<i64> = keys.iter().map(|k| k * 10).collect();
+            let batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(Int64Array::from(keys)),
+                    Arc::new(Int32Array::from(kgs)),
+                    Arc::new(Int64Array::from(vals)),
+                ],
+            )
+            .unwrap();
+            let op = format!("win-{i}");
+            assert!(write_spill(&ck, &op, 0, &schema, &[batch]).await);
+            stage_epoch_incremental_kg(&ck, &op, 1, &schema, &[], &[0], &[], &[(lo, hi)]).await;
+        }
+        let old_ops: Vec<String> = (0..old_m).map(|i| format!("win-{i}")).collect();
+        let refs: Vec<&str> = old_ops.iter().map(String::as_str).collect();
+
+        // Restore at NEW parallelisms (scale down to 2, up to 8): each new instance gathers only its
+        // KG range; the union must be every key exactly once, each in its owner's range.
+        for new_m in [2usize, 8] {
+            let mut seen: Vec<i64> = vec![];
+            for ni in 0..new_m {
+                let (lo, hi) = instance_key_group_range(ni, new_m, g);
+                let batches = restore_keyed_range(&ck, &refs, 1, lo, hi, 1).await;
+                for b in &batches {
+                    let keys = b.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+                    let kgs = b.column(1).as_any().downcast_ref::<Int32Array>().unwrap();
+                    for r in 0..b.num_rows() {
+                        let kg = kgs.value(r) as u16;
+                        assert!(lo <= kg && kg < hi, "key landed outside owner range at M'={new_m}");
+                        assert_eq!(kg, kg_of(keys.value(r)) as u16);
+                        seen.push(keys.value(r));
+                    }
+                }
+            }
+            seen.sort_unstable();
+            assert_eq!(
+                seen,
+                (0..n_keys).collect::<Vec<_>>(),
+                "rescale to M'={new_m}: every key exactly once (no loss/dup)"
+            );
+        }
     }
 }
