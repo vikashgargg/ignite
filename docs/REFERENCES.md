@@ -51,6 +51,17 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/concepts
   grace withholds until all N seen OR grace elapses; a periodic tick excludes newly-idle partitions even
   with no input. This is the safety that makes per-partition non-blocking (a withhold-until-all-N
   version with NO idleness HUNG for 3h). See docs/design/streaming-per-partition-watermark.md.
+- **§2b Rescalable keyed state — key-groups** (Stefan Richter, "A Deep Dive into Rescalable State in
+  Apache Flink", 2017; FLIP-8): the key space is pre-partitioned into a fixed **G key-groups**
+  (`maxParallelism`), `kg = hash(key) % G`. A subtask owns a **contiguous range** of key-groups; rescale
+  to M′ just re-assigns ranges. State is written **in key-group order** with a kg→offset index, so a
+  rescaled subtask reads the **byte-range** for its key-groups directly — no per-key deserialization.
+  **Vajra impl (`state_io`, rescale steps 1–3a):** `key_group`/`instance_key_group_range`/
+  `key_group_owner` (exchange routes by kg→owner, matching state ownership); manifest records each
+  chunk's kg `[lo,hi)` coverage; `restore_keyed_range` gathers a new instance's rows by selecting chunks
+  via manifest range (`chunks_for_range`, a lookup) + row-filter. **Beats Flink:** chunk selection is a
+  manifest lookup over IMMUTABLE Arrow chunks (KG-aligned ⇒ zero rewrite) vs re-serializing RocksDB
+  state. Proven: `rescale_redistributes_keyed_state_exactly`. See streaming-rescale-from-checkpoint.md.
 - **Implication for Vajra:** our `StreamBarrierAlignExec` (N→1 Chandy-Lamport) + `state_io` +
   Kafka replay + EO sink mirror this. **Owe:** unaligned-checkpoint option (low-latency EO),
   Key-Group-style rescale for state, savepoints. `FlowEvent::Marker(Checkpoint{epoch})` is the barrier.
