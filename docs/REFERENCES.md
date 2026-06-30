@@ -93,6 +93,52 @@ VLDB'25 https://www.vldb.org/pvldb/vol18/p4846-mei.pdf
   backed + local cache + async access.** Informs F4 (object-store checkpoint/state). Lesson: **cache
   is mandatory** (no-cache remote = −48%). Design state object-store-native with tiered local cache +
   async access (Arrow/Parquet state format) from day one.
+- **Recovery/cost numbers (fetched 2026-07-01):** up to **94% less checkpoint duration, 49× faster
+  recovery after failure/rescale, 50% cost savings** vs Flink 1.x. **MEMORY INSIGHT:** Flink bounds RAM
+  NOT via GC but by keeping **state off-heap on DFS/local-disk** (RAM = bounded cache, independent of
+  state size) + **credit-based network backpressure** tightly bounding in-flight buffers. ⇒ a no-GC
+  engine does NOT automatically win on RSS; bounded memory is an ARCHITECTURAL discipline (bounded
+  in-flight buffers + spilled/tiered state + allocator), which Vajra must engineer explicitly — our
+  no-JVM edge is for LATENCY/predictability, orthogonal to RSS. (Explains why T1–T7a CPU fixes left
+  Vajra's bounded-path RSS at 1.12× Flink.)
+
+### 3c. Spark 4.1 Structured Streaming Real-Time Mode — fetched 2026-07-01
+Source: https://www.databricks.com/blog/introducing-real-time-mode-apache-sparktm-structured-streaming
+- **Execution:** long-lived jobs that **schedule stages concurrently** + an **in-memory streaming
+  shuffle** between tasks (no micro-batch coordination) — i.e. exactly Vajra's streaming-exchange model.
+- **Latency:** p99 **a few ms → ~300ms** (transform-dependent); prod users report 15ms / <200ms e2e.
+- **Tradeoff (KEY):** Databricks explicitly says RT-mode adds **"slight system overhead"** (higher
+  memory) and recommend it only for latency-critical pipelines ⇒ even Spark **trades memory for latency**
+  in this design. Validates Vajra's concurrent-stage + in-memory-shuffle direction; latency (p99) is the
+  headline metric to measure, and memory overhead is expected — must be bounded, not eliminated.
+- **Vajra implication:** measure **p99 latency** head-to-head (the RT-mode/Flink axis we have NOT
+  measured), and treat memory as a bounded-buffer discipline, not a free win.
+
+### 3d. Flink 2.3 release (current; fetched 2026-07-01 — cite this, don't re-fetch)
+Source: https://nightlies.apache.org/flink/flink-docs-release-2.3/release-notes/flink-2.3/
+- **Watermark alignment redesign (FLINK-37399):** prior watermark alignment *unintentionally throttled
+  backlog processing*; 2.3 adds a configurable **alignment buffer (default 3 update-intervals)** to delay
+  alignment ⇒ faster historical/backlog reprocessing, safety kept. → DIRECTLY relevant to our
+  per-partition-watermark + idleness work: alignment must NOT throttle catch-up. Mirror this buffer idea.
+- **Adaptive partition selection (FLINK-31655):** load-aware `StreamPartitioner` routes to **least-loaded
+  channels** (vs round-robin) → **~3× throughput under skew** / slow downstream (Redis/HBase/LLM). →
+  relevant to our exchange for NON-keyed/rebalance paths (keyed shuffle still must honor key→owner; but
+  skew-aware buffering/backpressure is a lever).
+- **Checkpoint during recovery (FLINK-35761):** can checkpoint *while recovering* from unaligned ckpt
+  (was blocked until channel state drained) → preserves work across restart cascades. → recovery-time bar.
+- **Mini-batch agg silent data-loss fix (FLINK-35661):** retraction-only bundles dropped remaining keys.
+  → reminder: even Flink ships keyed-agg correctness bugs at scale; our correctness gate must stay adversarial.
+- **Changelog PTFs `FROM_CHANGELOG`/`TO_CHANGELOG` (FLINK-39258)** + **`ON CONFLICT` upsert
+  (DO NOTHING/ERROR/DEDUPLICATE) + watermark-based changelog compaction (FLINK-38926)** → maps to our
+  FlowEvent retract/changelog + update-mode; adopt the ON CONFLICT vocabulary + wm-compaction for upserts.
+- **Native S3 FS `flink-s3-fs-native` (FLINK-38592):** AWS SDK v2, **non-blocking I/O**, IRSA auth,
+  exactly-once via `RecoverableWriter`. → blueprint for our object-store checkpoint/sink (F4): async SDK,
+  recoverable writer for EO, no Hadoop dep.
+- **Adaptive scheduler rescale history (FLINK-38333):** records rescale events (parallelism/slots/state)
+  via REST. → our rescale work should expose similar observability.
+- **Net for Vajra:** Flink's 2.x momentum is **disaggregated state + recovery speed + skew/backlog
+  handling + changelog SQL + async object-store I/O + observability** — NOT raw single-node throughput.
+  The replacement bar is these operational axes. Memory is bounded by off-heap state + credit backpressure.
 
 ### 3b. Incremental + async checkpointing (Flink large-state) — fetched 2026-06-24
 Sources: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/ops/state/large_state_tuning/ ·
