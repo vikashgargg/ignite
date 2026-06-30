@@ -101,6 +101,16 @@ the encode/exchange/decode layer, but the null-alloc vs tokio-channel vs decode 
 **Prod-grade gate: confirm with an encode/exchange-side timer BEFORE implementing** (don't optimize an
 unproven cost). If confirmed dominant, fix (a) is small + clearly Flink-better.
 
+### ENCODE RULED OUT 2026-06-30 (measured, encode timer): `encode_allhops = 4ms / 1041ms wall = 0.4%`
+The per-batch null-marker alloc is NEGLIGIBLE — NOT the gap. (Confirmed before implementing — the
+candidate was wrong; the discipline saved a wasted fix.) So upstream cost = **source read + `from_json`
+(serde_json Value-per-row) + exchange tokio-channel/decode** — encode and window finalize (16%) are not it.
+**Untried `from_json` lever = `simd-json`** (SIMD-accelerated parse): the KB ruled out *arrow-json* (parity
+with serde_json), but **simd-json was NOT tried** — it's 2–3× faster than serde_json's Value-tree parse and
+is the real Flink-better candidate (Flink uses JVM Jackson; SIMD-Rust ≫ Jackson). NEXT (confirm-first):
+time the `from_json` UDF invoke; if dominant, A/B serde_json → simd-json. Throughput is LOCAL-core-limited
+here (0.265M/s on 4 workers) — absolute number is EKS.
+
 ### Fix targets for the bounded/EKS gap (ranked) — (superseded by the re-narrow above)
 1. **`from_json` parse** — vectorized/SIMD JSON (simd-json / arrow-json fast path), or avoid re-parsing
    (parse once; project needed fields). Confirm its share with a split timer or with/without-from_json A/B.
