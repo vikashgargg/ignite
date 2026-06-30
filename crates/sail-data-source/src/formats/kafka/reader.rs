@@ -282,6 +282,17 @@ impl StreamSource for KafkaStreamSource {
             n_parts
                 .unwrap_or_else(|| state.config().target_partitions())
                 .max(1)
+        } else if std::env::var("VAJRA_RT_MULTI").is_ok() {
+            // Throughput Phase B (FLIP-27): N realtime readers, one per Kafka partition, to parallelize
+            // source read + from_json (Phase A showed the window STARVED on the single-instance path).
+            // GATED off by default — the N-instance per-epoch EO commit union is steps 2-3 (single-
+            // coordinator commit is still wired); enable only to profile/validate. Each instance reads
+            // ONE partition in event-time order ⇒ monotone watermark (also closes the per-partition
+            // watermark edge). See docs/design/streaming-realtime-multi-instance.md.
+            count_kafka_partitions(&self.options)
+                .await
+                .unwrap_or_else(|| state.config().target_partitions())
+                .max(1)
         } else {
             1
         };
@@ -582,6 +593,10 @@ impl ExecutionPlan for KafkaSourceExec {
                 // keep the configured size (DataFusion default 8 Ki), bounded by the byte cap below.
                 let target_batch = max_batch;
                 while remaining(&next) > 0 {
+                    // Throughput attribution (VAJRA_WM_PROF): time the per-batch read (poll + append +
+                    // finish) so the EKS profile pinpoints the source-read share. Zero cost when unset.
+                    let _rd = sail_common_datafusion::streaming::event::encoding::wm_prof_enabled()
+                        .then(std::time::Instant::now);
                     let mut builders = KafkaArrowBuilders::with_capacity(target_batch);
                     // Flush on EITHER a row cap OR a byte cap. The byte cap is the
                     // real safety guarantee: Arrow Utf8/Binary use i32 offsets (2 GiB
@@ -650,9 +665,15 @@ impl ExecutionPlan for KafkaSourceExec {
                         }
                     }
                     if builders.len() > 0 {
+                        if let Some(t) = _rd {
+                            sail_common_datafusion::streaming::event::encoding::prof_add(
+                                &sail_common_datafusion::streaming::event::encoding::SOURCE_READ_NS,
+                                t.elapsed().as_nanos() as u64,
+                            );
+                        }
                         match builders.finish_projected(&full_schema, &projection) {
                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
-                            Err(e) => { yield Err(e); return; }
+                            Err(e) => { eprintln!("KAFKA_SOURCE finish_projected error: {e}"); yield Err(e); return; }
                         }
                         continue;
                     }

@@ -25,6 +25,32 @@ use crate::streaming::event::FlowEvent;
 /// For a data event, the marker array only contains the null buffer,
 /// which adds 1-bit overhead for each row in a data event.
 /// The retracted field adds another 1-bit overhead for each row in a data event.
+/// Throughput attribution (env `VAJRA_WM_PROF`): cumulative ns spent in flow-event `encode()` across
+/// ALL operator hops (the per-data-batch null-marker-column build). Read by the window operator's prof
+/// dump to see the encode's share of the wall. Zero cost when the env var is unset.
+pub static ENCODE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Cumulative ns in `from_json` UDF invoke (the serde_json parse) — attribute the parse share of the
+/// streaming throughput gap. Written by sail-function's from_json, read by the window prof dump.
+pub static FROM_JSON_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Cumulative ns in the Kafka source read+batch-build loop (across source instances). Written by
+/// kafka/reader.rs, read by the window prof dump — the COMPLETE per-stage breakdown for EKS pinpointing.
+pub static SOURCE_READ_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Cumulative ns in the keyed shuffle distribute/route+send (across instances). Written by
+/// streaming/exchange.rs, read by the window prof dump.
+pub static EXCHANGE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Convenience: add `nanos` to a profiling counter only when profiling is enabled (cheap guard).
+pub fn prof_add(counter: &std::sync::atomic::AtomicU64, nanos: u64) {
+    counter.fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);
+}
+/// Shared throughput-profiling gate (env `VAJRA_WM_PROF`), cached. Used across crates.
+pub fn wm_prof_enabled() -> bool {
+    static E: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *E.get_or_init(|| std::env::var("VAJRA_WM_PROF").is_ok())
+}
+fn encode_prof_enabled() -> bool {
+    wm_prof_enabled()
+}
+
 pub struct EncodedFlowEventStream {
     inner: SendableFlowEventStream,
     schema: SchemaRef,
@@ -40,6 +66,18 @@ impl EncodedFlowEventStream {
     }
 
     pub fn encode(&self, event: FlowEvent) -> Result<RecordBatch> {
+        let _t = encode_prof_enabled().then(std::time::Instant::now);
+        let out = self.encode_inner(event);
+        if let Some(t) = _t {
+            ENCODE_NS.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+        out
+    }
+
+    fn encode_inner(&self, event: FlowEvent) -> Result<RecordBatch> {
         let columns = match event {
             FlowEvent::Data { batch, retracted } => {
                 let mut columns: Vec<ArrayRef> = vec![

@@ -42,6 +42,17 @@ behind `VAJRA_WM_PROF`, reporting per-operator µs + rows at `EndOfData`:
 
 Deliverable: a stage breakdown (e.g. "from_json 55%, exchange 20%, finalize 15%, rest 10%").
 
+**RESULT 2026-06-30 (done, LOCAL controlled Kafka, PARTS=4 N=3000 continuous):** window is **STARVED** —
+`input_wait ≈ 100%` of wall, `finalize = 59ms (0%)`, 180k rows/instance ⇒ **bottleneck is UPSTREAM of
+the window** (single-instance source read + `from_json` + exchange), the window itself does ~no work.
+Confirms the prime suspect; finalize/window is NOT the gap. (Even local — where throughput totals are
+noisy — this attribution is a within-engine ratio and is unambiguous.) ⇒ Phase B targets the SOURCE
+path. **Top fix = realtime one-instance-per-Kafka-partition (FLIP-27)** — parallelizes read+`from_json`
+N-way AND fixes the per-partition-watermark correctness gap (#2b) in one change; the single-instance EO
+commit coordination is what must be generalized to N instances (exchange already MIN-merges watermarks +
+`StreamBarrierAlignExec` aligns barriers). Alternative if that's too big: parallel `from_json` inside
+the single instance (rayon over batches).
+
 ### Phase B — fix the dominant stage (ranked by likelihood, all grounded)
 1. **Parallelize parse/decode before the exchange** (most likely win). The single-instance source
    serializes `from_json`. Options, in order of preference:

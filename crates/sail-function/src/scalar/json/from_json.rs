@@ -151,10 +151,21 @@ impl ScalarUDFImpl for SparkFromJson {
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         let session_timezone = self.session_timezone.to_string();
         let ScalarFunctionArgs { args, .. } = args;
-        make_scalar_function(
+        // Throughput attribution (VAJRA_WM_PROF): time the parse to gauge from_json's share of the
+        // streaming gap (serde_json Value-per-row). Zero cost when the env var is unset.
+        let _t = sail_common_datafusion::streaming::event::encoding::wm_prof_enabled()
+            .then(std::time::Instant::now);
+        let out = make_scalar_function(
             move |inner_args| from_json_inner(inner_args, session_timezone.as_str()),
             vec![],
-        )(&args)
+        )(&args);
+        if let Some(t) = _t {
+            sail_common_datafusion::streaming::event::encoding::FROM_JSON_NS.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+        out
     }
 
     fn coerce_types(&self, arg_types: &[DataType]) -> Result<Vec<DataType>> {

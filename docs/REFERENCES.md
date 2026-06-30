@@ -62,6 +62,21 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/concepts
   via manifest range (`chunks_for_range`, a lookup) + row-filter. **Beats Flink:** chunk selection is a
   manifest lookup over IMMUTABLE Arrow chunks (KG-aligned ⇒ zero rewrite) vs re-serializing RocksDB
   state. Proven: `rescale_redistributes_keyed_state_exactly`. See streaming-rescale-from-checkpoint.md.
+- **§2d Parallel source + streaming shuffle (cross-system grounding for realtime multi-instance):**
+  (1) **Flink FLIP-27** — one SourceReader per split (Kafka partition); SplitEnumerator assigns; each
+  reader event-time-ordered → per-split watermark, op = MIN. (2) **Spark Structured Streaming / 4.1
+  RT-mode** — `KafkaSourceRDD` one task per TopicPartition; RT-mode adds in-memory streaming shuffle +
+  concurrent stage scheduling (decouple stages so they pipeline, not block). (3) **Arrow Flight shuffle /
+  Ballista** — zero-copy columnar exchange between stages (DoGet/DoPut), the disaggregated-shuffle model
+  for distributed (EKS). (4) **StreamNative/Pulsar + Kafka** — partitioned topics; consumers scale to
+  partition count; ordering per partition. (5) **FAANG** (LinkedIn Samza/Brooklin, Uber, Netflix Mantis)
+  — converge on per-partition parallel ingest + per-partition watermark/state. **Vajra synthesis (Phase
+  B, docs/design/streaming-realtime-multi-instance.md):** realtime source → N readers (one per Kafka
+  partition, reuse the bounded path) + per-instance epoch staging + atomic union commit (generalize the
+  single-coordinator realtime EO); each reader single-partition-ordered ⇒ monotone watermark (removes the
+  per-partition-WM workaround) + `StreamExchangeExec` keyed MIN-merge + `StreamBarrierAlignExec` N→1
+  align; **EKS distributed shuffle = Arrow Flight** (zero-copy). This is the read+`from_json`
+  parallelization the Phase A profile demands AND the watermark-correctness fix, in one change.
 - **Implication for Vajra:** our `StreamBarrierAlignExec` (N→1 Chandy-Lamport) + `state_io` +
   Kafka replay + EO sink mirror this. **Owe:** unaligned-checkpoint option (low-latency EO),
   Key-Group-style rescale for state, savepoints. `FlowEvent::Marker(Checkpoint{epoch})` is the barrier.
@@ -172,6 +187,21 @@ arrow-rs raw JSON reader PR #3479.
   parse edge over Flink is simply **being Rust, not Java** — already realized. arrow-json would only
   help if we could feed it zero-copy (no NDJSON rebuild); not worth it now. Bottleneck for the
   streaming workload was the **read path** (fixed: builders + rdkafka tuning, 2.1×), not parse.
+- **BOUNDED-PATH PROFILE 2026-06-30 (the EKS gap, re-localized):** the EKS throughput harness is
+  `availableNow` (bounded, ALREADY 16-reader parallel). `VAJRA_WM_PROF` shows the window STILL STARVED
+  (input_wait ~75%/instance, finalize ~20%) ⇒ with read + from_json already optimized (above), the
+  remaining ~2.4× gap is the **exchange** (`StreamExchangeExec` per-batch Arrow-IPC re-encode + tokio
+  channel copies) or the **`availableNow` micro-batch loop overhead** (re-plan + parquet-commit +
+  checkpoint per `maxOffsetsPerTrigger` batch, ~25× at 100M — vs Flink's ONE continuous pipeline).
+  NEXT = split exchange vs micro-batch (bigger maxOffsetsPerTrigger A/B + an exchange-side timer).
+  Multi-instance/Flight = continuous/multi-node, not this gap. See throughput-robustness-review.md.
+- **VERSION-UPGRADE perf targets (separate upgrade repo; verify in release notes before hand-tuning):**
+  (1) **arrow-rs `Utf8View`/`BinaryView` (StringView)** — fewer allocs/copies on string + JSON + shuffle
+  paths (big for the value column + exchange re-encode). (2) **DataFusion grouped-`AggregateExec`** perf
+  (hash, blocked emission, spill) — helps window finalize at scale. (3) **Arrow Flight** zero-copy /
+  client-cache improvements — for the multi-node shuffle (§4). Bumping DataFusion/Arrow/Flight may close
+  part of the gap "for free"; coordinate with the version-upgrade repo. **Add concrete release-note facts
+  here as they're confirmed** (don't assert versions un-verified).
 
 ## Cross-cutting design principles for Vajra (synthesized)
 1. **Unified API, two execution modes:** Spark API over batch + micro-batch + realtime
