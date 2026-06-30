@@ -29,11 +29,23 @@ never pays the raw-value round-trip. ⇒ our Arrow/no-GC edge is being SPENT on 
 | Ticket | Status | What |
 |---|---|---|
 | **VAJ-T7** | 🔨 NEXT (the big one) | **Fuse JSON parse into the source** — parse value→struct cols inside the read; raw value never materialized as a full column; exchange carries narrow parsed cols. Attacks source_read + from_json + exchange at once. Grounded: Flink deserialize-in-source + DataFusion projection/expr pushdown into scan. |
-| **VAJ-T4** | after T7 | Zero-copy exchange — slice instead of `concat_batches` + arrow `Utf8View` (no payload copy on shuffle). |
+| **VAJ-T4** | ✅ DONE+EKS | One `take` per owner via `vajra_key_groups` (was 128-split+`concat_batches`). EKS: 5.18→**5.33M ev/s**, gap 1.10→**1.085×**, RSS 10.19→**9.90 GiB**. BUT exchange CPU 68→66.5s only (shuffle cost = hash+route+send, NOT the concat copy) ⇒ exchange has a LOW ceiling. Did NOT reach parity. |
+| **VAJ-T7** | 🔨 measurement-justified | T4 didn't win; upstream still ~206s, window starved. Biggest remaining = **source_read 102s (value-byte copy) + from_json 37s = ~140s**. Rewrite from_json parse (simd-json + direct-builder, semantic-parity + simd-json-padding care) and/or fuse parse into source. On branch streaming/t7-parse-fusion; final confident EKS after. |
 | VAJ-T5/T6 | backlog | source_read poll floor / simd-json — only if T7+T4 don't reach ≤1.0×. |
 
-## Measured trajectory
-- Baseline 1.15× slower (4.92M). T1+T2 → **1.10× (5.18M)**. Next: T7 (parse-fusion) → T4 (zero-copy exchange) → target ≤1.0×.
+| **VAJ-T7a** | ✅ DONE+EKS | Flink-class columnar `ColBuilder` from_json (primitives→typed builders, complex→exact fallback; 20 parity tests). EKS: 5.33→**5.37M ev/s**, gap 1.085→**1.068×**, RSS 9.90→**9.61 GiB**, from_json CPU 37.4→**31.7s**. Real but modest — the `serde_json` PARSE (~27s) remains (that's T7b). |
+
+## Measured trajectory (all EKS 100M, c7g.4xlarge, vs Flink 1.19)
+- Baseline **1.15×** (4.92M) → T1+T2 **1.10×** (5.18M) → +T4 **1.085×** (5.33M) → +T7a **1.068×** (5.37M).
+  Memory 10.38→**9.61 GiB**. Steady, measured — **competitive, ~7% behind, NOT yet beating.**
+
+## What's left to BEAT Flink (honest, ranked by remaining CPU)
+1. **source_read 100.6s (value-byte copy) — #1, unchanged.** Only **source-fusion** (parse JSON in the
+   Kafka source, never materialize the value Binary col) cuts it. Big/risky: touches the wrapped-source
+   rewriter path. ~50s potential → would clearly beat Flink.
+2. **from_json 31.7s — T7b simd-json** faster parse (the serde_json tree is the residual). ~32→~18s.
+3. exchange 67s = floor (shuffle hash+route+send, not copy).
+**To clearly beat Flink: source-fusion (#1) is required; T7b helps but isn't sufficient alone.**
 
 ## Module map (no exploration needed — from CODEMAP)
 - T1/T2 → `sail-data-source/src/formats/kafka/reader.rs` (`KafkaArrowBuilders`, bounded read loop, offset maps `ends`/`next`, `write_staged_offsets`).
