@@ -55,10 +55,10 @@ streaming_phase() {
   # --- Flink latency: continuous passthrough job + same probe ---
   echo "-- Flink passthrough latency --"
   kk apply -f k8s/stream/flink-session.yaml >/dev/null 2>&1; kk wait --for=condition=available --timeout=300s deployment/flink-jm deployment/flink-tm 2>/dev/null
-  kk create configmap flink-sql-latency --from-file=flink-sql-latency.sql=k8s/stream/flink-sql-latency.sql --dry-run=client -o yaml | kk apply -f - >/dev/null
   # submit the continuous job (detached) via the JM sql-client, then probe, then cancel.
   local JM; JM=$(kk get pod -l app=flink,component=jm -o jsonpath='{.items[0].metadata.name}')
-  kk exec "$JM" -- sh -c '/opt/flink/bin/sql-client.sh -f /opt/flink/conf/flink-sql-latency.sql' >/tmp/flink_lat_submit.log 2>&1 &
+  kk cp k8s/stream/flink-sql-latency.sql "$JM":/tmp/flink-sql-latency.sql
+  kk exec "$JM" -- sh -c '/opt/flink/bin/sql-client.sh -f /tmp/flink-sql-latency.sql' >/tmp/flink_lat_submit.log 2>&1 &
   sleep 20
   kk exec vajra-client -- sh -c \
     "ENGINE=flink BOOT=$BOOT IN_TOPIC=lat_in OUT_TOPIC=lat_out RATE=$LAT_RATE DURATION_S=$LAT_DUR python3 /tmp/lat_probe.py" 2>&1 | grep -a LATENCY_RESULT | tee -a /tmp/tri_stream.txt
