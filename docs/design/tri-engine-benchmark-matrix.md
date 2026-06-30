@@ -12,11 +12,11 @@ RisingWave/StreamNative as architecture refs). Claim "replaces both" ONLY on mea
 | # | Dimension | Metric | Vajra (have) | Flink (have) | Status / need |
 |---|---|---|---|---|---|
 | S1 | Throughput | ev/s @100M | 5.37M | 5.74M | ⚠️ 1.068× (EKS measured) |
-| S2 | Peak memory | GiB @100M | 9.61 | 8.57 | ❌ 1.12× (need: bounded-under-load too) |
+| S2 | Peak memory | GiB @100M | 9.61 | 8.57 | ❌ bounded-path 1.12× EKS; ✅ **continuous-path BOUNDED local soak (~125MB steady, late/early=1.01, NO leak)** |
 | S3 | **Latency** | p50/p99/p999 e2e | — | — | ❓ NEED both (add Flink Kafka→Kafka passthrough baseline) |
 | S4 | **Recovery time** | kill→caught-up s | — | — | ❓ NEED (Flink 2.0 ForSt 49× ref) |
 | S5 | Checkpoint | dur ms + size | O(delta) proven | — | ❓ NEED timed (Flink 2.0 −94% ref) |
-| S6 | State @ scale | 1M+ keys, bounded | 64k-cap FIXED | RocksDB/ForSt | ⚠️ re-verify @1M (local) |
+| S6 | State @ scale | 1M+ keys, bounded | 64k-cap FIXED | RocksDB/ForSt | ✅ **1M keys all emitted, no cap** (local, wall 5.2s) |
 | S7 | Correctness/EO | dup/loss=0 ±crash | gate green | EO | ✅ local gate (C6/C7 xfail) |
 | S8 | Rescale | exact across parallelism | mechanism done | FLIP-8 | ✅ local (bit-exact gated by EO residual) |
 | S9 | Backpressure | bounded in-flight, slow sink | — | credit-flow FLIP-2 | ❓ NEED (local) |
