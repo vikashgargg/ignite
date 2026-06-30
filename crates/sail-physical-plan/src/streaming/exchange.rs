@@ -348,6 +348,9 @@ async fn distribute(
                 }
             }
             Ok(batch) => {
+                // Throughput attribution (VAJRA_WM_PROF): time the shuffle route+coalesce+send.
+                let _ex = sail_common_datafusion::streaming::event::encoding::wm_prof_enabled()
+                    .then(std::time::Instant::now);
                 // Hash into key-groups, then coalesce per OWNING instance (contiguous key-groups map
                 // to the same instance) so we send one batch per instance, not one per key-group.
                 let sch = batch.schema();
@@ -385,8 +388,16 @@ async fn distribute(
                         }
                     }
                 }
+                if let Some(t) = _ex {
+                    sail_common_datafusion::streaming::event::encoding::prof_add(
+                        &sail_common_datafusion::streaming::event::encoding::EXCHANGE_NS,
+                        t.elapsed().as_nanos() as u64,
+                    );
+                }
             }
             Err(e) => {
+                // Prod-grade: surface shuffle errors in the (EKS) pod log, not just up the channel.
+                eprintln!("STREAM_EXCHANGE error (distribute): {e}");
                 let _ = senders[0].send(Err(e)).await;
                 return;
             }

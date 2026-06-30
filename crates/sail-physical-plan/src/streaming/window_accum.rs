@@ -72,11 +72,18 @@ mod prof {
             .load(Ordering::Relaxed);
         let fj = sail_common_datafusion::streaming::event::encoding::FROM_JSON_NS
             .load(Ordering::Relaxed);
+        let rd = sail_common_datafusion::streaming::event::encoding::SOURCE_READ_NS
+            .load(Ordering::Relaxed);
+        let ex = sail_common_datafusion::streaming::event::encoding::EXCHANGE_NS
+            .load(Ordering::Relaxed);
         let pct = |x: u64| x.saturating_mul(100).checked_div(wall).unwrap_or(0);
+        // COMPLETE per-stage breakdown (all summed across instances) for EKS pinpointing. The summed
+        // ns are CPU across parallel instances — rank the stages by share to find the dominant one.
         eprintln!(
-            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) finalize={}ms({}%) encode_allhops={}ms from_json_allinst={}ms rows={} \
-             => {} (input_wait%>=60 ⇒ UPSTREAM-bound; from_json large ⇒ parse-bound; encode large ⇒ flow-event encode)",
-            wall / 1_000_000, iw / 1_000_000, pct(iw), fz / 1_000_000, pct(fz), enc / 1_000_000, fj / 1_000_000, rows,
+            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) | STAGES(summed-cpu-ms): source_read={} from_json={} exchange={} encode={} finalize={} | rows={} => {} \
+             (rank the largest STAGE = the throughput bottleneck to fix)",
+            wall / 1_000_000, iw / 1_000_000, pct(iw),
+            rd / 1_000_000, fj / 1_000_000, ex / 1_000_000, enc / 1_000_000, fz / 1_000_000, rows,
             if pct(iw) >= 60 { "STARVED(upstream)" } else { "BUSY(window)" },
         );
     }

@@ -32,6 +32,16 @@ pub static ENCODE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 /// Cumulative ns in `from_json` UDF invoke (the serde_json parse) — attribute the parse share of the
 /// streaming throughput gap. Written by sail-function's from_json, read by the window prof dump.
 pub static FROM_JSON_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Cumulative ns in the Kafka source read+batch-build loop (across source instances). Written by
+/// kafka/reader.rs, read by the window prof dump — the COMPLETE per-stage breakdown for EKS pinpointing.
+pub static SOURCE_READ_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Cumulative ns in the keyed shuffle distribute/route+send (across instances). Written by
+/// streaming/exchange.rs, read by the window prof dump.
+pub static EXCHANGE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Convenience: add `nanos` to a profiling counter only when profiling is enabled (cheap guard).
+pub fn prof_add(counter: &std::sync::atomic::AtomicU64, nanos: u64) {
+    counter.fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);
+}
 /// Shared throughput-profiling gate (env `VAJRA_WM_PROF`), cached. Used across crates.
 pub fn wm_prof_enabled() -> bool {
     static E: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
