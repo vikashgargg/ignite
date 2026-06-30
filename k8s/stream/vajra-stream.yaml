@@ -25,6 +25,10 @@ spec:
           env:
             - { name: RUST_LOG, value: warn }
             - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
+            # Throughput pinpoint: dumps the per-stage breakdown (source_read/from_json/exchange/encode/
+            # finalize) to this pod's log at the windowed-agg EndOfData — grep `WM_PROF`. Per-batch
+            # overhead only (negligible). Remove for the pure throughput A/B if you want zero overhead.
+            - { name: VAJRA_WM_PROF, value: "1" }
           volumeMounts:
             - { name: data, mountPath: /data }
       volumes:
