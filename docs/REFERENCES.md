@@ -262,8 +262,40 @@ arrow-rs raw JSON reader PR #3479.
 
 ---
 ## Backlog of sources to mine (when relevant; append findings above)
-- Flink 2.0.0 release blog (full) · Nexmark streaming benchmark methodology
 - Arrow Flight SQL spec · Arrow IPC format
 - RisingWave / Materialize architecture (changelog, differential dataflow) · Arroyo
 - DataFusion physical optimizer + codec internals · Comet Arrow Flight shuffle (issue #3596)
 - FAANG streaming production blogs (Netflix Keystone, Uber, LinkedIn, Pinterest) on latency/state/EO
+
+## 7. OFFICIAL benchmarks — the credible bar (fetched 2026-07-01; use these, don't invent)
+Sources: Nexmark https://flock-lab.github.io/flock/flink_nexmark.html + github.com/nexmark/nexmark ·
+TPC-DS https://www.databricks.com/blog/2021/11/02/databricks-sets-official-data-warehousing-performance-record.html · tpc.org TPC-DS spec · github.com/databricks/tpcds-kit
+
+### Streaming = NEXMARK (Flink's official streaming benchmark)
+- **Auction data model:** Person (bidders/sellers) · Auction (items) · Bid (bids). One generator stream
+  with a fixed ratio (default ~ Bid-heavy). Workloads **100M / 200M events**.
+- **Queries q0–q13 (+ variants to q22):** q0 passthrough (overhead) · q1 currency map · q2 selection/
+  filter · q3 local-item (filter+join Person×Auction) · q4 avg-price-per-category (agg) · q5 hot-items
+  (**sliding window**) · q6 avg-sell-by-seller (windowed) · q7 highest-bid (windowed) · q8 new-users
+  (windowed join) · q9 winning-bids (**join**) · q10 log-to-fs (windowed sink) · q11 user-sessions
+  (**session window**) · q12 **processing-time window** · q13 bounded-side-input join. ⇒ covers filter/
+  agg/sliding+session+proc-time windows/joins = the full streaming surface (our windowed-COUNT ≈ q5/q6).
+- **Metric = `Cores × Time(s)` per query + events/s** (NOT just wall). Full suite ~50 min. Baseline =
+  the `nexmark-flink` package (official Flink runner) on a multi-node cluster.
+- **Vajra implication:** for a credible "replaces Flink (streaming)" claim, run NEXMARK (Spark-API
+  equivalents of q0–q13) vs `nexmark-flink`, report Cores×Time + ev/s. Our current windowed-COUNT is the
+  q5/q6 slice only — full Nexmark is the gold standard to add.
+
+### Batch = TPC-DS (Spark's official batch benchmark)
+- **99 queries** (Databricks ran 104 = 99 + 4 approved variants + s_max full-scan), varying complexity
+  (simple agg → pattern mining). Scale factors SF1(1GB)/SF1000(1TB)/SF100000(100TB).
+- **Official metric `QphDS`** = combined: (1) data load, (2) **power test** (one sequential pass of all
+  queries = single-user response time), (3) **throughput test** (concurrent query streams), (4) data
+  maintenance (insert/delete). **Databricks SQL record: 32,941,245 QphDS @ 100TB** (2.2× prior Alibaba
+  14.86M; 10% lower cost). Tooling: `databricks/tpcds-kit`.
+- **Vajra implication:** for "replaces Spark (batch)", run the **TPC-DS 99 power test** (sequential
+  per-query response time + total wall) at a fixed SF (SF100/SF1000) vs Spark same node/data, + peak mem.
+  We have `scripts/tpcds_score.py`. TPC-H (SF-1/SF-100, `tpch_distributed.py`) = simpler secondary.
+
+### Net: tri-engine matrix anchors → streaming on **Nexmark (Cores×Time + ev/s)**, batch on **TPC-DS-99
+power test (response time + wall + mem)**. These are the one-time Spark/Flink reference numbers to beat.
