@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use datafusion::arrow::array::{
-    ArrayBuilder, ArrayRef, BinaryBuilder, Int32Builder, Int64Builder, RecordBatch, StringBuilder,
+    ArrayRef, BinaryBuilder, Int32Builder, Int64Builder, RecordBatch, StringBuilder,
     TimestampMillisecondBuilder,
 };
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
@@ -597,7 +597,7 @@ impl ExecutionPlan for KafkaSourceExec {
                     // finish) so the EKS profile pinpoints the source-read share. Zero cost when unset.
                     let _rd = sail_common_datafusion::streaming::event::encoding::wm_prof_enabled()
                         .then(std::time::Instant::now);
-                    let mut builders = KafkaArrowBuilders::with_capacity(target_batch);
+                    let mut builders = KafkaArrowBuilders::with_capacity(target_batch, &projection);
                     // Flush on EITHER a row cap OR a byte cap. The byte cap is the
                     // real safety guarantee: Arrow Utf8/Binary use i32 offsets (2 GiB
                     // per array), and the overflow is byte-driven, so a row count alone
@@ -800,7 +800,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 }
 
                 let mut msg_stream = consumer.stream();
-                let mut builders = KafkaArrowBuilders::with_capacity(max_batch);
+                let mut builders = KafkaArrowBuilders::with_capacity(max_batch, &projection);
                 let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let mut timer = tokio::time::interval(Duration::from_millis(interval_ms.max(1)));
                 timer.tick().await; // discard the immediate first tick
@@ -816,7 +816,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         // `biased` + data-flush-first guarantees the marker never overtakes its data.
                         _ = timer.tick() => {
                             if builders.len() > 0 {
-                                let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch));
+                                let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
                                 match b.finish_projected(&full_schema, &projection) {
                                     Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
                                     Err(e) => { yield Err(e); return; }
@@ -831,7 +831,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         // with ~ms latency instead of waiting for the (coarser) epoch tick.
                         _ = flush_timer.tick() => {
                             if builders.len() > 0 {
-                                let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch));
+                                let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
                                 match b.finish_projected(&full_schema, &projection) {
                                     Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
                                     Err(e) => { yield Err(e); return; }
@@ -862,7 +862,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                     // the commit; mid-epoch batches just carry data forward). Byte cap
                                     // keeps Utf8/Binary columns under Arrow's i32 offset limit.
                                     if builders.len() >= max_batch || batch_bytes >= MAX_BATCH_BYTES {
-                                        let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch));
+                                        let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
                                         match b.finish_projected(&full_schema, &projection) {
                                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
                                             Err(e) => { yield Err(e); return; }
@@ -942,7 +942,7 @@ impl ExecutionPlan for KafkaSourceExec {
 
             // Collect messages into micro-batches.
             loop {
-                let mut builders = KafkaArrowBuilders::with_capacity(max_batch);
+                let mut builders = KafkaArrowBuilders::with_capacity(max_batch, &projection);
                 let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let deadline = tokio::time::Instant::now() + timeout;
 
@@ -1011,33 +1011,42 @@ impl ExecutionPlan for KafkaSourceExec {
 /// zero-extra-copy consume path (Arrow-native; cf. docs/REFERENCES.md §4/§5) and the fix for
 /// the measured consumer-read-path bottleneck (docs/STREAMING_ARCHITECTURE.md P0 throughput).
 struct KafkaArrowBuilders {
-    key: BinaryBuilder,
-    value: BinaryBuilder,
-    topic: StringBuilder,
-    partition: Int32Builder,
-    offset: Int64Builder,
-    timestamp: TimestampMillisecondBuilder,
-    timestamp_type: Int32Builder,
+    key: Option<BinaryBuilder>,
+    value: Option<BinaryBuilder>,
+    topic: Option<StringBuilder>,
+    partition: Option<Int32Builder>,
+    offset: Option<Int64Builder>,
+    timestamp: Option<TimestampMillisecondBuilder>,
+    timestamp_type: Option<Int32Builder>,
+    rows: usize,
 }
 
 impl KafkaArrowBuilders {
-    fn with_capacity(n: usize) -> Self {
+    /// Projection-aware: only the columns in `projection` are allocated + appended, so pruned columns
+    /// cost nothing — esp. the CONSTANT `topic` string, which the EKS `source_read` profile showed was
+    /// being copied 100M× then projected away. Column indices match `kafka_data_schema()`: 0=key
+    /// 1=value 2=topic 3=partition 4=offset 5=timestamp 6=timestampType. (Spark/DataFusion projection
+    /// pushdown + Arrow bulk-columnar build; REFERENCES §170 — don't re-introduce per-record waste.)
+    fn with_capacity(n: usize, projection: &[usize]) -> Self {
+        let has = |i: usize| projection.contains(&i);
         Self {
-            key: BinaryBuilder::with_capacity(n, 0),
-            value: BinaryBuilder::with_capacity(n, 0),
-            topic: StringBuilder::with_capacity(n, 0),
-            partition: Int32Builder::with_capacity(n),
-            offset: Int64Builder::with_capacity(n),
-            timestamp: TimestampMillisecondBuilder::with_capacity(n),
-            timestamp_type: Int32Builder::with_capacity(n),
+            key: has(0).then(|| BinaryBuilder::with_capacity(n, 0)),
+            value: has(1).then(|| BinaryBuilder::with_capacity(n, 0)),
+            topic: has(2).then(|| StringBuilder::with_capacity(n, 0)),
+            partition: has(3).then(|| Int32Builder::with_capacity(n)),
+            offset: has(4).then(|| Int64Builder::with_capacity(n)),
+            timestamp: has(5).then(|| TimestampMillisecondBuilder::with_capacity(n)),
+            timestamp_type: has(6).then(|| Int32Builder::with_capacity(n)),
+            rows: 0,
         }
     }
 
     fn len(&self) -> usize {
-        self.offset.len()
+        self.rows
     }
 
-    /// Append one Kafka message (borrowed bytes copied straight into the Arrow buffers).
+    /// Append one Kafka message (borrowed bytes copied straight into the projected Arrow buffers;
+    /// pruned columns are skipped — no work, no allocation).
     fn append(
         &mut self,
         key: Option<&[u8]>,
@@ -1048,30 +1057,57 @@ impl KafkaArrowBuilders {
         ts_ms: i64,
         ts_type: i32,
     ) {
-        self.key.append_option(key);
-        self.value.append_option(value);
-        self.topic.append_value(topic);
-        self.partition.append_value(partition);
-        self.offset.append_value(offset);
-        self.timestamp.append_value(ts_ms);
-        self.timestamp_type.append_value(ts_type);
+        if let Some(b) = self.key.as_mut() {
+            b.append_option(key);
+        }
+        if let Some(b) = self.value.as_mut() {
+            b.append_option(value);
+        }
+        if let Some(b) = self.topic.as_mut() {
+            b.append_value(topic);
+        }
+        if let Some(b) = self.partition.as_mut() {
+            b.append_value(partition);
+        }
+        if let Some(b) = self.offset.as_mut() {
+            b.append_value(offset);
+        }
+        if let Some(b) = self.timestamp.as_mut() {
+            b.append_value(ts_ms);
+        }
+        if let Some(b) = self.timestamp_type.as_mut() {
+            b.append_value(ts_type);
+        }
+        self.rows += 1;
     }
 
-    /// Finish into the projected Spark Kafka record batch.
-    fn finish_projected(mut self, full_schema: &SchemaRef, projection: &[usize]) -> Result<RecordBatch> {
-        let columns: Vec<ArrayRef> = vec![
-            Arc::new(self.key.finish()),
-            Arc::new(self.value.finish()),
-            Arc::new(self.topic.finish()),
-            Arc::new(self.partition.finish()),
-            Arc::new(self.offset.finish()),
-            Arc::new(self.timestamp.finish()),
-            Arc::new(self.timestamp_type.finish()),
-        ];
-        RecordBatch::try_new(Arc::clone(full_schema), columns)
-            .map_err(|e| arrow_datafusion_err!(e))?
-            .project(projection)
-            .map_err(|e| arrow_datafusion_err!(e))
+    /// Finish into the projected Spark Kafka record batch — builds ONLY the projected columns, in
+    /// `projection` order (no full-7-column build followed by `.project()`).
+    fn finish_projected(
+        mut self,
+        full_schema: &SchemaRef,
+        projection: &[usize],
+    ) -> Result<RecordBatch> {
+        let projected_schema =
+            Arc::new(full_schema.project(projection).map_err(|e| arrow_datafusion_err!(e))?);
+        let columns: Vec<ArrayRef> = projection
+            .iter()
+            .map(|&i| -> Result<ArrayRef> {
+                let missing = || exec_datafusion_err!("kafka builder: column {i} not allocated");
+                let arr: ArrayRef = match i {
+                    0 => Arc::new(self.key.take().ok_or_else(missing)?.finish()),
+                    1 => Arc::new(self.value.take().ok_or_else(missing)?.finish()),
+                    2 => Arc::new(self.topic.take().ok_or_else(missing)?.finish()),
+                    3 => Arc::new(self.partition.take().ok_or_else(missing)?.finish()),
+                    4 => Arc::new(self.offset.take().ok_or_else(missing)?.finish()),
+                    5 => Arc::new(self.timestamp.take().ok_or_else(missing)?.finish()),
+                    6 => Arc::new(self.timestamp_type.take().ok_or_else(missing)?.finish()),
+                    other => return Err(exec_datafusion_err!("kafka builder: column {other} out of range")),
+                };
+                Ok(arr)
+            })
+            .collect::<Result<_>>()?;
+        RecordBatch::try_new(projected_schema, columns).map_err(|e| arrow_datafusion_err!(e))
     }
 }
 
