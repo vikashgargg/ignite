@@ -50,7 +50,25 @@ throughput measurement never crashes, so the N-instance EO commit union (step 2)
 answer "did step 1 close the 2.4× gap vs Flink?" Step 2 is for the crash-EO *correctness* claim,
 separable from the throughput number. **This is much cheaper than assumed.**
 
-## Recommended order (REVISED)
+## ⚠️ CRITICAL PATH-MISMATCH FOUND 2026-06-30 (before any EKS spend)
+The EKS throughput harness (`scripts/stream_windowed_agg.py`, `state_scale_stress.py`) uses
+**`trigger(availableNow=True)` — the BOUNDED path**, which ALREADY runs one-instance-per-Kafka-partition
+(16 readers, `reader.rs:270`). So: **(1)** Phase A's "single-instance source STARVED" was profiled on the
+**CONTINUOUS** path (`inc_ckpt_gate`), a DIFFERENT path. **(2)** `VAJRA_RT_MULTI` / Phase B multi-instance
+only helps CONTINUOUS — it does NOT touch the bounded path the EKS 2.4× gap was measured on. ⇒ **The EKS
+throughput gap is NOT the realtime single-instance source.** Must RE-PROFILE the BOUNDED (availableNow)
+windowed-agg to find ITS bottleneck (from_json / exchange / window — all already parallel-read at 16).
+Phase B remains valid for *continuous-mode* throughput, but the headline EKS number needs the bounded
+profile first. (This is exactly the robustness check paying off — caught before EKS $$.)
+
+## Recommended order (RE-REVISED after the mismatch)
+1. **Profile the BOUNDED availableNow windowed-agg** (VAJRA_WM_PROF, EndOfData dump) over Kafka locally
+   → find the real EKS-path bottleneck (window busy? exchange? from_json even at 16 readers?).
+2. Fix the dominant bounded-path stage (the actual EKS gap).
+3. THEN EKS A/B on the bounded path vs Flink.
+(Phase B continuous multi-instance stays banked for continuous-mode throughput / correctness.)
+
+## Recommended order (REVISED — superseded by the path-mismatch above)
 1. **EKS throughput A/B FIRST** (answers the headline cheaply): deploy step-1 `VAJRA_RT_MULTI=1` on the
    single-node cluster, no-crash, measure ev/s vs the single-instance baseline AND vs Flink 1.19. Confirms
    whether parallel read+from_json closes/beats the gap. Pre-flight: i32-overflow at scale, teardown-$0.
