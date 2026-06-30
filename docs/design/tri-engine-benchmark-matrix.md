@@ -11,9 +11,9 @@ RisingWave/StreamNative as architecture refs). Claim "replaces both" ONLY on mea
 ## A. STREAMING dimensions — baseline = Flink 1.19/2.x (EKS c7g.4xlarge, fair side-by-side)
 | # | Dimension | Metric | Vajra (have) | Flink (have) | Status / need |
 |---|---|---|---|---|---|
-| S1 | Throughput | ev/s @100M | 5.37M | 5.74M | ⚠️ 1.068× (EKS measured) |
+| S1 | Throughput | ev/s @100M | 5.28–5.37M | 5.74–5.78M | ⚠️ ~1.07–1.10× (EKS, multi-run) |
 | S2 | Peak memory | GiB @100M | 9.61 | 8.57 | ❌ bounded-path 1.12× EKS; ✅ **continuous-path BOUNDED local soak (~125MB steady, late/early=1.01, NO leak)** |
-| S3 | **Latency** | p50/p99/p999 e2e | — | — | ❓ NEED both (add Flink Kafka→Kafka passthrough baseline) |
+| S3 | **Latency** | p50/p99/p999 e2e | p50=62 p99=119 p999=126 max=129 | p50=53 p99=110 p999=127 max=131 | ✅ **MEASURED (EKS 2026-07-01, 20k/s): competitive; Vajra TAIL p999/max SLIGHTLY BETTER (no-GC)** |
 | S4 | **Recovery time** | kill→caught-up s | — | — | ❓ NEED (Flink 2.0 ForSt 49× ref) |
 | S5 | Checkpoint | dur ms + size | O(delta) proven | — | ❓ NEED timed (Flink 2.0 −94% ref) |
 | S6 | State @ scale | 1M+ keys, bounded | 64k-cap FIXED | RocksDB/ForSt | ✅ **1M keys all emitted, no cap** (local, wall 5.2s) |
