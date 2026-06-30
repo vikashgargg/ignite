@@ -41,6 +41,25 @@ bottleneck). **For multi-node EKS it needs the streaming Flight shuffle (#2)** �
 structural addition the current design doc under-specifies. **Correctness hinges on step 2** (the
 N-instance commit union under crash — the same multi-partition-commit race the gap register flags).
 
+## ✅✅ EKS RESULT 2026-06-30 (DECISIVE — ran it: 100M events, c7g.4xlarge single node, bounded availableNow)
+| | throughput | wall | peak RSS |
+|---|---|---|---|
+| Flink 1.19 | 5.67M ev/s | 17.6s | 8.57 GiB |
+| Vajra (:wmprof) | **4.92M ev/s** | 20.3s | 10.38 GiB |
+
+**Vajra ≈ 1.15× SLOWER (NOT the old 2.4×) + 1.2× more memory** on this path — much closer than assumed.
+**`WM_PROF` per-stage CPU (summed over 16 instances), RANKED:**
+`source_read=106s` ≫ `exchange=80s` > `from_json=38s` > `finalize=23s` > `encode=0.3s`.
+⇒ **DOMINANT = source_read (Kafka read + Arrow batch-build), then exchange (shuffle route+coalesce).
+from_json only 3rd — simd-json was NOT the target (confirmed by not blind-implementing it).**
+
+### THE fix to beat Flink (EKS-confirmed, ranked) — implement ONE prod-grade, re-measure
+1. **source_read** (~47% upstream CPU): rdkafka poll + `KafkaArrowBuilders` batch-build + FlowEvent wrap.
+   Reduce per-message alloc/overhead; larger `fetch.max.bytes`/`max.partition.fetch.bytes`; batch appends.
+2. **exchange** (~36%): `StreamExchangeExec` route + `concat_batches` coalesce copies + channel. Cut the
+   per-batch copy; arrow `Utf8View` (version-upgrade) shrinks shuffle copies + the 1.2× memory.
+3. from_json (~17%) only after 1+2. finalize/encode negligible.
+
 ## EKS TOPOLOGY CONFIRMED 2026-06-30 — SINGLE NODE
 `k8s/stream/`: Vajra `replicas:1` + `--mode local-cluster --workers 4`, `eks-stream-cluster
 desiredCapacity:1`, `role:compute` single node. ⇒ **(a) streaming Arrow Flight shuffle (#2) is NOT on
