@@ -29,9 +29,16 @@ use crate::streaming::event::FlowEvent;
 /// ALL operator hops (the per-data-batch null-marker-column build). Read by the window operator's prof
 /// dump to see the encode's share of the wall. Zero cost when the env var is unset.
 pub static ENCODE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-fn encode_prof_enabled() -> bool {
+/// Cumulative ns in `from_json` UDF invoke (the serde_json parse) — attribute the parse share of the
+/// streaming throughput gap. Written by sail-function's from_json, read by the window prof dump.
+pub static FROM_JSON_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Shared throughput-profiling gate (env `VAJRA_WM_PROF`), cached. Used across crates.
+pub fn wm_prof_enabled() -> bool {
     static E: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *E.get_or_init(|| std::env::var("VAJRA_WM_PROF").is_ok())
+}
+fn encode_prof_enabled() -> bool {
+    wm_prof_enabled()
 }
 
 pub struct EncodedFlowEventStream {
