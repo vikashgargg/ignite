@@ -1,0 +1,44 @@
+# Apache Spark 3.5.3 reference for the OFFICIAL TPC-DS-99 power test (batch baseline, dimension B2).
+# Runs the SAME scripts/tpcds_score.py (all 99 queries, sequential = power test) that Vajra runs, in
+# Spark local[16] mode on the SAME node + node-local resources as Vajra (run AFTER scaling Vajra to 0
+# so it gets the full node = fair). tpcds_score.py generates its data in-process via DuckDB at TPCDS_SF,
+# so no shared data volume is needed. Reports per-query wall + total + the pod's peak memory (cgroup v2).
+# Requires a ConfigMap 'tpcds-script' (= scripts/tpcds_score.py), created at run time:
+#   kubectl -n vajra create configmap tpcds-script --from-file=tpcds_score.py=scripts/tpcds_score.py
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: spark-tpcds-99
+  namespace: vajra
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: spark
+          image: python:3.12-slim-bookworm
+          resources:
+            requests: { cpu: "8", memory: "16Gi" }
+            limits: { cpu: "15", memory: "115Gi" }
+          env:
+            - { name: SPARK_REMOTE, value: "local[16]" }
+            - { name: TPCDS_SF, value: "10" }            # match the Vajra run's TPCDS_SF
+            - { name: SPARK_LOCAL_IP, value: "127.0.0.1" }
+            - { name: PYSPARK_SUBMIT_ARGS, value: "--driver-memory 95g --conf spark.sql.shuffle.partitions=64 pyspark-shell" }
+          volumeMounts:
+            - { name: script, mountPath: /app }
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              apt-get update -qq && apt-get install -y -qq openjdk-17-jre-headless procps >/dev/null
+              pip install --quiet "pyspark==3.5.3" duckdb pandas
+              echo "=== Spark 3.5.3 TPC-DS-99 power test (local[16], 95g driver, SF=$TPCDS_SF) ==="
+              python3 /app/tpcds_score.py || true
+              echo "=== Spark pod peak memory ==="
+              cat /sys/fs/cgroup/memory.peak 2>/dev/null | awk '{printf "peak_RSS_bytes=%d (%.1f GiB)\n",$1,$1/1073741824}'
+      volumes:
+        - name: script
+          configMap: { name: tpcds-script }

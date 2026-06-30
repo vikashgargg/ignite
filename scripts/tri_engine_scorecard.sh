@@ -85,10 +85,16 @@ batch_phase() {
     [ -n "$VPOD" ] && echo "Vajra $NAME peakRSS=$(gib "$(kk exec "$VPOD" -- cat /sys/fs/cgroup/memory.peak 2>/dev/null)") GiB" | tee -a /tmp/tri_batch.txt
   done
   # Spark baseline: same scripts, Spark 3.5.3 local[16], after scaling Vajra->0 (same node = fair).
-  echo "==== Spark baseline (scale Vajra->0, run spark-bench-job) ===="
-  kk scale deploy/vajra --replicas=0 2>/dev/null || true
-  echo "  (apply k8s/eks/spark-bench-job.yaml — parameterized for tpcds_score.py/tpch_distributed.py;"
-  echo "   reads SPARK_REMOTE=local[16] + TPCDS_SF/TPCH_SF; reports per-query wall + cgroup memory.peak)"
+  echo "==== Spark 3.5.3 baseline (scale Vajra->0, same node) ===="
+  kk scale deploy/vajra --replicas=0 2>/dev/null || true; sleep 10
+  # TPC-DS-99 power test on Spark (data generated in-process via DuckDB at TPCDS_SF).
+  kk create configmap tpcds-script --from-file=tpcds_score.py=scripts/tpcds_score.py --dry-run=client -o yaml | kk apply -f - >/dev/null
+  kk delete job spark-tpcds-99 --ignore-not-found >/dev/null 2>&1
+  sed "s/value: \"10\".*# match.*/value: \"$TPCDS_SF\"/" k8s/eks/spark-tpcds-job.yaml | kk apply -f -
+  kk wait --for=condition=complete --timeout=3600s job/spark-tpcds-99 2>/dev/null \
+    && kk logs job/spark-tpcds-99 2>/dev/null | grep -aiE "TOTAL|wall|peak_RSS|TPC-DS|GEOMEAN" | tail -15 | tee -a /tmp/tri_batch.txt
+  # TPC-H on Spark (reuses the existing spark-bench-job for tpch_distributed.py).
+  echo "  (TPC-H Spark: k8s/eks/spark-bench-job.yaml, same pattern)"
   echo "######## BATCH SCORECARD TABLE ########"; cat /tmp/tri_batch.txt | mask
   echo "Teardown: eksctl delete cluster --name <batch-cluster> --region $REGION --force --wait (NO interrupt)"
 }
