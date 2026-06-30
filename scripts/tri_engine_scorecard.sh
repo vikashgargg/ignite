@@ -70,23 +70,31 @@ streaming_phase() {
 
 # ---------------------------------------------------------------------------
 batch_phase() {
-  echo "######## BATCH SCORECARD (vs Spark 3.5.3) ########"
+  NS="${BATCH_NS:-vajra}"   # batch runs in the `vajra` namespace (k8s/eks/vajra-sf100.yaml)
+  echo "######## BATCH SCORECARD (vs Spark 3.5.3), ns=$NS ########"
   echo "Official: TPC-DS-99 power test (sequential per-query + total wall) + TPC-H + peak RSS."
   : > /tmp/tri_batch.txt
-  # Vajra batch server assumed deployed (k8s/eks/vajra-sf100.yaml) + a client pod with CLIENT_READY.
-  local VSVC="vajra.${NS}.svc.cluster.local:50051"
+  local REG; REG="$(aws ecr describe-repositories --region "$REGION" --repository-name vajra --query 'repositories[0].repositoryUri' --output text 2>/dev/null | sed 's|/vajra||')"
+  # Deploy the batch Vajra server + client (vajra-sf100 = svc/deploy/app name).
+  kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+  sed "s|__ECR__|$REG|g" k8s/eks/vajra-sf100.yaml | kk apply -f -
+  kk apply -f k8s/eks/vajra-client.yaml
+  kk wait --for=condition=available --timeout=300s deployment/vajra-sf100 2>/dev/null
+  kk wait --for=condition=ready --timeout=300s pod/vajra-client 2>/dev/null
+  until kk logs vajra-client 2>/dev/null | grep -q CLIENT_READY; do sleep 5; done
+  local VSVC="vajra-sf100.${NS}.svc.cluster.local:50051"
   for bench in "tpcds_score.py TPCDS_SF=$TPCDS_SF TPC-DS-99" "tpch_distributed.py TPCH_SF=$TPCH_SF TPC-H"; do
     set -- $bench; local SCRIPT="$1" SFENV="$2" NAME="$3"
     echo "==== Vajra $NAME ($SFENV) ===="
     kk cp "scripts/$SCRIPT" vajra-client:/tmp/"$SCRIPT" 2>/dev/null
     kk exec vajra-client -- sh -c "SPARK_REMOTE=sc://$VSVC $SFENV python3 /tmp/$SCRIPT" 2>&1 \
       | grep -aiE "TOTAL|wall|q[0-9]+|score|GEOMEAN|TPC" | tail -20 | tee -a /tmp/tri_batch.txt
-    local VPOD; VPOD=$(kk get pod -l app=vajra -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    local VPOD; VPOD=$(kk get pod -l app=vajra-sf100 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
     [ -n "$VPOD" ] && echo "Vajra $NAME peakRSS=$(gib "$(kk exec "$VPOD" -- cat /sys/fs/cgroup/memory.peak 2>/dev/null)") GiB" | tee -a /tmp/tri_batch.txt
   done
   # Spark baseline: same scripts, Spark 3.5.3 local[16], after scaling Vajra->0 (same node = fair).
   echo "==== Spark 3.5.3 baseline (scale Vajra->0, same node) ===="
-  kk scale deploy/vajra --replicas=0 2>/dev/null || true; sleep 10
+  kk scale deploy/vajra-sf100 --replicas=0 2>/dev/null || true; sleep 10
   # TPC-DS-99 power test on Spark (data generated in-process via DuckDB at TPCDS_SF).
   kk create configmap tpcds-script --from-file=tpcds_score.py=scripts/tpcds_score.py --dry-run=client -o yaml | kk apply -f - >/dev/null
   kk delete job spark-tpcds-99 --ignore-not-found >/dev/null 2>&1
