@@ -41,7 +41,24 @@ bottleneck). **For multi-node EKS it needs the streaming Flight shuffle (#2)** �
 structural addition the current design doc under-specifies. **Correctness hinges on step 2** (the
 N-instance commit union under crash — the same multi-partition-commit race the gap register flags).
 
-## Recommended order
+## EKS TOPOLOGY CONFIRMED 2026-06-30 — SINGLE NODE
+`k8s/stream/`: Vajra `replicas:1` + `--mode local-cluster --workers 4`, `eks-stream-cluster
+desiredCapacity:1`, `role:compute` single node. ⇒ **(a) streaming Arrow Flight shuffle (#2) is NOT on
+the critical path** for this test — in-process exchange across 4 in-node workers is fine; defer Flight to
+true multi-node scale-out. **(b) The throughput NUMBER needs only step 1 + an EKS NO-CRASH run** — a
+throughput measurement never crashes, so the N-instance EO commit union (step 2) is NOT required to
+answer "did step 1 close the 2.4× gap vs Flink?" Step 2 is for the crash-EO *correctness* claim,
+separable from the throughput number. **This is much cheaper than assumed.**
+
+## Recommended order (REVISED)
+1. **EKS throughput A/B FIRST** (answers the headline cheaply): deploy step-1 `VAJRA_RT_MULTI=1` on the
+   single-node cluster, no-crash, measure ev/s vs the single-instance baseline AND vs Flink 1.19. Confirms
+   whether parallel read+from_json closes/beats the gap. Pre-flight: i32-overflow at scale, teardown-$0.
+2. **Step 2 (N-instance EO commit union)** + local crash-gate — the correctness claim, once throughput
+   is confirmed worth it.
+3. **Step 3** drop per-partition-WM workaround; **multi-node Flight shuffle** only if/when scaling out.
+
+## Recommended order (original, superseded by the single-node finding above)
 1. **Decide EKS topology** (1 big c7g node vs multi-node) — determines if streaming Flight shuffle is
    on the critical path now. (Prior EKS run was c7g.4xlarge — confirm single vs multi.)
 2. **Step 2: N-instance EO commit union** + local crash-gate (`inc_ckpt_gate PARTS=4` no-dup/no-loss).
