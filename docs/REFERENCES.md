@@ -62,6 +62,21 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/concepts
   via manifest range (`chunks_for_range`, a lookup) + row-filter. **Beats Flink:** chunk selection is a
   manifest lookup over IMMUTABLE Arrow chunks (KG-aligned ⇒ zero rewrite) vs re-serializing RocksDB
   state. Proven: `rescale_redistributes_keyed_state_exactly`. See streaming-rescale-from-checkpoint.md.
+- **§2d Parallel source + streaming shuffle (cross-system grounding for realtime multi-instance):**
+  (1) **Flink FLIP-27** — one SourceReader per split (Kafka partition); SplitEnumerator assigns; each
+  reader event-time-ordered → per-split watermark, op = MIN. (2) **Spark Structured Streaming / 4.1
+  RT-mode** — `KafkaSourceRDD` one task per TopicPartition; RT-mode adds in-memory streaming shuffle +
+  concurrent stage scheduling (decouple stages so they pipeline, not block). (3) **Arrow Flight shuffle /
+  Ballista** — zero-copy columnar exchange between stages (DoGet/DoPut), the disaggregated-shuffle model
+  for distributed (EKS). (4) **StreamNative/Pulsar + Kafka** — partitioned topics; consumers scale to
+  partition count; ordering per partition. (5) **FAANG** (LinkedIn Samza/Brooklin, Uber, Netflix Mantis)
+  — converge on per-partition parallel ingest + per-partition watermark/state. **Vajra synthesis (Phase
+  B, docs/design/streaming-realtime-multi-instance.md):** realtime source → N readers (one per Kafka
+  partition, reuse the bounded path) + per-instance epoch staging + atomic union commit (generalize the
+  single-coordinator realtime EO); each reader single-partition-ordered ⇒ monotone watermark (removes the
+  per-partition-WM workaround) + `StreamExchangeExec` keyed MIN-merge + `StreamBarrierAlignExec` N→1
+  align; **EKS distributed shuffle = Arrow Flight** (zero-copy). This is the read+`from_json`
+  parallelization the Phase A profile demands AND the watermark-correctness fix, in one change.
 - **Implication for Vajra:** our `StreamBarrierAlignExec` (N→1 Chandy-Lamport) + `state_io` +
   Kafka replay + EO sink mirror this. **Owe:** unaligned-checkpoint option (low-latency EO),
   Key-Group-style rescale for state, savepoints. `FlowEvent::Marker(Checkpoint{epoch})` is the barrier.

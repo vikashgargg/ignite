@@ -282,6 +282,17 @@ impl StreamSource for KafkaStreamSource {
             n_parts
                 .unwrap_or_else(|| state.config().target_partitions())
                 .max(1)
+        } else if std::env::var("VAJRA_RT_MULTI").is_ok() {
+            // Throughput Phase B (FLIP-27): N realtime readers, one per Kafka partition, to parallelize
+            // source read + from_json (Phase A showed the window STARVED on the single-instance path).
+            // GATED off by default — the N-instance per-epoch EO commit union is steps 2-3 (single-
+            // coordinator commit is still wired); enable only to profile/validate. Each instance reads
+            // ONE partition in event-time order ⇒ monotone watermark (also closes the per-partition
+            // watermark edge). See docs/design/streaming-realtime-multi-instance.md.
+            count_kafka_partitions(&self.options)
+                .await
+                .unwrap_or_else(|| state.config().target_partitions())
+                .max(1)
         } else {
             1
         };
