@@ -55,10 +55,13 @@ S10/B5 cold-start · (debug binary OK for behavioral checks). Find bugs cheap BE
 - S1+S2 streaming throughput/memory vs Flink: `eks_stream_headtohead.sh` (+ `flink-sql.sql`).
 **BUILT this session:** S3 Flink latency passthrough `k8s/stream/flink-sql-latency.sql` (raw passthrough,
 mirrors `stream_latency_query.py`); Vajra latency = `stream_latency.sh`.
-**REMAINING gaps to build:** S3 latency *runner+orchestrator* (start continuous Flink job async, run
-shared producer+latency-consumer for DURATION, cancel) · B2 TPC-DS · B3 ClickBench Spark-baseline (mirror
-spark-bench-job.yaml pattern) · S4 recovery-timing (extend soak gate w/ kill→caught-up timer) · S10/B5
-cold-start (launch→first-output timer).
+**ALSO REUSABLE (confirmed):** B2 TPC-DS = `scripts/tpcds_score.py` (Vajra) + spark-bench pattern; B3
+ClickBench = `scripts/clickbench.py` (Vajra, downloads hits parquet) + spark-bench pattern. So ALL batch
+dims (B1/B2/B3 + memory) = existing Vajra script + the `spark-bench-job.yaml` pattern parameterized by
+script/args. `lat_probe.py` (S3) BUILT+VALIDATED (Vajra local p50=43 p99=59 p999=141ms, debug).
+**REMAINING to build:** the **tri-engine orchestrator** `tri_engine_scorecard.sh` (assemble: deploy
+Vajra/Flink/Spark on ONE EKS cluster, run each dim, capture table) + parameterize spark-baseline for
+tpcds/clickbench + smaller dims S4 recovery-timing + S10/B5 cold-start. Then the EKS run ($ gate).
 **Phase-2 execution:** ONE EKS cluster → run reusable (B1/B4/S1/S2) for immediate fair numbers + the
 built/remaining gaps → capture Spark+Flink baselines once → teardown $0 (clean, NO interrupt).
 
