@@ -41,7 +41,8 @@ managedNodeGroups:
   - name: kafka
     amiFamily: AmazonLinux2023
     instanceTypes: ["m7g.2xlarge"]   # 8 vCPU, 32 GB — dedicated Kafka broker
-    spot: true
+    spot: false                      # on-demand: dedicated broker must be reliable (spot capacity for
+                                     # m7g.2xlarge was unfulfillable in ap-south-1c, 2026-06-30)
     desiredCapacity: 1
     minSize: 0
     maxSize: 1
