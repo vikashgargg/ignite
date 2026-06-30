@@ -89,6 +89,18 @@ loop overhead**.
    aggregate, JSON, and Flight zero-copy perf gains — bumping versions may close part of the gap for free.
    Track release notes in REFERENCES and coordinate with the version-upgrade repo before hand-optimizing.
 
+### CANDIDATE inefficiency found 2026-06-30 (flow-event encoding, `encoding.rs:46`)
+`EncodedFlowEventStream::encode` for a `FlowEvent::Data` prepends a **`new_null_array(Binary,
+num_rows)`** marker column + a retracted bool to EVERY data batch, at EVERY operator hop
+(source→watermark→exchange→window). Markers are separate events, so this per-row null-marker column is
+pure per-record overhead, ×hops ×batches — **Flink doesn't tag every record** (object reuse / separate
+marker channel). **Flink-better fix candidates:** (a) cheap constant/shared null-marker (avoid O(N)
+alloc), or (b) carry markers as SEPARATE batches so data batches need no marker column (deeper redesign).
+**NOT YET CONFIRMED as the dominant cost** — locally the window is starved within ONE batch, implicating
+the encode/exchange/decode layer, but the null-alloc vs tokio-channel vs decode split is unmeasured.
+**Prod-grade gate: confirm with an encode/exchange-side timer BEFORE implementing** (don't optimize an
+unproven cost). If confirmed dominant, fix (a) is small + clearly Flink-better.
+
 ### Fix targets for the bounded/EKS gap (ranked) — (superseded by the re-narrow above)
 1. **`from_json` parse** — vectorized/SIMD JSON (simd-json / arrow-json fast path), or avoid re-parsing
    (parse once; project needed fields). Confirm its share with a split timer or with/without-from_json A/B.
