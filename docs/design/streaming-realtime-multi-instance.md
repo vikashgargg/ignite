@@ -54,6 +54,14 @@ partition — because it has no per-epoch realtime commit, just final offsets.)
 4. **Re-profile** with `VAJRA_WM_PROF` (window should no longer be starved) + **EKS throughput** A/B vs
    the single-instance baseline and vs Flink. Target ≤1.2× Flink, keep the 6.6× memory win.
 
+## STATUS — step 1 DONE 2026-06-30 (gated VAJRA_RT_MULTI)
+Realtime parallelism flips 1→N (reuse bounded per-partition read + offset keys). Re-profile
+(VAJRA_WM_PROF, PARTS=4 N=3000): pipeline RUNS CLEAN (no panic); total rows processed **180k→720k (4×)
+at the same ~42s wall** ⇒ the N parallel readers parallelize source read+`from_json` as intended; the
+window is fast (finalize 216ms) and never the bottleneck. CAVEATS: (1) rows include continuous re-reads
+(720k > ~210k produced) so the LOCAL number is confounded — **real throughput = controlled EKS** (step
+4); (2) gate FAILs because the N-instance EO commit union is not yet wired (step 2). NEXT = step 2.
+
 ## Risks / honest unknowns
 - The union-commit across N instances under crash+replay is the delicate part (the same multi-partition-
   commit race the gap register flags) — must be gated + crash-gated before default-on.
