@@ -243,6 +243,117 @@ fn from_json_inner(args: &[ArrayRef], session_timezone: &str) -> Result<ArrayRef
 /// serde_json. Our parse is already Rust (no JVM) so it already beats Flink's per-record JVM
 /// deserialize; arrow-json adds NDJSON-rebuild complexity for ~0 gain over this, so it was reverted.
 /// See docs/REFERENCES.md §6.
+/// Flink-class columnar deserialize (VAJ-T7): one typed Arrow builder per struct field, appended
+/// directly — NO per-value `ScalarValue` boxing + `iter_to_array` re-dispatch (the EKS `from_json`
+/// hot cost). Mirrors Flink's `JsonRowDataDeserializationSchema` (per-field converter into the
+/// columnar buffer). Primitive types append straight into typed builders; complex/coerced types
+/// (Date32/Timestamp/Decimal/Struct/List/Map) fall back to the exact `json_value_to_scalar` converter,
+/// so behavior is identical by construction — only the hot primitive path changes.
+enum ColBuilder {
+    Boolean(BooleanBuilder),
+    Int8(Int8Builder),
+    Int16(Int16Builder),
+    Int32(Int32Builder),
+    Int64(Int64Builder),
+    Float32(Float32Builder),
+    Float64(Float64Builder),
+    Utf8(StringBuilder),
+    LargeUtf8(LargeStringBuilder),
+    /// Complex/coerced types: reuse the proven `ScalarValue` converter (semantic parity, rare path).
+    Fallback {
+        data_type: DataType,
+        vals: Vec<ScalarValue>,
+    },
+}
+
+impl ColBuilder {
+    fn new(data_type: &DataType, capacity: usize) -> Self {
+        match data_type {
+            DataType::Boolean => Self::Boolean(BooleanBuilder::with_capacity(capacity)),
+            DataType::Int8 => Self::Int8(Int8Builder::with_capacity(capacity)),
+            DataType::Int16 => Self::Int16(Int16Builder::with_capacity(capacity)),
+            DataType::Int32 => Self::Int32(Int32Builder::with_capacity(capacity)),
+            DataType::Int64 => Self::Int64(Int64Builder::with_capacity(capacity)),
+            DataType::Float32 => Self::Float32(Float32Builder::with_capacity(capacity)),
+            DataType::Float64 => Self::Float64(Float64Builder::with_capacity(capacity)),
+            DataType::Utf8 => Self::Utf8(StringBuilder::with_capacity(capacity, 0)),
+            DataType::LargeUtf8 => Self::LargeUtf8(LargeStringBuilder::with_capacity(capacity, 0)),
+            other => Self::Fallback {
+                data_type: other.clone(),
+                vals: Vec::with_capacity(capacity),
+            },
+        }
+    }
+
+    /// Append one JSON value (or `None`/absent → null), matching `json_value_to_scalar` exactly.
+    fn append(
+        &mut self,
+        value: Option<&Value>,
+        options: &SparkFromJsonOptions,
+        session_timezone: &str,
+    ) -> Result<()> {
+        match self {
+            Self::Boolean(b) => b.append_option(match value {
+                Some(Value::Bool(v)) => Some(*v),
+                _ => None,
+            }),
+            Self::Int8(b) => b.append_option(match value {
+                Some(Value::Number(n)) => n.as_i64().map(|v| v as i8),
+                _ => None,
+            }),
+            Self::Int16(b) => b.append_option(match value {
+                Some(Value::Number(n)) => n.as_i64().map(|v| v as i16),
+                _ => None,
+            }),
+            Self::Int32(b) => b.append_option(match value {
+                Some(Value::Number(n)) => n.as_i64().map(|v| v as i32),
+                _ => None,
+            }),
+            Self::Int64(b) => b.append_option(match value {
+                Some(Value::Number(n)) => n.as_i64(),
+                _ => None,
+            }),
+            Self::Float32(b) => b.append_option(match value {
+                Some(Value::Number(n)) => n.as_f64().map(|v| v as f32),
+                _ => None,
+            }),
+            Self::Float64(b) => b.append_option(match value {
+                Some(Value::Number(n)) => n.as_f64(),
+                _ => None,
+            }),
+            Self::Utf8(b) => match value {
+                None | Some(Value::Null) => b.append_null(),
+                Some(Value::String(s)) => b.append_value(s),
+                Some(other) => b.append_value(other.to_string()),
+            },
+            Self::LargeUtf8(b) => match value {
+                None | Some(Value::Null) => b.append_null(),
+                Some(Value::String(s)) => b.append_value(s),
+                Some(other) => b.append_value(other.to_string()),
+            },
+            Self::Fallback { data_type, vals } => {
+                vals.push(json_value_to_scalar(value, data_type, options, session_timezone)?);
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Result<ArrayRef> {
+        Ok(match self {
+            Self::Boolean(mut b) => Arc::new(b.finish()),
+            Self::Int8(mut b) => Arc::new(b.finish()),
+            Self::Int16(mut b) => Arc::new(b.finish()),
+            Self::Int32(mut b) => Arc::new(b.finish()),
+            Self::Int64(mut b) => Arc::new(b.finish()),
+            Self::Float32(mut b) => Arc::new(b.finish()),
+            Self::Float64(mut b) => Arc::new(b.finish()),
+            Self::Utf8(mut b) => Arc::new(b.finish()),
+            Self::LargeUtf8(mut b) => Arc::new(b.finish()),
+            Self::Fallback { vals, .. } => ScalarValue::iter_to_array(vals)?,
+        })
+    }
+}
+
 fn parse_json_to_struct(
     rows: &StringArray,
     fields: &Fields,
@@ -250,35 +361,30 @@ fn parse_json_to_struct(
     session_timezone: &str,
 ) -> Result<ArrayRef> {
     let num_rows = rows.len();
-    let mut children_scalars: Vec<Vec<ScalarValue>> =
-        vec![Vec::with_capacity(num_rows); fields.len()];
+    let mut builders: Vec<ColBuilder> = fields
+        .iter()
+        .map(|f| ColBuilder::new(f.data_type(), num_rows))
+        .collect();
     let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
 
     for i in 0..num_rows {
         if rows.is_null(i) {
-            for (j, field) in fields.iter().enumerate() {
-                children_scalars[j].push(ScalarValue::try_new_null(field.data_type())?);
+            for b in builders.iter_mut() {
+                b.append(None, options, session_timezone)?;
             }
             validity.push(false);
         } else {
-            let json_str = rows.value(i);
-            match serde_json::from_str::<Value>(json_str) {
+            match serde_json::from_str::<Value>(rows.value(i)) {
                 Ok(Value::Object(obj)) => {
-                    for (j, field) in fields.iter().enumerate() {
-                        let field_value = obj.get(field.name());
-                        children_scalars[j].push(json_value_to_scalar(
-                            field_value,
-                            field.data_type(),
-                            options,
-                            session_timezone,
-                        )?);
+                    for (b, field) in builders.iter_mut().zip(fields.iter()) {
+                        b.append(obj.get(field.name()), options, session_timezone)?;
                     }
                     validity.push(true);
                 }
                 _ => {
                     // Parse error or non-object → struct with null fields (PERMISSIVE mode)
-                    for (j, field) in fields.iter().enumerate() {
-                        children_scalars[j].push(ScalarValue::try_new_null(field.data_type())?);
+                    for b in builders.iter_mut() {
+                        b.append(None, options, session_timezone)?;
                     }
                     validity.push(true);
                 }
@@ -286,10 +392,8 @@ fn parse_json_to_struct(
         }
     }
 
-    let children_arrays: Vec<ArrayRef> = children_scalars
-        .into_iter()
-        .map(|arr| ScalarValue::iter_to_array(arr))
-        .collect::<Result<_>>()?;
+    let children_arrays: Vec<ArrayRef> =
+        builders.into_iter().map(|b| b.finish()).collect::<Result<_>>()?;
 
     Ok(Arc::new(StructArray::new(
         fields.clone(),
