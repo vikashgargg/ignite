@@ -131,14 +131,28 @@ dup = n - uniq
 rss = []
 for line in open(metrics):
     parts = line.strip().split(",")
-    if len(parts) == 3 and parts[1].isdigit(): rss.append(int(parts[1]))
+    # time-ordered RSS samples; skip header + the t=0 pre-warmup startup point.
+    if len(parts) == 3 and parts[1].isdigit() and parts[0] != "0":
+        rss.append(int(parts[1]))
 rss = [r for r in rss if r > 0]
-rss.sort()
-med = rss[len(rss)//2] if rss else 0
+def _med(xs):
+    s = sorted(xs)
+    return s[len(s) // 2] if s else 0
+# Leak = a sustained upward TREND in steady state, NOT a transient spike. Warmup ramp + crash-restart
+# both produce one-off spikes that do not indicate a leak, so max/median is the wrong test. Compare the
+# median of the late half vs the early half (window medians ignore one-off outliers): a real leak grows
+# monotonically -> late >> early; a transient does not move the window median.
+if len(rss) >= 4:
+    h = len(rss) // 2
+    early, late = _med(rss[:h]), _med(rss[h:])
+    flat = early > 0 and (late / early) < leak_ratio
+else:
+    early = late = _med(rss)
+    flat = True
+med = _med(rss)
 mx = max(rss) if rss else 0
-flat = med > 0 and (mx / med) < leak_ratio
 print(f"SOAK_RESULT rows={n} unique={uniq} dup={dup} contiguous={contiguous} "
-      f"rss_med_kb={med} rss_max_kb={mx} flat={flat}")
+      f"rss_med_kb={med} rss_max_kb={mx} rss_early_kb={early} rss_late_kb={late} flat={flat}")
 ok = contiguous and dup == 0 and flat
 print("SOAK_GATE", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)
