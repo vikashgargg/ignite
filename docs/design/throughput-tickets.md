@@ -16,8 +16,24 @@ Each ticket: status · acceptance criteria (AC) · the CODEMAP module it touches
 | **VAJ-T5** | source_read | 📋 backlog | source_read floor ~100s = rdkafka poll + necessary value-payload copy (10GB @100M). Investigate: borrow-from-rdkafka-buffer into Arrow (zero-copy value), bigger fetch.max.bytes. Diminishing — after T4. |
 | **VAJ-T6** | from_json | 📋 backlog | from_json 38s — simd-json now relatively bigger; revisit only after T4+T5. |
 
+## ROOT CAUSE of the residual gap (WM_PROF 2026-06-30): data-movement-bound, NOT compute-bound
+Window is STARVED: `input_wait≈1192%` (idle waiting), `finalize` only 19.6s. We are not compute-bound.
+The cost is **stage-boundary copies of the raw JSON `value`**: source_read **materializes raw value
+bytes into an Arrow Binary column (~10GB @100M)** → from_json **re-reads + parses it** → exchange
+**`concat_batches` copies** it to window instances. **Flink avoids ALL of this**: `KafkaDeserialization
+Schema` parses JSON *directly from the fetch buffer* (never materializes raw bytes) + operator chaining
++ pipelined shuffle stream records concurrently. Flink's per-record Jackson+GC is slower per-op but it
+never pays the raw-value round-trip. ⇒ our Arrow/no-GC edge is being SPENT on copies.
+
+## REPRIORITIZED — fix the round-trip (turns our advantage into a win)
+| Ticket | Status | What |
+|---|---|---|
+| **VAJ-T7** | 🔨 NEXT (the big one) | **Fuse JSON parse into the source** — parse value→struct cols inside the read; raw value never materialized as a full column; exchange carries narrow parsed cols. Attacks source_read + from_json + exchange at once. Grounded: Flink deserialize-in-source + DataFusion projection/expr pushdown into scan. |
+| **VAJ-T4** | after T7 | Zero-copy exchange — slice instead of `concat_batches` + arrow `Utf8View` (no payload copy on shuffle). |
+| VAJ-T5/T6 | backlog | source_read poll floor / simd-json — only if T7+T4 don't reach ≤1.0×. |
+
 ## Measured trajectory
-- Baseline 1.15× slower (4.92M). T1+T2 → **1.10× (5.18M)**. Target ≤1.0× via T4 (exchange) + T5/T6.
+- Baseline 1.15× slower (4.92M). T1+T2 → **1.10× (5.18M)**. Next: T7 (parse-fusion) → T4 (zero-copy exchange) → target ≤1.0×.
 
 ## Module map (no exploration needed — from CODEMAP)
 - T1/T2 → `sail-data-source/src/formats/kafka/reader.rs` (`KafkaArrowBuilders`, bounded read loop, offset maps `ends`/`next`, `write_staged_offsets`).
