@@ -5,8 +5,15 @@ no-JVM + incremental checkpoint**, reach **parity** on the rest, and make the fe
 features that actually gate prod adoption first-class. This doc is the standing strategic register;
 streaming work cites a P0/P1 item here + the `STREAMING_ARCHITECTURE.md` gap cell it advances.
 
-## Where Vajra already BEATS Flink (the moat — lean in)
-- **Memory: 6.6× less** (measured EKS, 1.28 vs 8.5 GiB) → fewer/smaller nodes = cost story.
+## HONEST scorecard (measured; claim only what's verified — see [[feedback_competitive_claims_bar]])
+**EKS 100M, c7g.4xlarge, bounded availableNow (2026-06-30):** throughput Vajra 4.92M vs Flink 5.67M
+ev/s = **1.15× SLOWER**; memory Vajra 10.38 vs Flink 8.57 GiB = **1.2× MORE** (this path). So we are
+**competitive, NOT categorically better — yet.** Per-stage fix targets: source_read>exchange>from_json.
+
+## Where Vajra is ahead / a moat (qualified — not universal)
+- **Memory: 6.6× less ON THE CONTINUOUS path** (prior EKS, 1.28 vs 8.5 GiB) — BUT the bounded
+  availableNow path shows 1.2× MORE (2026-06-30). ⇒ **path-dependent; do NOT claim "better memory"
+  unqualified.**
 - **No JVM** → no GC pauses, faster cold start, smaller footprint, predictable tail latency.
 - **Incremental checkpoint on ONE Arrow substrate** (F5 spill chunks = checkpoint refs; window + join,
   O(delta) proven) → structurally cheaper than Flink's RocksDB-backed ForSt.
