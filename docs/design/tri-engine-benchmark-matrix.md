@@ -59,9 +59,20 @@ mirrors `stream_latency_query.py`); Vajra latency = `stream_latency.sh`.
 ClickBench = `scripts/clickbench.py` (Vajra, downloads hits parquet) + spark-bench pattern. So ALL batch
 dims (B1/B2/B3 + memory) = existing Vajra script + the `spark-bench-job.yaml` pattern parameterized by
 script/args. `lat_probe.py` (S3) BUILT+VALIDATED (Vajra local p50=43 p99=59 p999=141ms, debug).
-**REMAINING to build:** the **tri-engine orchestrator** `tri_engine_scorecard.sh` (assemble: deploy
-Vajra/Flink/Spark on ONE EKS cluster, run each dim, capture table) + parameterize spark-baseline for
-tpcds/clickbench + smaller dims S4 recovery-timing + S10/B5 cold-start. Then the EKS run ($ gate).
+**CLUSTER REALITY (inventory 2026-07-01):** batch + streaming use SEPARATE EKS setups —
+- **Streaming:** `k8s/stream/eks-stream-cluster.yaml` (compute c7g + kafka m7g) + `eks_stream_headtohead.sh`.
+- **Batch:** `k8s/eks/cluster-sf100.yaml` (+ `vajra-sf100.yaml` Vajra deploy, `tpch-gen-job.yaml` data,
+  `spark-bench-job.yaml` Spark baseline, `clickbench-loader.yaml`).
+⇒ "one EKS session" = TWO sequential cluster phases (not one cluster). Orchestrator = 2 sub-flows:
+**REMAINING to build (orchestrator `tri_engine_scorecard.sh`, 2 phases, reuse existing):**
+- **Streaming phase:** `eks_stream_headtohead.sh` (S1 throughput + S2 mem vs Flink) + ADD latency S3
+  (deploy `flink-sql-latency.sql` continuous + `lat_probe.py` ENGINE=flink; Vajra passthrough +
+  `lat_probe.py` ENGINE=vajra). Teardown.
+- **Batch phase:** `cluster-sf100` + `vajra-sf100` → `tpcds_score.py` vs Vajra (B2 power test) + scale
+  Vajra→0 → `spark-bench-job.yaml` parameterized for `tpcds_score.py` (Spark baseline) + B1 TPC-H +
+  mem. Teardown.
+- Smaller dims S4 recovery-timing + S10/B5 cold-start fold into each phase.
+Then the EKS run ($ gate). Full Nexmark q0–q13 = dedicated follow-on (phased per user 2026-07-01).
 **Phase-2 execution:** ONE EKS cluster → run reusable (B1/B4/S1/S2) for immediate fair numbers + the
 built/remaining gaps → capture Spark+Flink baselines once → teardown $0 (clean, NO interrupt).
 
