@@ -187,6 +187,21 @@ arrow-rs raw JSON reader PR #3479.
   parse edge over Flink is simply **being Rust, not Java** — already realized. arrow-json would only
   help if we could feed it zero-copy (no NDJSON rebuild); not worth it now. Bottleneck for the
   streaming workload was the **read path** (fixed: builders + rdkafka tuning, 2.1×), not parse.
+- **BOUNDED-PATH PROFILE 2026-06-30 (the EKS gap, re-localized):** the EKS throughput harness is
+  `availableNow` (bounded, ALREADY 16-reader parallel). `VAJRA_WM_PROF` shows the window STILL STARVED
+  (input_wait ~75%/instance, finalize ~20%) ⇒ with read + from_json already optimized (above), the
+  remaining ~2.4× gap is the **exchange** (`StreamExchangeExec` per-batch Arrow-IPC re-encode + tokio
+  channel copies) or the **`availableNow` micro-batch loop overhead** (re-plan + parquet-commit +
+  checkpoint per `maxOffsetsPerTrigger` batch, ~25× at 100M — vs Flink's ONE continuous pipeline).
+  NEXT = split exchange vs micro-batch (bigger maxOffsetsPerTrigger A/B + an exchange-side timer).
+  Multi-instance/Flight = continuous/multi-node, not this gap. See throughput-robustness-review.md.
+- **VERSION-UPGRADE perf targets (separate upgrade repo; verify in release notes before hand-tuning):**
+  (1) **arrow-rs `Utf8View`/`BinaryView` (StringView)** — fewer allocs/copies on string + JSON + shuffle
+  paths (big for the value column + exchange re-encode). (2) **DataFusion grouped-`AggregateExec`** perf
+  (hash, blocked emission, spill) — helps window finalize at scale. (3) **Arrow Flight** zero-copy /
+  client-cache improvements — for the multi-node shuffle (§4). Bumping DataFusion/Arrow/Flight may close
+  part of the gap "for free"; coordinate with the version-upgrade repo. **Add concrete release-note facts
+  here as they're confirmed** (don't assert versions un-verified).
 
 ## Cross-cutting design principles for Vajra (synthesized)
 1. **Unified API, two execution modes:** Spark API over batch + micro-batch + realtime

@@ -70,7 +70,26 @@ read parallelism (already maxed at 16) and NOT the window finalize (~20%). **THE
 `from_json` parse throughput (+ exchange efficiency).** JSON parse is the canonical hotspot; Flink's
 JSON deserialize vs our DataFusion `from_json` UDF / arrow-json is the likely delta.
 
-### Fix targets for the bounded/EKS gap (ranked)
+### `from_json` RULED OUT 2026-06-30 (KB-grounded, no re-tread)
+`from_json.rs:229-233` (measured 2026-06-22): Rust `serde_json` per-row; a columnar `arrow-json` fast
+path was tried and REVERTED — **~0 gain vs Rust serde_json for SIMPLE records** (and arrow-json's edge
+only shows on nested records, which the EKS `{k,ts,v}` workload is not). Rust serde_json **already beats
+Flink's JVM/Jackson** per-record deserialize (no JVM). ⇒ `from_json` is NOT the EKS gap; do NOT
+re-optimize it. The upstream bottleneck is therefore the **exchange** or the **availableNow micro-batch
+loop overhead**.
+
+### Re-narrowed fix targets (ranked)
+1. **availableNow micro-batch loop overhead** — `maxOffsetsPerTrigger=4M` over 100M = ~25 micro-batches,
+   each RE-PLANS + reads + aggregates + writes parquet + checkpoints. Per-batch setup/commit ×25 vs
+   Flink's ONE continuous pipeline could be the gap. Check: larger `maxOffsetsPerTrigger` (fewer
+   batches) → throughput delta; or profile per-micro-batch wall.
+2. **Exchange** — `StreamExchangeExec` 16→M keyed shuffle: per-batch Arrow-IPC re-encode + tokio channel
+   copies. Add an exchange-side timer; consider reducing encode/copy.
+3. **Version-upgrade lever (separate repo):** newer DataFusion/Arrow/Arrow-Flight releases bring
+   aggregate, JSON, and Flight zero-copy perf gains — bumping versions may close part of the gap for free.
+   Track release notes in REFERENCES and coordinate with the version-upgrade repo before hand-optimizing.
+
+### Fix targets for the bounded/EKS gap (ranked) — (superseded by the re-narrow above)
 1. **`from_json` parse** — vectorized/SIMD JSON (simd-json / arrow-json fast path), or avoid re-parsing
    (parse once; project needed fields). Confirm its share with a split timer or with/without-from_json A/B.
 2. **Exchange efficiency** — the 16→M keyed shuffle's per-batch IPC re-encode; minimize copies.
