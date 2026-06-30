@@ -111,6 +111,17 @@ is the real Flink-better candidate (Flink uses JVM Jackson; SIMD-Rust ≫ Jackso
 time the `from_json` UDF invoke; if dominant, A/B serde_json → simd-json. Throughput is LOCAL-core-limited
 here (0.265M/s on 4 workers) — absolute number is EKS.
 
+### from_json MEASURED 2026-06-30: real but NOT dominant (~13%/source-instance) ⇒ EKS is decisive
+`from_json_allinst = 2083ms` summed across ~16 source instances over ~1s wall ≈ **~13% per source
+instance**. encode 3ms (0.4%), finalize ~18% (window). So the source instance is **read-dominated**
+(~87%) — and the KB (§6) records the read path was ALREADY tuned 2.1×. ⇒ **No single NEW local fix
+justifies a big change** (from_json simd-json would cut ~13%×~2 = ~6% of source time — not the 2.4×).
+Local throughput is **core-limited** (0.27M/s on 4 workers) and does NOT represent the EKS 16-vCPU
+profile. **CONCLUSION: local profiling is exhausted; the clean attribution + the real number require
+EKS** (16 vCPU, 100M, vs Flink 1.19). All instrumentation (VAJRA_WM_PROF: input_wait/finalize/encode/
+from_json) is committed + ready to read on EKS. simd-json stays a candidate to evaluate IF the EKS
+profile shows parse dominant there (coordinate the dep with the version-upgrade repo).
+
 ### Fix targets for the bounded/EKS gap (ranked) — (superseded by the re-narrow above)
 1. **`from_json` parse** — vectorized/SIMD JSON (simd-json / arrow-json fast path), or avoid re-parsing
    (parse once; project needed fields). Confirm its share with a split timer or with/without-from_json A/B.
