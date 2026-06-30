@@ -47,6 +47,21 @@ S10/B5 cold-start · (debug binary OK for behavioral checks). Find bugs cheap BE
 - Capture Spark+Flink numbers ONCE → record in this doc + REFERENCES → standing reference.
 **Phase 3 — prod fixes** per worst dimensions, grounded in the recorded baselines + REFERENCES.
 
+## Build inventory (2026-07-01) — what's reusable vs gaps
+**REUSABLE NOW (zero new code, fair on EKS):**
+- B1+B4 TPC-H SF-100 vs Spark: `k8s/eks/spark-bench-job.yaml` runs the SAME `tpch_distributed.py` on
+  Spark 3.5.3 local[16] (after scaling Vajra→0 = same node, fair) + cgroup `memory.peak`. Vajra side =
+  `tpch_distributed.py` vs Vajra server.
+- S1+S2 streaming throughput/memory vs Flink: `eks_stream_headtohead.sh` (+ `flink-sql.sql`).
+**BUILT this session:** S3 Flink latency passthrough `k8s/stream/flink-sql-latency.sql` (raw passthrough,
+mirrors `stream_latency_query.py`); Vajra latency = `stream_latency.sh`.
+**REMAINING gaps to build:** S3 latency *runner+orchestrator* (start continuous Flink job async, run
+shared producer+latency-consumer for DURATION, cancel) · B2 TPC-DS · B3 ClickBench Spark-baseline (mirror
+spark-bench-job.yaml pattern) · S4 recovery-timing (extend soak gate w/ kill→caught-up timer) · S10/B5
+cold-start (launch→first-output timer).
+**Phase-2 execution:** ONE EKS cluster → run reusable (B1/B4/S1/S2) for immediate fair numbers + the
+built/remaining gaps → capture Spark+Flink baselines once → teardown $0 (clean, NO interrupt).
+
 ## Deliverable
 `scripts/tri_engine_scorecard.sh` orchestrating Phase-2 on EKS (Vajra+Flink+Spark), emitting the full
 table. Phase-1 reuses existing local gates. This matrix = the "stands against Spark+Flink in every
