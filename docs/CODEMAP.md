@@ -34,7 +34,7 @@ streaming rewrite) → `sail-logical-plan`/`-optimizer` → `sail-session` plann
 
 | File | What |
 |---|---|
-| `sail-common-datafusion/src/streaming/event/` | `FlowEvent::{Data{batch,retracted}, Marker(Watermark/Checkpoint/EndOfData/...)}`; encode/decode; `MARKER_FIELD_NAME`. The changelog primitive (retract stream). |
+| `sail-common-datafusion/src/streaming/event/` | `FlowEvent::{Data{batch,retracted}, Marker(Watermark/Checkpoint/EndOfData/...)}`; encode/decode (`encoding.rs`); `MARKER_FIELD_NAME`. The changelog primitive (retract stream). **THROUGHPUT NOTE (2026-06-30):** `encode()` prepends a `new_null_array(Binary, num_rows)` marker col + retracted bool to EVERY data batch at EVERY hop (O(N) per-batch alloc; Flink doesn't tag per-record) — candidate cost for the EKS throughput gap (window STARVED at 16 readers; read/from_json/parallelism ruled out). CONFIRM with a timer before optimizing. See throughput-robustness-review.md. |
 | `sail-common-datafusion/src/streaming/{checkpoint,coordinator,source}.rs` | checkpoint store; epoch coordinator; `StreamSource` trait |
 | `sail-data-source/src/formats/kafka/reader.rs` | `KafkaSourceExec`: bounded(availableNow)/realtime(continuous EO)/unbounded paths; 1 instance/partition (FLIP-27); `VAJRA_KAFKA_LEGACY_POLL` kill-switch; `KAFKA_BENCH` read micro-bench |
 | `sail-data-source/src/formats/kafka/sink.rs` | `KafkaSinkExec` transactional EO producer |
