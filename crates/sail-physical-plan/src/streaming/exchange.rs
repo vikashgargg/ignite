@@ -12,15 +12,12 @@
 //! with marker broadcast (which `RepartitionExec` cannot express).
 
 use std::any::Any;
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use datafusion::arrow::array::{Array, BinaryArray, RecordBatch};
-use datafusion::arrow::compute::concat_batches;
+use datafusion::arrow::array::{Array, BinaryArray, RecordBatch, UInt32Array};
+use datafusion::arrow::compute::take;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning, PhysicalExprRef};
-use datafusion::physical_plan::metrics::Time;
-use datafusion::physical_plan::repartition::BatchPartitioner;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{exec_datafusion_err, internal_err, Result};
@@ -325,19 +322,10 @@ async fn distribute(
     // key-group to its owning output instance via `key_group_owner` — the SAME math as the rescale
     // state ownership (`instance_key_group_range`), so a key always lands on the instance that owns its
     // state at any parallelism. (Plain `hash % n` is not rescale-stable.) `g >= n` recommended.
+    // Routing uses `vajra_key_groups` (PROVEN to match `BatchPartitioner` hashing) so we can `take`
+    // ONCE per owning instance, instead of a 128-way `BatchPartitioner` split + `concat_batches`
+    // re-merge into n instances — i.e. one copy pass over the rows, not two (VAJ-T4).
     let g = crate::streaming::state_io::DEFAULT_KEY_GROUPS;
-    let mut partitioner = match BatchPartitioner::try_new(
-        Partitioning::Hash(hash_keys, g as usize),
-        Time::default(),
-        0,
-        1,
-    ) {
-        Ok(p) => p,
-        Err(e) => {
-            let _ = senders[0].send(Err(e)).await;
-            return;
-        }
-    };
     while let Some(item) = input.next().await {
         match item {
             Ok(batch) if is_marker_batch(&batch) => {
@@ -351,41 +339,59 @@ async fn distribute(
                 // Throughput attribution (VAJRA_WM_PROF): time the shuffle route+coalesce+send.
                 let _ex = sail_common_datafusion::streaming::event::encoding::wm_prof_enabled()
                     .then(std::time::Instant::now);
-                // Hash into key-groups, then coalesce per OWNING instance (contiguous key-groups map
-                // to the same instance) so we send one batch per instance, not one per key-group.
                 let sch = batch.schema();
-                let mut kg_parts: Vec<(usize, RecordBatch)> = Vec::new();
-                let res = partitioner.partition(batch, |kg, sub| {
-                    kg_parts.push((kg, sub));
-                    Ok(())
-                });
-                if let Err(e) = res {
-                    let _ = senders[0].send(Err(e)).await;
-                    return;
+                let nrows = batch.num_rows();
+                // Per-row key-group (matches BatchPartitioner) -> owning instance, then ONE take per
+                // owner = a single copy pass (was 128-way take + concat re-merge = two passes).
+                let arrays = match hash_keys
+                    .iter()
+                    .map(|e| e.evaluate(&batch).and_then(|v| v.into_array(nrows)))
+                    .collect::<Result<Vec<_>>>()
+                {
+                    Ok(a) => a,
+                    Err(e) => {
+                        let _ = senders[0].send(Err(e)).await;
+                        return;
+                    }
+                };
+                let kgs = match crate::streaming::state_io::vajra_key_groups(&arrays, g, nrows) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        let _ = senders[0].send(Err(e)).await;
+                        return;
+                    }
+                };
+                let mut idx_by_owner: Vec<Vec<u32>> = vec![Vec::new(); n];
+                for (row, &kg) in kgs.iter().enumerate() {
+                    idx_by_owner[crate::streaming::state_io::key_group_owner(kg, n, g)]
+                        .push(row as u32);
                 }
-                let mut by_instance: BTreeMap<usize, Vec<RecordBatch>> = BTreeMap::new();
-                for (kg, sub) in kg_parts {
-                    if sub.num_rows() == 0 {
+                for (owner, idx) in idx_by_owner.into_iter().enumerate() {
+                    if idx.is_empty() {
                         continue;
                     }
-                    let owner = crate::streaming::state_io::key_group_owner(kg as u16, n, g);
-                    by_instance.entry(owner).or_default().push(sub);
-                }
-                for (owner, subs) in by_instance {
-                    let merged = match subs.len() {
-                        1 => subs.into_iter().next(),
-                        _ => match concat_batches(&sch, &subs) {
-                            Ok(b) => Some(b),
-                            Err(e) => {
-                                let _ = senders[0].send(Err(e.into())).await;
-                                return;
-                            }
-                        },
-                    };
-                    if let Some(b) = merged {
-                        if senders[owner].send(Ok(b)).await.is_err() {
+                    let indices = UInt32Array::from(idx);
+                    let cols = match batch
+                        .columns()
+                        .iter()
+                        .map(|c| take(c, &indices, None))
+                        .collect::<std::result::Result<Vec<_>, _>>()
+                    {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = senders[0].send(Err(e.into())).await;
                             return;
                         }
+                    };
+                    let b = match RecordBatch::try_new(Arc::clone(&sch), cols) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            let _ = senders[0].send(Err(e.into())).await;
+                            return;
+                        }
+                    };
+                    if senders[owner].send(Ok(b)).await.is_err() {
+                        return;
                     }
                 }
                 if let Some(t) = _ex {
