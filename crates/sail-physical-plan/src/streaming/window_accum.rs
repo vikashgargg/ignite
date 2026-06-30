@@ -66,11 +66,15 @@ mod prof {
         let iw = INPUT_WAIT_NS.load(Ordering::Relaxed);
         let fz = FINALIZE_NS.load(Ordering::Relaxed);
         let rows = ROWS.load(Ordering::Relaxed);
+        // Encode time is summed across ALL operator hops (cross-crate static); compare to per-instance
+        // wall to gauge the flow-event encode (per-batch null-marker build) share of the gap.
+        let enc = sail_common_datafusion::streaming::event::encoding::ENCODE_NS
+            .load(Ordering::Relaxed);
         let pct = |x: u64| x.saturating_mul(100).checked_div(wall).unwrap_or(0);
         eprintln!(
-            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) finalize={}ms({}%) rows={} \
-             => {} (input_wait%>=60 ⇒ UPSTREAM-bound i.e. source/from_json; finalize% high ⇒ window-bound)",
-            wall / 1_000_000, iw / 1_000_000, pct(iw), fz / 1_000_000, pct(fz), rows,
+            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) finalize={}ms({}%) encode_allhops={}ms rows={} \
+             => {} (input_wait%>=60 ⇒ UPSTREAM-bound; finalize% high ⇒ window-bound; encode_allhops large ⇒ flow-event encode cost)",
+            wall / 1_000_000, iw / 1_000_000, pct(iw), fz / 1_000_000, pct(fz), enc / 1_000_000, rows,
             if pct(iw) >= 60 { "STARVED(upstream)" } else { "BUSY(window)" },
         );
     }

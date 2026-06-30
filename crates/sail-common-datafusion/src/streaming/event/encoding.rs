@@ -25,6 +25,15 @@ use crate::streaming::event::FlowEvent;
 /// For a data event, the marker array only contains the null buffer,
 /// which adds 1-bit overhead for each row in a data event.
 /// The retracted field adds another 1-bit overhead for each row in a data event.
+/// Throughput attribution (env `VAJRA_WM_PROF`): cumulative ns spent in flow-event `encode()` across
+/// ALL operator hops (the per-data-batch null-marker-column build). Read by the window operator's prof
+/// dump to see the encode's share of the wall. Zero cost when the env var is unset.
+pub static ENCODE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn encode_prof_enabled() -> bool {
+    static E: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *E.get_or_init(|| std::env::var("VAJRA_WM_PROF").is_ok())
+}
+
 pub struct EncodedFlowEventStream {
     inner: SendableFlowEventStream,
     schema: SchemaRef,
@@ -40,6 +49,18 @@ impl EncodedFlowEventStream {
     }
 
     pub fn encode(&self, event: FlowEvent) -> Result<RecordBatch> {
+        let _t = encode_prof_enabled().then(std::time::Instant::now);
+        let out = self.encode_inner(event);
+        if let Some(t) = _t {
+            ENCODE_NS.fetch_add(
+                t.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+        out
+    }
+
+    fn encode_inner(&self, event: FlowEvent) -> Result<RecordBatch> {
         let columns = match event {
             FlowEvent::Data { batch, retracted } => {
                 let mut columns: Vec<ArrayRef> = vec![
