@@ -61,7 +61,22 @@ windowed-agg to find ITS bottleneck (from_json / exchange / window — all alrea
 Phase B remains valid for *continuous-mode* throughput, but the headline EKS number needs the bounded
 profile first. (This is exactly the robustness check paying off — caught before EKS $$.)
 
-## Recommended order (RE-REVISED after the mismatch)
+## BOUNDED-PATH PROFILE 2026-06-30 — the REAL EKS gap is `from_json` + exchange (NOT parallelism/window)
+Profiled `stream_windowed_agg.py` (availableNow, 16 partitions/16 readers, VAJRA_WM_PROF) locally:
+window **STILL STARVED** — input_wait ≈75%/instance, finalize only **17–20%**, throughput 0.26M ev/s
+(local, modest). ⇒ **even with 16 parallel readers, upstream (`from_json` parse + exchange) can't feed
+the window fast enough.** So the ~2.4×-vs-Flink gap is **per-unit `from_json`/exchange throughput**, NOT
+read parallelism (already maxed at 16) and NOT the window finalize (~20%). **THE fix to beat Flink =
+`from_json` parse throughput (+ exchange efficiency).** JSON parse is the canonical hotspot; Flink's
+JSON deserialize vs our DataFusion `from_json` UDF / arrow-json is the likely delta.
+
+### Fix targets for the bounded/EKS gap (ranked)
+1. **`from_json` parse** — vectorized/SIMD JSON (simd-json / arrow-json fast path), or avoid re-parsing
+   (parse once; project needed fields). Confirm its share with a split timer or with/without-from_json A/B.
+2. **Exchange efficiency** — the 16→M keyed shuffle's per-batch IPC re-encode; minimize copies.
+3. (Multi-instance / Flight shuffle remain CONTINUOUS-path / multi-node items, not this gap.)
+
+## Recommended order (RE-REVISED after the mismatch — superseded by the bounded profile above)
 1. **Profile the BOUNDED availableNow windowed-agg** (VAJRA_WM_PROF, EndOfData dump) over Kafka locally
    → find the real EKS-path bottleneck (window busy? exchange? from_json even at 16 readers?).
 2. Fix the dominant bounded-path stage (the actual EKS gap).
