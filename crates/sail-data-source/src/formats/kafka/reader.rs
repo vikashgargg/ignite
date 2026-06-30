@@ -550,23 +550,36 @@ impl ExecutionPlan for KafkaSourceExec {
                     Err(e) => { yield Err(exec_datafusion_err!("Kafka {e}")); return; }
                 };
                 let mut tpl = rdkafka::TopicPartitionList::new();
-                let mut ends: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
-                let mut next: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
+                // Hot-path offset state keyed by a packed (topic-idx, partition) u64; topics interned
+                // once. The durable (topic, partition) commit format is rebuilt at staging.
+                let mut topic_names: Vec<String> = Vec::new();
+                let mut idx_of: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+                let mut ends: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
+                let mut next: std::collections::HashMap<u64, i64> = std::collections::HashMap::new();
                 for (topic, part, start, high) in assignments {
                     if let Err(e) = tpl.add_partition_offset(&topic, part, rdkafka::Offset::Offset(start)) {
                         yield Err(exec_datafusion_err!("Kafka assign({topic},{part}@{start}): {e}")); return;
                     }
-                    ends.insert((topic.clone(), part), high);
-                    next.insert((topic, part), start);
+                    let idx = *idx_of.entry(topic.clone()).or_insert_with(|| {
+                        topic_names.push(topic.clone());
+                        (topic_names.len() - 1) as u32
+                    });
+                    let k = pack_tp(idx, part);
+                    ends.insert(k, high);
+                    next.insert(k, start);
                 }
                 if let Err(e) = consumer.assign(&tpl) {
                     yield Err(exec_datafusion_err!("Kafka assign: {e}")); return;
                 }
 
                 // Read until every partition reaches its end offset (or no more messages).
-                let remaining = |next: &std::collections::HashMap<(String, i32), i64>| -> i64 {
+                let remaining = |next: &std::collections::HashMap<u64, i64>| -> i64 {
                     ends.iter().map(|(k, e)| (e - next.get(k).copied().unwrap_or(*e)).max(0)).sum()
                 };
+                // Last-seen topic cache: resolve the interned idx in the hot loop without a per-message
+                // String alloc (str compare; single-topic = always a hit).
+                let mut last_topic = String::new();
+                let mut last_idx: u32 = 0;
                 let mut msg_stream = consumer.stream();
                 // A bounded (availableNow / micro-batch) read MUST reach each partition's
                 // captured end offset — that snapshot is exactly what Spark's
@@ -640,10 +653,17 @@ impl ExecutionPlan for KafkaSourceExec {
                                 empty_polls = 0; // made progress -> reset the stall budget
                                 let part = msg.partition();
                                 let topic = msg.topic();
-                                // One String alloc per message for the offset-map key (reused for
-                                // the end-offset lookup and the `next` insert).
-                                let tp = (topic.to_string(), part);
-                                let end = ends.get(&tp).copied().unwrap_or(i64::MIN);
+                                // Resolve the interned topic idx without a per-message String alloc:
+                                // librdkafka returns the same topic repeatedly, so a str compare to
+                                // last-seen is the common path (single-topic = always a hit).
+                                if topic != last_topic {
+                                    let Some(&i) = idx_of.get(topic) else { continue };
+                                    last_idx = i;
+                                    last_topic.clear();
+                                    last_topic.push_str(topic);
+                                }
+                                let k = pack_tp(last_idx, part);
+                                let end = ends.get(&k).copied().unwrap_or(i64::MIN);
                                 let off = msg.offset();
                                 if off >= end { continue; } // past this batch's snapshot
                                 let (ts_ms, ts_type) = match msg.timestamp() {
@@ -658,7 +678,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                     + topic.len();
                                 // Append borrowed bytes straight into the Arrow buffers (no to_vec).
                                 builders.append(key, value, topic, part, off, ts_ms, ts_type);
-                                next.insert(tp, off + 1);
+                                next.insert(k, off + 1);
                             }
                             Some(Err(e)) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
                             None => { stream_ended = true; break; } // consumer stream closed
@@ -692,7 +712,15 @@ impl ExecutionPlan for KafkaSourceExec {
 
                 // Stage the offsets actually reached (write-ahead); runner commits after durable.
                 if let Some(ck) = &ck {
-                    write_staged_offsets(ck, &next, inst, parallelism).await;
+                    // Rebuild the durable (topic, partition) -> offset commit format from packed keys.
+                    let durable: std::collections::HashMap<(String, i32), i64> = next
+                        .iter()
+                        .map(|(&k, &o)| {
+                            let (idx, part) = unpack_tp(k);
+                            ((topic_names[idx as usize].clone(), part), o)
+                        })
+                        .collect();
+                    write_staged_offsets(ck, &durable, inst, parallelism).await;
                 }
                 yield Ok(FlowEvent::Marker(sail_common_datafusion::streaming::event::marker::FlowMarker::EndOfData));
             };
@@ -1111,6 +1139,27 @@ impl KafkaArrowBuilders {
     }
 }
 
+
+/// Pack (topic-index, partition) into a u64 hot-loop offset key — avoids a per-message
+/// `(String, i32)` alloc + String re-hash at 1e8 msgs (Flink tracks offsets per-split, not
+/// per-record). The durable `(topic, partition)` commit format is reconstructed at staging.
+fn pack_tp(idx: u32, part: i32) -> u64 {
+    ((idx as u64) << 32) | (part as u32 as u64)
+}
+fn unpack_tp(k: u64) -> (u32, i32) {
+    ((k >> 32) as u32, k as u32 as i32)
+}
+
+#[cfg(test)]
+mod offset_key_tests {
+    use super::{pack_tp, unpack_tp};
+    #[test]
+    fn pack_tp_roundtrips() {
+        for (idx, part) in [(0u32, 0i32), (3, 17), (255, 0), (1, 4095), (7, 65535)] {
+            assert_eq!(unpack_tp(pack_tp(idx, part)), (idx, part));
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Local read-throughput micro-benchmark (ignored unless KAFKA_BENCH=1).
