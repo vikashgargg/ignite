@@ -256,9 +256,11 @@ fn apply_consumer_throughput_defaults(cfg: &mut ClientConfig) {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|&n| n >= 1024)
-        .unwrap_or(65536); // 64 MiB/partition (was 1 GiB). VALIDATED EKS 2026-07-02 (100M sweep): 64 MiB
-                           // = 7.36 GiB RSS (< Flink 8.58) at 5.58M ev/s (no throughput cost) vs 1 GiB =
-                           // 8.32 GiB — the sweet spot. Raise via env if a workload needs deeper prefetch.
+        .unwrap_or(65536); // 64 MiB/partition (was 1 GiB) — DEFENSIVE bound. MEASURED EKS 2026-07-02: for a
+                           // fast consumer the prefetch queue stays ~44MB regardless of this cap (RSS flat
+                           // 7.14/7.32/7.33 across 1GiB/256/64MiB), so this is NOT the memory driver — it
+                           // only bounds the WORST case if a consumer falls far behind. Keep bounded +
+                           // env-tunable (VAJRA_KAFKA_STATS logs the actual fetchq_size for observability).
     let prefetch_msgs = std::env::var("VAJRA_KAFKA_PREFETCH_MSGS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())

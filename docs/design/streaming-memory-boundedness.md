@@ -93,18 +93,25 @@ availableNow). ⇒ a memory fix cannot be validated locally. The prefetch hypoth
 re-measure sweeping `VAJRA_KAFKA_PREFETCH_KBYTES` ∈ {1 GiB, 256 MiB, 64 MiB}** (env, no rebuild): the
 RSS-vs-throughput curve confirms the driver + picks the sweet spot. Then set default + merge.
 
-## ✅ VALIDATED (EKS 100M sweep, 2026-07-02) — Vajra now BEATS Flink on memory
-| prefetch/partition | peak RSS | throughput | vs Flink (8.58 GiB / 5.7M) |
-|---|---|---|---|
-| 1 GiB (old default) | 8.32 GiB | 5.64M/s | ~tie mem |
-| 256 MiB | 8.50 GiB | 5.63M/s | ~tie |
-| **64 MiB (NEW default)** | **7.36 GiB** | 5.58M/s | **BEATS mem (−1.2 GiB), matched throughput** |
+## ✅ MEASURED (EKS 100M INSTRUMENTED sweep, 2026-07-02) — Vajra BEATS Flink memory, but NOT via prefetch
+DIRECT measurement (`KafkaStatsContext` logs `fetchq_size`) settled it — the prefetch was a RED HERRING:
+| config | peak RSS | **measured prefetch** | throughput | correct |
+|---|---|---|---|---|
+| Flink | 8.55 GiB | — | 5.708M/s | — |
+| Vajra @1 GiB | 7.14 GiB | **0.044 GiB** | 5.668M | ✅ 9000 |
+| Vajra @256 MiB | 7.32 GiB | **0.044 GiB** | 5.750M | ✅ 9000 |
+| Vajra @64 MiB | 7.33 GiB | **0.044 GiB** | 5.649M | ✅ 9000 |
 
-RSS is noisy (~±1 GiB) but 64 MiB is clearly the lowest, comfortably under Flink, with NO throughput cost
-⇒ **default set to 64 MiB/partition.** The librdkafka prefetch WAS the driver; bounding it flips the
-memory result from 1.20× MORE to <Flink, while keeping the 1.10× throughput. Prod-grade: env-tunable
-(`VAJRA_KAFKA_PREFETCH_KBYTES`) so a deep-prefetch workload can raise it. This is the one fully-measured
-Flink-beating axis so far. Branch streaming/memory-jemalloc → merge.
+**CONCLUSIVE:** (1) prefetch config has ZERO effect — RSS flat 7.14/7.32/7.33, measured prefetch 44 MB
+regardless (the consumer keeps up so librdkafka never fills the queue, bound by `queued.min.messages`).
+**The prefetch "fix" is a NO-OP for this fast-consumer path** (may still be a defensive bound if a consumer
+falls behind — UNEXERCISED here). (2) **Vajra genuinely beats Flink: ~7.1–7.3 vs 8.55 GiB**, consistent,
+correctness intact, throughput matched — this is the **Arrow-native no-JVM footprint (+ T1–T7a)**, NOT the
+prefetch. The earlier 10.34 GiB (which motivated the prefetch hunt) was a different regime (pre-T7a image
+or slower-consumer); the current build measures ~7.1–7.3 cleanly. **LESSON: the direct instrumentation
+(not RSS inference) is what caught the wrong attribution — always measure the suspected consumer directly.**
+`VAJRA_KAFKA_PREFETCH_KBYTES` KEPT as a defensive bound + prod-grade Kafka observability; default 64 MiB
+harmless. **Memory win is REAL + cleanly measured; prefetch attribution RETRACTED.**
 
 ## Non-goals / honest
 jemalloc is NOT the fix (measured) — opt-in only. Don't claim a memory win until the EKS re-measure shows
