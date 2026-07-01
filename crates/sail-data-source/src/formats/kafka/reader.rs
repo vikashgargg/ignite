@@ -17,8 +17,9 @@ use datafusion::physical_plan::{DisplayAs, ExecutionPlan, PlanProperties};
 use datafusion_common::{arrow_datafusion_err, exec_datafusion_err, plan_err, Result};
 use futures::{FutureExt, StreamExt};
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::consumer::{Consumer, ConsumerContext, StreamConsumer};
 use rdkafka::message::{Message, Timestamp};
+use rdkafka::{ClientContext, Statistics};
 use sail_common_datafusion::streaming::checkpoint::CheckpointStore;
 use sail_common_datafusion::streaming::event::encoding::EncodedFlowEventStream;
 use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
@@ -214,7 +215,36 @@ async fn count_kafka_partitions(options: &KafkaReadOptions) -> Option<usize> {
 /// reaches ~10M ev/s via aggressive fetch settings; rdkafka defaults prefetch too little). These
 /// raise the prefetch queue + per-fetch byte budget + socket buffers and shorten the fetch wait.
 /// See docs/STREAMING_ARCHITECTURE.md P0 throughput.
+/// Consumer context that logs librdkafka's per-partition fetch-queue (PREFETCH) size — the C-side buffer
+/// that is the dominant streaming-RSS driver (invisible to the allocator + DataFusion MemoryPool). Enabled
+/// by `VAJRA_KAFKA_STATS` (sets `statistics.interval.ms`); prod-grade observability (Flink-equivalent
+/// consumer metrics) + DIRECT proof of the prefetch memory. docs/design/streaming-memory-boundedness.md.
+#[derive(Clone, Default)]
+struct KafkaStatsContext;
+impl ClientContext for KafkaStatsContext {
+    fn stats(&self, s: Statistics) {
+        let (mut bytes, mut msgs, mut lag) = (0i64, 0i64, 0i64);
+        for t in s.topics.values() {
+            for p in t.partitions.values() {
+                bytes += p.fetchq_size as i64;
+                msgs += p.fetchq_cnt;
+                if p.consumer_lag >= 0 {
+                    lag += p.consumer_lag;
+                }
+            }
+        }
+        eprintln!(
+            "KAFKA_STATS prefetch_bytes={bytes} prefetch_gib={:.3} prefetch_msgs={msgs} lag={lag}",
+            bytes as f64 / 1_073_741_824.0
+        );
+    }
+}
+impl ConsumerContext for KafkaStatsContext {}
+
 fn apply_consumer_throughput_defaults(cfg: &mut ClientConfig) {
+    if std::env::var("VAJRA_KAFKA_STATS").is_ok() {
+        cfg.set("statistics.interval.ms", "2000"); // fire KafkaStatsContext::stats every 2s
+    }
     // librdkafka PREFETCH QUEUE = the dominant streaming-RSS driver (measured 2026-07-01): this C-side
     // buffer is invisible to the DataFusion MemoryPool + the Rust allocator, so it's why the bounded pool
     // was bypassed and the RSS exceeded Flink's. Default was 1 GiB/partition (× 16 parts on EKS = up to
@@ -523,7 +553,10 @@ impl ExecutionPlan for KafkaSourceExec {
                 cfg.set("enable.auto.commit", "false");
                 apply_consumer_throughput_defaults(&mut cfg);
                 for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
-                let consumer: StreamConsumer = match cfg.create() {
+                // Stats context logs the librdkafka prefetch queue bytes (VAJRA_KAFKA_STATS) — direct
+                // measurement of the streaming-RSS driver. No overhead when stats disabled (no interval).
+                let consumer: StreamConsumer<KafkaStatsContext> =
+                    match cfg.create_with_context(KafkaStatsContext) {
                     Ok(c) => c,
                     Err(e) => { yield Err(exec_datafusion_err!("failed to create Kafka consumer: {e}")); return; }
                 };
@@ -796,7 +829,10 @@ impl ExecutionPlan for KafkaSourceExec {
                 cfg.set("enable.auto.commit", "false");
                 apply_consumer_throughput_defaults(&mut cfg);
                 for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
-                let consumer: StreamConsumer = match cfg.create() {
+                // Stats context logs the librdkafka prefetch queue bytes (VAJRA_KAFKA_STATS) — direct
+                // measurement of the streaming-RSS driver. No overhead when stats disabled (no interval).
+                let consumer: StreamConsumer<KafkaStatsContext> =
+                    match cfg.create_with_context(KafkaStatsContext) {
                     Ok(c) => c,
                     Err(e) => { yield Err(exec_datafusion_err!("failed to create Kafka consumer: {e}")); return; }
                 };
