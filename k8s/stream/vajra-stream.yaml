@@ -25,6 +25,11 @@ spec:
           env:
             - { name: RUST_LOG, value: warn }
             - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
+            # jemalloc return-to-OS decay (bounds RSS = the streaming memory fix). 1s decay purges freed
+            # Arrow batch pages back to the OS so peak RSS ~ live memory. tikv-jemalloc reads the
+            # `_RJEM_MALLOC_CONF`-prefixed env; also set MALLOC_CONF in case of an unprefixed build.
+            - { name: _RJEM_MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
+            - { name: MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
             # Throughput pinpoint: dumps the per-stage breakdown (source_read/from_json/exchange/encode/
             # finalize) to this pod's log at the windowed-agg EndOfData — grep `WM_PROF`. Per-batch
             # overhead only (negligible). Remove for the pure throughput A/B if you want zero overhead.

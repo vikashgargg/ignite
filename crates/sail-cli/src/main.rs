@@ -8,6 +8,15 @@ use sail_common::config::{CliConfig, CliConfigEnv};
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+// jemalloc (default) bounds RSS: it returns freed pages to the OS on dirty/muzzy decay, so peak RSS
+// tracks LIVE memory rather than peak-retained (glibc malloc keeps freed Arrow buffers -> the measured
+// streaming 1.20x-vs-Flink RSS gap). This is the allocator discipline Flink/RocksDB/ForSt/TiKV use to
+// bound RAM (REFERENCES §3). mimalloc takes precedence if explicitly enabled (opt-in throughput mode).
+// Decay is tuned at runtime via `_RJEM_MALLOC_CONF` (set in the deployments + local harness).
+#[cfg(all(feature = "jemalloc", not(feature = "mimalloc")))]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = CliConfig::load()?;
     if config.run_python {

@@ -22,6 +22,9 @@ spec:
           env:
             - { name: RUST_LOG, value: warn }
             - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
+            # jemalloc return-to-OS decay (bounds RSS). See k8s/stream/vajra-stream.yaml.
+            - { name: _RJEM_MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
+            - { name: MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
           volumeMounts:
             - { name: data, mountPath: /data }
       volumes:
