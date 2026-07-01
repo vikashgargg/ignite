@@ -36,6 +36,20 @@ use crate::formats::kafka::options::KafkaReadOptions;
 /// row-based `batch_size`.
 const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
 
+/// Runtime-tunable source batch byte cap (streaming-RSS lever: 16 readers × this = source in-flight;
+/// smaller = less RSS, possibly more per-batch overhead). Default `MAX_BATCH_BYTES`; floor 1 MiB to keep
+/// the i32-offset safety. `VAJRA_SOURCE_MAX_BATCH_BYTES`. docs/design/streaming-memory-boundedness.md.
+fn max_batch_bytes() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("VAJRA_SOURCE_MAX_BATCH_BYTES")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n >= 1024 * 1024)
+            .unwrap_or(MAX_BATCH_BYTES)
+    })
+}
+
 /// Wall-clock stall tolerance (ms) for a bounded read: once `remaining > 0` but no message
 /// has arrived for this long, the residual offsets are deemed unreachable (log compaction /
 /// aborted-txn control records inflating the high watermark) and the read completes. Derived
@@ -201,8 +215,27 @@ async fn count_kafka_partitions(options: &KafkaReadOptions) -> Option<usize> {
 /// raise the prefetch queue + per-fetch byte budget + socket buffers and shorten the fetch wait.
 /// See docs/STREAMING_ARCHITECTURE.md P0 throughput.
 fn apply_consumer_throughput_defaults(cfg: &mut ClientConfig) {
-    cfg.set("queued.min.messages", "1000000"); // prefetch up to 1M msgs per partition
-    cfg.set("queued.max.messages.kbytes", "1048576"); // 1 GiB local prefetch (librdkafka max ~2 GiB)
+    // librdkafka PREFETCH QUEUE = the dominant streaming-RSS driver (measured 2026-07-01): this C-side
+    // buffer is invisible to the DataFusion MemoryPool + the Rust allocator, so it's why the bounded pool
+    // was bypassed and the RSS exceeded Flink's. Default was 1 GiB/partition (× 16 parts on EKS = up to
+    // 16 GiB) — vastly more than Flink's ~50 MiB total fetch. Bound it (env-tunable) to a Flink-comparable
+    // per-partition budget so RSS ≈ prefetch×partitions, trading a little prefetch depth for bounded
+    // memory. `VAJRA_KAFKA_PREFETCH_KBYTES` (default 65536 = 64 MiB/partition; set 1048576 for the old
+    // 1 GiB throughput-max). docs/design/streaming-memory-boundedness.md.
+    let prefetch_kbytes = std::env::var("VAJRA_KAFKA_PREFETCH_KBYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n >= 1024)
+        .unwrap_or(65536); // 64 MiB/partition (was 1 GiB). VALIDATED EKS 2026-07-02 (100M sweep): 64 MiB
+                           // = 7.36 GiB RSS (< Flink 8.58) at 5.58M ev/s (no throughput cost) vs 1 GiB =
+                           // 8.32 GiB — the sweet spot. Raise via env if a workload needs deeper prefetch.
+    let prefetch_msgs = std::env::var("VAJRA_KAFKA_PREFETCH_MSGS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n >= 1000)
+        .unwrap_or(400_000); // was 1M/partition
+    cfg.set("queued.max.messages.kbytes", prefetch_kbytes.to_string());
+    cfg.set("queued.min.messages", prefetch_msgs.to_string());
     cfg.set("fetch.message.max.bytes", "10485760"); // 10 MiB (matches broker message.max.bytes)
     cfg.set("fetch.wait.max.ms", "50"); // don't idle 500ms waiting to fill a fetch
     cfg.set("socket.receive.buffer.bytes", "16777216"); // 16 MiB socket rx buffer
@@ -620,7 +653,7 @@ impl ExecutionPlan for KafkaSourceExec {
                     let mut batch_bytes: usize = 0;
                     let mut stream_ended = false;
                     while builders.len() < target_batch
-                        && batch_bytes < MAX_BATCH_BYTES
+                        && batch_bytes < max_batch_bytes()
                         && remaining(&next) > 0
                     {
                         // Fast path: take a message librdkafka's fetch thread already buffered,
@@ -889,7 +922,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                     // Flush on row OR byte cap for throughput (epoch still delimits
                                     // the commit; mid-epoch batches just carry data forward). Byte cap
                                     // keeps Utf8/Binary columns under Arrow's i32 offset limit.
-                                    if builders.len() >= max_batch || batch_bytes >= MAX_BATCH_BYTES {
+                                    if builders.len() >= max_batch || batch_bytes >= max_batch_bytes() {
                                         let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
                                         match b.finish_projected(&full_schema, &projection) {
                                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
@@ -974,7 +1007,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let deadline = tokio::time::Instant::now() + timeout;
 
-                while builders.len() < max_batch && batch_bytes < MAX_BATCH_BYTES {
+                while builders.len() < max_batch && batch_bytes < max_batch_bytes() {
                     let remaining =
                         deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {

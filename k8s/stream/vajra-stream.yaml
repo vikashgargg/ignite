@@ -25,6 +25,9 @@ spec:
           env:
             - { name: RUST_LOG, value: warn }
             - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
+            # Streaming-memory fix = bound librdkafka's prefetch queue (the C-side driver of the EKS
+            # 1.20x-vs-Flink RSS gap). VAJRA_KAFKA_PREFETCH_KBYTES is set per-run by the prefetch sweep;
+            # code default 256 MiB/partition. docs/design/streaming-memory-boundedness.md
             # Throughput pinpoint: dumps the per-stage breakdown (source_read/from_json/exchange/encode/
             # finalize) to this pod's log at the windowed-agg EndOfData — grep `WM_PROF`. Per-batch
             # overhead only (negligible). Remove for the pure throughput A/B if you want zero overhead.
