@@ -57,6 +57,42 @@ strictly better than Flink managed-mem and Spark unified-mem.
   path — validate on the EKS re-measure with `VAJRA_SOURCE_MAX_BATCH_BYTES=32MiB` + `CAP=4`.
 - NEXT: EKS re-measure with reduced buffers → if memory ↓ toward Flink 8.58 GiB, set as defaults + merge.
 
+## DECISIVE ROOT CAUSE (measured 2026-07-01) — the pool is BYPASSED
+Set a `greedy` MemoryPool with **max_size=512 MiB**; the Kafka windowed-agg still peaked at **1.69 GiB
+(3.3× OVER the limit, no error).** ⇒ **the streaming pipeline's memory is NOT REGISTERED with the
+MemoryPool** — DataFusion's pool only bounds consumers that call `try_grow` (aggregate/sort/join hash
+tables); the Kafka source builders, exchange channel batches, and in-flight `FlowEvent`s never reserve,
+so the ceiling doesn't apply to them. This is why jemalloc (not retention), buffer-tuning (bounds an
+UNregistered amount), and enabling the bounded pool all failed: **the memory escapes the pool entirely.**
+
+## THE FIX (correct prod-grade, = Flink managed-memory + backpressure)
+Register the streaming in-flight with the pool + backpressure:
+1. **Source reserves** pool memory for each emitted batch (`batch.get_array_memory_size()`); the
+   `MemoryReservation` travels with the `FlowEvent` and **drops (releases) when the window consumes it** —
+   reservation tied to batch lifetime = accounts the WHOLE in-flight span (source→exchange→window).
+2. Pool full (window behind) → source `try_grow` fails → **source awaits = backpressure** → in-flight
+   hard-bounded at the pool limit (Flink network-buffer semantics).
+3. **Default pool = bounded** (greedy/fair sized to container) so the ceiling is on.
+⇒ RSS tracks the pool limit. This is the managed-memory behavior; buffer env-tunables become secondary.
+The env-tunable buffers (VAJRA_EXCHANGE_CHANNEL_CAP / SOURCE_MAX_BATCH_BYTES) stay as coarse extra knobs.
+
+## ACTUAL ROOT CAUSE (2026-07-01) — librdkafka prefetch queue (C-side, invisible to pool+allocator)
+`apply_consumer_throughput_defaults` explicitly set `queued.max.messages.kbytes=1 GiB/partition` +
+`queued.min.messages=1M/partition` (for throughput — "saturate the broker like Flink"). At EKS's 16
+partitions that's **up to 16 GiB of librdkafka prefetch buffer** = the 10.34 GiB. This is the ONLY thing
+that explains ALL the negative results: it's C-side (jemalloc=glibc), never registers (MemoryPool 512MiB
+→ 1.69 GiB bypassed), separate from Arrow batches (batch-size tuning moot), and Flink prefetches ~50 MB
+(→ the exact 1.20× ratio). **FIX:** `VAJRA_KAFKA_PREFETCH_KBYTES` (default 1 GiB→256 MiB) + `_MSGS`
+(1M→400k), env-tunable.
+
+## HONEST: local testing is EXHAUSTED (cannot validate this fix)
+Every local A/B — allocator, exchange/source buffers, prefetch — caps at ~1.3–1.8 GiB REGARDLESS (8
+partitions, 20M events on one Mac). Local does NOT reproduce the EKS 10.34 GiB regime (16 part, 100M,
+availableNow). ⇒ a memory fix cannot be validated locally. The prefetch hypothesis stands on the MATH
+(1 GiB×16 vs Flink 50 MB = the 1.20×) + the explicit config, not a local A/B. **VALIDATION = ONE EKS
+re-measure sweeping `VAJRA_KAFKA_PREFETCH_KBYTES` ∈ {1 GiB, 256 MiB, 64 MiB}** (env, no rebuild): the
+RSS-vs-throughput curve confirms the driver + picks the sweet spot. Then set default + merge.
+
 ## Non-goals / honest
 jemalloc is NOT the fix (measured) — opt-in only. Don't claim a memory win until the EKS re-measure shows
 ≤ Flink. This is the one measured axis where Vajra currently LOSES on the streaming-bounded path.

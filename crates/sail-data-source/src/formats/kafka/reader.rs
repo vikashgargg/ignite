@@ -215,8 +215,27 @@ async fn count_kafka_partitions(options: &KafkaReadOptions) -> Option<usize> {
 /// raise the prefetch queue + per-fetch byte budget + socket buffers and shorten the fetch wait.
 /// See docs/STREAMING_ARCHITECTURE.md P0 throughput.
 fn apply_consumer_throughput_defaults(cfg: &mut ClientConfig) {
-    cfg.set("queued.min.messages", "1000000"); // prefetch up to 1M msgs per partition
-    cfg.set("queued.max.messages.kbytes", "1048576"); // 1 GiB local prefetch (librdkafka max ~2 GiB)
+    // librdkafka PREFETCH QUEUE = the dominant streaming-RSS driver (measured 2026-07-01): this C-side
+    // buffer is invisible to the DataFusion MemoryPool + the Rust allocator, so it's why the bounded pool
+    // was bypassed and the RSS exceeded Flink's. Default was 1 GiB/partition (× 16 parts on EKS = up to
+    // 16 GiB) — vastly more than Flink's ~50 MiB total fetch. Bound it (env-tunable) to a Flink-comparable
+    // per-partition budget so RSS ≈ prefetch×partitions, trading a little prefetch depth for bounded
+    // memory. `VAJRA_KAFKA_PREFETCH_KBYTES` (default 65536 = 64 MiB/partition; set 1048576 for the old
+    // 1 GiB throughput-max). docs/design/streaming-memory-boundedness.md.
+    let prefetch_kbytes = std::env::var("VAJRA_KAFKA_PREFETCH_KBYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n >= 1024)
+        .unwrap_or(262144); // 256 MiB/partition (was 1 GiB) — BALANCE: bounds RSS 4x (16×256=4GiB EKS max
+                            // vs 16 GiB) while keeping enough prefetch for throughput. EKS tunes the
+                            // memory-vs-throughput curve (1 GiB/256/64 MiB) since local can't reproduce it.
+    let prefetch_msgs = std::env::var("VAJRA_KAFKA_PREFETCH_MSGS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&n| n >= 1000)
+        .unwrap_or(400_000); // was 1M/partition
+    cfg.set("queued.max.messages.kbytes", prefetch_kbytes.to_string());
+    cfg.set("queued.min.messages", prefetch_msgs.to_string());
     cfg.set("fetch.message.max.bytes", "10485760"); // 10 MiB (matches broker message.max.bytes)
     cfg.set("fetch.wait.max.ms", "50"); // don't idle 500ms waiting to fill a fetch
     cfg.set("socket.receive.buffer.bytes", "16777216"); // 16 MiB socket rx buffer
