@@ -47,6 +47,16 @@ strictly better than Flink managed-mem and Spark unified-mem.
 4. **Spill:** wire F5 window spill to pool pressure.
 5. **Validate:** local bounded windowed-agg peak RSS ↓; then EKS re-measure vs Flink 8.58 GiB. Gate: ≤ Flink.
 
+## PROGRESS (2026-07-01, branch streaming/memory-jemalloc)
+- Made in-flight buffers env-tunable (the bound levers): `VAJRA_EXCHANGE_CHANNEL_CAP` (exchange channel
+  depth, default 16) + `VAJRA_SOURCE_MAX_BATCH_BYTES` (Kafka source batch cap, default 128MiB). The mpsc
+  channel already gives backpressure; a smaller cap = tighter backpressure = less in-flight (no data drop).
+- **Local A/B (5M-row bounded windowed-agg, file source):** exchange cap 16→2 = peak RSS **2.35→2.08 GiB
+  (−11.5%) with ZERO throughput cost** (61.4→61.3s), correctness intact. ⇒ exchange buffering is a real
+  RSS driver, reducible for free. Source-batch cap (the bigger EKS lever, 128MB×16=2GB) needs the Kafka
+  path — validate on the EKS re-measure with `VAJRA_SOURCE_MAX_BATCH_BYTES=32MiB` + `CAP=4`.
+- NEXT: EKS re-measure with reduced buffers → if memory ↓ toward Flink 8.58 GiB, set as defaults + merge.
+
 ## Non-goals / honest
 jemalloc is NOT the fix (measured) — opt-in only. Don't claim a memory win until the EKS re-measure shows
 ≤ Flink. This is the one measured axis where Vajra currently LOSES on the streaming-bounded path.

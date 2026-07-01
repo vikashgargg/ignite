@@ -28,8 +28,11 @@ spec:
             # jemalloc return-to-OS decay (bounds RSS = the streaming memory fix). 1s decay purges freed
             # Arrow batch pages back to the OS so peak RSS ~ live memory. tikv-jemalloc reads the
             # `_RJEM_MALLOC_CONF`-prefixed env; also set MALLOC_CONF in case of an unprefixed build.
-            - { name: _RJEM_MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
-            - { name: MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
+            # Bounded in-flight buffers = the streaming-RSS fix (measured: exchange cap 16->2 = -11.5%
+            # RSS, zero throughput cost). Tighter exchange backpressure + smaller source batches bound the
+            # live in-flight memory (the EKS 1.20x-vs-Flink gap). docs/design/streaming-memory-boundedness.md
+            - { name: VAJRA_EXCHANGE_CHANNEL_CAP, value: "4" }
+            - { name: VAJRA_SOURCE_MAX_BATCH_BYTES, value: "33554432" }  # 32 MiB (was 128)
             # Throughput pinpoint: dumps the per-stage breakdown (source_read/from_json/exchange/encode/
             # finalize) to this pod's log at the windowed-agg EndOfData — grep `WM_PROF`. Per-batch
             # overhead only (negligible). Remove for the pure throughput A/B if you want zero overhead.

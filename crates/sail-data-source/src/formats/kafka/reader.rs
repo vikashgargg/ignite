@@ -36,6 +36,20 @@ use crate::formats::kafka::options::KafkaReadOptions;
 /// row-based `batch_size`.
 const MAX_BATCH_BYTES: usize = 128 * 1024 * 1024;
 
+/// Runtime-tunable source batch byte cap (streaming-RSS lever: 16 readers × this = source in-flight;
+/// smaller = less RSS, possibly more per-batch overhead). Default `MAX_BATCH_BYTES`; floor 1 MiB to keep
+/// the i32-offset safety. `VAJRA_SOURCE_MAX_BATCH_BYTES`. docs/design/streaming-memory-boundedness.md.
+fn max_batch_bytes() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("VAJRA_SOURCE_MAX_BATCH_BYTES")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n >= 1024 * 1024)
+            .unwrap_or(MAX_BATCH_BYTES)
+    })
+}
+
 /// Wall-clock stall tolerance (ms) for a bounded read: once `remaining > 0` but no message
 /// has arrived for this long, the residual offsets are deemed unreachable (log compaction /
 /// aborted-txn control records inflating the high watermark) and the read completes. Derived
@@ -620,7 +634,7 @@ impl ExecutionPlan for KafkaSourceExec {
                     let mut batch_bytes: usize = 0;
                     let mut stream_ended = false;
                     while builders.len() < target_batch
-                        && batch_bytes < MAX_BATCH_BYTES
+                        && batch_bytes < max_batch_bytes()
                         && remaining(&next) > 0
                     {
                         // Fast path: take a message librdkafka's fetch thread already buffered,
@@ -889,7 +903,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                     // Flush on row OR byte cap for throughput (epoch still delimits
                                     // the commit; mid-epoch batches just carry data forward). Byte cap
                                     // keeps Utf8/Binary columns under Arrow's i32 offset limit.
-                                    if builders.len() >= max_batch || batch_bytes >= MAX_BATCH_BYTES {
+                                    if builders.len() >= max_batch || batch_bytes >= max_batch_bytes() {
                                         let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
                                         match b.finish_projected(&full_schema, &projection) {
                                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
@@ -974,7 +988,7 @@ impl ExecutionPlan for KafkaSourceExec {
                 let mut batch_bytes: usize = 0; // byte budget (see MAX_BATCH_BYTES)
                 let deadline = tokio::time::Instant::now() + timeout;
 
-                while builders.len() < max_batch && batch_bytes < MAX_BATCH_BYTES {
+                while builders.len() < max_batch && batch_bytes < max_batch_bytes() {
                     let remaining =
                         deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {

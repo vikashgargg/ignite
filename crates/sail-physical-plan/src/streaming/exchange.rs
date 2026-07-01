@@ -27,8 +27,22 @@ use sail_common_datafusion::streaming::event::schema::MARKER_FIELD_NAME;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
 
-/// Bounded channel depth per output partition (backpressure point).
-const CHANNEL_CAPACITY: usize = 16;
+/// Bounded channel depth per output partition = the streaming BACKPRESSURE point. Lower depth = tighter
+/// backpressure = less in-flight memory (DataFusion does NOT account intermediate stream buffers, so this
+/// is a primary streaming-RSS lever; the measured EKS 1.20x-vs-Flink memory gap is live in-flight buffering
+/// across up to N×M sub-channels). Tunable via `VAJRA_EXCHANGE_CHANNEL_CAP` (default 16). The mpsc send
+/// awaits when full, so a smaller cap bounds in-flight without dropping data (Flink FLIP-2 credit-flow
+/// analog, coarser). REFERENCES §8 / docs/design/streaming-memory-boundedness.md.
+fn channel_capacity() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("VAJRA_EXCHANGE_CHANNEL_CAP")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n >= 1)
+            .unwrap_or(16)
+    })
+}
 
 type BatchResult = Result<RecordBatch>;
 /// Per-output-partition sub-receivers, taken by `execute`; lazily initialized on first call.
@@ -161,7 +175,7 @@ impl ExecutionPlan for StreamExchangeExec {
             if n_in <= 1 {
                 let mut senders: Vec<Sender<BatchResult>> = Vec::with_capacity(m);
                 for slot in out_subs.iter_mut() {
-                    let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY);
+                    let (tx, rx) = channel::<BatchResult>(channel_capacity());
                     senders.push(tx);
                     slot.push(Some(rx));
                 }
@@ -171,7 +185,7 @@ impl ExecutionPlan for StreamExchangeExec {
                 for i in 0..n_in {
                     let mut senders: Vec<Sender<BatchResult>> = Vec::with_capacity(m);
                     for slot in out_subs.iter_mut() {
-                        let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY);
+                        let (tx, rx) = channel::<BatchResult>(channel_capacity());
                         senders.push(tx);
                         slot.push(Some(rx));
                     }
@@ -281,7 +295,7 @@ impl ExecutionPlan for StreamCoalesceExec {
             .output_partitioning()
             .partition_count();
         let schema = self.input.schema();
-        let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY.max(n));
+        let (tx, rx) = channel::<BatchResult>(channel_capacity().max(n));
         for i in 0..n {
             let mut stream = self.input.execute(i, context.clone())?;
             let tx = tx.clone();
