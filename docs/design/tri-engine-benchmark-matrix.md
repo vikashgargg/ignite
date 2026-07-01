@@ -26,7 +26,7 @@ RisingWave/StreamNative as architecture refs). Claim "replaces both" ONLY on mea
 | # | Dimension | Metric | Vajra (have) | Spark (have) | Status / need |
 |---|---|---|---|---|---|
 | B1 | TPC-H | query wall, SF | SF-1 1.78s (local) | 63.46s (3.5.3) | ✅ ~36× local — re-confirm @ bigger SF on EKS, fair |
-| B2 | TPC-DS | query coverage + wall | partial | — | ❓ NEED full run |
+| B2 | TPC-DS | coverage + wall + mem | 97/99 cov, 0.32 GiB | 2.5 GiB | ⚠️ **EKS 2026-07-01: Vajra 97/99 queries (Q5 schema, Q9 type-cmp) = strong Spark-compat; MEMORY Vajra 0.32 vs Spark 2.5 GiB = ~8× less (no-JVM). BUT tpcds_score.py `LIMIT 10000` = tiny data → times MEANINGLESS; perf-at-SF needs gen fix (remove LIMIT + real dsdgen at SF)** |
 | B3 | ClickBench | 43-query wall | vs LakeSail 60.11s | (LakeSail 65.5s) | ⚠️ have vs LakeSail, not Spark — add Spark |
 | B4 | Batch memory | peak GiB | — | — | ❓ NEED comparative |
 | B5 | Cold start (batch) | launch→result ms | — | — | ❓ NEED (no-JVM) |
