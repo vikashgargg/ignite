@@ -8,6 +8,16 @@ RisingWave/StreamNative as architecture refs). Claim "replaces both" ONLY on mea
 
 ## Honesty: ✅ measured-better · ⚠️ competitive · ❌ worse · ❓ unmeasured. No number, no claim.
 
+## MEASURED SO FAR (EKS 2026-07-01) — honest tri-engine baseline
+- **Streaming vs Flink 1.19:** throughput 5.28M vs 5.78M (1.10× slower) · memory 10.34 vs 8.58 GiB
+  (1.20× MORE) · **latency competitive, Vajra TAIL p999/max BETTER** (126/129 vs 127/131ms = no-GC win).
+- **Batch vs Spark 3.5.3 (TPC-DS):** Vajra **97/99 query coverage** (Q5/Q9 compat gaps) · memory **0.32 vs
+  2.5 GiB = ~8× LESS** (no-JVM). ⚠️ coverage not perf-at-SF (`LIMIT 10000`; gen fix needed).
+- **KEY: memory is PATH-DEPENDENT + it flips** — ~8× less on batch, 1.20× more on streaming-bounded ⇒ the
+  streaming bounded-path buffering is the specific, isolated fix.
+- **NEXT = production workloads** (real sinks S3 Iceberg/Parquet + Kafka vs Flink/Spark):
+  [production-workload-benchmark.md](production-workload-benchmark.md). Land fixes first, then P1–P5.
+
 ## A. STREAMING dimensions — baseline = Flink 1.19/2.x (EKS c7g.4xlarge, fair side-by-side)
 | # | Dimension | Metric | Vajra (have) | Flink (have) | Status / need |
 |---|---|---|---|---|---|
