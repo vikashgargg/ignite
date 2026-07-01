@@ -33,6 +33,10 @@ kk delete -f k8s/stream/flink-session.yaml --ignore-not-found >/dev/null 2>&1; k
 
 echo "==== [2] Vajra + client ===="
 sed "s|__ECR__|$REG|g" k8s/stream/vajra-stream.yaml | kk apply -f -
+# maxSurge=0: the pod requests ~15 CPU on a 16-vCPU node, so a rolling update that surges a 2nd pod
+# DEADLOCKS (new Pending, old never terminates → env change never applies → sweep measures stale config).
+# Terminate old BEFORE new so each prefetch value actually takes effect.
+kk patch deploy vajra-stream --type merge -p '{"spec":{"strategy":{"rollingUpdate":{"maxSurge":0,"maxUnavailable":1}}}}' >/dev/null
 wait_ready vajra-stream
 kk apply -f k8s/stream/vajra-client.yaml
 kk wait --for=condition=ready --timeout=300s pod/vajra-client
