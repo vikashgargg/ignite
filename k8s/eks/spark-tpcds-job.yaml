@@ -19,13 +19,13 @@ spec:
         - name: spark
           image: python:3.12-slim-bookworm
           resources:
-            requests: { cpu: "8", memory: "16Gi" }
-            limits: { cpu: "15", memory: "115Gi" }
+            requests: { cpu: "6", memory: "12Gi" }
+            limits: { cpu: "7", memory: "48Gi" }
           env:
             - { name: SPARK_REMOTE, value: "local[16]" }
             - { name: TPCDS_SF, value: "10" }
             - { name: SPARK_LOCAL_IP, value: "127.0.0.1" }
-            - { name: PYSPARK_SUBMIT_ARGS, value: "--driver-memory 95g --conf spark.sql.shuffle.partitions=64 pyspark-shell" }
+            - { name: PYSPARK_SUBMIT_ARGS, value: "--driver-memory 40g --conf spark.sql.shuffle.partitions=32 pyspark-shell" }
           volumeMounts:
             - { name: script, mountPath: /app }
           command:

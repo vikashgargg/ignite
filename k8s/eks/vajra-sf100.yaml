@@ -17,8 +17,8 @@ spec:
           args: ["server", "--ip", "0.0.0.0", "--port", "50051", "--mode", "local-cluster", "--workers", "4"]
           ports: [ { containerPort: 50051 } ]
           resources:
-            requests: { cpu: "8", memory: "16Gi" }
-            limits: { cpu: "15", memory: "115Gi" }
+            requests: { cpu: "4", memory: "12Gi" }
+            limits: { cpu: "7", memory: "48Gi" }
           env:
             - { name: RUST_LOG, value: warn }
             - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }

@@ -22,5 +22,5 @@ spec:
       # needs headroom for the largest table's pandas frame + Arrow transfer. 24Gi covers SF-1 safely
       # (SF-10+ needs a Vajra-side/shared-parquet data path instead — future).
       resources:
-        requests: { cpu: "2", memory: "8Gi", ephemeral-storage: "20Gi" }
-        limits: { cpu: "4", memory: "24Gi", ephemeral-storage: "40Gi" }
+        requests: { cpu: "1", memory: "6Gi", ephemeral-storage: "20Gi" }
+        limits: { cpu: "2", memory: "16Gi", ephemeral-storage: "40Gi" }
