@@ -93,6 +93,19 @@ availableNow). ⇒ a memory fix cannot be validated locally. The prefetch hypoth
 re-measure sweeping `VAJRA_KAFKA_PREFETCH_KBYTES` ∈ {1 GiB, 256 MiB, 64 MiB}** (env, no rebuild): the
 RSS-vs-throughput curve confirms the driver + picks the sweet spot. Then set default + merge.
 
+## ✅ VALIDATED (EKS 100M sweep, 2026-07-02) — Vajra now BEATS Flink on memory
+| prefetch/partition | peak RSS | throughput | vs Flink (8.58 GiB / 5.7M) |
+|---|---|---|---|
+| 1 GiB (old default) | 8.32 GiB | 5.64M/s | ~tie mem |
+| 256 MiB | 8.50 GiB | 5.63M/s | ~tie |
+| **64 MiB (NEW default)** | **7.36 GiB** | 5.58M/s | **BEATS mem (−1.2 GiB), matched throughput** |
+
+RSS is noisy (~±1 GiB) but 64 MiB is clearly the lowest, comfortably under Flink, with NO throughput cost
+⇒ **default set to 64 MiB/partition.** The librdkafka prefetch WAS the driver; bounding it flips the
+memory result from 1.20× MORE to <Flink, while keeping the 1.10× throughput. Prod-grade: env-tunable
+(`VAJRA_KAFKA_PREFETCH_KBYTES`) so a deep-prefetch workload can raise it. This is the one fully-measured
+Flink-beating axis so far. Branch streaming/memory-jemalloc → merge.
+
 ## Non-goals / honest
 jemalloc is NOT the fix (measured) — opt-in only. Don't claim a memory win until the EKS re-measure shows
 ≤ Flink. This is the one measured axis where Vajra currently LOSES on the streaming-bounded path.

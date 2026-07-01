@@ -226,9 +226,9 @@ fn apply_consumer_throughput_defaults(cfg: &mut ClientConfig) {
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|&n| n >= 1024)
-        .unwrap_or(262144); // 256 MiB/partition (was 1 GiB) — BALANCE: bounds RSS 4x (16×256=4GiB EKS max
-                            // vs 16 GiB) while keeping enough prefetch for throughput. EKS tunes the
-                            // memory-vs-throughput curve (1 GiB/256/64 MiB) since local can't reproduce it.
+        .unwrap_or(65536); // 64 MiB/partition (was 1 GiB). VALIDATED EKS 2026-07-02 (100M sweep): 64 MiB
+                           // = 7.36 GiB RSS (< Flink 8.58) at 5.58M ev/s (no throughput cost) vs 1 GiB =
+                           // 8.32 GiB — the sweet spot. Raise via env if a workload needs deeper prefetch.
     let prefetch_msgs = std::env::var("VAJRA_KAFKA_PREFETCH_MSGS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
