@@ -23,7 +23,7 @@ spec:
             limits: { cpu: "15", memory: "115Gi" }
           env:
             - { name: SPARK_REMOTE, value: "local[16]" }
-            - { name: TPCDS_SF, value: "10" }            # match the Vajra run's TPCDS_SF
+            - { name: TPCDS_SF, value: "10" }
             - { name: SPARK_LOCAL_IP, value: "127.0.0.1" }
             - { name: PYSPARK_SUBMIT_ARGS, value: "--driver-memory 95g --conf spark.sql.shuffle.partitions=64 pyspark-shell" }
           volumeMounts:

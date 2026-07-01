@@ -87,8 +87,10 @@ batch_phase() {
     set -- $bench; local SCRIPT="$1" SFENV="$2" NAME="$3"
     echo "==== Vajra $NAME ($SFENV) ===="
     kk cp "scripts/$SCRIPT" vajra-client:/tmp/"$SCRIPT" 2>/dev/null
-    kk exec vajra-client -- sh -c "SPARK_REMOTE=sc://$VSVC $SFENV python3 /tmp/$SCRIPT" 2>&1 \
-      | grep -aiE "TOTAL|wall|q[0-9]+|score|GEOMEAN|TPC" | tail -20 | tee -a /tmp/tri_batch.txt
+    # Capture FULL output to a log (so failures/Tracebacks are visible, not filtered away), then show it.
+    kk exec vajra-client -- sh -c "SPARK_REMOTE=sc://$VSVC $SFENV python3 /tmp/$SCRIPT" >"/tmp/vbatch_$NAME.log" 2>&1 || true
+    grep -aiE "Result:|TPC-DS|TPC-H|Scorecard|Q[0-9]|Error|Traceback|Exception|Generating|Data ready|refused|connect" \
+      "/tmp/vbatch_$NAME.log" | tail -25 | tee -a /tmp/tri_batch.txt
     local VPOD; VPOD=$(kk get pod -l app=vajra-sf100 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
     [ -n "$VPOD" ] && echo "Vajra $NAME peakRSS=$(gib "$(kk exec "$VPOD" -- cat /sys/fs/cgroup/memory.peak 2>/dev/null)") GiB" | tee -a /tmp/tri_batch.txt
   done
@@ -98,7 +100,8 @@ batch_phase() {
   # TPC-DS-99 power test on Spark (data generated in-process via DuckDB at TPCDS_SF).
   kk create configmap tpcds-script --from-file=tpcds_score.py=scripts/tpcds_score.py --dry-run=client -o yaml | kk apply -f - >/dev/null
   kk delete job spark-tpcds-99 --ignore-not-found >/dev/null 2>&1
-  sed "s/value: \"10\".*# match.*/value: \"$TPCDS_SF\"/" k8s/eks/spark-tpcds-job.yaml | kk apply -f -
+  # keep the flow-map `}` intact when injecting SF (a greedy sed ate it -> broken YAML on the first run).
+  sed "s/name: TPCDS_SF, value: \"10\" }/name: TPCDS_SF, value: \"$TPCDS_SF\" }/" k8s/eks/spark-tpcds-job.yaml | kk apply -f -
   kk wait --for=condition=complete --timeout=3600s job/spark-tpcds-99 2>/dev/null \
     && kk logs job/spark-tpcds-99 2>/dev/null | grep -aiE "TOTAL|wall|peak_RSS|TPC-DS|GEOMEAN" | tail -15 | tee -a /tmp/tri_batch.txt
   # TPC-H on Spark (reuses the existing spark-bench-job for tpch_distributed.py).
