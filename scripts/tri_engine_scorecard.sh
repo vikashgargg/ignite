@@ -83,7 +83,11 @@ batch_phase() {
   kk wait --for=condition=ready --timeout=300s pod/vajra-client 2>/dev/null
   until kk logs vajra-client 2>/dev/null | grep -q CLIENT_READY; do sleep 5; done
   local VSVC="vajra-sf100.${NS}.svc.cluster.local:50051"
-  for bench in "tpcds_score.py TPCDS_SF=$TPCDS_SF TPC-DS-99" "tpch_distributed.py TPCH_SF=$TPCH_SF TPC-H"; do
+  # TPC-DS uses createDataFrame (Arrow over Connect = cross-pod safe: client generates, Vajra receives).
+  # TPC-H writes parquet to a LOCAL dir then spark.read.parquet reads it SERVER-side -> that path is on
+  # the client, not Vajra -> cross-pod FAIL. TPC-H needs shared storage (future); the clean official run
+  # is TPC-DS-99. (Data is client-side pandas -> keep SF small enough for the client pod, SF-1 default.)
+  for bench in "tpcds_score.py TPCDS_SF=$TPCDS_SF TPC-DS-99"; do
     set -- $bench; local SCRIPT="$1" SFENV="$2" NAME="$3"
     echo "==== Vajra $NAME ($SFENV) ===="
     kk cp "scripts/$SCRIPT" vajra-client:/tmp/"$SCRIPT" 2>/dev/null
@@ -92,7 +96,10 @@ batch_phase() {
     grep -aiE "Result:|TPC-DS|TPC-H|Scorecard|Q[0-9]|Error|Traceback|Exception|Generating|Data ready|refused|connect" \
       "/tmp/vbatch_$NAME.log" | tail -25 | tee -a /tmp/tri_batch.txt
     local VPOD; VPOD=$(kk get pod -l app=vajra-sf100 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
-    [ -n "$VPOD" ] && echo "Vajra $NAME peakRSS=$(gib "$(kk exec "$VPOD" -- cat /sys/fs/cgroup/memory.peak 2>/dev/null)") GiB" | tee -a /tmp/tri_batch.txt
+    if [ -n "$VPOD" ]; then
+      local PK; PK=$(kk exec "$VPOD" -- sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null' 2>/dev/null)
+      echo "Vajra $NAME peakRSS=$(gib "${PK:-0}") GiB" | tee -a /tmp/tri_batch.txt
+    fi
   done
   # Spark baseline: same scripts, Spark 3.5.3 local[16], after scaling Vajra->0 (same node = fair).
   echo "==== Spark 3.5.3 baseline (scale Vajra->0, same node) ===="
