@@ -265,6 +265,74 @@ vajra bench --scale-factor 10   # requires: pip install duckdb
 
 ---
 
+## Batch **and** streaming in one engine
+
+The whole point of Vajra: **one binary, one API** does Spark's batch **and** Flink-class streaming.
+No JVM, no separate cluster, no second framework — the same `SparkSession` you already know. Start a
+server once (`vajra server`, or the Docker image above), then point PySpark at `sc://localhost:50051`.
+
+### Batch (Spark-class) — read → transform → write
+
+```python
+from pyspark.sql import SparkSession, functions as F
+
+spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
+
+# Read Parquet (local, S3, or a Delta/Iceberg table), aggregate, write back — your Spark code, unchanged.
+orders = spark.read.parquet("s3://my-bucket/orders/")
+daily = (orders
+         .withColumn("day", F.to_date("ts"))
+         .groupBy("day", "region")
+         .agg(F.sum("amount").alias("revenue"), F.countDistinct("user_id").alias("buyers")))
+
+daily.write.mode("overwrite").partitionBy("day").parquet("s3://my-bucket/daily_revenue/")
+
+# SQL works too — full Spark SQL surface (window functions, CTEs, PIVOT, QUALIFY, …)
+spark.sql("SELECT region, SUM(revenue) FROM parquet.`s3://my-bucket/daily_revenue/` GROUP BY region").show()
+```
+
+### Streaming (Flink-class) — Kafka → event-time window → sink, **exactly-once**
+
+The *same* `SparkSession`. Structured Streaming API — event-time windows, watermarks, and
+exactly-once checkpointing to an object store (proven across a hard crash: see the P1 result above).
+
+```python
+from pyspark.sql import functions as F
+
+# Kafka source → parse JSON → 10s tumbling event-time window with watermark → count per key
+events = (spark.readStream
+          .format("kafka")
+          .option("kafka.bootstrap.servers", "localhost:9092")
+          .option("subscribe", "events")
+          .load()
+          .select(F.from_json(F.col("value").cast("string"),
+                              "user_id STRING, amount DOUBLE, ts TIMESTAMP").alias("e"))
+          .select("e.*"))
+
+windowed = (events
+            .withWatermark("ts", "30 seconds")
+            .groupBy(F.window("ts", "10 seconds"), "user_id")
+            .agg(F.sum("amount").alias("revenue")))
+
+# Exactly-once sink to Parquet on S3 — checkpoint makes it crash-safe (kill -9 → resume, no dup/loss)
+query = (windowed.writeStream
+         .format("parquet")
+         .option("path", "s3://my-bucket/windowed_revenue/")
+         .option("checkpointLocation", "s3://my-bucket/_ckpt/windowed_revenue/")
+         .outputMode("append")
+         .trigger(processingTime="5 seconds")   # or .trigger(availableNow=True) for backfill
+         .start())
+
+query.awaitTermination()
+```
+
+Both jobs run on the **same server**, the **same 105/105 Spark-compatible engine**, with **no JVM**
+and **no Flink** — batch and streaming share one execution core. See
+[docs/STREAMING.md](docs/STREAMING.md) for the streaming feature matrix and
+[COMPAT.md](COMPAT.md) for the batch SQL surface.
+
+---
+
 ## Deployment
 
 > **Platform support:** macOS requires **Apple Silicon (M1/M2/M3/M4)**. Linux works on x86_64 and aarch64. Intel Macs are not supported.
@@ -422,7 +490,7 @@ EOF
 
 ---
 
-## What Works Today (v0.5.0-alpha)
+## What Works Today (v0.6.0-alpha)
 
 ### SQL & Query Engine
 | Feature | Status |
@@ -460,16 +528,21 @@ EOF
 | `df.freqItems()` | ✅ |
 | Lambda HOFs (`transform`, `filter`, `aggregate`) | ✅ |
 
-### Structured Streaming
+### Structured Streaming (Flink-class)
 | Feature | Status |
 |---|---|
-| Kafka source (`readStream.format("kafka")`) | ✅ |
-| `writeStream.format("memory").queryName(name)` | ✅ |
-| `writeStream.foreachBatch(fn)` | ✅ |
-| Streaming aggregates (COUNT/SUM/AVG per micro-batch) | ✅ |
-| Checkpoint + recovery (resume from last offset) | ✅ |
-| Event-time windows (`F.window()`, `withWatermark`) | **✅ executor wired (Sprint 6)** |
-| Stream × static join | ✅ |
+| Kafka source, **parallel** (per Spark `KafkaSourceRDD` / Flink FLIP-27) | ✅ |
+| Sinks: Parquet/file (incl. **S3**), Kafka, `memory`, `foreachBatch` | ✅ |
+| Triggers: `processingTime`, `availableNow`, continuous | ✅ |
+| Event-time windows (`F.window()`) + watermarks, **keyed & parallel** | ✅ |
+| **Per-partition watermark** (Flink `withIdleness`) — no premature window close | ✅ |
+| Streaming aggregates (COUNT/SUM/AVG), append + **update/retraction** output | ✅ |
+| Stream–stream / interval joins; stream × static join | ✅ |
+| Stateful deduplication (`dropDuplicates`) | ✅ |
+| **Exactly-once**, crash-verified (`kill -9` → resume): stateless **and** stateful, incl. **Parquet-on-S3** sink (dup=0, bit-identical) | ✅ |
+| Spillable large state (object-store) + incremental checkpoints | ✅ |
+| Rescale from checkpoint (key-groups, Flink FLIP-8) | ✅ gated |
+| Iceberg sink | 🚧 in progress |
 
 ### Infrastructure
 | Feature | Status |
@@ -577,11 +650,12 @@ make build-all
 | **Phase 1** ✅ | Done | 105/105 Spark compat, 22/22 TPC-H, K8s + Apple Container |
 | **Phase 2** ✅ | Done | Streaming (Kafka/foreachBatch/checkpoint), auth, HA, Web UI |
 | **Phase 3** ✅ | Done 2026-05-30 | VARIANT, GroupedMap, time travel, dbt, ClickBench, Iceberg OverwritePartitions, event-time windows, stateful dedup, theta sketch, Vortex skeleton, 95%+ Spark test suite |
-| **Phase 4** 📅 | Q3 2026 | GPU workers, sub-interpreter UDFs, SF-100 distributed, SaaS |
+| **Phase 4** ✅ | Done 2026-07-02 | Flink 1.19 streaming head-to-head on EKS; exactly-once across hard crash incl. **Parquet-on-S3** sink; prod-workload benchmarks (P1 streaming EO, P4 batch 6.2× vs Spark); spillable/incremental state; per-partition watermark; TPC-DS-99 coverage |
+| **Phase 5** 🔜 | In progress | **Public GA prod-grade**: pullable GHCR image (signed + SBOM), Helm publish, streaming Iceberg sink, streaming latency, large-state backend, observability metrics |
 
-Full plan: [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md). What's left to reach a
-production **1.0 GA** (honest gap checklist with measurable acceptance criteria):
-[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+Full plans: distribution/repo prod-grade **[GA readiness board](docs/design/public-ga-readiness-board.md)**;
+engine gaps **[PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md)**; and the 1.0 GA acceptance
+checklist **[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)**.
 
 ---
 
