@@ -136,6 +136,26 @@ the final epoch on EndOfData before the query ends), then re-verify RUN=75 + PAR
 promote C6/C7 XFAIL→GREEN or claim "Flink-class multi-partition continuous stateful EO" until the
 residual is closed and completeness is proven no-loss on a full-window run.
 
+## 5e. C7 crash-EO result (measured 2026-07-03)
+
+The RUN=75 "309 dups" was a **one-off from the earlier disk-full/Docker-unhealthy period** — in a clean
+env, RUN=75 is **2/2 = 0 dups**, RUN=40 is **3/3 = 0 dups** (5/6 total; the outlier explained).
+
+**C7 (continuous PARTS=4 + hard `kill -9` + restart, VAJRA_RT_MULTI):** across the crash,
+`no_dup=True, all_counts_10=True, DUP_GROUPS=0, count!=10=0` — **exactly-once no-duplication across a
+hard crash HOLDS on the multi-partition path** (the union-commit recovery replays from committed offsets
+with no re-read). The gate reports FAIL **only on completeness** (`rows=1200 vs 1800` = 4 of 6 windows
+closed), NOT on dups/counts.
+
+**Net:** the hard target — multi-partition continuous stateful EO **no-dup across crash** — is achieved
+by T-EO-1 + T-EO-3. **Remaining = COMPLETENESS (the "last-window edge"):** the final windows don't close
+because the per-partition watermark (MIN over N instances) doesn't advance when the gate's flush/max-ts
+reaches only some partitions — idle partitions must be excluded (Flink `withIdleness`) OR the flush must
+reach all partitions. This is a separate issue from the dup fix (and also affects single-instance short
+runs). Next (T-EO-3.5): make the multi-instance per-partition watermark advance at end-of-input so all
+windows close (idleness on the realtime path), then completeness == no-loss ⇒ full EO; then promote
+C6/C7 XFAIL→GREEN + EKS.
+
 ## 6. Honesty / risk
 
 The residual has historically resisted a single-instance patch and "full exact-zero" was expected to
