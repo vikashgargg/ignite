@@ -299,3 +299,52 @@ TPC-DS https://www.databricks.com/blog/2021/11/02/databricks-sets-official-data-
 
 ### Net: tri-engine matrix anchors → streaming on **Nexmark (Cores×Time + ev/s)**, batch on **TPC-DS-99
 power test (response time + wall + mem)**. These are the one-time Spark/Flink reference numbers to beat.
+
+## 8. RisingWave 3.0 + Polars — mine the best of BOTH (for a next-era engine)
+
+Vajra must beat Spark (batch) AND Flink (streaming) on every axis. Two more engines carry ideas worth
+stealing; the goal is the **union of the best**, built on our Arrow/DataFusion no-JVM core.
+
+### RisingWave 3.0 (streaming database — the streaming SQL frontier)
+- **Decoupled compute/storage state (Hummock):** an LSM state store on S3/object-store; compute nodes are
+  near-stateless, state lives on cheap durable storage. ⇒ **fast elastic rescale** (state isn't pinned to
+  a node) + cheap large state. This is the SAME direction as **Flink 2.0 ForSt (§3)** and as **Vajra's F5
+  spillable Arrow state + inc-ckpt** (immutable Arrow chunks on object store, O(delta) checkpoints). Vajra
+  already has the substrate; RisingWave validates the architecture (compute/state separation is the frontier).
+- **Materialized views = incremental computation:** a streaming query is a MV kept fresh by *incremental*
+  updates (differential-dataflow-style deltas), not re-execution. Maps to Vajra's **changelog/retraction
+  output mode** (`WindowOutputMode::Update`, emit retract+insert) — extend it to full MV maintenance.
+- **Arrangements (shared indexed state):** joins/aggs share indexed state (one arrangement, many readers) =
+  less memory. Vajra analog: shared keyed state across operators on the same key-group (F5 chunks).
+- **Barrier-based exactly-once** (Chandy-Lamport, like Flink §2) + **per-partition watermarks** — our
+  T-EO-1/T-EO-3/T-EO-3.5 (per-instance FLIP-27 read + union commit + withIdleness merge) is exactly this
+  model. **Honest note:** RW is Postgres-wire + MV-centric; Vajra is Spark-API + DataFrame/SQL — same
+  streaming core ideas, different surface. (3.0 is the current line; cite durable architecture facts, not
+  version-specific perf claims we haven't measured.)
+
+### Polars (the fast single-node Arrow engine — batch/out-of-core)
+- **New streaming engine (2024+ rewrite):** **morsel-driven** parallelism (small row batches flow through a
+  work-stealing scheduler — Leis/Neumann morsel model, same as our exchange should approach) + **out-of-core
+  spill** for larger-than-memory. **Honest scope:** Polars "streaming" = larger-than-memory **batch**, NOT
+  infinite event streams (no watermarks/EO/state) — so it's a **batch/perf** reference, not a Flink rival.
+- **Arrow-native, zero-copy, vectorized (SIMD)** columnar kernels + a **lazy query optimizer** (predicate/
+  projection pushdown, common-subexpression elim, streaming physical plan). This is the **columnar edge (§6)**
+  that lets Vajra beat Flink's per-record JVM cost — Polars proves how far a well-optimized Arrow engine goes
+  on one node. Vajra's DataFusion core (§5) is the distributed equivalent; steal Polars' optimizer rigor +
+  morsel scheduling for the single-node hot path.
+
+### Synthesis — the "best of all" bar for Vajra (cite this in streaming/engine work)
+| Concern | Best source | Vajra target (build to this) |
+|---|---|---|
+| Exactly-once | Flink barriers + RW barriers | Barrier-aligned union commit (T-EO-3), crash-proven ✅ |
+| Watermarks | Flink `withIdleness` + RW per-partition | Per-instance FLIP-27 + idleness merge (T-EO-1/3.5) ✅ |
+| Large state / rescale | Flink 2.0 ForSt + RW Hummock (S3) | F5 immutable Arrow chunks + inc-ckpt on object store ✅ |
+| Incremental results | RW materialized views | Changelog/retraction mode → full MV maintenance ⬜ |
+| Vectorized hot path | Polars morsel-driven + DataFusion | Arrow/DataFusion vectorized, no-JVM (§6) ✅; add morsel scheduling ⬜ |
+| Query optimization | Polars/DataFusion optimizer | DataFusion optimizer; mine Polars' pushdown/CSE rigor ⬜ |
+| No-JVM footprint | (Vajra unique) | Arrow single-binary — the categorical memory/startup edge ✅ |
+
+**Prod-grade bar (STANDING):** every one of these must be *measured* head-to-head (Nexmark/TPC-DS/prod
+workloads) before claiming "better than Flink/Spark", path-dependence flagged. The win is the **union** —
+Flink's correctness + RW's decoupled state/MV incrementalism + Polars' vectorized single-node speed +
+Vajra's no-JVM Arrow core — that no single incumbent has all of.
