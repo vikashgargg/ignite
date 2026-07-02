@@ -1,7 +1,7 @@
 # Vajra — Build Status
 
-> Last updated: 2026-06-19
-> Branch: `phase5/real-world-head-to-head`
+> Last updated: 2026-07-02
+> Branch: `main`
 > See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) and [FEATURES.md](FEATURES.md) for the full plan.
 > **Road to a true Spark + Flink replacement** (measured state + grounded gap analysis +
 > prioritized roadmap): [docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md).
@@ -9,28 +9,52 @@
 
 ---
 
-## Streaming head-to-head vs Apache Flink 1.19 (2026-06-19) — measured on EKS c7g.4xlarge
+## Honest headline (measured, 2026-07-02)
 
-Identical 100M-event 10 s tumbling keyed-COUNT, shared Kafka topic, official Flink 1.19.
-Full writeup: [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAMING_VS_FLINK_EKS.md).
+**Vajra is a strong Spark *batch* replacement and a competitive Flink *streaming* replacement —
+claimed only where measured head-to-head, path-dependence flagged.**
+
+- **Batch vs Spark 3.5.3:** wins across the board — TPC-H SF-100 ~3.2× faster / ~2.2× less RAM;
+  TPC-DS-99 97/99 coverage, ~8× less memory (0.32 vs 2.5 GiB); **P4 batch Parquet-on-S3 6.2×
+  faster + 2.4× less memory with bit-identical output at 200M rows** (2026-07-02).
+- **Streaming vs Flink 1.19:** *competitive, not categorically-better.* Throughput ~1.07–1.10×
+  **slower** (after T1–T7a), memory **modestly better** (~7.1 vs 8.55 GiB) and **path-dependent**;
+  tail latency better (no GC); **exactly-once proven under hard crash, incl. a real S3 object-store
+  sink** (P1: dup=0, bit-identical).
+
+## Streaming head-to-head vs Apache Flink 1.19 — measured on EKS (latest: tri-engine 2026-07-01)
+
+Authoritative run = **rigorous Nexmark-methodology tri-engine scorecard** (`scripts/tri_engine_scorecard.sh`),
+official Flink 1.19, shared Kafka, identical 10 s tumbling keyed-COUNT.
+Full writeup: [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAMING_VS_FLINK_EKS.md),
+[docs/design/tri-engine-benchmark-matrix.md](docs/design/tri-engine-benchmark-matrix.md).
 
 | Dimension | Flink 1.19 | Vajra | Verdict |
 |---|---|---|---|
-| **Throughput** | 1.157M ev/s | **1.543M ev/s** | 🟢 Vajra **1.33× faster** |
-| **Memory** (peak RSS) | 8.24 GiB | **1.29 GiB** | 🟢 Vajra **~6.4× less** |
-| **Exactly-once** | mature | EO across **hard kill** ✓ (100000/100000, parallel source) | 🟢 correct / 🟡 less hardened |
-| **Latency** | ms (Kafka) / ~ckpt (file) | **p50 27 ms / p99 51 ms** (Kafka sink + decoupled 5 ms flush, 1 s epoch) | 🟢 **sub-100 ms, Flink-class** (was ~30 s) |
-| **Exactly-once → Kafka** | transactional (FLIP-143) | **EO Kafka→Kafka across kill -9: 100000/100000** (`f1b978e0`) | 🟢 **matches Flink** |
+| **Throughput** | 5.78M ev/s | 5.28M ev/s | 🟡 Vajra **~1.10× slower** (competitive; was 1.15×, after T1–T7a) |
+| **Memory** (peak RSS) | 8.55 GiB | ~7.1 GiB | 🟢 Vajra **~1.2× less** (streaming; **path-dependent** — batch is ~8× less) |
+| **Latency** | ms (Kafka) | competitive, **tail better** (no GC pauses) | 🟢 tail / 🟡 median |
+| **Exactly-once** (hard-kill chaos) | mature | EO ✓ incl. **real S3 sink** (P1 dup=0, bit-identical) | 🟢 correct / 🟡 less hardened |
 
-Surfaced + fixed two real bugs via the true head-to-head (Arrow i32 offset overflow
-`6b812758`; single-threaded Kafka source `bd8679f2`, parallelized per Spark
-`KafkaSourceRDD` / Flink FLIP-27), then **added a Kafka sink** (`74b167bc`, record-paced
-→ latency ~30 s → **p50 51 ms, ~600×, Flink-class**) and **exactly-once-to-Kafka**
-(`f1b978e0`, transactional + `send_offsets_to_transaction` + fencing; chaos-validated
-100000/100000 across a hard kill). **Vajra now wins throughput + memory, and matches
-Flink on latency *and* exactly-once-to-Kafka.** Remaining for full Flink parity:
-sub-100 ms p99, large-state backend, mid-job failure recovery, unaligned checkpoints —
-see [docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md). All AWS torn down to $0.
+> **Honesty note (supersedes earlier claims):** an *earlier, lighter* EKS run (2026-06-19) reported
+> Vajra 1.33× *faster* throughput and 6.4× less memory at ~1.5M ev/s. The **rigorous tri-engine
+> Nexmark-methodology run at ~5.3M ev/s is authoritative and supersedes it** — Vajra is
+> **competitive, ~1.1× slower on throughput**, memory **path-dependent**. We claim only the measured
+> head-to-head and flag path-dependence (per the project's honest-claims bar). Remaining for full
+> Flink parity: throughput (VAJ-T7 parse-fusion), large-state backend, mid-job recovery time,
+> soak/chaos, observability — see [docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md).
+
+## Production-workload results — real S3 sinks (EKS 2026-07-02)
+
+Canonical Uber/Netflix/Apple prod patterns on **real object storage**
+([docs/design/production-workload-benchmark.md](docs/design/production-workload-benchmark.md)):
+
+| Workload | Result | Verdict |
+|---|---|---|
+| **P1** Kafka → 10 s windowed-agg → **Parquet on S3**, exactly-once | clean + **EO-under-crash** (kill -9 → resume from S3 checkpoint): rows=9000 dup=0 sum=90M **bit-identical**; 4.67M ev/s, RSS 7.25 GiB | 🟢 **EO on a real object-store sink, proven** |
+| **P4** batch: gen 200M → write **Parquet on S3** → read+agg vs Spark 3.5.3 | Vajra **5.92 s / 3.44 GiB** vs Spark **36.94 s / 8.1 GiB**; both rows=200M distinct_k=1000 sum identical | 🟢 **6.2× faster, 2.4× less mem, identical output** |
+
+All AWS torn down to $0 after each run.
 
 ---
 

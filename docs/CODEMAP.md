@@ -59,8 +59,19 @@ streaming rewrite) → `sail-logical-plan`/`-optimizer` → `sail-session` plann
 |---|---|
 | `scripts/diff_test*` | differential test vs real Spark 3.5.3 (see [[project_test_harness]]) |
 | `scripts/stream_windowed_agg.py` | Vajra windowed-agg head-to-head harness |
-| `k8s/stream/` | EKS head-to-head (kafka, flink-session, producer, vajra-stream, eks-stream-cluster) |
+| `scripts/tri_engine_scorecard.sh` | 2-phase (streaming\|batch) Vajra-vs-Flink-vs-Spark scorecard (Nexmark / TPC-DS methodology); authoritative head-to-head |
+| `scripts/batch_s3_bench.py` | **P4** batch Parquet-on-S3 (gen→write S3→read+agg, count/sum correctness+timing); runs on Vajra (`SPARK_REMOTE=sc://`) OR classic Spark (`BENCH_REMOTE=local[16]` — NOT the magic `SPARK_REMOTE`, which forces Connect-mode) |
+| `scripts/eks_p1_s3_eo.sh` | **P1** Kafka→windowed-agg→Parquet-on-S3 exactly-once, incl. kill-9 crash gate (EO across restart) |
+| `scripts/eks_build_image.sh` | fast arm64 image build via throwaway c7g EC2 (native, auto-terminate) — avoids slow local docker |
+| `scripts/correctness_gate.sh` | STANDING adversarial streaming correctness harness (cardinality/partitions/scrambled/crash) vs batch ground-truth |
+| `k8s/stream/` | EKS streaming head-to-head (kafka, flink-session, producer, vajra-stream, eks-stream-cluster) |
+| `k8s/eks/` | EKS batch (spark-tpcds-job, spark-s3-job, vajra-sf100/client); Spark-on-S3 needs hadoop-aws:3.3.4 + aws-java-sdk-bundle + `InstanceProfileCredentialsProvider` + s3→s3a; py3.12 needs `setuptools<81` |
 | `KAFKA_BENCH=1 ... cargo test -p sail-data-source --release kafka_read_bench` | local Kafka read throughput micro-bench |
+
+Streaming perf/observability knobs (see also [[project_f2f3_distributed]] / throughput tickets):
+`KafkaStatsContext` (`sail-data-source/.../kafka/reader.rs`, `VAJRA_KAFKA_STATS` → logs fetchq_size/prefetch/lag);
+`VAJRA_WM_PROF` (per-stage streaming CPU breakdown); jemalloc allocator is **opt-in** (`sail-cli` `--features jemalloc`,
+default off — glibc/jemalloc measured equivalent, so not the memory driver).
 
 ## Conventions
 

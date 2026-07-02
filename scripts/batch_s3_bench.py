@@ -9,7 +9,10 @@ Usage: SPARK_REMOTE=sc://.. S3_PATH=s3://bucket/p4 N_ROWS=200000000 ENGINE=vajra
 import os, time
 from pyspark.sql import SparkSession, functions as F
 
-REMOTE = os.environ.get("SPARK_REMOTE", "sc://localhost:50051")
+# NOTE: `SPARK_REMOTE` is a MAGIC pyspark env — if set (to anything), getOrCreate() forces Spark
+# Connect mode (which needs pandas) and IGNORES .master(). So the local Spark baseline passes its
+# master via the non-magic `BENCH_REMOTE` and must NOT set SPARK_REMOTE. Vajra sets SPARK_REMOTE=sc://.
+REMOTE = os.environ.get("SPARK_REMOTE") or os.environ.get("BENCH_REMOTE", "sc://localhost:50051")
 S3 = os.environ["S3_PATH"]
 N = int(os.environ.get("N_ROWS", "200000000"))
 ENGINE = os.environ.get("ENGINE", "?")

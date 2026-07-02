@@ -59,6 +59,26 @@ real-workload throughput bottleneck now INCLUDES the S3 sink (~17%), which refra
 fusion attacks from_json, but the sink is now a co-equal cost). Next: P4/P5 batch-on-S3 vs Spark; P1 Flink
 side-by-side (needs Flink s3-fs plugin); Iceberg-table sink (P1 used Parquet — the EO substrate is the same).
 
+### P4 PASSED — batch Parquet-on-S3 vs Spark 3.5.3 (EKS 2026-07-02, `scripts/batch_s3_bench.py`)
+Canonical batch-ETL: generate 200M rows → **write Parquet to real S3** → read back + agg (count, sum(v),
+distinct k). Like-for-like: SAME compute node, SAME S3 bucket, SAME script; Vajra scaled to 0 before Spark
+ran (each gets the full node). **Correctness MATCHES exactly:** both rows=200,000,000, distinct_k=1000,
+sum_v=39,999,999,800,000,000 (bit-identical).
+
+| engine | write_s | read+agg_s | **total_s** | peak RSS |
+|---|---|---|---|---|
+| **Vajra** | 4.38 | 1.54 | **5.92** | **3.44 GiB** |
+| Spark 3.5.3 | 33.43 | 3.52 | 36.94 | 8.1 GiB |
+| Vajra advantage | 7.6× | 2.3× | **6.2× faster** | **2.4× less** |
+
+⇒ **Vajra replaces Spark for batch Parquet-on-S3 ETL: ~6× faster wall + ~2.4× less memory, identical
+output at 200M-row prod scale** (no-JVM Arrow footprint; write path dominates and is where Vajra wins most).
+Spark-on-S3 harness gotchas (all fixed): py3.12 needs `setuptools<81` (distutils shim); the MAGIC
+`SPARK_REMOTE` env forces Connect-mode (needs pandas) and ignores `.master()` — local baseline must use the
+non-magic `BENCH_REMOTE` + classic `local[16]`; hadoop-aws:3.3.4 + aws-java-sdk-bundle:1.12.262 +
+InstanceProfileCredentialsProvider + s3→s3a. Next: batch **Iceberg** table vs Spark (needs JdbcCatalog +
+S3FileIO catalog svc); P1 Flink side-by-side; streaming Iceberg sink.
+
 ## Apple container compatibility (periodic gate — local + distributed)
 Vajra must also run these workloads on **Apple `container`** (native macOS arm64 runtime) — SAME arm
 image as EKS — to prove it runs distributed loads on Apple container, not just k8s. Validated once

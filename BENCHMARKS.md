@@ -1,10 +1,43 @@
 # Vajra (वज्र) Benchmark Results
 
-> Last updated: 2026-05-27
-> Tag: **v0.4.0-alpha** (Phase 3 / Sprint 4 — VARIANT + ClickBench complete)
-> Machine: macOS Apple Silicon (ARM64)
+> Last updated: 2026-07-02
+> Tag: **v0.6.0-alpha**
+> Machine: macOS Apple Silicon (ARM64) for local; AWS Graviton EKS for head-to-heads
 > Build: release (`lto = true, codegen-units = 1`) unless otherwise noted
-> Mode: `local` (`SPARK_REMOTE=sc://localhost:50051`)
+> Mode: `local` (`SPARK_REMOTE=sc://localhost:50051`) unless otherwise noted
+
+---
+
+## Authoritative head-to-heads (measured, honest — 2026-07-02)
+
+**Batch vs Spark 3.5.3 — Vajra wins across the board:**
+
+| Benchmark | Vajra | Spark 3.5.3 | Verdict |
+|---|---|---|---|
+| TPC-H SF-1 (22q, warm) | 1.78 s | 63.46 s | ~36× (small/warm) |
+| TPC-H SF-100 (22q, 100 GB, EKS) | 347 s / 51.7 GiB | 1099 s / 115 GiB | ~3.2× faster, ~2.2× less RAM |
+| TPC-DS-99 (EKS, coverage) | 97/99, 0.32 GiB | 99/99, 2.5 GiB | ~8× less memory (Q5/Q9 compat gaps) |
+| **P4 batch Parquet-on-S3 (200M rows, EKS)** | **5.92 s / 3.44 GiB** | 36.94 s / 8.1 GiB | **6.2× faster, 2.4× less mem, bit-identical output** |
+
+**Streaming vs Flink 1.19 — competitive, NOT categorically-better** (rigorous tri-engine
+Nexmark-methodology run, 2026-07-01; supersedes an earlier lighter ~1.5M-ev/s run that reported
+Vajra faster — we claim only the measured head-to-head + flag path-dependence):
+
+| Dimension | Flink 1.19 | Vajra | Verdict |
+|---|---|---|---|
+| Throughput | 5.78M ev/s | 5.28M ev/s | ~1.10× slower (competitive, after T1–T7a) |
+| Memory (peak RSS) | 8.55 GiB | ~7.1 GiB | ~1.2× less (path-dependent; batch ~8× less) |
+| Latency | ms (Kafka) | competitive, tail better (no GC) | tail win / median tie |
+| Exactly-once (hard crash) | mature | EO ✓ incl. real S3 sink (dup=0) | correct / less hardened |
+
+**Production workloads on real S3** (Uber/Netflix patterns, EKS 2026-07-02):
+- **P1** Kafka → 10 s windowed-agg → Parquet-on-S3, **exactly-once incl. crash** (kill -9 →
+  resume from S3 checkpoint): rows=9000, **dup=0**, sum=90M bit-identical; 4.67M ev/s, 7.25 GiB.
+- **P4** (above): batch Parquet-on-S3 vs Spark, 6.2× faster / 2.4× less mem / identical output.
+
+Full writeups: [docs/design/production-workload-benchmark.md](docs/design/production-workload-benchmark.md),
+[docs/design/tri-engine-benchmark-matrix.md](docs/design/tri-engine-benchmark-matrix.md),
+[docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAMING_VS_FLINK_EKS.md).
 
 ---
 
