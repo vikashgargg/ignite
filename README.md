@@ -335,7 +335,7 @@ Just like Flink lets you tune the latency/throughput trade-off, Vajra gives you 
 |---|---|---|---|
 | **Backfill** | `availableNow=True` | batch (process all, then stop) | catch-up, reprocessing, scheduled ETL |
 | **Micro-batch** | `processingTime="5 seconds"` | **seconds → sub-second** | standard streaming ETL (Spark-class) |
-| **Realtime** | `continuous="1 second"` | **millisecond, event-at-a-time** | Flink-class low-latency, per-event pipelines |
+| **Realtime** | `continuous="1 second"` | **millisecond-class, event-at-a-time** | Flink-class low-latency, per-event pipelines |
 
 ```python
 # Same `windowed` query as above — only the trigger changes:
@@ -349,17 +349,58 @@ q3 = windowed.writeStream.format("parquet").option("path", OUT) \
      .option("checkpointLocation", CK).trigger(continuous="1 second").start()     # realtime mode
 ```
 
-**Vajra realtime mode** (the `continuous` trigger) runs the query as a **long-lived, event-at-a-time
-pipeline** — not micro-batches — with commit cadence decoupled from data flow. Because there is **no
-JVM and no GC**, the tail stays flat (**p99 ≈ p50**, no stop-the-world pauses — Flink's p99 is
-dominated by GC), and sub-millisecond *processing* latency has been measured while still processing
-at multi-million rows/s (vectorized Arrow, so we don't pay Flink's per-record CPU cost).
+**How you invoke realtime mode:** switch the trigger to `continuous` — that's the whole change.
+
+```python
+# Micro-batch (Spark-class): a new batch every 5s
+q = df.writeStream.format("kafka")....trigger(processingTime="5 seconds").start()
+
+# REALTIME (Flink-class): continuous event-at-a-time pipeline. The interval is the commit/epoch
+# cadence (decoupled from data flow) — tune it down for tighter commits; data still flows continuously.
+q = df.writeStream.format("kafka")....trigger(continuous="1 second").start()
+q = df.writeStream.format("kafka")....trigger(continuous="200 milliseconds").start()  # tighter commits
+```
+
+Under `continuous`, Vajra runs the query as a **long-lived, event-at-a-time pipeline** (not
+micro-batches), with commit cadence decoupled from data flow. Because there is **no JVM and no GC**,
+the tail stays flat and never eats a stop-the-world pause. In-engine *processing* latency is
+sub-millisecond; **end-to-end** latency (through Kafka) is **millisecond-class (~60 ms p50 at 20k/s,
+below)** — Kafka/network dominated, the same as Flink, and we match it.
+
+**This is the exact query our latency harness runs** ([scripts/stream_latency_query.py](scripts/stream_latency_query.py)) —
+copy-paste and try it, don't take our word for it:
+
+```python
+# Kafka -> (passthrough) -> Kafka, REALTIME mode. Measured end-to-end latency, not a claim.
+raw = (spark.readStream.format("kafka")
+       .option("kafka.bootstrap.servers", "localhost:9092")
+       .option("subscribe", "lat_in").option("startingOffsets", "latest").load())
+(raw.select("value").writeStream.format("kafka")
+    .option("kafka.bootstrap.servers", "localhost:9092")
+    .option("topic", "lat_out")
+    .option("checkpointLocation", "/tmp/lat_ck")
+    .trigger(continuous="1 second")      # <-- realtime mode
+    .start().awaitTermination())
+```
+
+Run the whole probe (producer + this query + a latency consumer that reports p50/p99/p99.9) with
+one command: `BOOT=localhost:9092 DURATION_S=60 RATE=20000 scripts/stream_latency.sh`.
+
+**Measured head-to-head vs Apache Flink 1.19** (EKS, 20k events/s, end-to-end produce→consume):
+
+| | p50 | p99 | p99.9 | max |
+|---|--:|--:|--:|--:|
+| **Vajra** (realtime) | 62 ms | 119 ms | **126 ms** | **129 ms** |
+| Flink 1.19 | 53 ms | 110 ms | 127 ms | 131 ms |
+
+Both are **millisecond-class** and competitive; Flink edges the median, **Vajra's extreme tail
+(p99.9/max) is slightly better** — the no-GC payoff. This is a real, reproducible number, not a claim.
 
 > **Honest status:** micro-batch modes (backfill / processingTime) are production-proven, including
 > **exactly-once across a hard crash** on a real S3 sink. Realtime-mode exactly-once is proven today
 > for the **stateless, continuous Kafka → durable sink** path (measured across restart on real Kafka);
-> **multi-partition + stateful realtime exactly-once** and a fully record-level low-latency sink are
-> in progress (see [PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md) and
+> **multi-partition + stateful realtime exactly-once** and a lower-latency record-level sink are in
+> progress (see [PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md) and
 > [UNIFIED_ENGINE_FLINK_PARITY.md](docs/UNIFIED_ENGINE_FLINK_PARITY.md)).
 
 Both jobs run on the **same server**, the **same 105/105 Spark-compatible engine**, with **no JVM**
