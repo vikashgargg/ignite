@@ -156,6 +156,24 @@ runs). Next (T-EO-3.5): make the multi-instance per-partition watermark advance 
 windows close (idleness on the realtime path), then completeness == no-loss ⇒ full EO; then promote
 C6/C7 XFAIL→GREEN + EKS.
 
+## 5f. Idleness targeting — topology finding (measured 2026-07-03)
+
+T-EO-3.5 added `withIdleness` to the IN-PROCESS `StreamExchangeExec` N→M merge (`merge_output_subchannels`)
+and passed the full gate GREEN (no regression) — but it did NOT close the completeness edge. Instrumented
+(`STREAM_EXCH_MERGE` log): that merge **fires 0 times** for the multi-instance realtime windowed-agg on the
+gate's `--mode local-cluster` path. So the watermark merge for this query is NOT the in-process exchange —
+it is the **distributed shuffle path** (`sail-execution/src/stream_service/client.rs` + `plan/shuffle_write.rs`)
+and/or the window operator's own multi-input handling (`window_accum.rs`: "one instance per input partition,
+broadcast watermark"). The in-process idleness is correct + kept (it helps single-node/in-process exchange
+plans), but the **completeness fix for the gate's distributed path must add idleness to the DISTRIBUTED
+streaming watermark merge** (F2/F3 territory). Precise next step, scoped; not yet implemented.
+
+**Honest net for the branch:** the CORE win — multi-partition continuous stateful EO **no-duplication,
+incl. across a hard crash** — is DONE + measured (T-EO-1 + T-EO-3). Completeness (all windows close) is
+narrowed to the distributed watermark-merge idleness; the in-process idleness (T-EO-3.5) is a correct,
+green, but insufficient-for-local-cluster piece. Do NOT promote C6/C7 or claim Flink-class multi-partition
+continuous stateful EO until the distributed-path idleness lands + no-loss is proven + EKS.
+
 ## 6. Honesty / risk
 
 The residual has historically resisted a single-instance patch and "full exact-zero" was expected to
