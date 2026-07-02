@@ -96,6 +96,46 @@ immutable Arrow state chunks (our F5/inc-ckpt substrate) — O(delta) checkpoint
 - **Decision:** the robust Flink-class path is T-EO-2/3 (multi-instance union commit), a real F2/F3
   effort. Continue incrementally, each step gated; do not claim exact-zero until C6+C7 are GREEN.
 
+## 5c. Re-emit localized (2026-07-02, measured)
+
+The `[10,10]` full-dups are **NOT sink-task overlap** (measured: single `part-0.parquet` per epoch,
+300 same-file re-emits, 0 cross-file) and **NOT partial splits**. Pattern: **epoch 0 clean (300 rows),
+later epochs 39/52 doubled (~600)** ⇒ the **window operator re-emits already-closed windows in later
+epochs** on the multi-instance path. Mechanism (localized in `window_accum.rs`):
+- The window runs **one instance per input partition** (`n_partitions = input.output_partitioning()`,
+  line ~526), each with its own `emitted_ends` HashSet (emit-once dedup, line ~340).
+- `emitted_ends` is **pruned** for windows finalized past the watermark (line ~966, "P1 fix"). With N
+  instances the MIN-merged watermark advances unevenly; a window's end can be pruned from `emitted_ends`
+  and then a **lagging instance's data re-closes + re-emits** the full window ⇒ `[10,10]`.
+
+**T-EO-2/3 target (refined):** the emit-once guarantee must hold across the multi-instance epoch
+boundary. Options to evaluate (instrumented): (a) don't prune `emitted_ends` until the window is past
+lateness on the GLOBAL (MIN) watermark AND all N instances have passed it; (b) make the durable commit
+carry `emitted_ends` so a re-emit is deduped at commit; (c) the coordinated union commit (T-EO-3) dedups
+by (window,key) at the atomic commit. Next debug step: instrument the window emit + `emitted_ends`
+prune/re-close to confirm the lagging-instance re-close, then fix the prune condition to be
+global-watermark + all-instances-passed. Each iteration re-runs `inc_ckpt_gate.sh VAJRA_RT_MULTI=1`.
+
+## 5d. T-EO-3 result + residual (measured 2026-07-03)
+
+**T-EO-3 (per-instance staged offsets + sink union commit) FIXES the core multi-instance dup.**
+RT_ASSIGN log proved the mechanism: on the 2nd execution, ALL instances now resume from their
+committed offsets (`(0,843) (1,3738) (2,1744) (3,2675)` — were `0` for 3 of 4 before) ⇒ no re-read.
+
+Measured (`VAJRA_RT_MULTI`, PARTS=4, N=300):
+- **Gate config RUN=40: 3/3 runs = DUP_GROUPS=0, count!=10=0** (no-dup invariant HOLDS, counts exact).
+- **Residual:** a longer RUN=75 hit 309 dups ONCE = a **timing-dependent epoch-boundary race** (more
+  commit boundaries → the query-stop-vs-final-epoch-commit gap re-reads). Not yet exact-zero at all
+  timings. This is the continuous epoch-boundary residual the KB flagged as historically needing EKS.
+- **Completeness:** window coverage varies with run duration (short run closes fewer of the 6 windows)
+  — a test-timing artifact (produced windows are all correct: count=10, no dup), not data loss.
+
+**Status:** core re-read dup is FIXED + validated at gate config. Remaining for exact-zero-at-all-
+timings = the graceful-stop / final-epoch-commit synchronization (source must stage + sink must commit
+the final epoch on EndOfData before the query ends), then re-verify RUN=75 + PARTS=8, and EKS. Do NOT
+promote C6/C7 XFAIL→GREEN or claim "Flink-class multi-partition continuous stateful EO" until the
+residual is closed and completeness is proven no-loss on a full-window run.
+
 ## 6. Honesty / risk
 
 The residual has historically resisted a single-instance patch and "full exact-zero" was expected to
