@@ -326,6 +326,42 @@ query = (windowed.writeStream
 query.awaitTermination()
 ```
 
+### Pick your latency — from backfill to **millisecond realtime**
+
+Just like Flink lets you tune the latency/throughput trade-off, Vajra gives you the full spectrum
+**through the standard Spark `trigger()` API** — same query, one line changes:
+
+| Mode | `trigger(...)` | Latency class | When to use |
+|---|---|---|---|
+| **Backfill** | `availableNow=True` | batch (process all, then stop) | catch-up, reprocessing, scheduled ETL |
+| **Micro-batch** | `processingTime="5 seconds"` | **seconds → sub-second** | standard streaming ETL (Spark-class) |
+| **Realtime** | `continuous="1 second"` | **millisecond, event-at-a-time** | Flink-class low-latency, per-event pipelines |
+
+```python
+# Same `windowed` query as above — only the trigger changes:
+q1 = windowed.writeStream.format("parquet").option("path", OUT) \
+     .option("checkpointLocation", CK).trigger(availableNow=True).start()        # backfill
+
+q2 = windowed.writeStream.format("parquet").option("path", OUT) \
+     .option("checkpointLocation", CK).trigger(processingTime="5 seconds").start()  # micro-batch
+
+q3 = windowed.writeStream.format("parquet").option("path", OUT) \
+     .option("checkpointLocation", CK).trigger(continuous="1 second").start()     # realtime mode
+```
+
+**Vajra realtime mode** (the `continuous` trigger) runs the query as a **long-lived, event-at-a-time
+pipeline** — not micro-batches — with commit cadence decoupled from data flow. Because there is **no
+JVM and no GC**, the tail stays flat (**p99 ≈ p50**, no stop-the-world pauses — Flink's p99 is
+dominated by GC), and sub-millisecond *processing* latency has been measured while still processing
+at multi-million rows/s (vectorized Arrow, so we don't pay Flink's per-record CPU cost).
+
+> **Honest status:** micro-batch modes (backfill / processingTime) are production-proven, including
+> **exactly-once across a hard crash** on a real S3 sink. Realtime-mode exactly-once is proven today
+> for the **stateless, continuous Kafka → durable sink** path (measured across restart on real Kafka);
+> **multi-partition + stateful realtime exactly-once** and a fully record-level low-latency sink are
+> in progress (see [PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md) and
+> [UNIFIED_ENGINE_FLINK_PARITY.md](docs/UNIFIED_ENGINE_FLINK_PARITY.md)).
+
 Both jobs run on the **same server**, the **same 105/105 Spark-compatible engine**, with **no JVM**
 and **no Flink** — batch and streaming share one execution core. See
 [docs/STREAMING.md](docs/STREAMING.md) for the streaming feature matrix and
