@@ -17,6 +17,7 @@ cleanup() { echo "== rb s3://$BUCKET =="; aws s3 rb "s3://$BUCKET" --force >/dev
 trap cleanup EXIT
 
 echo "==== [1] Vajra server + client ===="
+kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null  # batch skips kafka.yaml (which made the ns)
 sed "s|__ECR__|$REG|g" k8s/stream/vajra-stream.yaml | kk apply -f -
 kk patch deploy vajra-stream --type merge -p '{"spec":{"strategy":{"rollingUpdate":{"maxSurge":0,"maxUnavailable":1}}}}' >/dev/null
 kk set env deploy/vajra-stream AWS_REGION="$REGION" >/dev/null
