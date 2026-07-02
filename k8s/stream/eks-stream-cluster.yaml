@@ -38,6 +38,8 @@ managedNodeGroups:
         - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess   # P1: streaming sink writes Parquet/Iceberg to S3
+                                                       # (node instance role; Vajra object-store from_env)
   - name: kafka
     amiFamily: AmazonLinux2023
     instanceTypes: ["m7g.2xlarge"]   # 8 vCPU, 32 GB — dedicated Kafka broker
