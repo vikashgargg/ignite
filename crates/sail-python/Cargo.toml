@@ -16,7 +16,6 @@ sail-cli = { path = "../sail-cli" }
 pyo3 = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
-fastrace = { workspace = true }
 
 [lib]
 crate-type = ["cdylib"]

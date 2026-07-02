@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a capability — often "Spark/Flink does X, Vajra should too".
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do? If Spark or Flink supports this, link the docs.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Vajra do? API shape, semantics, expected result.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [batch/SQL, streaming, connectors, catalog (Delta/Iceberg), Python/UDF, deploy/ops, observability, other]
+    validations:
+      required: true

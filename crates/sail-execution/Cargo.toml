@@ -24,8 +24,8 @@ sail-catalog-system = { path = "../sail-catalog-system" }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
-tonic-types = { workspace = true }
 tonic-prost = { workspace = true }
+tonic-types = { workspace = true }
 fastrace = { workspace = true }
 tower = { workspace = true }
 prost = { workspace = true }

@@ -23,8 +23,8 @@ sail-session = { path = "../sail-session" }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
-tonic-types = { workspace = true }
 tonic-prost = { workspace = true }
+tonic-types = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 pbjson = { workspace = true }

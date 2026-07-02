@@ -169,6 +169,25 @@ Canonical Uber/Netflix streaming-data-lake + batch-ETL patterns on **real S3**
 
 ## Quick Start
 
+### Run with Docker (30 seconds, no install)
+
+The published multi-arch image (linux/amd64 + linux/arm64 — the **same arm64 image** that runs on
+EKS and Apple `container`) is on GHCR, signed and SBOM-attested:
+
+```sh
+# Start a Vajra Spark Connect server on :50051
+docker run --rm -p 50051:50051 ghcr.io/vikashgargg/ignite:latest --mode local server
+```
+
+```python
+# Point any PySpark job at it — unchanged
+from pyspark.sql import SparkSession
+spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
+spark.range(1_000_000).selectExpr("sum(id)").show()
+```
+
+Verify provenance: `cosign verify ghcr.io/vikashgargg/ignite:latest` (keyless, Sigstore).
+
 ### Prerequisites
 
 | Platform | Requirement |

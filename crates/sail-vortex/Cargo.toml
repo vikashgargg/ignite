@@ -5,11 +5,9 @@ edition = { workspace = true }
 
 [dependencies]
 sail-common-datafusion = { path = "../sail-common-datafusion" }
-sail-data-source = { path = "../sail-data-source" }
 
 async-trait = { workspace = true }
 datafusion = { workspace = true }
-datafusion-common = { workspace = true }
 
 # TODO(6.4): when disk space allows and vortex-datafusion is confirmed
 # compatible with DataFusion 53.x, add:

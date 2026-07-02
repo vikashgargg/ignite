@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a defect in Vajra (incorrect result, crash, regression).
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please include a **minimal, reproducible** example — Vajra aims to be a
+        byte-exact drop-in for Spark, so concrete repro + expected-vs-actual is the most useful thing.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you observe, and what did you expect (ideally the Spark/Flink result)?
+      placeholder: "Query X returned N rows; Spark 3.5.3 returns M rows for the same input."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: PySpark/SQL snippet + input data (or a generator) that reproduces it.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Vajra version / image tag / commit
+      placeholder: "ghcr.io/vikashgargg/ignite:0.6.0 (or git sha)"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options: [local, local-cluster, kubernetes-cluster, apple-container, streaming]
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS/arch, Python version, how you launched Vajra, relevant RUST_LOG output.
+    validations:
+      required: false

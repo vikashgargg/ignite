@@ -1,11 +1,30 @@
-# Contributing to Sail
+# Contributing to Vajra
 
 Contributions are more than welcome!
 
-Please submit [GitHub issues](https://github.com/lakehq/sail/issues) for bug reports and feature requests.
-You are also welcome to ask questions in [GitHub discussions](https://github.com/lakehq/sail/discussions).
+Vajra is a fork of [Sail](https://github.com/lakehq/sail) (by LakeSail, Apache-2.0); see the `NOTICE`
+file for attribution. Issues and PRs for **Vajra** belong in this repository.
 
-Feel free to create a [pull request](https://github.com/lakehq/sail/pulls) if you would like to make a code change.
-You can refer to the [Development Guide](https://docs.lakesail.com/sail/main/development/) to get started.
+Please submit [GitHub issues](https://github.com/vikashgargg/ignite/issues) for bug reports and feature
+requests (templates will guide you). You are welcome to ask questions in
+[GitHub Discussions](https://github.com/vikashgargg/ignite/discussions).
 
-Additionally, please join our [Slack Community](https://www.launchpass.com/lakesail-community/free) if you haven’t already!
+Feel free to open a [pull request](https://github.com/vikashgargg/ignite/pulls) for a code change. The
+PR template lists the prod-grade checklist we hold every change to.
+
+## Prod-grade bar
+
+Every change is expected to be production-grade and honest:
+
+- **Lint:** `cargo clippy --all-targets -- -D warnings` must be clean (the workspace denies
+  `unwrap`/`expect`/`panic`/`allow` outside test modules). `cargo fmt --check` must pass.
+- **Tests:** add or update tests; run `cargo test`. Streaming changes cite the feature-matrix cell they
+  advance in [`docs/STREAMING_ARCHITECTURE.md`](docs/STREAMING_ARCHITECTURE.md) and meet its done-criteria.
+- **Distributed contract:** a new physical-plan field must round-trip in
+  [`sail-execution/src/codec.rs`](crates/sail-execution/src/codec.rs), or be logged as a single-node gap.
+- **Honest claims:** performance/competitive claims must be **measured head-to-head** with the scale and
+  conditions stated, and path-dependence flagged — no estimated or unqualified "beats Spark/Flink" claims.
+- **Docs:** update `CHANGELOG.md` and the relevant knowledge-base docs (CODEMAP / STATUS / BENCHMARKS)
+  in the same change.
+
+See [`docs/CODEMAP.md`](docs/CODEMAP.md) to orient in the codebase.

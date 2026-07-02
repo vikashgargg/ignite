@@ -13,6 +13,5 @@ sail-catalog = { path = "../sail-catalog" }
 serde = { workspace = true }
 datafusion = { workspace = true }
 async-trait = { workspace = true }
-educe = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
