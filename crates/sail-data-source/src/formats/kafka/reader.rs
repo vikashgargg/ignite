@@ -234,7 +234,7 @@ impl ClientContext for KafkaStatsContext {
             }
         }
         log::info!(
-            "kafka stats prefetch_bytes={bytes} prefetch_gib={:.3} prefetch_msgs={msgs} lag={lag}",
+            "KAFKA_STATS prefetch_bytes={bytes} prefetch_gib={:.3} prefetch_msgs={msgs} lag={lag}",
             bytes as f64 / 1_073_741_824.0
         );
     }
