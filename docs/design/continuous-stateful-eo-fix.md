@@ -80,6 +80,22 @@ immutable Arrow state chunks (our F5/inc-ckpt substrate) — O(delta) checkpoint
 - Then, and only then, update README/STATUS to claim **multi-partition continuous stateful exactly-once
   (Flink-class realtime)** — with the measured gate + EKS evidence.
 
+## 5b. Progress log (measured)
+
+- **T-EO-1 DONE + validated (2026-07-02).** Realtime `resolve()` now applies the FLIP-27 per-instance
+  filter (`g % parallelism == inst`). Before: `VAJRA_RT_MULTI` PARTS=4 gave `counts=[12,28] sum=40`
+  (4× over-read, 562 dup groups). After: `counts=[10,10] sum=20` — **over-read eliminated** (per-instance
+  counts correct = 10). Committed.
+- **Exposed next layer:** multi-instance NOCRASH now shows **FULL duplicates** (`[10,10]`, ~300 groups) =
+  the sink/epoch **commit coordination across N instances** is missing. This is T-EO-2/3 (per-instance
+  epoch staging + atomic union commit): each of the N instances/sink-tasks emits its window output, and
+  without a coordinated per-epoch union commit the same `(window,key)` is written by more than one epoch
+  flush / sink task. Confirms the design — multi-instance realtime is correct ONLY with the union commit.
+- **Single-instance default path** (no `VAJRA_RT_MULTI`) remains the closest today (~2 partial-count
+  split dups = residual watermark race), but has the inherent interleaved-read false-idle limitation.
+- **Decision:** the robust Flink-class path is T-EO-2/3 (multi-instance union commit), a real F2/F3
+  effort. Continue incrementally, each step gated; do not claim exact-zero until C6+C7 are GREEN.
+
 ## 6. Honesty / risk
 
 The residual has historically resisted a single-instance patch and "full exact-zero" was expected to
