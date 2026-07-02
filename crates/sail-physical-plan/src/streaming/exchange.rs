@@ -44,6 +44,26 @@ fn channel_capacity() -> usize {
     })
 }
 
+/// Flink `WatermarkStrategy.withIdleness` timeout for the REALTIME (unbounded) N→M watermark merge: a
+/// sub-channel that produces nothing for this long is EXCLUDED from the watermark MIN so a partition
+/// that goes idle (its Kafka partition drained, no `EndOfData` in continuous mode) never holds the MIN
+/// back and the final windows still close. Only applied on the unbounded/multi-channel path (bounded
+/// channels END when drained, so they need no idleness — the exact MIN is preserved there). A
+/// slow-but-ACTIVE channel is not excluded (its last activity is recent), so idleness never closes a
+/// window early. Tunable via `VAJRA_RT_IDLE_MS` (default 500). REFERENCES §2; docs/design/
+/// streaming-per-partition-watermark.md (idle exclusion = liveness vs completeness).
+fn realtime_idle_timeout() -> std::time::Duration {
+    static MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let ms = *MS.get_or_init(|| {
+        std::env::var("VAJRA_RT_IDLE_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&n| n >= 1)
+            .unwrap_or(500)
+    });
+    std::time::Duration::from_millis(ms)
+}
+
 type BatchResult = Result<RecordBatch>;
 /// Per-output-partition sub-receivers, taken by `execute`; lazily initialized on first call.
 /// Outer index = output partition; inner = one sub-channel per INPUT partition (length 1 for the
@@ -215,7 +235,15 @@ impl ExecutionPlan for StreamExchangeExec {
         }
         // N→M: merge this output's N sub-channels — yield data, MIN-merge watermarks across the
         // N input channels (Flink receiver rule), forward one EndOfData once all N inputs end.
-        let stream = merge_output_subchannels(subs);
+        // Realtime (unbounded) path gets Flink `withIdleness` so a drained (idle, never-EndOfData)
+        // partition doesn't hold the watermark MIN back — bounded path keeps the exact MIN (channels
+        // END when drained). This closes the multi-partition continuous "last-window edge".
+        let idle = matches!(
+            self.properties().boundedness,
+            datafusion::physical_plan::execution_plan::Boundedness::Unbounded { .. }
+        )
+        .then(realtime_idle_timeout);
+        let stream = merge_output_subchannels(subs, idle);
         Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
     }
 }
@@ -476,14 +504,21 @@ fn rewrite_watermark(template: &RecordBatch, micros: i64) -> Result<RecordBatch>
 /// channel arrives); a single `EndOfData` is forwarded once all N inputs have ended.
 fn merge_output_subchannels(
     subs: Vec<Receiver<BatchResult>>,
+    idle_timeout: Option<std::time::Duration>,
 ) -> impl futures::Stream<Item = BatchResult> {
     let n = subs.len();
     async_stream::stream! {
         let mut receivers = subs;
         let mut wm: Vec<Option<i64>> = vec![None; n];
         let mut ended: Vec<bool> = vec![false; n];
+        // Per-channel last-activity time — a channel idle beyond `idle_timeout` is excluded from the
+        // watermark MIN (Flink withIdleness). Only consulted when `idle_timeout` is Some (realtime).
+        let mut last_active: Vec<std::time::Instant> = vec![std::time::Instant::now(); n];
         let mut last_emitted: Option<i64> = None;
         let mut end_batch: Option<RecordBatch> = None;
+        // A watermark batch kept as a template so an idle-tick MIN advance can emit even when no
+        // channel delivered a batch this iteration (the timeout path has no `batch` in hand).
+        let mut wm_template: Option<RecordBatch> = None;
         loop {
             let pollable: Vec<usize> = (0..n).filter(|&j| !ended[j]).collect();
             if pollable.is_empty() {
@@ -492,53 +527,89 @@ fn merge_output_subchannels(
                 }
                 return;
             }
-            let (j, item) = futures::future::poll_fn(|cx| {
-                for &j in &pollable {
-                    if let std::task::Poll::Ready(v) = receivers[j].poll_recv(cx) {
-                        return std::task::Poll::Ready((j, v));
+            // Poll the sub-channels; on the realtime path also wake after `idle_timeout` even if no
+            // channel is active, so a newly-idle channel gets excluded from the MIN (idleness tick).
+            let polled = {
+                let poll_fut = futures::future::poll_fn(|cx| {
+                    for &j in &pollable {
+                        if let std::task::Poll::Ready(v) = receivers[j].poll_recv(cx) {
+                            return std::task::Poll::Ready((j, v));
+                        }
+                    }
+                    std::task::Poll::Pending
+                });
+                match idle_timeout {
+                    Some(to) => tokio::time::timeout(to, poll_fut).await.ok(),
+                    None => Some(poll_fut.await),
+                }
+            };
+            // Whether to re-evaluate the watermark MIN this iteration (on a watermark, a channel end,
+            // or an idle tick — NOT on a plain data batch, which is just forwarded).
+            let mut recompute = false;
+            match polled {
+                None => recompute = true, // idle tick: no channel produced within `idle_timeout`
+                Some((j, item)) => match item {
+                    None => { ended[j] = true; recompute = true; } // channel closed = exhausted
+                    Some(Err(e)) => { yield Err(e); return; }
+                    Some(Ok(batch)) => {
+                        last_active[j] = std::time::Instant::now();
+                        match classify_mk(&batch) {
+                            Mk::Data => yield Ok(batch),
+                            Mk::Watermark(ts) => {
+                                wm[j] = Some(wm[j].map_or(ts, |c| c.max(ts)));
+                                wm_template = Some(batch);
+                                recompute = true;
+                            }
+                            Mk::EndOfData => {
+                                ended[j] = true;
+                                if end_batch.is_none() {
+                                    end_batch = Some(batch);
+                                }
+                                recompute = true;
+                            }
+                            // Other broadcast markers (latency): forward only sub-channel 0's copy.
+                            Mk::Other => { if j == 0 { yield Ok(batch); } }
+                        }
+                    }
+                },
+            }
+            if recompute {
+                // Watermark MIN over channels that are neither ENDED nor IDLE (Flink withIdleness): a
+                // channel idle beyond the timeout is excluded so it can't hold the MIN back (closes the
+                // continuous last-window edge). Among the remaining ACTIVE channels, if any has not yet
+                // reported a watermark, HOLD (None) — a slow-but-active channel must never be skipped
+                // (that would close a window early = the partial-count-split dup).
+                let now = std::time::Instant::now();
+                let merged = {
+                    let mut mn: Option<i64> = None;
+                    let mut any_active_pending = false;
+                    for k in 0..n {
+                        if ended[k] {
+                            continue;
+                        }
+                        if let Some(to) = idle_timeout {
+                            if now.duration_since(last_active[k]) > to {
+                                continue; // idle → excluded from the MIN
+                            }
+                        }
+                        match wm[k] {
+                            Some(v) => mn = Some(mn.map_or(v, |c| c.min(v))),
+                            None => any_active_pending = true,
+                        }
+                    }
+                    if any_active_pending { None } else { mn }
+                };
+                if let Some(mw) = merged {
+                    if last_emitted.is_none_or(|l| mw > l) {
+                        last_emitted = Some(mw);
+                        if let Some(tmpl) = &wm_template {
+                            match rewrite_watermark(tmpl, mw) {
+                                Ok(b) => yield Ok(b),
+                                Err(e) => { yield Err(e); return; }
+                            }
+                        }
                     }
                 }
-                std::task::Poll::Pending
-            })
-            .await;
-            match item {
-                None => ended[j] = true, // channel closed = input exhausted
-                Some(Err(e)) => { yield Err(e); return; }
-                Some(Ok(batch)) => match classify_mk(&batch) {
-                    Mk::Data => yield Ok(batch),
-                    Mk::Watermark(ts) => {
-                        wm[j] = Some(wm[j].map_or(ts, |c| c.max(ts)));
-                        let merged = {
-                            let mut mn: Option<i64> = None;
-                            let mut all = true;
-                            for k in 0..n {
-                                if ended[k] { continue; }
-                                match wm[k] {
-                                    Some(v) => mn = Some(mn.map_or(v, |c| c.min(v))),
-                                    None => { all = false; break; }
-                                }
-                            }
-                            if all { mn } else { None }
-                        };
-                        if let Some(mw) = merged {
-                            if last_emitted.is_none_or(|l| mw > l) {
-                                last_emitted = Some(mw);
-                                match rewrite_watermark(&batch, mw) {
-                                    Ok(b) => yield Ok(b),
-                                    Err(e) => { yield Err(e); return; }
-                                }
-                            }
-                        }
-                    }
-                    Mk::EndOfData => {
-                        ended[j] = true;
-                        if end_batch.is_none() {
-                            end_batch = Some(batch);
-                        }
-                    }
-                    // Other broadcast markers (latency): forward only sub-channel 0's copy.
-                    Mk::Other => { if j == 0 { yield Ok(batch); } }
-                },
             }
         }
     }
