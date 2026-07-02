@@ -174,6 +174,24 @@ narrowed to the distributed watermark-merge idleness; the in-process idleness (T
 green, but insufficient-for-local-cluster piece. Do NOT promote C6/C7 or claim Flink-class multi-partition
 continuous stateful EO until the distributed-path idleness lands + no-loss is proven + EKS.
 
+## 5g. Completeness investigation hit an OBSERVABILITY wall (2026-07-03)
+
+Correction to §5f: the "in-process exchange idleness fires 0×" was measured from `/tmp/incckpt_server.log`,
+which in `--mode local-cluster` is only the SCHEDULER (82 bytes) — **worker execution logs (where the
+exchange/window actually run) are NOT captured there.** So we cannot reliably observe whether the
+idleness engages or why completeness varies. The single-node comparison (`--mode local`) produced no CHECK
+(gate not single-node-compatible). `MergedRecordBatchStream` (distributed merge) has zero watermark
+handling, so the distributed watermark path is either elsewhere or the streaming pipeline runs in-process
+on workers (making `StreamExchangeExec` idleness the right place after all — unverifiable without worker logs).
+
+**Blocked-on-observability.** Prod-grade rule: do NOT commit completeness fixes we can't measure. The
+required FIRST step is a reliable local streaming-observability harness: either (a) capture worker logs in
+local-cluster (`--mode local-cluster` worker stdout → a known file), or (b) make `inc_ckpt_gate` runnable
+`--mode local` so all logs land in one place, or (c) a `VAJRA_PLAN_DUMP` that prints the finalized streaming
+physical-plan tree (so the watermark-merge point is known with certainty, not inferred). THEN target the
+idleness at the proven merge point and validate completeness → no-loss. Until then, completeness stays
+honestly open; the CORE no-dup-across-crash win (T-EO-1/T-EO-3) is unaffected and validated.
+
 ## 6. Honesty / risk
 
 The residual has historically resisted a single-instance patch and "full exact-zero" was expected to
