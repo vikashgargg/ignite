@@ -158,6 +158,7 @@ async fn read_realtime_committed(
 /// idempotently and concurrent epochs never clobber each other.
 async fn write_staged_epoch_offsets(
     ck: &CheckpointStore,
+    inst: usize,
     epoch: u64,
     offsets: &std::collections::HashMap<(String, i32), i64>,
 ) {
@@ -166,9 +167,15 @@ async fn write_staged_epoch_offsets(
         .map(|((t, p), o)| (format!("{t}:{p}"), *o))
         .collect();
     if let Ok(body) = serde_json::to_vec(&map) {
+        // T-EO-3: PER-INSTANCE staged key. With N realtime readers each staging its OWN partitions,
+        // a single shared key (`sources/0/staged-epoch-<epoch>`) let instances CLOBBER each other
+        // (last-writer-wins) so only one partition's offset survived the commit — on restart the other
+        // instances re-read from offset 0 (measured as full-window duplicates). Each instance now
+        // stages `sources/0/inst-<i>/staged-epoch-<epoch>`; the sink UNIONS them at commit. inst=0 for
+        // the single-instance default (unchanged behavior).
         let _ = ck
             .put(
-                &format!("sources/0/staged-epoch-{epoch}"),
+                &format!("sources/0/inst-{inst}/staged-epoch-{epoch}"),
                 bytes::Bytes::from(body),
             )
             .await;
@@ -900,6 +907,12 @@ impl ExecutionPlan for KafkaSourceExec {
                     Ok(a) => a,
                     Err(e) => { yield Err(exec_datafusion_err!("Kafka {e}")); return; }
                 };
+                // T-EO diagnostic: which (partition@start) this realtime instance owns. Correct
+                // FLIP-27 assignment ⇒ every partition owned by EXACTLY ONE instance across the run.
+                log::debug!(
+                    "realtime source inst={inst}/{parallelism} owns={:?}",
+                    assignments.iter().map(|(_, p, s)| (*p, *s)).collect::<Vec<_>>()
+                );
                 let mut tpl = rdkafka::TopicPartitionList::new();
                 let mut next: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
                 for (topic, part, start) in assignments {
@@ -936,7 +949,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                 }
                                 batch_bytes = 0;
                             }
-                            write_staged_epoch_offsets(&ck, epoch, &next).await;
+                            write_staged_epoch_offsets(&ck, inst, epoch, &next).await;
                             yield Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id: epoch }));
                             epoch += 1;
                         }
