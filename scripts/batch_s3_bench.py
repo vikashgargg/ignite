@@ -15,7 +15,9 @@ N = int(os.environ.get("N_ROWS", "200000000"))
 ENGINE = os.environ.get("ENGINE", "?")
 K = int(os.environ.get("KEYS", "1000"))
 
-s = SparkSession.builder.remote(REMOTE).getOrCreate()
+# sc:// = Spark Connect (Vajra); anything else (e.g. local[16]) = a local Spark master (baseline).
+_b = SparkSession.builder
+s = (_b.remote(REMOTE) if REMOTE.startswith("sc://") else _b.master(REMOTE)).getOrCreate()
 
 # 1) generate + WRITE parquet to S3 (id, k=id%KEYS, v=id*2)
 t0 = time.time()

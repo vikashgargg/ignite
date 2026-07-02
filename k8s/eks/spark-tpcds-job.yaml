@@ -34,7 +34,7 @@ spec:
             - |
               set -e
               apt-get update -qq && apt-get install -y -qq openjdk-17-jre-headless procps >/dev/null
-              pip install --quiet "pyspark==3.5.3" duckdb pandas
+              pip install --quiet "setuptools<81" "pyspark==3.5.3" duckdb pandas
               echo "=== Spark 3.5.3 TPC-DS-99 power test (local[16], 95g driver, SF=$TPCDS_SF) ==="
               python3 /app/tpcds_score.py || true
               echo "=== Spark pod peak memory ==="

@@ -38,7 +38,7 @@ spec:
             - |
               set -e
               apt-get update -qq && apt-get install -y -qq openjdk-17-jre-headless procps >/dev/null
-              pip install --quiet "pyspark==3.5.3"
+              pip install --quiet "setuptools<81" "pyspark==3.5.3"   # setuptools<81 = distutils shim (py3.12)
               echo "=== Spark 3.5.3 batch-on-S3 (local[16]) -> $S3_PATH ==="
               # rewrite s3:// -> s3a:// for Spark's hadoop-aws
               S3_PATH="$(echo "$S3_PATH" | sed 's|^s3://|s3a://|')" python3 /app/batch_s3_bench.py || true
