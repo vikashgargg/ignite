@@ -46,6 +46,19 @@ robustness/credibility layer on top of the tri-engine matrix.
 3. **Streaming bounded-path memory 1.20×** (bounded buffers/backpressure/spill) — the one measured loss.
 4. S3/IRSA wiring + a small-file/commit metric.
 
+## ✅ P1 PASSED (EKS 2026-07-02) — Kafka→windowed-agg→Parquet-on-S3, exactly-once incl. crash
+`scripts/eks_p1_s3_eo.sh`, 100M events, c7g.4xlarge, real S3 bucket:
+- **P1a clean:** rows=9000 distinct_window_key=9000 **dup=0** sum_count=90,000,000 (9 windows × 1000 keys,
+  exact) · throughput **4.67M ev/s** (to S3; ~17% under the 5.6M blackhole = the sink cost) · peak RSS
+  **7.25 GiB** (still < Flink's 8.55 blackhole, WITH a real S3 sink).
+- **P1b EO-under-crash:** `kill -9` the server mid-run → restart → **resume from the S3 checkpoint** →
+  rows=9000 dup=0 sum_count=90,000,000 **bit-identical to clean**. Exactly-once across a hard crash,
+  proven on a real object-store sink = the Flink EO guarantee, on Vajra.
+⇒ **Vajra does the canonical Uber/Netflix streaming-data-lake pattern correctly, incl. EO recovery.** The
+real-workload throughput bottleneck now INCLUDES the S3 sink (~17%), which reframes the T7 decision (parse-
+fusion attacks from_json, but the sink is now a co-equal cost). Next: P4/P5 batch-on-S3 vs Spark; P1 Flink
+side-by-side (needs Flink s3-fs plugin); Iceberg-table sink (P1 used Parquet — the EO substrate is the same).
+
 ## Apple container compatibility (periodic gate — local + distributed)
 Vajra must also run these workloads on **Apple `container`** (native macOS arm64 runtime) — SAME arm
 image as EKS — to prove it runs distributed loads on Apple container, not just k8s. Validated once
