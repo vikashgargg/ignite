@@ -233,8 +233,8 @@ impl ClientContext for KafkaStatsContext {
                 }
             }
         }
-        eprintln!(
-            "KAFKA_STATS prefetch_bytes={bytes} prefetch_gib={:.3} prefetch_msgs={msgs} lag={lag}",
+        log::info!(
+            "kafka stats prefetch_bytes={bytes} prefetch_gib={:.3} prefetch_msgs={msgs} lag={lag}",
             bytes as f64 / 1_073_741_824.0
         );
     }
@@ -761,7 +761,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         }
                         match builders.finish_projected(&full_schema, &projection) {
                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
-                            Err(e) => { eprintln!("KAFKA_SOURCE finish_projected error: {e}"); yield Err(e); return; }
+                            Err(e) => { log::error!("kafka source finish_projected error: {e}"); yield Err(e); return; }
                         }
                         continue;
                     }

@@ -184,9 +184,7 @@ impl AsyncRead for SaslReadHalf {
                             if read == buf.len() {
                                 let frame_len = u32::from_be_bytes(buf) as usize;
                                 if kerb_trace_enabled() {
-                                    eprintln!(
-                                        "kerberos thrift sasl data read frame_len={frame_len}"
-                                    );
+                                    log::trace!("kerberos thrift sasl data read frame_len={frame_len}");
                                 }
                                 if frame_len > MAX_SASL_FRAME_SIZE {
                                     return std::task::Poll::Ready(Err(io::Error::new(
@@ -295,7 +293,7 @@ impl SaslWriteHalf {
         };
         let payload_len = payload.len() as u32;
         if kerb_trace_enabled() {
-            eprintln!("kerberos thrift sasl data write frame_len={payload_len}");
+            log::trace!("kerberos thrift sasl data write frame_len={payload_len}");
         }
         let mut frame = Vec::with_capacity(4 + payload.len());
         frame.extend_from_slice(&payload_len.to_be_bytes());
@@ -464,7 +462,7 @@ where
     S: AsyncWrite + Unpin,
 {
     if kerb_trace_enabled() {
-        eprintln!(
+        log::trace!(
             "kerberos thrift sasl write: status={status:?} payload_len={}",
             payload.len()
         );
@@ -508,7 +506,7 @@ where
 
     let status = NegotiationStatus::from_byte(status)?;
     if kerb_trace_enabled() {
-        eprintln!(
+        log::trace!(
             "kerberos thrift sasl read: status={status:?} payload_len={}",
             payload.len()
         );

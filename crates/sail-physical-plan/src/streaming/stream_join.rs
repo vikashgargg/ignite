@@ -307,9 +307,7 @@ async fn spill_side_over_budget(
         if let Some(ck) = ck {
             let idx = *next;
             if crate::streaming::state_io::write_spill(ck, op_id, idx, schema, buf).await {
-                if std::env::var("VAJRA_F5_DEBUG").is_ok() {
-                    eprintln!("F5_JOIN_SPILL {op_id} idx={idx}");
-                }
+                log::debug!("f5 join spill {op_id} idx={idx}");
                 spilled.push(idx);
                 *next += 1;
                 buf.clear();

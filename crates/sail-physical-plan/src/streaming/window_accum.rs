@@ -79,8 +79,8 @@ mod prof {
         let pct = |x: u64| x.saturating_mul(100).checked_div(wall).unwrap_or(0);
         // COMPLETE per-stage breakdown (all summed across instances) for EKS pinpointing. The summed
         // ns are CPU across parallel instances — rank the stages by share to find the dominant one.
-        eprintln!(
-            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) | STAGES(summed-cpu-ms): source_read={} from_json={} exchange={} encode={} finalize={} | rows={} => {} \
+        log::info!(
+            "wm_prof[{tag}] wall={}ms input_wait={}ms({}%) | STAGES(summed-cpu-ms): source_read={} from_json={} exchange={} encode={} finalize={} | rows={} => {} \
              (rank the largest STAGE = the throughput bottleneck to fix)",
             wall / 1_000_000, iw / 1_000_000, pct(iw),
             rd / 1_000_000, fj / 1_000_000, ex / 1_000_000, enc / 1_000_000, fz / 1_000_000, rows,
@@ -365,7 +365,7 @@ struct AccumState {
     /// F5.4 instrumentation: high-water mark of in-RAM resident partial state (`pending_bytes`). The
     /// operator's bounded-memory proof: this stays ≈ the spill budget regardless of cardinality
     /// (excess is spilled to object-store), independent of the O(N) output sink. Logged at EndOfData
-    /// under `VAJRA_F5_DEBUG`.
+    /// at `log::debug!` level.
     peak_pending_bytes: usize,
     /// F5.2: an in-flight `Final` merge driven INCREMENTALLY (one output batch per poll) so the
     /// finalize never materializes the whole result in `buf` — peak output is bounded to a couple
@@ -946,9 +946,7 @@ impl ExecutionPlan for WindowAccumExec {
                                         )
                                         .await
                                         {
-                                            if std::env::var("VAJRA_F5_DEBUG").is_ok() {
-                                                eprintln!("F5_SPILL p{partition} idx={idx}");
-                                            }
+                                            log::debug!("f5 window spill p{partition} idx={idx}");
                                             acc.spilled.push(idx);
                                             acc.next_spill += 1;
                                             acc.pending_rows.clear();
@@ -1019,14 +1017,12 @@ impl ExecutionPlan for WindowAccumExec {
                             if prof::enabled() {
                                 prof::dump(&format!("p{partition}"));
                             }
-                            if std::env::var("VAJRA_F5_DEBUG").is_ok() {
-                                eprintln!(
-                                    "F5_PEAK p{partition} peak_pending_bytes={} spilled_chunks={} budget={}",
-                                    acc.peak_pending_bytes,
-                                    acc.next_spill,
-                                    state_budget_bytes
-                                );
-                            }
+                            log::debug!(
+                                "f5 window peak p{partition} peak_pending_bytes={} spilled_chunks={} budget={}",
+                                acc.peak_pending_bytes,
+                                acc.next_spill,
+                                state_budget_bytes
+                            );
                             if let Some(ck) = &ck {
                                 // Checkpointed run (availableNow/once): SNAPSHOT the open-window
                                 // partial state (write-ahead) so windows spanning runs complete

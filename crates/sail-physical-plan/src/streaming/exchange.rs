@@ -417,7 +417,7 @@ async fn distribute(
             }
             Err(e) => {
                 // Prod-grade: surface shuffle errors in the (EKS) pod log, not just up the channel.
-                eprintln!("STREAM_EXCHANGE error (distribute): {e}");
+                log::error!("stream exchange distribute error: {e}");
                 let _ = senders[0].send(Err(e)).await;
                 return;
             }
