@@ -307,7 +307,7 @@ async fn spill_side_over_budget(
         if let Some(ck) = ck {
             let idx = *next;
             if crate::streaming::state_io::write_spill(ck, op_id, idx, schema, buf).await {
-                log::debug!("f5 join spill {op_id} idx={idx}");
+                log::info!("F5_JOIN_SPILL {op_id} idx={idx}");
                 spilled.push(idx);
                 *next += 1;
                 buf.clear();
