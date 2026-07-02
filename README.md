@@ -175,8 +175,8 @@ The published multi-arch image (linux/amd64 + linux/arm64 — the **same arm64 i
 EKS and Apple `container`) is on GHCR, signed and SBOM-attested:
 
 ```sh
-# Start a Vajra Spark Connect server on :50051
-docker run --rm -p 50051:50051 ghcr.io/vikashgargg/ignite:latest --mode local server
+# Start a Vajra Spark Connect server on :50051 (bind 0.0.0.0 so it's reachable through -p)
+docker run --rm -p 50051:50051 ghcr.io/vikashgargg/ignite:latest server --ip 0.0.0.0 --mode local
 ```
 
 ```python

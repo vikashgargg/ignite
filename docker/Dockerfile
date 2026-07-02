@@ -69,7 +69,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Full pyspark (not pyspark-client) required for UDF cloudpickle deserialization.
 # pandas + pyarrow required for Arrow UDFs and Pandas UDFs.
-RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}" pandas pyarrow
+# grpcio + grpcio-status + protobuf are the Spark Connect client deps so in-container
+# `vajra run` / `vajra shell` (which connect via sc://) work, not just the server.
+RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}" pandas pyarrow \
+        grpcio grpcio-status protobuf googleapis-common-protos
 
 COPY --from=builder /usr/local/bin/vajra /usr/local/bin/vajra
 
