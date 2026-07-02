@@ -843,42 +843,56 @@ impl ExecutionPlan for KafkaSourceExec {
                 // Resolve start offsets per partition (committed if present, else earliest/latest
                 // watermark) in a SYNC step — rdkafka's non-Send `Metadata` never crosses an await.
                 let resolve = || -> std::result::Result<Vec<(String, i32, i64)>, String> {
-                    let mut out = vec![];
+                    // FLIP-27 per-instance split assignment (SAME as the bounded path): collect ALL
+                    // (topic, partition) pairs, sort into a stable global order, and keep only those
+                    // whose global index `% parallelism == inst`. This is REQUIRED for multi-instance
+                    // realtime correctness — without it every instance reads every partition (measured
+                    // as an N× over-count). parallelism=1 ⇒ instance 0 owns all (single-instance path
+                    // unchanged). Each instance thus reads its partitions in event-time order ⇒ monotone
+                    // per-instance watermark ⇒ the downstream keyed exchange MIN-merge is exact.
+                    let mut pairs: Vec<(String, i32)> = vec![];
                     for topic in &topics {
                         let md = consumer.fetch_metadata(Some(topic), meta_timeout)
                             .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
-                            let part = p.id();
-                            // Recovery precedence (EO Kafka sink first):
-                            //  1. the consumer GROUP's committed offset — for an EO Kafka sink this is
-                            //     the records' atomic commit point (sink commits offsets INTO its txn
-                            //     via send_offsets_to_transaction); an auto-generated group (file sink)
-                            //     has none here, so this is skipped and the next source is used;
-                            //  2. the object-store `realtime/committed` record (file-sink EO model);
-                            //  3. the earliest/latest watermark (fresh start).
-                            let mut one = rdkafka::TopicPartitionList::new();
-                            let _ = one.add_partition(topic, part);
-                            let group_off = consumer
-                                .committed_offsets(one, meta_timeout)
-                                .ok()
-                                .and_then(|t| t.find_partition(topic, part).map(|e| e.offset()))
-                                .and_then(|o| match o {
-                                    rdkafka::Offset::Offset(v) => Some(v),
-                                    _ => None,
-                                });
-                            let start = match group_off
-                                .or_else(|| committed.get(&(topic.clone(), part)).copied())
-                            {
-                                Some(o) => o,
-                                None => {
-                                    let (low, high) = consumer.fetch_watermarks(topic, part, meta_timeout)
-                                        .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
-                                    if earliest { low } else { high }
-                                }
-                            };
-                            out.push((topic.clone(), part, start));
+                            pairs.push((topic.clone(), p.id()));
                         }
+                    }
+                    pairs.sort();
+                    let mut out = vec![];
+                    for (g, (topic, part)) in pairs.into_iter().enumerate() {
+                        if g % parallelism != inst {
+                            continue; // owned by another instance
+                        }
+                        // Recovery precedence (EO Kafka sink first):
+                        //  1. the consumer GROUP's committed offset — for an EO Kafka sink this is
+                        //     the records' atomic commit point (sink commits offsets INTO its txn
+                        //     via send_offsets_to_transaction); an auto-generated group (file sink)
+                        //     has none here, so this is skipped and the next source is used;
+                        //  2. the object-store `realtime/committed` record (file-sink EO model);
+                        //  3. the earliest/latest watermark (fresh start).
+                        let mut one = rdkafka::TopicPartitionList::new();
+                        let _ = one.add_partition(&topic, part);
+                        let group_off = consumer
+                            .committed_offsets(one, meta_timeout)
+                            .ok()
+                            .and_then(|t| t.find_partition(&topic, part).map(|e| e.offset()))
+                            .and_then(|o| match o {
+                                rdkafka::Offset::Offset(v) => Some(v),
+                                _ => None,
+                            });
+                        let start = match group_off
+                            .or_else(|| committed.get(&(topic.clone(), part)).copied())
+                        {
+                            Some(o) => o,
+                            None => {
+                                let (low, high) = consumer.fetch_watermarks(&topic, part, meta_timeout)
+                                    .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
+                                if earliest { low } else { high }
+                            }
+                        };
+                        out.push((topic, part, start));
                     }
                     Ok(out)
                 };
