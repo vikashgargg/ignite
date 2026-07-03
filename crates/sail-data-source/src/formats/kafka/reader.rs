@@ -831,6 +831,12 @@ impl ExecutionPlan for KafkaSourceExec {
                 cfg.set("bootstrap.servers", &options.bootstrap_servers);
                 cfg.set("group.id", &options.group_id);
                 cfg.set("enable.auto.commit", "false");
+                // Native EOF signal: librdkafka emits PartitionEOF exactly when the consumer reaches the
+                // partition high-watermark (genuinely caught up = no more data) — the CORRECT, exact
+                // source of Flink `WatermarkStatus.IDLE`. A slow-but-behind partition keeps delivering
+                // data (never EOF), so it is never mis-marked idle under load (the timeout heuristic's
+                // bug that closed windows early → over-emit). New data after EOF simply resumes delivery.
+                cfg.set("enable.partition.eof", "true");
                 apply_consumer_throughput_defaults(&mut cfg);
                 for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
                 // Stats context logs the librdkafka prefetch queue bytes (VAJRA_KAFKA_STATS) — direct
@@ -955,6 +961,17 @@ impl ExecutionPlan for KafkaSourceExec {
                 let flush_ms = LOW_LATENCY_FLUSH_MS.min(interval_ms.max(1)).max(1);
                 let mut flush_timer = tokio::time::interval(Duration::from_millis(flush_ms));
                 flush_timer.tick().await;
+                // Source-signaled idleness (Flink WatermarkStatus.IDLE): when a flush interval passes with
+                // NO data consumed (genuinely caught up to the partition head), emit ONE `Idle` marker so
+                // the downstream N→M merge excludes this partition from the watermark MIN. This replaces
+                // the exchange's wall-clock idle inference, which at scale wrongly marked a slow-but-active
+                // (unscheduled/backpressured) reader idle → premature window close → over-emit. Any new
+                // data clears the idle state (and re-activates the channel downstream).
+                // Source-signaled idleness (Flink WatermarkStatus.IDLE) driven by librdkafka PartitionEOF:
+                // emit `Idle` ONCE when a partition reaches its high-watermark (caught up = no more data),
+                // and re-activate on the next data. Exact — never mis-marks a slow-but-behind partition.
+                let idle_src = format!("kafka:{inst}");
+                let mut idle_signaled = false;
                 loop {
                     tokio::select! {
                         biased;
@@ -988,6 +1005,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         msg = msg_stream.next() => {
                             match msg {
                                 Some(Ok(m)) => {
+                                    idle_signaled = false; // data flowing again → active
                                     let (ts_ms, ts_type) = match m.timestamp() {
                                         Timestamp::NotAvailable => (-1i64, -1i32),
                                         Timestamp::CreateTime(ms) => (ms, 0i32),
@@ -1014,6 +1032,24 @@ impl ExecutionPlan for KafkaSourceExec {
                                             Err(e) => { yield Err(e); return; }
                                         }
                                         batch_bytes = 0;
+                                    }
+                                }
+                                Some(Err(rdkafka::error::KafkaError::PartitionEOF(_))) => {
+                                    // Caught up to the partition high-watermark = genuinely idle. Flush any
+                                    // buffered rows first (never let the Idle marker overtake its data),
+                                    // then signal `Idle` ONCE so the downstream merge excludes this
+                                    // partition from the watermark MIN (Flink WatermarkStatus.IDLE).
+                                    if builders.len() > 0 {
+                                        let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
+                                        match b.finish_projected(&full_schema, &projection) {
+                                            Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                                            Err(e) => { yield Err(e); return; }
+                                        }
+                                        batch_bytes = 0;
+                                    }
+                                    if !idle_signaled {
+                                        idle_signaled = true;
+                                        yield Ok(FlowEvent::Marker(FlowMarker::Idle { source: idle_src.clone() }));
                                     }
                                 }
                                 Some(Err(e)) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
