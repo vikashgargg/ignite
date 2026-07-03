@@ -18,6 +18,29 @@ Local scale-hardening (double partitions, ~3× cardinality, N=1000) — the hone
   w.r.t. crash; validate to exact-zero on EKS timing). The C7 gate cell is PARTS=4 (solid); PARTS=8 crash
   is the open residual.
 
+## 🔬 CRASH-EO ROOT-CAUSE + FIX ATTEMPTS (local PARTS=16, definitive 2026-07-03)
+
+Reproduced the EKS crash-EO dup RELIABLY at local PARTS=16 (4/4 FAIL, ~700-1700 dups) = fast iteration
+loop. Root-caused + attempted targeted fixes (all committed, all measured):
+1. **Cumulative `realtime/committed`** (seed with prior + max-merge staged): dups 1445→131, resume-at-0
+   9→3. Real 10× improvement. Grounded (Flink 2PC: committed offset set must cover every input).
+2. **Initial-offset staging on start** (stage resume position before consuming): defensively correct
+   (every input's position known at every checkpoint) but did NOT further reduce dups (~600-1000).
+3. **INC=1 (state checkpointing)**: also FAILS (~300-1000 dups) — so it's not a missing-state issue.
+**DEFINITIVE (committed-only analysis):** reading ONLY `_spark_metadata`-committed batches gives the SAME
+dups as reading all files → the duplicates are **REAL committed exactly-once violations** (the same window
+is committed in TWO epochs: pre-crash epoch N AND post-crash epoch M), NOT a test artifact.
+
+**CONCLUSION:** multi-instance (N-reader) continuous stateful **crash-EO is genuinely broken at scale** and
+the targeted patches (offset-record completeness) are NECESSARY but NOT SUFFICIENT. The real fix is the
+deep distributed-EO rework: a **barrier-aligned atomic commit of {window operator STATE + source OFFSETS +
+sink DATA-visibility} across all N instances** (Flink aligned-checkpoint + 2PC sink; RisingWave barrier
+commit). Recovery must restore to the last globally-consistent checkpoint and NEVER re-commit an
+already-committed window under a new epoch. This is F2/F3 distributed-EO scope — a substantial effort, not
+a patch. **DEFAULT DECISION (open):** N-reader default has this crash-EO gap; single-instance held crash-EO
+for the P1 keyed pattern but fails the scrambled-order no-dup gate. Neither is universally correct → the
+deep rework is the real answer; until then, document honestly + do NOT claim crash-EO exactly-once at scale.
+
 ## 🔴 EKS SCALE RESULT (measured 2026-07-03, vajra-stream-ht, 16-partition, image :eo-multipart)
 
 The honest EKS validation (the bar for the headline claim) — definitive:

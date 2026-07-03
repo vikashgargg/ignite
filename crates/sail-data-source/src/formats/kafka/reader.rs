@@ -919,6 +919,15 @@ impl ExecutionPlan for KafkaSourceExec {
                 if let Err(e) = consumer.assign(&tpl) {
                     yield Err(exec_datafusion_err!("Kafka assign: {e}")); return;
                 }
+                // Stage the INITIAL (resume) offsets IMMEDIATELY, before consuming, so the cumulative
+                // `realtime/committed` covers EVERY partition from the very first commit. Without this, a
+                // reader that crashes before its first epoch tick never staged any offset → it is absent
+                // from the committed record → resumes at offset 0 → re-reads its whole partition → the
+                // already-committed windows re-emit (measured: 3/16 partitions still hit this after the
+                // cumulative fix). Staging the start position means such a reader resumes at exactly where
+                // it began (no re-read of uncommitted data). Chandy-Lamport: every input's position is
+                // known at every checkpoint, including the initial one.
+                write_staged_epoch_offsets(&ck, inst, epoch, &next).await;
 
                 let mut msg_stream = consumer.stream();
                 let mut builders = KafkaArrowBuilders::with_capacity(max_batch, &projection);
