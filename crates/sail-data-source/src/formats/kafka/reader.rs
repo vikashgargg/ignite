@@ -844,7 +844,7 @@ impl ExecutionPlan for KafkaSourceExec {
 
                 // Resolve start offsets per partition (committed if present, else earliest/latest
                 // watermark) in a SYNC step — rdkafka's non-Send `Metadata` never crosses an await.
-                let resolve = || -> std::result::Result<Vec<(String, i32, i64)>, String> {
+                let resolve = || -> std::result::Result<(Vec<(String, i32, i64)>, usize), String> {
                     // FLIP-27 per-instance split assignment (SAME as the bounded path): collect ALL
                     // (topic, partition) pairs, sort into a stable global order, and keep only those
                     // whose global index `% parallelism == inst`. This is REQUIRED for multi-instance
@@ -852,6 +852,8 @@ impl ExecutionPlan for KafkaSourceExec {
                     // as an N× over-count). parallelism=1 ⇒ instance 0 owns all (single-instance path
                     // unchanged). Each instance thus reads its partitions in event-time order ⇒ monotone
                     // per-instance watermark ⇒ the downstream keyed exchange MIN-merge is exact.
+                    // Also returns `pairs.len()` = the TOTAL partition count = the number of offsets a
+                    // GLOBALLY-COMPLETE checkpoint must cover (the sink gates its commit on this).
                     let mut pairs: Vec<(String, i32)> = vec![];
                     for topic in &topics {
                         let md = consumer.fetch_metadata(Some(topic), meta_timeout)
@@ -862,6 +864,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         }
                     }
                     pairs.sort();
+                    let total_partitions = pairs.len();
                     let mut out = vec![];
                     for (g, (topic, part)) in pairs.into_iter().enumerate() {
                         if g % parallelism != inst {
@@ -896,9 +899,9 @@ impl ExecutionPlan for KafkaSourceExec {
                         };
                         out.push((topic, part, start));
                     }
-                    Ok(out)
+                    Ok((out, total_partitions))
                 };
-                let assignments = match resolve() {
+                let (assignments, total_partitions) = match resolve() {
                     Ok(a) => a,
                     Err(e) => { yield Err(exec_datafusion_err!("Kafka {e}")); return; }
                 };
@@ -908,6 +911,17 @@ impl ExecutionPlan for KafkaSourceExec {
                     "realtime source inst={inst}/{parallelism} owns={:?}",
                     assignments.iter().map(|(_, p, s)| (*p, *s)).collect::<Vec<_>>()
                 );
+                // W3 (distributed-EO): publish the TOTAL partition count so the sink can gate its commit
+                // on GLOBAL COMPLETENESS — only advance `realtime/committed` when the offset set covers
+                // ALL `total_partitions` (a globally-consistent checkpoint), never a partial one that
+                // would drop a partition and re-read it on crash. Idempotent (every instance writes the
+                // same value); tiny.
+                let _ = ck
+                    .put(
+                        "sources/0/expected",
+                        bytes::Bytes::from(total_partitions.to_string()),
+                    )
+                    .await;
                 let mut tpl = rdkafka::TopicPartitionList::new();
                 let mut next: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
                 for (topic, part, start) in assignments {
