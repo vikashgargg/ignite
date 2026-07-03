@@ -16,7 +16,7 @@ spec:
       nodeSelector: { role: compute }
       containers:
         - name: server
-          image: __ECR__/vajra:wmprof
+          image: __ECR__/vajra:eo-multipart
           args: ["server", "--ip", "0.0.0.0", "--port", "50051", "--mode", "local-cluster", "--workers", "4"]
           ports: [ { containerPort: 50051 } ]
           resources:

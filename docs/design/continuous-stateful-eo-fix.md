@@ -18,7 +18,28 @@ Local scale-hardening (double partitions, ~3× cardinality, N=1000) — the hone
   w.r.t. crash; validate to exact-zero on EKS timing). The C7 gate cell is PARTS=4 (solid); PARTS=8 crash
   is the open residual.
 
-## ✅ RESULT (measured 2026-07-03)
+## 🔴 EKS SCALE RESULT (measured 2026-07-03, vajra-stream-ht, 16-partition, image :eo-multipart)
+
+The honest EKS validation (the bar for the headline claim) — definitive:
+- **Throughput/memory/latency scorecard (100M events vs Flink 1.19):** Vajra **5.389M ev/s** vs Flink 5.479M
+  = **~TIED (1.7% slower — IMPROVED from 1.10× by the N-reader default)**; memory **7.04 vs 8.55 GiB =
+  ~1.2× LESS (beats Flink)**; latency p50/p99 32/66 ms vs Flink 27/55 (competitive, Flink edges).
+- **P1a CLEAN (no crash), Kafka→10s windowed-agg→Parquet-S3:** `rows=9000 distinct=9000 sum_count=90,000,000
+  dup=0` = **PERFECT — no-dup + complete + correct sum at 16-partition scale.** ✅
+- **P1b CRASH (kill -9 mid-run, resume from S3 checkpoint):** `rows=47138 distinct=9000 sum_count=101,542,129
+  **dup=38,138**` = **FAILS.** ❌ Multi-partition continuous stateful **crash-EO does NOT hold at 16-partition
+  scale** — the crash re-commits windows non-idempotently (38k dups). Local PARTS=8 (5/6) UNDERSTATED it; at
+  scale it fails hard + consistently.
+
+**Honest conclusion:** no-dup + **completeness are Flink-class at scale** (P1a dup=0, throughput near-parity,
+memory beats). But **crash-recovery exactly-once is NOT yet correct at scale** — the per-epoch sink commit +
+offset union commit are not crash-atomic/idempotent across N=16 instances. THIS is the real remaining P0 for
+the "Flink-class crash-EO" headline. Candidate fix: idempotent per-epoch sink commit (restart overwrites the
+uncommitted epoch's files deterministically; `_spark_metadata` gates strictly) + atomic union offset commit.
+Re-validate P1b to dup=0 at 16 partitions on EKS. Until then: claim no-dup+completeness (validated), NOT
+crash-EO-at-scale.
+
+## ✅ RESULT (measured 2026-07-03 — LOCAL gate; see EKS caveat above for crash-EO at scale)
 Multi-partition **continuous stateful exactly-once** is now correct **by default** (realtime Kafka source
 defaults to N readers; `VAJRA_RT_SINGLE` opts out). Measured on `correctness_gate.sh` local-cluster:
 - **C6** continuous 4-partition scrambled: **3/3 = 1800 rows / 6 windows, no-dup, all counts=10** (complete).

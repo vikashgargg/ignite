@@ -396,17 +396,17 @@ one command: `BOOT=localhost:9092 DURATION_S=60 RATE=20000 scripts/stream_latenc
 Both are **millisecond-class** and competitive; Flink edges the median, **Vajra's extreme tail
 (p99.9/max) is slightly better** — the no-GC payoff. This is a real, reproducible number, not a claim.
 
-> **Honest status:** micro-batch modes (backfill / processingTime) are production-proven, including
-> **exactly-once across a hard crash** on a real S3 sink. **Realtime-mode (continuous) multi-partition
-> STATEFUL processing is now no-duplicate + COMPLETE, validated to 8 partitions** (one reader per Kafka
-> partition + per-instance committed-offset union + Flink `withIdleness` watermark drain;
-> `scripts/correctness_gate.sh` C6, and PARTS=8/N=1000 scale runs — see
-> [docs/design/continuous-stateful-eo-fix.md](docs/design/continuous-stateful-eo-fix.md)). **Exactly-once
-> across a hard `kill -9` is solid at 4 partitions but has a rare epoch-boundary re-commit at 8**
-> (~5/6 runs) — the scale-dependent crash-atomicity residual, being hardened (candidate fix + EKS-timing
-> validation). We do NOT yet claim exact-zero crash-EO at scale. Also pending for the unqualified
-> "Flink-class" headline: EKS multi-node throughput/latency/memory at scale + a lower-latency record-level
-> sink (see [PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md)).
+> **Honest status (EKS-measured 2026-07-03):** micro-batch modes are production-proven (incl. EO across a
+> hard crash on S3). **Realtime-mode (continuous) multi-partition STATEFUL processing is no-duplicate +
+> COMPLETE at scale** — validated on EKS at **16 partitions**: Kafka→10s windowed-agg→Parquet-on-S3 gave
+> `rows=9000 distinct=9000 sum=90,000,000 **dup=0**` (one reader per Kafka partition + per-instance
+> committed-offset union + Flink `withIdleness` drain). At the same run, **throughput reached near-parity
+> with Flink 1.19** (5.39M vs 5.48M ev/s, the N-reader default closing the prior gap) while using **~1.2×
+> less memory** (7.04 vs 8.55 GiB). **BUT exactly-once across a hard `kill -9` does NOT yet hold at scale**
+> — the 16-partition crash produced dups (the per-epoch commit isn't crash-atomic/idempotent across N
+> instances). **This is the open P0** — we claim no-dup + completeness + throughput/memory, **not**
+> crash-recovery EO at scale, until it's fixed + re-validated to dup=0 on EKS
+> (see [docs/design/continuous-stateful-eo-fix.md](docs/design/continuous-stateful-eo-fix.md)).
 
 Both jobs run on the **same server**, the **same 105/105 Spark-compatible engine**, with **no JVM**
 and **no Flink** — batch and streaming share one execution core. See
@@ -622,8 +622,8 @@ EOF
 | Stream–stream / interval joins; stream × static join | ✅ |
 | Stateful deduplication (`dropDuplicates`) | ✅ |
 | **Exactly-once**, crash-verified (`kill -9` → resume): stateless **and** stateful, incl. **Parquet-on-S3** sink (dup=0, bit-identical) | ✅ |
-| **Multi-partition *continuous* stateful** — no-dup + **complete** (validated to 8 partitions) | ✅ |
-| Multi-partition continuous **exactly-once across hard crash** — solid at 4 partitions; rare epoch-boundary re-commit at 8 (EKS-scale hardening in progress) | 🟡 |
+| **Multi-partition *continuous* stateful** — no-dup + **complete** (validated to **16 partitions on EKS**, dup=0, sum exact) | ✅ |
+| Multi-partition continuous **exactly-once across hard crash** — **NOT yet correct at scale** (16-part EKS crash → dups; the open P0) | 🔴 |
 | Spillable large state (object-store) + incremental checkpoints | ✅ |
 | Rescale from checkpoint (key-groups, Flink FLIP-8) | ✅ gated |
 | Iceberg sink | 🚧 in progress |
