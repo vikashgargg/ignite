@@ -346,27 +346,22 @@ impl StreamSource for KafkaStreamSource {
         // so the per-instance `max` watermark races past a slower partition's data and the keyed
         // window operator drops it as "late" (measured ~7% loss at 16 partitions / 8 instances).
         // One partition per instance keeps each instance's stream event-time ordered, so its
-        // watermark is monotone and the downstream MIN-merge is correct. The realtime continuous
-        // path stays single (parallelism=1) — its per-epoch barrier coordination is separate.
-        let parallelism = if bounded {
-            let n_parts = count_kafka_partitions(&self.options).await;
-            // Fall back to target_partitions if metadata is unavailable; never below 1.
-            n_parts
-                .unwrap_or_else(|| state.config().target_partitions())
-                .max(1)
-        } else if std::env::var("VAJRA_RT_MULTI").is_ok() {
-            // Throughput Phase B (FLIP-27): N realtime readers, one per Kafka partition, to parallelize
-            // source read + from_json (Phase A showed the window STARVED on the single-instance path).
-            // GATED off by default — the N-instance per-epoch EO commit union is steps 2-3 (single-
-            // coordinator commit is still wired); enable only to profile/validate. Each instance reads
-            // ONE partition in event-time order ⇒ monotone watermark (also closes the per-partition
-            // watermark edge). See docs/design/streaming-realtime-multi-instance.md.
+        // watermark is monotone and the downstream MIN-merge is correct.
+        //
+        // BOTH bounded (availableNow) AND realtime/continuous now default to N = one reader per Kafka
+        // partition (FLIP-27). The realtime multi-instance path is now exactly-once complete: T-EO-1
+        // per-instance split assignment, T-EO-3 per-instance staged offsets + sink union commit, and
+        // T-EO-3.5 exchange watermark idleness + all-idle drain-to-max. Validated: correctness_gate C6
+        // (no-dup + complete, 1800 rows / 6 windows, 3/3) + C7 (EO across hard kill -9, 2/2). See
+        // docs/design/continuous-stateful-eo-fix.md. `VAJRA_RT_SINGLE` opts out to the legacy
+        // single-instance realtime reader (NOT EO-complete for multi-partition) as a safety escape.
+        let parallelism = if !bounded && std::env::var("VAJRA_RT_SINGLE").is_ok() {
+            1
+        } else {
             count_kafka_partitions(&self.options)
                 .await
                 .unwrap_or_else(|| state.config().target_partitions())
                 .max(1)
-        } else {
-            1
         };
         Ok(Arc::new(KafkaSourceExec::try_new(
             self.options.clone(),

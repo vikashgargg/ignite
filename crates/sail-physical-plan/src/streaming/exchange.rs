@@ -581,23 +581,42 @@ fn merge_output_subchannels(
                 // (that would close a window early = the partial-count-split dup).
                 let now = std::time::Instant::now();
                 let merged = {
-                    let mut mn: Option<i64> = None;
+                    let mut min_active: Option<i64> = None;
                     let mut any_active_pending = false;
+                    let mut has_active = false;
+                    let mut max_idle: Option<i64> = None; // max wm among idle (drained) channels
                     for k in 0..n {
                         if ended[k] {
                             continue;
                         }
-                        if let Some(to) = idle_timeout {
-                            if now.duration_since(last_active[k]) > to {
-                                continue; // idle → excluded from the MIN
+                        let idle = idle_timeout
+                            .is_some_and(|to| now.duration_since(last_active[k]) > to);
+                        if idle {
+                            // idle → excluded from the active MIN, but remember its wm for the
+                            // all-idle drain case below.
+                            if let Some(v) = wm[k] {
+                                max_idle = Some(max_idle.map_or(v, |c| c.max(v)));
                             }
+                            continue;
                         }
+                        has_active = true;
                         match wm[k] {
-                            Some(v) => mn = Some(mn.map_or(v, |c| c.min(v))),
+                            Some(v) => min_active = Some(min_active.map_or(v, |c| c.min(v))),
                             None => any_active_pending = true,
                         }
                     }
-                    if any_active_pending { None } else { mn }
+                    if has_active {
+                        // Some channel is actively producing → hold the MIN over active channels (a
+                        // slow-but-active channel must bound the watermark; excluded idle ones don't).
+                        if any_active_pending { None } else { min_active }
+                    } else {
+                        // ALL non-ended channels are IDLE (drained) — no active input holds the
+                        // watermark back, so advance to the MAX seen so the FINAL windows close (Flink
+                        // withIdleness "all sources idle" drain; late data on a re-activated channel is
+                        // append-mode-dropped, never re-emitted). This closes the continuous last-window
+                        // edge without the earlier stall-at-MIN (merged=None) that left W_n unclosed.
+                        max_idle
+                    }
                 };
                 if let Some(mw) = merged {
                     if last_emitted.is_none_or(|l| mw > l) {

@@ -1,8 +1,24 @@
 # Continuous multi-partition stateful exactly-once — the Flink-class fix
 
-Branch: `streaming/continuous-stateful-eo` · Status: DESIGN (diagnosed 2026-07-02) · Owner: streaming
-Gate cells this closes: **C6** (continuous 4-partition, no-dup) + **C7** (continuous 4-partition + crash, EO)
-in `scripts/correctness_gate.sh` (both XFAIL today → target GREEN).
+Branch: `streaming/continuous-stateful-eo` · **Status: ✅ DONE (2026-07-03) — C6 + C7 GREEN by default.**
+Gate cells closed: **C6** (continuous 4-partition, no-dup) + **C7** (continuous 4-partition + crash, EO)
+in `scripts/correctness_gate.sh` — promoted XFAIL→GREEN; full gate GREEN (6/6, no regression).
+
+## ✅ RESULT (measured 2026-07-03)
+Multi-partition **continuous stateful exactly-once** is now correct **by default** (realtime Kafka source
+defaults to N readers; `VAJRA_RT_SINGLE` opts out). Measured on `correctness_gate.sh` local-cluster:
+- **C6** continuous 4-partition scrambled: **3/3 = 1800 rows / 6 windows, no-dup, all counts=10** (complete).
+- **C7** continuous 4-partition + hard `kill -9`: **2/2 = INC_CKPT_EO_ACROSS_CRASH PASS**, complete + no-dup.
+- **Full gate GREEN 6/6** (C1/C2/C4/C5 unchanged). clippy `-D warnings` clean.
+
+The four pieces: **T-EO-1** per-instance FLIP-27 split assignment (no over-read) · **T-EO-3** per-instance
+staged offsets + sink UNION commit (all instances resume from committed offsets → no re-read dups) ·
+**T-EO-3.5** exchange watermark idleness + **all-idle DRAIN-TO-MAX** (when every input drains, advance the
+watermark to the max seen so the final windows close — this was the last-window-edge root cause, found via
+the RUST_LOG observability harness: `merged=None, wm=[51,51,70,41], idle=4` = all excluded → stall at MIN) ·
+**T-EO-4** make N-reader the realtime default. Grounded in Flink `withIdleness` + RisingWave per-partition
+watermark (REFERENCES §2, §8). The KB expected exact-zero to need EKS; achieved locally. NEXT: EKS scale
+(PARTS=8+) validation before the headline "Flink-class" claim; robust README/STATUS to the measured result.
 
 ## 1. Problem (measured, not assumed)
 
