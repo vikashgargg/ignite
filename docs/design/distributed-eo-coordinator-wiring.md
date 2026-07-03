@@ -4,6 +4,20 @@ Branch: `streaming/distributed-eo-rework` · Status: DESIGN (2026-07-03) · Clos
 ([continuous-stateful-eo-fix.md](continuous-stateful-eo-fix.md): multi-partition continuous stateful
 crash-EO produces real committed dups at N=16; targeted offset-record patches were necessary-but-insufficient).
 
+## 0. STANDING PRINCIPLE — no patches, structural correctness only (charter, user-directed 2026-07-03)
+
+Vajra replaces Flink and Spark **in every way** (see [vajra_charter](../../MEMORY.md)); crash-EO exactly-once
+is a **structural invariant**, not a metric to tune toward with heuristics. **Rule: do NOT patch the
+symptom.** Three targeted patches on the ad-hoc sink-commit path (W3 offset-completeness gate, W4 GC-guard,
+W4 recovery-truncation) each only *moved* the dup count (7407→7414→6259) without eliminating it — proof the
+**ad-hoc "last sink task counts done-markers" commit is the wrong abstraction**. The credible prod-grade fix
+is the one Flink/RisingWave already prove: a **checkpoint coordinator that commits epoch `e` iff EVERY task
+(all N sources + all M windows + all P sinks) has durably acked `e`** — global consistency by construction,
+so completeness/ordering/truncation become *consequences* of the protocol, not standalone guesses. Any change
+to the EO path must advance THIS invariant and cite it; a change that only shifts the measured dup count is
+rejected. Offset-completeness and recovery-truncation are kept ONLY as components of the coordinator protocol
+(they are Flink-ABS-correct), never as the commit decision itself.
+
 ## 1. The finding (measured + code-audited)
 
 The crash-EO dup at scale is a **globally-inconsistent checkpoint**: on crash + restart, the same window is
@@ -87,6 +101,88 @@ of `staged-epoch-<e>`) reads whatever is present at commit time — incomplete u
 (measured: partitions missing → resume at 0). This is precisely the `EpochCoordinator`'s all-task-ack
 guarantee, which is unwired. ⇒ W2/W3 (task acks → coordinator → driver atomic global commit) is the
 correct, minimal change; the per-operator snapshots it needs already exist and are correct.
+
+## 4c. FINAL protocol — object-store epoch acks, coordinator-gated commit (implementation, 2026-07-03)
+
+Chosen realization (objectively-better-in-production vs an RPC coordinator: no new RPC surface, identical in
+local-cluster and EKS, same durable medium as offsets/state = RisingWave decoupled-commit + the F4
+object-store-atomic principle Vajra already uses). The tested [`EpochCoordinator`] state machine is the
+commit decision — fed acks read from object store, it commits epoch `e` **iff every task acked**.
+
+**Expected task set (written once each):** `epochs/expected/{src,win,snk}` = N readers / M window instances /
+P sink tasks. Total expected = N+M+P leaf tasks per epoch.
+
+**Per-epoch, per-task ack (durable-snapshot-THEN-ack, Chandy-Lamport local rule):**
+- Source inst `i` on barrier `e`: stage offsets (exists) → ack `epochs/<e>/ack/src-<i>` = `{offsets_i}`.
+- Window inst `p` on barrier `e`: durably snapshot `emitted_ends`+state (exists) → ack `epochs/<e>/ack/win-<p>`
+  = `{state_ptr: "window/p/e"}`. **← the structurally-missing gate: today the sink commits without any
+  guarantee every window durably snapshotted `e`.**
+- Sink task `j` on barrier `e`: write slice `<base>/<e>/part-j.parquet` (exists) → ack `epochs/<e>/ack/snk-<j>`.
+
+**Coordinator-gated commit (one designated finalizer task):** builds `EpochCoordinator::new(0..N+M+P)`, reads
+`epochs/<e>/ack/*`, feeds each into `ack()`. Only when `ack()` returns `Some(GlobalCheckpoint)` (ALL N+M+P
+acked) does it write ONE atomic `realtime/committed` = `{epoch, offsets: all src acks, state_ptrs: all win
+acks}` THEN commit `_spark_metadata` (union of snk slices). No all-ack ⇒ deferred (invisible, uncommitted).
+Replaces the ad-hoc "last sink counts sink done-markers + offset-count heuristic" entirely.
+
+**Recovery:** read `realtime/committed`→`last_committed`; every source seeks its offset; every window restores
+`window/p/last_committed`; **truncate every epoch > last_committed** (`_spark_metadata` + data dirs) so the
+visible set == the recovery line. Truncation/completeness are now *consequences* of the all-ack invariant.
+
+**Gate (unchanged):** `INC=0 PARTS=16 N=1000 bash scripts/inc_ckpt_gate.sh` crash×N → dup=0, then PARTS=8/4
+regression, then EKS P1b → dup=0. A run that only lowers the dup count (not 0) does NOT advance the invariant.
+
+## 4e. FIX LANDED — aligned checkpoint barriers in the exchange (2026-07-03)
+
+`StreamExchangeExec`'s N→M receiver merge now **aligns** `Checkpoint{e}` (Flink ABS): it BUFFERS each input's
+barrier and emits ONE aligned barrier downstream only when every non-ended input has reached `e` (MIN over
+active inputs; a not-yet-barriered active input HOLDS). Previously `Checkpoint` fell into `Mk::Other` and only
+sub-channel 0's barrier was forwarded (15 of 16 dropped) → the window snapshotted an inconsistent cut. With
+alignment, a window's `watermark@e` reflects data ≤ every reader's `e` offset, so the recovery cut (offset +
+watermark + `emitted_ends`) is consistent and `emitted_ends` watermark-pruning can never re-emit a committed
+window. **GATE: `INC=0 PARTS=16 N=1000 scripts/inc_ckpt_gate.sh` crash ×3 → rows=6000/6000, distinct=6,
+all_counts_10=True, no_dup=True, PASS ×3 (dup=0).** The three earlier patches (offset-completeness, GC-guard,
+recovery-truncation) are retained as sound Flink-ABS components but were necessary-not-sufficient without the
+aligned barrier. REMAINING before the claim: PARTS=8/4 + INC=1 regression, correctness_gate 6/6, then EKS P1b.
+`exchange.rs`: `rewrite_checkpoint` + `Mk::Checkpoint` + the align block in `merge_output_subchannels`.
+
+## 4d. MEASURED root cause (2026-07-03, decisive — not asserted)
+
+Instrumented the single-sink PARTS=16 crash gate (topology confirmed:
+`RealtimeFileSink(1) ← StreamBarrierAlign(8→1) ← WindowAccum(8) ← StreamExchange(16→8) ← Watermark ← Kafka(16)`).
+Dumped, per crash, which committed epoch dirs hold the duplicated `(window,key)` rows AND what each window
+instance restores:
+
+- Only **2 epoch dirs commit**: epoch 0 (pre-crash, 2000 rows = 2 windows) and epoch 24 (post-restart drain,
+  5004 rows). **1003 `(window,key)` pairs are in BOTH** ⇒ recovery re-emitted already-committed windows.
+- On restart each window instance restores `committed_epoch=23`, **`watermark=21s`**, `emitted_ends={10s,20s}`
+  (only 2 ends — the rest PRUNED), `pending_rows≈130`.
+- `emitted_ends` is **pruned by watermark** (window_accum.rs:975 "P1 fix": once wm passes a window end +
+  retention, drop it; safe in steady state because late data < wm is dropped at ingestion).
+
+**The bug = a non-consistent recovery cut.** The sink commits window OUTPUT continuously (watermark-driven,
+between barriers) into per-epoch data dirs, but the window STATE snapshot for the committed epoch records a
+watermark/`emitted_ends` that does **not** match the output already committed. On recovery the source resumes
+by OFFSET while the window restores a watermark that is LOWER than the ends of windows the sink already
+committed (e.g. epoch 0's windows end above the restored 21s). Those ends were **pruned** from `emitted_ends`,
+so re-read data re-aggregates and re-emits them → committed a second time under the drain epoch = the dup. In
+one line: **offset, watermark, `emitted_ends`, and committed output are four views of the checkpoint that are
+NOT the same cut** — exactly the globally-inconsistent checkpoint (§1), now measured end-to-end.
+
+**Why patches can't fix it:** offset-completeness (W3), GC-guard, and recovery-truncation (W4) each address one
+view; the defect is that the four views diverge. `emitted_ends` pruning is only sound when the restored
+watermark and the resume offset are the SAME cut — which the self-timed multi-reader + unaligned-exchange path
+does not guarantee. The fix must make the checkpoint ONE consistent cut.
+
+**The credible fix (structural, Flink ABS):** the epoch barrier must be a true in-band marker so that for a
+committed epoch `e`: the committed offset, the window watermark, the (unpruned-below-that-watermark)
+`emitted_ends`, and the sink output ALL correspond to the same data boundary. Concretely: (a) the
+`StreamExchange` must ALIGN barriers (forward `Checkpoint{e}` to a window instance only after `e` arrived from
+every upstream input) so a window's watermark at barrier `e` reflects only data ≤ every reader's `e` offset;
+(b) `emitted_ends` may be pruned in memory but the per-epoch snapshot must retain every end ≥ the committed
+watermark so recovery cannot re-emit; (c) commit offset+state+output atomically for the SAME `e` via the
+EpochCoordinator (§4c). Then pruning-by-watermark ⟺ pruning-by-offset and recovery is exactly-once. This is
+the next implementation step; it is validated by the same gate (dup=0), not by a lower dup count.
 
 ## 5. Risk / honesty
 

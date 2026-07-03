@@ -1111,7 +1111,11 @@ impl ExecutionPlan for WindowAccumExec {
                                     // the live working set) references.
                                     acc.epoch_chunks.push_back((id, acc.spilled.clone()));
                                     acc.epoch_chunks.retain(|(e, _)| *e + 2 > id); // keep e > id-2
-                                    if id >= 2 {
+                                    // W4: don't GC at/after the committed epoch (see full-path note).
+                                    let committed_e = crate::streaming::state_io::committed_epoch(ck)
+                                        .await
+                                        .unwrap_or(0);
+                                    if id >= 2 && id - 2 < committed_e {
                                         crate::streaming::state_io::gc_epoch_incremental(
                                             ck,
                                             &state_op_id,
@@ -1154,7 +1158,16 @@ impl ExecutionPlan for WindowAccumExec {
                                         &meta,
                                     )
                                     .await;
-                                    if id >= 2 {
+                                    // W4 (distributed-EO): NEVER GC a snapshot at/after the COMMITTED
+                                    // epoch. Under W3's completeness-gated commit, realtime/committed
+                                    // lags the current epoch; GC'ing the committed epoch's snapshot left
+                                    // recovery with empty emitted_ends → re-emit of already-committed
+                                    // windows (the crash-EO dup). GC id-2 only once it is strictly older
+                                    // than the committed epoch (keep [committed..id] for recovery).
+                                    let committed = crate::streaming::state_io::committed_epoch(ck)
+                                        .await
+                                        .unwrap_or(0);
+                                    if id >= 2 && id - 2 < committed {
                                         crate::streaming::state_io::gc_epoch_state(
                                             ck,
                                             &state_op_id,

@@ -844,7 +844,9 @@ impl ExecutionPlan for KafkaSourceExec {
 
                 // Resolve start offsets per partition (committed if present, else earliest/latest
                 // watermark) in a SYNC step — rdkafka's non-Send `Metadata` never crosses an await.
-                let resolve = || -> std::result::Result<(Vec<(String, i32, i64)>, usize), String> {
+                // (per-(topic,partition) start offsets for this instance, total partition count).
+                type Resolved = (Vec<(String, i32, i64)>, usize);
+                let resolve = || -> std::result::Result<Resolved, String> {
                     // FLIP-27 per-instance split assignment (SAME as the bounded path): collect ALL
                     // (topic, partition) pairs, sort into a stable global order, and keep only those
                     // whose global index `% parallelism == inst`. This is REQUIRED for multi-instance

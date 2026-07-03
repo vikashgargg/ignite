@@ -879,6 +879,26 @@ impl ExecutionPlan for RealtimeFileSinkExec {
             let ck = checkpoint_location
                 .as_deref()
                 .and_then(|l| CheckpointStore::from_location(l).ok());
+            // W4 recovery truncation (distributed-EO): before processing, reconcile the visible sink
+            // state to the committed recovery line. Epochs made visible past `realtime/committed.epoch`
+            // (deferred/incomplete under W3, or a crash between the visibility write and the offset
+            // write) would otherwise be re-emitted under a fresh epoch → committed twice = dup. The
+            // first sink task drops every epoch strictly after `realtime/committed.epoch`. Idempotent.
+            if part_idx == 0 {
+                if let Some(ck) = &ck {
+                    if let Ok(Some(bytes)) = ck.get("realtime/committed").await {
+                        if let Ok(rec) = serde_json::from_slice::<RealtimeCommitted>(&bytes) {
+                            if let Err(e) = crate::streaming_sink_log::truncate_after(
+                                &store, &base, rec.epoch,
+                            )
+                            .await
+                            {
+                                yield Err(DataFusionError::ObjectStore(Box::new(e))); return;
+                            }
+                        }
+                    }
+                }
+            }
             let mut buffer: Vec<RecordBatch> = Vec::new();
             while let Some(item) = decoded.next().await {
                 match item {

@@ -457,6 +457,7 @@ async fn distribute(
 enum Mk {
     Data,
     Watermark(i64),
+    Checkpoint(u64),
     EndOfData,
     Other,
 }
@@ -474,12 +475,23 @@ fn classify_mk(batch: &RecordBatch) -> Mk {
                 Ok(FlowMarker::Watermark { timestamp, .. }) => {
                     Mk::Watermark(timestamp.timestamp_micros())
                 }
+                Ok(FlowMarker::Checkpoint { id }) => Mk::Checkpoint(id),
                 Ok(FlowMarker::EndOfData) => Mk::EndOfData,
                 _ => Mk::Other,
             };
         }
     }
     Mk::Data
+}
+
+/// Rebuild a `Checkpoint{id}` marker batch from a template (for emitting ONE aligned barrier
+/// downstream after every input reached epoch `id`).
+fn rewrite_checkpoint(template: &RecordBatch, id: u64) -> Result<RecordBatch> {
+    let idx = template.schema().index_of(MARKER_FIELD_NAME)?;
+    let bytes = FlowMarker::Checkpoint { id }.encode()?;
+    let mut cols = template.columns().to_vec();
+    cols[idx] = Arc::new(BinaryArray::from(vec![Some(bytes.as_slice())]));
+    Ok(RecordBatch::try_new(template.schema(), cols)?)
 }
 
 /// Rebuild a watermark marker batch from a template (reuses its non-null-column placeholders),
@@ -511,6 +523,15 @@ fn merge_output_subchannels(
         let mut receivers = subs;
         let mut wm: Vec<Option<i64>> = vec![None; n];
         let mut ended: Vec<bool> = vec![false; n];
+        // Flink ABS aligned checkpoint: per-channel highest `Checkpoint{e}` epoch seen. A barrier is
+        // BUFFERED (not forwarded) until EVERY non-ended input has reached it; then ONE aligned barrier
+        // is emitted downstream. This makes a window's state snapshot at epoch `e` reflect a consistent
+        // global cut (data ≤ every reader's `e` offset), so the recovery cut (offset + watermark +
+        // emitted_ends) is consistent and exactly-once holds. Forwarding one input's barrier (the old
+        // `Mk::Other` path) snapshotted an inconsistent cut → crash re-emitted committed windows.
+        let mut ckpt: Vec<Option<u64>> = vec![None; n];
+        let mut last_emitted_ckpt: Option<u64> = None;
+        let mut ckpt_template: Option<RecordBatch> = None;
         // Per-channel last-activity time — a channel idle beyond `idle_timeout` is excluded from the
         // watermark MIN (Flink withIdleness). Only consulted when `idle_timeout` is Some (realtime).
         let mut last_active: Vec<std::time::Instant> = vec![std::time::Instant::now(); n];
@@ -558,6 +579,12 @@ fn merge_output_subchannels(
                             Mk::Watermark(ts) => {
                                 wm[j] = Some(wm[j].map_or(ts, |c| c.max(ts)));
                                 wm_template = Some(batch);
+                                recompute = true;
+                            }
+                            Mk::Checkpoint(e) => {
+                                // Buffer this input's barrier; emit downstream only once aligned.
+                                ckpt[j] = Some(ckpt[j].map_or(e, |c| c.max(e)));
+                                ckpt_template = Some(batch);
                                 recompute = true;
                             }
                             Mk::EndOfData => {
@@ -628,6 +655,41 @@ fn merge_output_subchannels(
                             }
                         }
                     }
+                }
+                // Aligned checkpoint (Flink ABS): the barrier safe to emit = MIN `Checkpoint` epoch over
+                // every non-ended input (a non-ended input that has not yet delivered any barrier HOLDS
+                // the alignment — it must never be skipped, or its data would land in the wrong epoch's
+                // snapshot). Emit one barrier per newly-aligned epoch, in order. Ended inputs are excluded
+                // (their stream is exhausted); an all-ended merge emits nothing (EndOfData path handles it).
+                let aligned = {
+                    let mut min_ck: Option<u64> = None;
+                    let mut hold = false;
+                    let mut any = false;
+                    for k in 0..n {
+                        if ended[k] {
+                            continue;
+                        }
+                        any = true;
+                        match ckpt[k] {
+                            Some(v) => min_ck = Some(min_ck.map_or(v, |c| c.min(v))),
+                            None => hold = true,
+                        }
+                    }
+                    if any && !hold { min_ck } else { None }
+                };
+                if let Some(a) = aligned {
+                    // First alignment: emit only `a` (epochs before the first-seen barrier — e.g. those
+                    // before a post-restart resume at committed+1 — were never triggered on this stream).
+                    let start = last_emitted_ckpt.map_or(a, |l| l + 1);
+                    for e in start..=a {
+                        if let Some(tmpl) = &ckpt_template {
+                            match rewrite_checkpoint(tmpl, e) {
+                                Ok(b) => yield Ok(b),
+                                Err(err) => { yield Err(err); return; }
+                            }
+                        }
+                    }
+                    last_emitted_ckpt = Some(a);
                 }
             }
         }
