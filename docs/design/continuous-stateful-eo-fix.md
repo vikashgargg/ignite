@@ -31,6 +31,16 @@ The honest EKS validation (the bar for the headline claim) — definitive:
   scale** — the crash re-commits windows non-idempotently (38k dups). Local PARTS=8 (5/6) UNDERSTATED it; at
   scale it fails hard + consistently.
 
+**⚠️ REGRESSION CONCERN (must reconcile):** the PRIOR P1 run (2026-07-02, **single-instance** realtime,
+[[project_realtime_eo]] / P1 memory) **passed** P1b crash-EO (`dup=0`). This run (**N-reader default**,
+T-EO-4) **fails** it (`dup=38k`). So T-EO-4 (N-reader default) likely **regressed crash-EO** while fixing
+no-dup/completeness (gate C6/C7) + throughput. Genuine tradeoff by workload: single-instance held crash-EO
+for the P1 keyed-producer pattern but had the scrambled-order gate dups; N-reader fixes the gate but its
+union-commit isn't crash-atomic at N=16. **DECISION NEEDED:** either (a) fix the multi-instance crash-atomic
+commit so N-reader is a safe default, or (b) revert T-EO-4's default to single-instance until then (keeping
+N-reader opt-in via a flag) — do NOT ship an N-reader default that regresses crash-EO. Isolate first:
+re-run P1b with `VAJRA_RT_SINGLE=1` on EKS to confirm single-instance still passes crash-EO at 16 parts.
+
 **Honest conclusion:** no-dup + **completeness are Flink-class at scale** (P1a dup=0, throughput near-parity,
 memory beats). But **crash-recovery exactly-once is NOT yet correct at scale** — the per-epoch sink commit +
 offset union commit are not crash-atomic/idempotent across N=16 instances. THIS is the real remaining P0 for
