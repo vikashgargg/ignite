@@ -69,6 +69,25 @@ path — RisingWave-style decoupled durable commit).
   + offsets from the global record. Gate: **C7 PARTS=16 crash → dup=0** (local), then PARTS=8/4 regression.
 - **W5 — EKS re-validate** P1b → dup=0 at 16 partitions; then promote the claim + settle the N-reader default.
 
+## 4b. W1 investigation (code-audited 2026-07-03)
+
+Confirmed the per-operator ordering is ALREADY correct (Chandy-Lamport local rule):
+- **Source** (`kafka/reader.rs:947-948`): `write_staged_epoch_offsets(...).await` THEN emit `Checkpoint{e}`
+  — stages durably BEFORE the barrier. ✓
+- **Window** (`window_accum.rs:1078-1156`): `stage_epoch_incremental/stage_epoch_state(...).await` with
+  `meta = [watermark, emitted_ends...]` THEN forwards the barrier. Snapshots durably (incl. emitted_ends)
+  BEFORE forwarding. ✓
+- **`StreamBarrierAlignExec`**: correct N→1 Chandy-Lamport alignment (seal `e` only when every input
+  reached it).
+
+So the LOCAL ordering is right; the gap is GLOBAL COMPLETION at the sink: `RealtimeFileSinkExec` commits
+`e` (offset union + `_spark_metadata`) driven by its own marker/`num_partitions` coordination, NOT by a
+guarantee that ALL N sources staged `e` AND ALL M windows snapshotted `e`. The offset union (`list_rel`
+of `staged-epoch-<e>`) reads whatever is present at commit time — incomplete under barrier skew at N=16
+(measured: partitions missing → resume at 0). This is precisely the `EpochCoordinator`'s all-task-ack
+guarantee, which is unwired. ⇒ W2/W3 (task acks → coordinator → driver atomic global commit) is the
+correct, minimal change; the per-operator snapshots it needs already exist and are correct.
+
 ## 5. Risk / honesty
 
 This is a real distributed-protocol change (F2/F3), high blast radius (the core EO path). It is gated at every
