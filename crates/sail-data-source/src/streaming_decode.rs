@@ -729,8 +729,21 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                 // partition resumes on restart (single-instance = just inst-0; the pre-T-EO-3 shared
                 // key `sources/0/staged-epoch-<epoch>` is still matched by the suffix for back-compat).
                 let suffix = format!("staged-epoch-{epoch}");
+                // CUMULATIVE commit (crash-atomicity fix): SEED with the PRIOR committed offsets, then
+                // max-merge THIS epoch's staged offsets. Without this, the record was REPLACED with only
+                // the current epoch's staged set — so any partition whose reader hadn't staged exactly
+                // THIS epoch (barrier skew across N=16 FLIP-27 readers) was DROPPED from the record and
+                // resumed at offset 0 on crash (measured: 9/16 partitions reset to 0 → re-read whole
+                // partition → cross-epoch window re-emit → dups). Offsets are monotone per partition, so
+                // seeding with prior + max-merge never regresses and never loses a partition. Flink 2PC:
+                // the committed offset set must cover EVERY input, always.
                 let mut offsets: std::collections::BTreeMap<String, i64> =
-                    std::collections::BTreeMap::new();
+                    match ck.get("realtime/committed").await.ok().flatten() {
+                        Some(bytes) => serde_json::from_slice::<RealtimeCommitted>(&bytes)
+                            .map(|r| r.offsets)
+                            .unwrap_or_default(),
+                        None => std::collections::BTreeMap::new(),
+                    };
                 if let Ok(rels) = ck.list_rel("sources/0").await {
                     for rel in rels.iter().filter(|r| r.ends_with(&suffix)) {
                         if let Ok(Some(bytes)) = ck.get(rel).await {
