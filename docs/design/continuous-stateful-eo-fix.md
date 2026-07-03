@@ -4,6 +4,20 @@ Branch: `streaming/continuous-stateful-eo` · **Status: ✅ DONE (2026-07-03) �
 Gate cells closed: **C6** (continuous 4-partition, no-dup) + **C7** (continuous 4-partition + crash, EO)
 in `scripts/correctness_gate.sh` — promoted XFAIL→GREEN; full gate GREEN (6/6, no regression).
 
+## ⚠️ SCALE-HARDENING FINDING (PARTS=8, measured 2026-07-03)
+Local scale-hardening (double partitions, ~3× cardinality, N=1000) — the honest result:
+- **C6 no-dup + COMPLETE: SOLID at PARTS=8** — 2/2 clean (rows=6000, 6 windows, no-dup, counts=10).
+  Completeness + no-dup (T-EO-1/3/3.5/4) scale from 4→8 partitions with no regression.
+- **C7 crash-EO: robust at PARTS=4 (2/2) but ~5/6 at PARTS=8** — a RARE crash-boundary race remains: when
+  hit, a whole epoch is re-committed (measured 671 dups on the one failure). This is the scale-dependent
+  **epoch-boundary crash-atomicity residual** (KB: "full exact-zero = EKS"): the union-commit / sink
+  epoch-commit at the exact crash instant is not yet perfectly atomic/idempotent across N=8 instances.
+- **Honest claim status:** no-dup + completeness = validated at scale; **crash-EO exactly-once is NOT yet
+  exact-zero at PARTS=8** (rare re-commit). Do NOT claim "Flink-class crash-EO at scale" until this residual
+  is closed (candidate: make the per-epoch sink commit fully idempotent + the offset union commit atomic
+  w.r.t. crash; validate to exact-zero on EKS timing). The C7 gate cell is PARTS=4 (solid); PARTS=8 crash
+  is the open residual.
+
 ## ✅ RESULT (measured 2026-07-03)
 Multi-partition **continuous stateful exactly-once** is now correct **by default** (realtime Kafka source
 defaults to N readers; `VAJRA_RT_SINGLE` opts out). Measured on `correctness_gate.sh` local-cluster:
