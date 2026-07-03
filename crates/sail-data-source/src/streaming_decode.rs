@@ -723,15 +723,33 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                 .await
                 .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
             if let Some(ck) = ck {
-                let offsets: std::collections::BTreeMap<String, i64> = match ck
-                    .get(&format!("sources/0/staged-epoch-{epoch}"))
-                    .await
-                    .ok()
-                    .flatten()
-                {
-                    Some(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
-                    None => std::collections::BTreeMap::new(),
-                };
+                // T-EO-3: UNION every source instance's staged offsets for this epoch. Multi-instance
+                // realtime stages `sources/0/inst-<i>/staged-epoch-<epoch>` (one per FLIP-27 reader,
+                // disjoint partitions); the union is the complete committed offset set so EVERY
+                // partition resumes on restart (single-instance = just inst-0; the pre-T-EO-3 shared
+                // key `sources/0/staged-epoch-<epoch>` is still matched by the suffix for back-compat).
+                let suffix = format!("staged-epoch-{epoch}");
+                let mut offsets: std::collections::BTreeMap<String, i64> =
+                    std::collections::BTreeMap::new();
+                if let Ok(rels) = ck.list_rel("sources/0").await {
+                    for rel in rels.iter().filter(|r| r.ends_with(&suffix)) {
+                        if let Ok(Some(bytes)) = ck.get(rel).await {
+                            if let Ok(m) = serde_json::from_slice::<
+                                std::collections::BTreeMap<String, i64>,
+                            >(&bytes)
+                            {
+                                // keys are "topic:partition" — disjoint across instances, so the union
+                                // never conflicts; keep the max offset per partition defensively.
+                                for (k, v) in m {
+                                    offsets
+                                        .entry(k)
+                                        .and_modify(|cur| *cur = (*cur).max(v))
+                                        .or_insert(v);
+                                }
+                            }
+                        }
+                    }
+                }
                 let rec = RealtimeCommitted { epoch, offsets };
                 if let Ok(body) = serde_json::to_vec(&rec) {
                     ck.put("realtime/committed", bytes::Bytes::from(body))

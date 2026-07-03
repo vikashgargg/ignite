@@ -59,9 +59,12 @@ run_continuous_crash() { # PARTS -> "pass" if EO across crash (INC_CKPT_EO ... P
 }
 
 echo "=== streaming correctness gate ==="
+# C6/C7 PROMOTED XFAIL→GREEN 2026-07-03: multi-partition continuous stateful EO is now no-dup +
+# complete + EO-across-crash by default (T-EO-1 per-instance split, T-EO-3 union commit, T-EO-3.5
+# idleness + all-idle drain-to-max; realtime source defaults to N readers). docs/design/continuous-stateful-eo-fix.md.
 record "C5 continuous, 1 partition, no-dup"            GREEN "$(run_continuous 1)"
-record "C6 continuous, 4 partitions SCRAMBLED, no-dup" XFAIL "$(run_continuous 4)"
-record "C7 continuous + crash, 4 partitions, EO"       XFAIL "$(run_continuous_crash 4)"
+record "C6 continuous, 4 partitions SCRAMBLED, no-dup" GREEN "$(run_continuous 4)"
+record "C7 continuous + crash, 4 partitions, EO"       GREEN "$(run_continuous_crash 4)"
 
 # --- availableNow completeness/bounded cells via f5_validate.sh (file-based, self-contained) ---
 # C1: large budget (no spill) -> windowed_out_rows must == N (completeness).

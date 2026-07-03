@@ -397,11 +397,16 @@ Both are **millisecond-class** and competitive; Flink edges the median, **Vajra'
 (p99.9/max) is slightly better** — the no-GC payoff. This is a real, reproducible number, not a claim.
 
 > **Honest status:** micro-batch modes (backfill / processingTime) are production-proven, including
-> **exactly-once across a hard crash** on a real S3 sink. Realtime-mode exactly-once is proven today
-> for the **stateless, continuous Kafka → durable sink** path (measured across restart on real Kafka);
-> **multi-partition + stateful realtime exactly-once** and a lower-latency record-level sink are in
-> progress (see [PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md) and
-> [UNIFIED_ENGINE_FLINK_PARITY.md](docs/UNIFIED_ENGINE_FLINK_PARITY.md)).
+> **exactly-once across a hard crash** on a real S3 sink. **Realtime-mode (continuous) multi-partition
+> STATEFUL processing is now no-duplicate + COMPLETE, validated to 8 partitions** (one reader per Kafka
+> partition + per-instance committed-offset union + Flink `withIdleness` watermark drain;
+> `scripts/correctness_gate.sh` C6, and PARTS=8/N=1000 scale runs — see
+> [docs/design/continuous-stateful-eo-fix.md](docs/design/continuous-stateful-eo-fix.md)). **Exactly-once
+> across a hard `kill -9` is solid at 4 partitions but has a rare epoch-boundary re-commit at 8**
+> (~5/6 runs) — the scale-dependent crash-atomicity residual, being hardened (candidate fix + EKS-timing
+> validation). We do NOT yet claim exact-zero crash-EO at scale. Also pending for the unqualified
+> "Flink-class" headline: EKS multi-node throughput/latency/memory at scale + a lower-latency record-level
+> sink (see [PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md)).
 
 Both jobs run on the **same server**, the **same 105/105 Spark-compatible engine**, with **no JVM**
 and **no Flink** — batch and streaming share one execution core. See
@@ -617,6 +622,8 @@ EOF
 | Stream–stream / interval joins; stream × static join | ✅ |
 | Stateful deduplication (`dropDuplicates`) | ✅ |
 | **Exactly-once**, crash-verified (`kill -9` → resume): stateless **and** stateful, incl. **Parquet-on-S3** sink (dup=0, bit-identical) | ✅ |
+| **Multi-partition *continuous* stateful** — no-dup + **complete** (validated to 8 partitions) | ✅ |
+| Multi-partition continuous **exactly-once across hard crash** — solid at 4 partitions; rare epoch-boundary re-commit at 8 (EKS-scale hardening in progress) | 🟡 |
 | Spillable large state (object-store) + incremental checkpoints | ✅ |
 | Rescale from checkpoint (key-groups, Flink FLIP-8) | ✅ gated |
 | Iceberg sink | 🚧 in progress |

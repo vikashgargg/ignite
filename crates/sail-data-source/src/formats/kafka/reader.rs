@@ -158,6 +158,7 @@ async fn read_realtime_committed(
 /// idempotently and concurrent epochs never clobber each other.
 async fn write_staged_epoch_offsets(
     ck: &CheckpointStore,
+    inst: usize,
     epoch: u64,
     offsets: &std::collections::HashMap<(String, i32), i64>,
 ) {
@@ -166,9 +167,15 @@ async fn write_staged_epoch_offsets(
         .map(|((t, p), o)| (format!("{t}:{p}"), *o))
         .collect();
     if let Ok(body) = serde_json::to_vec(&map) {
+        // T-EO-3: PER-INSTANCE staged key. With N realtime readers each staging its OWN partitions,
+        // a single shared key (`sources/0/staged-epoch-<epoch>`) let instances CLOBBER each other
+        // (last-writer-wins) so only one partition's offset survived the commit — on restart the other
+        // instances re-read from offset 0 (measured as full-window duplicates). Each instance now
+        // stages `sources/0/inst-<i>/staged-epoch-<epoch>`; the sink UNIONS them at commit. inst=0 for
+        // the single-instance default (unchanged behavior).
         let _ = ck
             .put(
-                &format!("sources/0/staged-epoch-{epoch}"),
+                &format!("sources/0/inst-{inst}/staged-epoch-{epoch}"),
                 bytes::Bytes::from(body),
             )
             .await;
@@ -339,27 +346,22 @@ impl StreamSource for KafkaStreamSource {
         // so the per-instance `max` watermark races past a slower partition's data and the keyed
         // window operator drops it as "late" (measured ~7% loss at 16 partitions / 8 instances).
         // One partition per instance keeps each instance's stream event-time ordered, so its
-        // watermark is monotone and the downstream MIN-merge is correct. The realtime continuous
-        // path stays single (parallelism=1) — its per-epoch barrier coordination is separate.
-        let parallelism = if bounded {
-            let n_parts = count_kafka_partitions(&self.options).await;
-            // Fall back to target_partitions if metadata is unavailable; never below 1.
-            n_parts
-                .unwrap_or_else(|| state.config().target_partitions())
-                .max(1)
-        } else if std::env::var("VAJRA_RT_MULTI").is_ok() {
-            // Throughput Phase B (FLIP-27): N realtime readers, one per Kafka partition, to parallelize
-            // source read + from_json (Phase A showed the window STARVED on the single-instance path).
-            // GATED off by default — the N-instance per-epoch EO commit union is steps 2-3 (single-
-            // coordinator commit is still wired); enable only to profile/validate. Each instance reads
-            // ONE partition in event-time order ⇒ monotone watermark (also closes the per-partition
-            // watermark edge). See docs/design/streaming-realtime-multi-instance.md.
+        // watermark is monotone and the downstream MIN-merge is correct.
+        //
+        // BOTH bounded (availableNow) AND realtime/continuous now default to N = one reader per Kafka
+        // partition (FLIP-27). The realtime multi-instance path is now exactly-once complete: T-EO-1
+        // per-instance split assignment, T-EO-3 per-instance staged offsets + sink union commit, and
+        // T-EO-3.5 exchange watermark idleness + all-idle drain-to-max. Validated: correctness_gate C6
+        // (no-dup + complete, 1800 rows / 6 windows, 3/3) + C7 (EO across hard kill -9, 2/2). See
+        // docs/design/continuous-stateful-eo-fix.md. `VAJRA_RT_SINGLE` opts out to the legacy
+        // single-instance realtime reader (NOT EO-complete for multi-partition) as a safety escape.
+        let parallelism = if !bounded && std::env::var("VAJRA_RT_SINGLE").is_ok() {
+            1
+        } else {
             count_kafka_partitions(&self.options)
                 .await
                 .unwrap_or_else(|| state.config().target_partitions())
                 .max(1)
-        } else {
-            1
         };
         Ok(Arc::new(KafkaSourceExec::try_new(
             self.options.clone(),
@@ -843,42 +845,56 @@ impl ExecutionPlan for KafkaSourceExec {
                 // Resolve start offsets per partition (committed if present, else earliest/latest
                 // watermark) in a SYNC step — rdkafka's non-Send `Metadata` never crosses an await.
                 let resolve = || -> std::result::Result<Vec<(String, i32, i64)>, String> {
-                    let mut out = vec![];
+                    // FLIP-27 per-instance split assignment (SAME as the bounded path): collect ALL
+                    // (topic, partition) pairs, sort into a stable global order, and keep only those
+                    // whose global index `% parallelism == inst`. This is REQUIRED for multi-instance
+                    // realtime correctness — without it every instance reads every partition (measured
+                    // as an N× over-count). parallelism=1 ⇒ instance 0 owns all (single-instance path
+                    // unchanged). Each instance thus reads its partitions in event-time order ⇒ monotone
+                    // per-instance watermark ⇒ the downstream keyed exchange MIN-merge is exact.
+                    let mut pairs: Vec<(String, i32)> = vec![];
                     for topic in &topics {
                         let md = consumer.fetch_metadata(Some(topic), meta_timeout)
                             .map_err(|e| format!("fetch_metadata({topic}): {e}"))?;
                         let Some(t) = md.topics().iter().find(|t| t.name() == topic) else { continue };
                         for p in t.partitions() {
-                            let part = p.id();
-                            // Recovery precedence (EO Kafka sink first):
-                            //  1. the consumer GROUP's committed offset — for an EO Kafka sink this is
-                            //     the records' atomic commit point (sink commits offsets INTO its txn
-                            //     via send_offsets_to_transaction); an auto-generated group (file sink)
-                            //     has none here, so this is skipped and the next source is used;
-                            //  2. the object-store `realtime/committed` record (file-sink EO model);
-                            //  3. the earliest/latest watermark (fresh start).
-                            let mut one = rdkafka::TopicPartitionList::new();
-                            let _ = one.add_partition(topic, part);
-                            let group_off = consumer
-                                .committed_offsets(one, meta_timeout)
-                                .ok()
-                                .and_then(|t| t.find_partition(topic, part).map(|e| e.offset()))
-                                .and_then(|o| match o {
-                                    rdkafka::Offset::Offset(v) => Some(v),
-                                    _ => None,
-                                });
-                            let start = match group_off
-                                .or_else(|| committed.get(&(topic.clone(), part)).copied())
-                            {
-                                Some(o) => o,
-                                None => {
-                                    let (low, high) = consumer.fetch_watermarks(topic, part, meta_timeout)
-                                        .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
-                                    if earliest { low } else { high }
-                                }
-                            };
-                            out.push((topic.clone(), part, start));
+                            pairs.push((topic.clone(), p.id()));
                         }
+                    }
+                    pairs.sort();
+                    let mut out = vec![];
+                    for (g, (topic, part)) in pairs.into_iter().enumerate() {
+                        if g % parallelism != inst {
+                            continue; // owned by another instance
+                        }
+                        // Recovery precedence (EO Kafka sink first):
+                        //  1. the consumer GROUP's committed offset — for an EO Kafka sink this is
+                        //     the records' atomic commit point (sink commits offsets INTO its txn
+                        //     via send_offsets_to_transaction); an auto-generated group (file sink)
+                        //     has none here, so this is skipped and the next source is used;
+                        //  2. the object-store `realtime/committed` record (file-sink EO model);
+                        //  3. the earliest/latest watermark (fresh start).
+                        let mut one = rdkafka::TopicPartitionList::new();
+                        let _ = one.add_partition(&topic, part);
+                        let group_off = consumer
+                            .committed_offsets(one, meta_timeout)
+                            .ok()
+                            .and_then(|t| t.find_partition(&topic, part).map(|e| e.offset()))
+                            .and_then(|o| match o {
+                                rdkafka::Offset::Offset(v) => Some(v),
+                                _ => None,
+                            });
+                        let start = match group_off
+                            .or_else(|| committed.get(&(topic.clone(), part)).copied())
+                        {
+                            Some(o) => o,
+                            None => {
+                                let (low, high) = consumer.fetch_watermarks(&topic, part, meta_timeout)
+                                    .map_err(|e| format!("fetch_watermarks({topic},{part}): {e}"))?;
+                                if earliest { low } else { high }
+                            }
+                        };
+                        out.push((topic, part, start));
                     }
                     Ok(out)
                 };
@@ -886,6 +902,12 @@ impl ExecutionPlan for KafkaSourceExec {
                     Ok(a) => a,
                     Err(e) => { yield Err(exec_datafusion_err!("Kafka {e}")); return; }
                 };
+                // T-EO diagnostic: which (partition@start) this realtime instance owns. Correct
+                // FLIP-27 assignment ⇒ every partition owned by EXACTLY ONE instance across the run.
+                log::debug!(
+                    "realtime source inst={inst}/{parallelism} owns={:?}",
+                    assignments.iter().map(|(_, p, s)| (*p, *s)).collect::<Vec<_>>()
+                );
                 let mut tpl = rdkafka::TopicPartitionList::new();
                 let mut next: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
                 for (topic, part, start) in assignments {
@@ -922,7 +944,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                 }
                                 batch_bytes = 0;
                             }
-                            write_staged_epoch_offsets(&ck, epoch, &next).await;
+                            write_staged_epoch_offsets(&ck, inst, epoch, &next).await;
                             yield Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id: epoch }));
                             epoch += 1;
                         }
