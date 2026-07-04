@@ -684,6 +684,13 @@ impl ExecutionPlan for WindowAccumExec {
         // instances' state (Flink key-groups; REFERENCES §2b). Off by default → same-parallelism
         // restore is unchanged (no regression). Requires VAJRA_INC_CKPT staging format.
         let rescale_enabled = std::env::var("VAJRA_RESCALE").is_ok();
+        // Bounded-COMPLETE flush (gated VAJRA_COMPLETE_ON_END, default OFF = Spark availableNow parity):
+        // when the source is bounded/terminal (a batch-over-stream aggregation, like Flink
+        // `scan.bounded.mode`), flush ALL open windows at end-of-input (MAX watermark) — including the
+        // final boundary window whose end > max-event-time — even with a checkpoint. Default OFF keeps
+        // Spark availableNow semantics (incomplete windows carry over to the next run). Opt-in gives
+        // Flink-parity completeness for bounded ETL. (docs/design/three-tier-sdlc.md Gap 1.)
+        let complete_on_end = std::env::var("VAJRA_COMPLETE_ON_END").is_ok();
         if prof::enabled() {
             prof::mark_start();
         }
@@ -1039,6 +1046,35 @@ impl ExecutionPlan for WindowAccumExec {
                                 state_budget_bytes
                             );
                             if let Some(ck) = &ck {
+                                if complete_on_end {
+                                    // Bounded-COMPLETE (Flink scan.bounded.mode parity): the source is
+                                    // terminal, so FLUSH every open window (emit_wm = MAX) — including the
+                                    // final boundary window — while still SNAPSHOTTING state first so a
+                                    // resumed run is consistent. This is the opt-in Flink-completeness mode.
+                                    let mut meta = vec![acc.watermark_micros.unwrap_or(i64::MIN)];
+                                    meta.extend(acc.emitted_ends.iter().copied());
+                                    let full = gather_partials(
+                                        &acc.pending_rows, &acc.spilled, Some(ck), &state_op_id,
+                                    )
+                                    .await;
+                                    crate::streaming::state_io::stage_state(
+                                        ck, &state_op_id, &partial_schema, &full, &meta,
+                                    )
+                                    .await;
+                                    match begin_finalize(
+                                        &acc, &final_group_by, &aggr_exprs, &partial_schema,
+                                        Some(ck), &state_op_id, ctx.clone(), state_budget_bytes,
+                                    ) {
+                                        Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
+                                        Ok(stream) => {
+                                            acc.active_merge = Some(stream);
+                                            acc.merge_emit_wm = Some(i64::MAX);
+                                            acc.merge_newly_emitted.clear();
+                                            acc.after_merge_marker =
+                                                Some(FlowEvent::Marker(FlowMarker::EndOfData));
+                                        }
+                                    }
+                                } else {
                                 // Checkpointed run (availableNow/once): SNAPSHOT the open-window
                                 // partial state (write-ahead) so windows spanning runs complete
                                 // correctly — the runner commits it after the output is durable.
@@ -1060,6 +1096,7 @@ impl ExecutionPlan for WindowAccumExec {
                                 )
                                 .await;
                                 buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
+                                }
                             } else {
                                 // No checkpoint: flush ALL remaining windows (terminal), resumably —
                                 // emit_wm = i64::MAX closes every window. The EndOfData marker is

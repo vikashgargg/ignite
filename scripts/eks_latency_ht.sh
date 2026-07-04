@@ -78,16 +78,26 @@ kk delete deploy vajra-stream --ignore-not-found >/dev/null 2>&1
 
 echo "==== [3] FLINK 1.19 streaming passthrough (mini-batch OFF) ===="
 kk apply -f k8s/stream/flink-session.yaml
-wait_ready flink-jm; wait_ready flink-tm
+# JM initContainer curls the Kafka connector jar (can be slow); wait generously + REST health-check.
+kk wait --for=condition=available --timeout=600s deployment/flink-jm || echo "WARN flink-jm slow"
+kk wait --for=condition=available --timeout=600s deployment/flink-tm || echo "WARN flink-tm slow"
+JM=$(kk get pod -l app=flink,component=jm -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+for i in $(seq 1 40); do kk exec "$JM" -- sh -c 'curl -sf localhost:8081/overview >/dev/null' 2>/dev/null && { echo "flink JM REST up"; break; }; sleep 5; done
 kk create configmap flink-sql-lat --from-file=flink-sql.sql=k8s/stream/flink-sql-latency.sql --dry-run=client -o yaml | kk apply -f -
-# Detached submit (unbounded passthrough): run sql-client in a bg pod, then measure, then cancel.
+# Detached submit (unbounded passthrough has no dml-sync -> sql-client returns after submit). Keep the pod
+# alive so the job stays running while we measure; then cancel it.
 kk delete job flink-lat --ignore-not-found >/dev/null 2>&1
 sed -e 's/name: flink-runner/name: flink-lat/' -e 's/name: flink-sql }/name: flink-sql-lat }/' \
-    -e 's#/opt/flink/bin/sql-client.sh -f /sql/flink-sql.sql#sed -i "s/table.dml-sync. = .true./table.dml-sync = false/" /sql/flink-sql.sql 2>/dev/null; /opt/flink/bin/sql-client.sh -f /sql/flink-sql.sql; sleep 999999#' \
+    -e 's#/opt/flink/bin/sql-client.sh -f /sql/flink-sql.sql#/opt/flink/bin/sql-client.sh -f /sql/flink-sql.sql 2>\&1 | tee /tmp/sqlout; sleep 999999#' \
     k8s/stream/flink-runner-job.yaml | kk apply -f -
-# wait for the Flink job to be RUNNING on the TM
-for i in $(seq 1 40); do kk logs job/flink-lat 2>/dev/null | grep -qiE "job has been submitted|Job ID" && break; sleep 5; done
-sleep 15
+# Verify the job actually reached RUNNING on the cluster (via JM REST) before measuring — else n=0.
+SUBMITTED=0
+for i in $(seq 1 60); do
+  if kk exec "$JM" -- sh -c 'curl -sf localhost:8081/jobs/overview' 2>/dev/null | grep -q '"state":"RUNNING"'; then SUBMITTED=1; echo "flink job RUNNING"; break; fi
+  sleep 5
+done
+[ "$SUBMITTED" = "1" ] || echo "WARN: flink latency job never reached RUNNING (measurement will be n=0)"
+sleep 10
 FLINK_LAT=$(loadgen_consume FLINK)
 FTM=$(kk get pod -l app=flink,component=tm -o jsonpath='{.items[0].metadata.name}')
 FMEM=$(kk exec "$FTM" -- sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null' 2>/dev/null)

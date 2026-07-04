@@ -23,7 +23,7 @@ echo "==== [1] Kafka + produce $N (16 partitions) ===="
 kk apply -f k8s/stream/kafka.yaml >/dev/null 2>&1 || kubectl apply -f k8s/stream/kafka.yaml
 wait_ready kafka
 kk delete job producer --ignore-not-found >/dev/null 2>&1
-sed "s|N_EVENTS\", value: \"[0-9]*\"|N_EVENTS\", value: \"$N\"|" k8s/stream/producer-job.yaml | kk apply -f -
+sed "s|N_EVENTS, value: \"[0-9]*\"|N_EVENTS, value: \"$N\"|" k8s/stream/producer-job.yaml | kk apply -f -
 kk wait --for=condition=complete --timeout=1800s job/producer; kk logs job/producer | grep PRODUCED
 
 echo "==== [2] Vajra ($TAG) + client ===="
