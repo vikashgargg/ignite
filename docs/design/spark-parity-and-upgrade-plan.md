@@ -29,6 +29,36 @@ combination, which de-risks our upgrade. Plan:
   dup=0 + TPC-H/TPC-DS scorecard unchanged. Then T2 kind + one T3 EKS smoke. **No behavior change** is the bar.
 - **Sequencing:** Arrow patch first (own PR) → DataFusion major (own PR) → then adopt features (below).
 
+## 2b. What DataFusion 54.0.0 buys us — batch (Spark) + streaming (from the official 54.0.0 blog)
+
+**Two different Arrows:** `arrow-rs` (Rust, v58.x — what our build compiles; bumped to 58.3.0) vs
+`apache/arrow` (C++, **v25.0.0** = milestone 74, Q3 2026 — matters only for **pyarrow interop** via
+`arrow-pyarrow`, NOT the Rust engine). So the engine upgrade = arrow-rs 58.3 + DataFusion 54.
+
+**Batch / Spark wins (free on upgrade):**
+- **Sort-merge join**: per-row bitset for semi/anti/mark joins + batched deferred filtering = **20–50× faster**
+  near-unique LEFT/FULL joins; `DynComparator` = **~5% faster TPC-H** overall. (Directly lifts TPC-H/TPC-DS.)
+- **`RepartitionExec` coalesces batches before distributing = up to 50% faster** on repartition-heavy
+  workloads. (Our shuffle/exchange path — TPC-H/TPC-DS shuffles.)
+- **Parquet scan morsel-driven parallelism = up to ~2× on skewed scans (ClickBench).** (We match LakeSail on
+  ClickBench today — this could pull ahead.)
+- Hashing `ahash → foldhash` (faster group-by/join keys); `first_value`/`last_value` GroupsAccumulator
+  speedups; redundant sort-key pruning; statistics-driven file/row-group ordering; struct-field pushdown into
+  the Parquet decoder; NestedLoopJoin **spilling** (memory robustness).
+- New Spark-parity SQL: **LATERAL joins**, **lambda functions** (`x -> expr`) + higher-order array UDFs
+  (`array_transform`/`array_filter`/`array_any_match`) — overlaps LakeSail v0.6.5 (§3), reduces our reimpl.
+
+**Streaming optimization opportunities (the throughput lever vs Flink):**
+- **`RepartitionExec` batch-coalescing** is the same idea our `StreamExchangeExec` needs — the streaming
+  exchange emits tiny per-flush batches (the realtime throughput cost). Port the coalesce-before-distribute
+  pattern into the streaming exchange → fewer, bigger batches downstream = higher throughput at the same
+  latency bound. **Candidate fix for the realtime throughput gap.**
+- **`foldhash`** speeds the keyed-exchange + windowed-agg group-by hashing (our hot path at 5.5M ev/s).
+- **GroupsAccumulator `first_value`/`last_value`** speedups apply to `WindowAccumExec`'s aggregation.
+- **Parquet content-defined chunking (CDC)** — page boundaries aligned to data → better dedup/incremental
+  storage: directly useful for the **streaming Parquet/S3 sink + inc-ckpt** (O(delta) chunks).
+- Extension-type registry + vector ops (`cosine_distance`/`inner_product`) → AI-native lakehouse (charter).
+
 ## 3. LakeSail v0.6.5 features to adopt (mapped to Spark parity)
 
 Each is a Spark-compat win; cherry-pick from LakeSail v0.6.5 (same fork lineage) or reimplement to our bar.
