@@ -28,6 +28,16 @@ combination, which de-risks our upgrade. Plan:
 - **Gate:** `cargo clippy --all-targets -D warnings` + `correctness_gate` GREEN 6/6 + `inc_ckpt_gate` crash
   dup=0 + TPC-H/TPC-DS scorecard unchanged. Then T2 kind + one T3 EKS smoke. **No behavior change** is the bar.
 - **Sequencing:** Arrow patch first (own PR) → DataFusion major (own PR) → then adopt features (below).
+- **Migration surface (scoped 2026-07-05, branch `upgrade/datafusion54-arrow583`):** Arrow 58.3 DONE (green).
+  DataFusion 54 bump surfaced the FIRST break on resolve: **`datafusion-common` 54.0.0 dropped the `avro`
+  feature** (Avro moved to the `arrow-avro` crate — 54.0.0 blog). Fix: drop `avro` from the
+  `datafusion-common` pin (Cargo.toml ~L171) + wire Avro via `arrow-avro` where used. Then rebuild to surface
+  the next breaks (expected: `ExecutionPlan`/`AggregateExec`/window-exec trait sigs used by
+  `window_accum`/`exchange`/kafka `sink`, and `datafusion-proto`/`codec.rs` helpers). **Systematic approach:
+  `git diff` LakeSail v0.6.4→v0.6.5** (they already migrated 53→54) to get the exact call-site changes rather
+  than discovering each on rebuild. Gate: clippy -D warnings + correctness_gate 6/6 + inc_ckpt crash dup=0 +
+  TPC-H/TPC-DS scorecard unchanged (NO behavior change), then T2 kind + one T3 EKS smoke. Best as a focused
+  dedicated cycle (multi-point migration; do NOT interleave with unrelated work).
 
 ## 2b. What DataFusion 54.0.0 buys us — batch (Spark) + streaming (from the official 54.0.0 blog)
 
