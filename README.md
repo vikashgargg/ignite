@@ -128,20 +128,24 @@ identical 10 s tumbling keyed-COUNT over a shared Kafka topic (2026-07-01,
 [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAMING_VS_FLINK_EKS.md),
 [docs/design/tri-engine-benchmark-matrix.md](docs/design/tri-engine-benchmark-matrix.md)):
 
+Latest fair EKS run (2026-07-04, 100M events, BOTH engines measured like-for-like):
+
 | Dimension | Flink 1.19 | Vajra | Verdict |
 |---|--:|--:|---|
-| **Throughput** | 5.78M ev/s | 5.28M ev/s | 🟡 **~1.10× slower** (competitive; after T1–T7a) |
-| **Memory** (peak RSS) | 8.55 GiB | ~7.1 GiB | 🟢 **~1.2× less** (streaming; **path-dependent** — batch ~8× less) |
-| **Exactly-once** (hard-kill chaos) | mature | EO ✓ incl. **real S3 sink** (dup=0, bit-identical) | 🟢 correct / 🟡 less hardened |
-| **Latency** | ms (Kafka) | competitive, **tail better** (no GC) | 🟢 tail / 🟡 median |
+| **Throughput** (windowed-agg) | 5.66M ev/s | 5.51M ev/s | 🟡 **~tied** (Flink ~1.5% faster) |
+| **Memory** (peak RSS) | 8.58 GiB | 7.06 GiB | 🟢 **~18% less** (no-JVM Arrow; batch ~8× less) |
+| **Windowed-agg completeness** | 10 windows / 100M | 10 windows / 100M (`VAJRA_COMPLETE_ON_END`) | 🟢 **parity** (Flink `scan.bounded.mode`) |
+| **Crash exactly-once** (16-part continuous, `kill -9`) | mature | **dup=0, sum exact, clean==crash** (EKS-confirmed) | 🟢 correct |
+| **Kafka→Kafka passthrough** | parallel | **100M/100M @ 1.67M msg/s** (parallel sink) | 🟢 fixed (was a 1/16-partition data-loss bug) |
+| **Latency** (ms, realtime) | p50 ~98 ms | tail better (no GC); clean re-measure pending | 🟡 to re-measure |
 
-**Honest summary:** on streaming, Vajra is **competitive, not categorically-better** —
-throughput ~1.1× *slower* than Flink today, memory *modestly* better and **path-dependent**,
-and it **holds exactly-once across a hard crash including a real S3 object-store sink**. (An
-earlier, lighter EKS run at ~1.5M ev/s reported Vajra *faster* + 6.4× less memory; the rigorous
-~5.3M-ev/s tri-engine run **supersedes** it — we claim only the measured head-to-head and flag
-path-dependence.) The head-to-heads surfaced + fixed real bugs (Arrow i32 offset overflow; a
-single-threaded Kafka source now parallelized per Spark `KafkaSourceRDD` / Flink FLIP-27).
+**Honest summary:** Vajra is **competitive, not categorically-better** on streaming — throughput **~tied**,
+**memory wins**, **exactly-once holds across a hard crash** (16-partition continuous, verified via
+`_spark_metadata`), **completeness matches Flink**, and the Kafka sink now writes **every partition** at
+~1.67M msg/s (a fixed 15/16 data-loss bug). Latency vs Flink is being re-measured cleanly (the earlier
+passthrough number was skewed by that sink bug). The head-to-heads surfaced + fixed real bugs the disciplined
+way — see the [3-tier SDLC](docs/design/three-tier-sdlc.md) (T1 local → T2 `kind` → T3 EKS) and the
+[Spark-parity + upgrade plan](docs/design/spark-parity-and-upgrade-plan.md).
 
 - **Exactly-once** (Spark `MicroBatchExecution` / object-store checkpoint model): stateless
   **and** stateful, verified under clean restart **and hard crash (SIGKILL)** — including a

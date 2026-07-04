@@ -1,0 +1,83 @@
+# Vajra — Spark-parity gap list + DataFusion/Arrow upgrade plan (STANDING, updated 2026-07-04)
+
+The maintained list of what remains to make Vajra a **true drop-in Spark replacement** ([charter](../../MEMORY.md)),
+plus the safe path to adopt the latest DataFusion/Arrow via LakeSail v0.6.5 as a proven reference. Work this
+architect-first, T1→T2→T3 ([three-tier-sdlc.md](three-tier-sdlc.md)); update this doc as items land.
+
+## 1. Current state (2026-07-04)
+
+- **Versions:** DataFusion **53.1.0**, Arrow **58.1.0** (`Cargo.toml`). (Note: Arrow-rs is at 58.x — "Arrow
+  25" was a version mix-up; the real target is 58.3.0.)
+- **Streaming (just landed, merged to main cfae68f1):** crash-EO exactly-once (aligned barriers + exact
+  PartitionEOF idle + emit floor) EKS-confirmed; final-window completeness (opt-in `VAJRA_COMPLETE_ON_END`,
+  Flink scan.bounded.mode parity); **parallel Kafka sink** (fixed a 15/16 data-loss bug + ~300× throughput,
+  100M/100M @ 1.67M msg/s on EKS). All T1→T2→T3 validated. 3-tier SDLC + kind tier established.
+- **SQL compat:** 105/105 scorecard; TPC-H SF-1 ~36× vs Spark; TPC-DS 97/99. Batch-on-S3 6.2× vs Spark.
+
+## 2. DataFusion 53.1 → 54.0 + Arrow 58.1 → 58.3 upgrade (reference: LakeSail v0.6.5)
+
+LakeSail (our upstream fork base) shipped v0.6.5 on **DataFusion 54.0.0 + Arrow 58.3.0** — a PROVEN, stable
+combination, which de-risks our upgrade. Plan:
+- **Arrow 58.1 → 58.3** — trivial (same major, patch bump). Bump the `arrow*` + `serde_arrow`/`arrow-58`
+  pins in `Cargo.toml`; expect ~zero API breakage. Do FIRST (isolate any Arrow-only fallout).
+- **DataFusion 53.1 → 54.0** — one major. Bump all `datafusion*` pins to 54.0.0. Expect API churn
+  (physical-plan/expr trait signatures, `AggregateExec`/`WindowAgg` APIs the streaming execs use, proto/codec
+  helpers). Diff LakeSail v0.6.4→v0.6.5 for the exact call-site migrations (they already did it). Our
+  streaming operators (`window_accum`, `exchange`, `barrier_align`, kafka `reader`/`sink`, `codec.rs`) are the
+  highest-risk surfaces — they subclass DataFusion `ExecutionPlan`/`AggregateExec`.
+- **Gate:** `cargo clippy --all-targets -D warnings` + `correctness_gate` GREEN 6/6 + `inc_ckpt_gate` crash
+  dup=0 + TPC-H/TPC-DS scorecard unchanged. Then T2 kind + one T3 EKS smoke. **No behavior change** is the bar.
+- **Sequencing:** Arrow patch first (own PR) → DataFusion major (own PR) → then adopt features (below).
+
+## 3. LakeSail v0.6.5 features to adopt (mapped to Spark parity)
+
+Each is a Spark-compat win; cherry-pick from LakeSail v0.6.5 (same fork lineage) or reimplement to our bar.
+- **SQL:** `PIVOT` operator (rewrite → aggregate with per-value FILTER); **named window clauses**; lambda
+  expressions `filter`/`transform`/`exists`/`forall`/`array_sort` + **lambda aggregates** (big Spark
+  higher-order-function gap); `window_time` + more window fns.
+- **Functions:** `to_xml`, enhanced `schema_of_json`, unified `to_timestamp`/`try_to_timestamp` (ANSI),
+  `try_to_time`/`to_time` (SparkTime), `percentile_disc` (ANSI), `timestampadd`.
+- **Catalog/lakehouse:** **catalog-managed Delta Lake + Iceberg tables** + catalog execution context (moves us
+  toward a real unified catalog — charter "unified storage abstraction"); Windows local paths for Iceberg.
+- **Writes:** additional file-sink modes; **Parquet content-defined chunking** (dedup-friendly writes).
+- **Semantics:** `EXPLAIN EXTENDED`/`COST` aligned to Spark; `get_json_object` bracket paths;
+  `array_position`/`array_sort` fixes.
+
+## 4. "True Spark replacement" gap list (the maintained todo)
+
+**Streaming (Flink-class):**
+- [x] crash-EO exactly-once at scale (EKS-confirmed)
+- [x] final-window completeness (bounded-complete flush)
+- [x] parallel Kafka sink (throughput + no data loss)
+- [ ] **EO + parallel Kafka sink**: per-task transactional offset commit (each sink task commits its
+      partition's offsets) — the at-least-once path is done; the EXACTLY-once transactional path with N
+      parallel producers needs per-partition offset handling.
+- [ ] realtime **latency** vs Flink measured clean (the earlier passthrough number was skewed by the 1/16
+      sink bug — now fixed; re-measure p50/p99/p999 vs Flink on EKS)
+- [ ] stateful **stream-stream joins**; multiple explicit output modes (complete/update) hardened; CEP
+- [ ] 24 h **soak** (Kafka→Delta) without OOM/restart; chaos/endurance
+
+**Batch / SQL parity:**
+- [ ] LakeSail v0.6.5 SQL features above (PIVOT, lambdas, named windows, functions)
+- [ ] TPC-DS Q5/Q9 compat gaps (97/99 → 99/99)
+- [ ] Official Apache Spark test suite ≥ 95% sustained on all 3 deploy modes
+
+**Lakehouse / catalog:**
+- [ ] catalog-managed Delta + Iceberg (from v0.6.5); streaming Iceberg sink; batch Iceberg vs Spark
+
+**Ops / scale (production-first):**
+- [ ] TPC-H SF-100 distributed < 60s (10-node K8s)
+- [ ] autoscaling / elasticity; rescale-from-checkpoint on EKS (mechanism done locally)
+- [ ] observability (metrics/traces) + Grafana; zero-downtime upgrade; multi-region
+- [ ] `pip install vajra-pyspark` one-liner works unchanged
+
+**Platform upgrade:**
+- [ ] DataFusion 54.0 + Arrow 58.3 (§2)
+
+## 5. Sequencing (architect-first, per the charter)
+1. **Arrow 58.3** (safe, isolate) → **DataFusion 54.0** (major; diff LakeSail v0.6.4→v0.6.5) — gate: no
+   behavior change, all gates green.
+2. **Adopt v0.6.5 SQL features** (PIVOT, lambdas, named windows, functions) — each with a scorecard test.
+3. **EO parallel-sink offset commit** + **clean realtime-latency-vs-Flink** re-measure.
+4. **Catalog-managed Delta/Iceberg** + streaming Iceberg sink.
+5. **Soak/chaos** + **SF-100 distributed** + observability.

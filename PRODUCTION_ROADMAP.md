@@ -1,8 +1,16 @@
 # Vajra — Production Spark Replacement Roadmap
 
-> Last updated: 2026-05-27
-> Branch: `phase3/true-parity`
-> Goal: **True drop-in Apache Spark replacement** — 100% SQL compat, Spark 4.x feature parity, production-grade operations on Apple Container and Kubernetes (local, local-cluster, kubernetes-cluster modes).
+> Last updated: 2026-07-04
+> Goal: **True drop-in Apache Spark replacement** (+ Flink-class streaming).
+>
+> **➡️ THE maintained gap list + the DataFusion 54 / Arrow 58.3 upgrade plan + LakeSail v0.6.5 feature
+> adoption now live in [docs/design/spark-parity-and-upgrade-plan.md](docs/design/spark-parity-and-upgrade-plan.md)** — read that first; this file is the older sprint-level roadmap.
+>
+> **Current state (2026-07-04):** streaming milestone landed on `main` — crash-EO exactly-once (EKS-confirmed),
+> final-window completeness (`VAJRA_COMPLETE_ON_END`, Flink `scan.bounded.mode` parity), and a **parallel Kafka
+> sink** (fixed a 15/16 data-loss bug + ~300× throughput; 100M/100M @ 1.67M msg/s on EKS). The **3-tier SDLC**
+> (T1 local → T2 `kind` → T3 EKS) + [kind tier](k8s/kind/) are established. Versions: DataFusion 53.1.0,
+> Arrow 58.1.0 (upgrade to DF 54.0 / Arrow 58.3 planned, ref LakeSail v0.6.5).
 
 ---
 
