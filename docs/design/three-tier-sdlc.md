@@ -34,7 +34,16 @@ that only moves a metric without satisfying the invariant is rejected.
 1. **Final-window completeness** — Vajra emits 9 windows / 90M where Flink emits 10 / 100M: Vajra does not
    flush the last boundary window at end-of-input. Design from Flink's `MAX_WATERMARK` on end-of-input +
    Spark's `availableNow` final trigger. T1: assert `n_windows` and `sum == N`. T2: same on kind.
-2. **Realtime Kafka→Kafka passthrough throughput/latency** — Vajra ~1.3K/s p50=257ms vs Flink 20K/s p50=98ms;
-   `vajra-stream` RSS 60 MB ⇒ the passthrough barely ran (likely an un-batched Kafka producer sink or the
-   continuous-trigger flush). Design from Flink's `KafkaSink` batching (`linger.ms`, `batch.size`) + the
-   librdkafka producer. T1: measure sink throughput locally. T2: passthrough on kind (both topics in-cluster).
+2. **Realtime Kafka→Kafka passthrough throughput** — Vajra ~1.3K/s p50=257ms vs Flink 20K/s p50=98ms (EKS,
+   clean); reproduced on T1 local (~1.4K/s). **MEASURED (2026-07-04, isolated backlog-drain, `scripts/
+   kafka_sink_gate.sh`): the Kafka SINK is NOT the bottleneck** — an availableNow Kafka passthrough drains at
+   **~122K/s** (single ThreadedProducer, librdkafka-batched). Windowed-agg reads Kafka at **5.5M/s**. So the
+   ~1K/s is specific to the **CONTINUOUS/realtime execution path** (per-epoch coordination + aligned barriers
+   + tiny 5ms-flush batches + single-task funnel), NOT the raw producer, and NOT fixed by "parallelize the
+   sink" (that was the wrong layer — RETRACTED before implementing). Flush-cadence tuning (5/100/500ms) did
+   NOT move it (disproved). ALSO found: the availableNow Kafka passthrough delivered only 125K of 2M
+   (INCOMPLETE) — a separate Kafka-sink-under-availableNow delivery gap. **This is a DEEP architectural
+   milestone (continuous realtime throughput), not a one-change fix.** Next: (a) build a CORRECT isolated
+   continuous-throughput harness (the latency harness co-locates loadgen+engine; the availableNow one loses
+   data); (b) per-stage profile the continuous path (VAJRA_WM_PROF); (c) design from Flink pipelined-exchange
+   + credit-based flow-control + Spark 4.1 RT-mode. Do NOT rush it into a mixed session.

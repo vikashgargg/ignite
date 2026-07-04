@@ -65,6 +65,10 @@ pub struct KafkaSinkExec {
     /// Checkpoint location — EO reads the source's per-epoch staged offsets
     /// (`sources/0/staged-epoch-<epoch>`) to put into the transaction.
     checkpoint_location: Option<String>,
+    /// This sink task's index (0 for a single sink; `i` for the i-th of N parallel tasks). Used for a
+    /// per-task `transactional.id` (`vajra-sink-<topic>-<idx>`) so parallel EO producers each fence their
+    /// own orphaned transactions independently (Flink KafkaSink per-subtask transactional.id).
+    sink_partition: usize,
     properties: Arc<PlanProperties>,
 }
 
@@ -80,6 +84,7 @@ impl KafkaSinkExec {
         exactly_once: bool,
         group_id: Option<String>,
         checkpoint_location: Option<String>,
+        sink_partition: usize,
     ) -> Result<Self> {
         if bootstrap_servers.is_empty() {
             return plan_err!("kafka sink requires kafka.bootstrap.servers");
@@ -108,8 +113,13 @@ impl KafkaSinkExec {
             exactly_once,
             group_id,
             checkpoint_location,
+            sink_partition,
             properties,
         })
+    }
+
+    pub fn sink_partition(&self) -> usize {
+        self.sink_partition
     }
 
     pub fn input(&self) -> &Arc<dyn ExecutionPlan> {
@@ -226,6 +236,7 @@ impl ExecutionPlan for KafkaSinkExec {
             self.exactly_once,
             self.group_id.clone(),
             self.checkpoint_location.clone(),
+            self.sink_partition,
         )?))
     }
 
@@ -246,6 +257,7 @@ impl ExecutionPlan for KafkaSinkExec {
         let exactly_once = self.exactly_once;
         let group_id = self.group_id.clone();
         let checkpoint_location = self.checkpoint_location.clone();
+        let sink_partition = self.sink_partition;
         let empty = Arc::new(Schema::empty());
         let empty_out = empty.clone();
 
@@ -261,7 +273,7 @@ impl ExecutionPlan for KafkaSinkExec {
                 // Transactional producer (Flink KafkaSink EXACTLY_ONCE). Stable transactional.id
                 // per sink task → on restart a new producer with the same id FENCES + aborts any
                 // orphaned in-flight txn, so read_committed consumers never see partial output.
-                cfg.set("transactional.id", format!("vajra-sink-{topic}-0"));
+                cfg.set("transactional.id", format!("vajra-sink-{topic}-{sink_partition}"));
                 cfg.set("enable.idempotence", "true");
                 cfg.set("transaction.timeout.ms", "120000");
             }

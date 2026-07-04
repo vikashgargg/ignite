@@ -135,16 +135,40 @@ impl TableFormat for KafkaTableFormat {
                 _ => {}
             }
         }
-        Ok(Arc::new(KafkaSinkExec::try_new(
-            input,
-            bootstrap_servers,
-            topic,
-            value_col,
-            key_col,
-            extra,
-            exactly_once,
-            group_id,
-            checkpoint_location,
-        )?))
+        // PARALLEL Kafka sink (Flink KafkaSink parity): a single KafkaSinkExec executes only input
+        // partition 0 (it declares UnknownPartitioning(1)), silently dropping the other N-1 partitions of
+        // a multi-partition (e.g. per-Kafka-partition N-reader) input — a correctness bug AND the throughput
+        // bottleneck. When the input has N>1 partitions, run N independent sink tasks — one per partition,
+        // each with its own producer + per-task transactional.id — wrapped in ParallelStreamSinkExec (the
+        // proven realtime-file-sink pattern). Every partition is written, and delivery scales N-way.
+        let n = input.properties().output_partitioning().partition_count();
+        let build_one = |inp: Arc<dyn ExecutionPlan>, idx: usize| -> Result<Arc<dyn ExecutionPlan>> {
+            Ok(Arc::new(KafkaSinkExec::try_new(
+                inp,
+                bootstrap_servers.clone(),
+                topic.clone(),
+                value_col.clone(),
+                key_col.clone(),
+                extra.clone(),
+                exactly_once,
+                group_id.clone(),
+                checkpoint_location.clone(),
+                idx,
+            )?))
+        };
+        if n > 1 {
+            let mut children: Vec<Arc<dyn ExecutionPlan>> = Vec::with_capacity(n);
+            for i in 0..n {
+                let part = Arc::new(crate::streaming_decode::PartitionSelectExec::new(
+                    Arc::clone(&input),
+                    i,
+                ));
+                children.push(build_one(part, i)?);
+            }
+            return Ok(Arc::new(crate::streaming_decode::ParallelStreamSinkExec::new(
+                children,
+            )));
+        }
+        build_one(input, 0)
     }
 }
