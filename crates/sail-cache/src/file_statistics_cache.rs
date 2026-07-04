@@ -1,16 +1,20 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use datafusion::common::TableReference;
 use datafusion::execution::cache::cache_manager::{
     CachedFileMetadata, FileStatisticsCache, FileStatisticsCacheEntry,
 };
-use datafusion::execution::cache::CacheAccessor;
+use datafusion::execution::cache::{CacheAccessor, TableScopedPath};
+use datafusion::common::Result;
 use log::debug;
 use moka::sync::Cache;
-use object_store::path::Path;
 
 pub struct MokaFileStatisticsCache {
-    statistics: Cache<Path, CachedFileMetadata>,
+    // DataFusion 54: the file-statistics cache is keyed by `TableScopedPath` (table + path) so entries can be
+    // dropped per table (`drop_table_entries`). Mirrors LakeSail v0.6.5's DF54 migration.
+    statistics: Cache<TableScopedPath, CachedFileMetadata>,
+    max_entries: Option<u64>,
 }
 
 impl MokaFileStatisticsCache {
@@ -34,25 +38,30 @@ impl MokaFileStatisticsCache {
 
         Self {
             statistics: builder.build(),
+            max_entries,
         }
     }
 }
 
-impl CacheAccessor<Path, CachedFileMetadata> for MokaFileStatisticsCache {
-    fn get(&self, k: &Path) -> Option<CachedFileMetadata> {
+impl CacheAccessor<TableScopedPath, CachedFileMetadata> for MokaFileStatisticsCache {
+    fn get(&self, k: &TableScopedPath) -> Option<CachedFileMetadata> {
         self.statistics.get(k)
     }
 
-    fn put(&self, key: &Path, value: CachedFileMetadata) -> Option<CachedFileMetadata> {
+    fn put(
+        &self,
+        key: &TableScopedPath,
+        value: CachedFileMetadata,
+    ) -> Option<CachedFileMetadata> {
         self.statistics.insert(key.clone(), value);
         None
     }
 
-    fn remove(&self, k: &Path) -> Option<CachedFileMetadata> {
+    fn remove(&self, k: &TableScopedPath) -> Option<CachedFileMetadata> {
         self.statistics.remove(k)
     }
 
-    fn contains_key(&self, k: &Path) -> bool {
+    fn contains_key(&self, k: &TableScopedPath) -> bool {
         self.statistics.contains_key(k)
     }
 
@@ -70,7 +79,32 @@ impl CacheAccessor<Path, CachedFileMetadata> for MokaFileStatisticsCache {
 }
 
 impl FileStatisticsCache for MokaFileStatisticsCache {
-    fn list_entries(&self) -> HashMap<Path, FileStatisticsCacheEntry> {
+    fn cache_limit(&self) -> usize {
+        self.max_entries
+            .map(|m| m as usize)
+            .unwrap_or(usize::MAX)
+    }
+
+    fn update_cache_limit(&self, _limit: usize) {
+        // moka's max_capacity is fixed at build time; a runtime resize would require rebuilding the cache
+        // (dropping entries). Left as a no-op (matches LakeSail v0.6.5's DF54 impl) — the cache still honors
+        // the limit set in `new()`.
+    }
+
+    fn drop_table_entries(&self, table_ref: &Option<TableReference>) -> Result<()> {
+        let to_drop: Vec<TableScopedPath> = self
+            .statistics
+            .iter()
+            .filter(|(k, _)| &k.table == table_ref)
+            .map(|(k, _)| k.as_ref().clone())
+            .collect();
+        for k in to_drop {
+            self.statistics.remove(&k);
+        }
+        Ok(())
+    }
+
+    fn list_entries(&self) -> HashMap<TableScopedPath, FileStatisticsCacheEntry> {
         self.statistics
             .iter()
             .map(|(path, cached)| {
@@ -114,8 +148,12 @@ mod tests {
             e_tag: None,
             version: None,
         };
+        let tsp = |p: &Path| TableScopedPath {
+            table: None,
+            path: p.clone(),
+        };
         let cache = MokaFileStatisticsCache::new(None, None);
-        assert!(cache.get(&meta.location).is_none());
+        assert!(cache.get(&tsp(&meta.location)).is_none());
 
         let stats = Arc::new(Statistics::new_unknown(&Schema::new(vec![Field::new(
             "test_column",
@@ -123,8 +161,8 @@ mod tests {
             false,
         )])));
         let cached = CachedFileMetadata::new(meta.clone(), Arc::clone(&stats), None);
-        cache.put(&meta.location, cached);
-        let cached = cache.get(&meta.location);
+        cache.put(&tsp(&meta.location), cached);
+        let cached = cache.get(&tsp(&meta.location));
         assert!(cached.is_some());
         assert!(cached.unwrap().is_valid_for(&meta));
 
@@ -132,13 +170,13 @@ mod tests {
         let mut meta2 = meta.clone();
         meta2.size = 2048;
         assert!(!cache
-            .get(&meta2.location)
+            .get(&tsp(&meta2.location))
             .map(|c| c.is_valid_for(&meta2))
             .unwrap_or(false));
 
         // different file
         let mut meta2 = meta;
         meta2.location = Path::from("test2");
-        assert!(cache.get(&meta2.location).is_none());
+        assert!(cache.get(&tsp(&meta2.location)).is_none());
     }
 }
