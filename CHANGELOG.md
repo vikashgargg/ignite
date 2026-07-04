@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Streaming crash-EO exactly-once at scale** (EKS-confirmed, 2026-07-04): Flink-ABS **aligned checkpoint
+  barriers** in the exchange + **exact source-signaled idleness** (librdkafka `PartitionEOF` = Flink
+  `WatermarkStatus.IDLE`) + a **crash-recovery emit floor**. 16-partition continuous `kill -9` → dup=0, sum
+  exact, clean==crash.
+- **Final-window completeness** — opt-in `VAJRA_COMPLETE_ON_END` (Flink `scan.bounded.mode` parity): flush all
+  windows at end-of-input while keeping Spark availableNow semantics by default (superset). EKS: 10 windows/100M.
+- **Parallel Kafka sink** (Flink `KafkaSink` parity): fixes a **15/16-partition data-loss bug** (a single sink
+  task read only input partition 0) + ~300× throughput. EKS: 100M/100M delivered @ 1.67M msg/s.
+- **3-tier SDLC + `kind` tier** (`docs/design/three-tier-sdlc.md`, `k8s/kind/`, `scripts/kind_*`): T1 local →
+  T2 kind (real k8s, free) → T3 EKS (confirm-only). Prod-representative self-checking gates
+  (`scripts/{correctness_gate,inc_ckpt_gate,completeness_gate,kafka_sink_gate,local_continuous_scale}`).
+- **Spark-parity gap list + DataFusion 54 / Arrow 58.3 upgrade plan** (`docs/design/spark-parity-and-upgrade-plan.md`) referencing LakeSail v0.6.5 (DF 54.0.0 + Arrow 58.3.0) as the proven upgrade reference.
 - Public GA prod-grade readiness board (`docs/design/public-ga-readiness-board.md`) — SDLC/Jira-style
   epics for distribution, supply-chain, container, Helm, observability, testing, and governance.
 - `NOTICE` (Apache-2.0 fork attribution to LakeSail/Sail + Arrow/DataFusion) and this `CHANGELOG.md`.

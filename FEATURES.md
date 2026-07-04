@@ -1,9 +1,11 @@
 # Vajra — Feature Roadmap for the Decade
 
-> Created: 2026-05-31
+> Created: 2026-05-31 · Updated: 2026-07-05
 > Purpose: Track every feature that makes Vajra the undisputed Spark replacement
-> for this decade — pulled from Spark 4.1, LakeSail v0.6.3, Databricks research,
-> and FAANG/NVIDIA engineering blogs.
+> for this decade — pulled from Spark 4.1, LakeSail v0.6.5 (DataFusion 54.0.0 + Arrow 58.3.0),
+> Databricks research, and FAANG/NVIDIA engineering blogs.
+> **The maintained gap list + LakeSail v0.6.5 feature-adoption + DF/Arrow upgrade plan now live in
+> [docs/design/spark-parity-and-upgrade-plan.md](docs/design/spark-parity-and-upgrade-plan.md).**
 >
 > Status legend: ✅ Done | 🔄 In progress | 📅 Planned | 💡 Research/Aspirational
 

@@ -1,5 +1,11 @@
 # Vajra Streaming — capability audit & "master of streaming" roadmap
 
+> **Update 2026-07-04 (on `main`):** crash-EO exactly-once (16-part continuous `kill -9`, EKS-confirmed dup=0
+> exact), final-window completeness (`VAJRA_COMPLETE_ON_END` = Flink `scan.bounded.mode` parity), and a
+> **parallel Kafka sink** (fixed a 15/16-partition data-loss bug + ~300× throughput) landed, validated
+> T1 local → T2 `kind` → T3 EKS. Open streaming items are tracked in
+> [docs/design/spark-parity-and-upgrade-plan.md](design/spark-parity-and-upgrade-plan.md) §4.
+
 Vajra's biggest differentiation vs LakeSail (which ships **no** Structured Streaming)
 is streaming. This is the honest map of what works today, what's partial, and what's
 needed to be a true Spark Structured Streaming replacement — with the code locations,

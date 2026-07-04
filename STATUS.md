@@ -1,7 +1,12 @@
 # Vajra — Build Status
 
-> Last updated: 2026-07-02
+> Last updated: 2026-07-05
 > Branch: `main`
+> **Latest (2026-07-04, streaming milestone on `main`):** crash-EO exactly-once (16-part continuous `kill -9`,
+> EKS-confirmed dup=0 exact), final-window completeness (`VAJRA_COMPLETE_ON_END` = Flink `scan.bounded.mode`
+> parity, 10 windows/100M), and a **parallel Kafka sink** (fixed a 15/16-partition data-loss bug + ~300×
+> throughput; 100M/100M @ 1.67M msg/s). All validated **T1 local → T2 kind → T3 EKS** ([3-tier SDLC](docs/design/three-tier-sdlc.md)). Next: DataFusion 54 / Arrow 58.3 upgrade + LakeSail v0.6.5 features — see
+> [docs/design/spark-parity-and-upgrade-plan.md](docs/design/spark-parity-and-upgrade-plan.md).
 > See [PRODUCTION_ROADMAP.md](PRODUCTION_ROADMAP.md) and [FEATURES.md](FEATURES.md) for the full plan.
 > **Road to a true Spark + Flink replacement** (measured state + grounded gap analysis +
 > prioritized roadmap): [docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md).
