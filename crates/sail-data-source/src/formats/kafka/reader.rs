@@ -831,6 +831,12 @@ impl ExecutionPlan for KafkaSourceExec {
                 cfg.set("bootstrap.servers", &options.bootstrap_servers);
                 cfg.set("group.id", &options.group_id);
                 cfg.set("enable.auto.commit", "false");
+                // Native EOF signal: librdkafka emits PartitionEOF exactly when the consumer reaches the
+                // partition high-watermark (genuinely caught up = no more data) — the CORRECT, exact
+                // source of Flink `WatermarkStatus.IDLE`. A slow-but-behind partition keeps delivering
+                // data (never EOF), so it is never mis-marked idle under load (the timeout heuristic's
+                // bug that closed windows early → over-emit). New data after EOF simply resumes delivery.
+                cfg.set("enable.partition.eof", "true");
                 apply_consumer_throughput_defaults(&mut cfg);
                 for (k, v) in &options.extra { cfg.set(k.as_str(), v.as_str()); }
                 // Stats context logs the librdkafka prefetch queue bytes (VAJRA_KAFKA_STATS) — direct
@@ -844,7 +850,9 @@ impl ExecutionPlan for KafkaSourceExec {
 
                 // Resolve start offsets per partition (committed if present, else earliest/latest
                 // watermark) in a SYNC step — rdkafka's non-Send `Metadata` never crosses an await.
-                let resolve = || -> std::result::Result<Vec<(String, i32, i64)>, String> {
+                // (per-(topic,partition) start offsets for this instance, total partition count).
+                type Resolved = (Vec<(String, i32, i64)>, usize);
+                let resolve = || -> std::result::Result<Resolved, String> {
                     // FLIP-27 per-instance split assignment (SAME as the bounded path): collect ALL
                     // (topic, partition) pairs, sort into a stable global order, and keep only those
                     // whose global index `% parallelism == inst`. This is REQUIRED for multi-instance
@@ -852,6 +860,8 @@ impl ExecutionPlan for KafkaSourceExec {
                     // as an N× over-count). parallelism=1 ⇒ instance 0 owns all (single-instance path
                     // unchanged). Each instance thus reads its partitions in event-time order ⇒ monotone
                     // per-instance watermark ⇒ the downstream keyed exchange MIN-merge is exact.
+                    // Also returns `pairs.len()` = the TOTAL partition count = the number of offsets a
+                    // GLOBALLY-COMPLETE checkpoint must cover (the sink gates its commit on this).
                     let mut pairs: Vec<(String, i32)> = vec![];
                     for topic in &topics {
                         let md = consumer.fetch_metadata(Some(topic), meta_timeout)
@@ -862,6 +872,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         }
                     }
                     pairs.sort();
+                    let total_partitions = pairs.len();
                     let mut out = vec![];
                     for (g, (topic, part)) in pairs.into_iter().enumerate() {
                         if g % parallelism != inst {
@@ -896,9 +907,9 @@ impl ExecutionPlan for KafkaSourceExec {
                         };
                         out.push((topic, part, start));
                     }
-                    Ok(out)
+                    Ok((out, total_partitions))
                 };
-                let assignments = match resolve() {
+                let (assignments, total_partitions) = match resolve() {
                     Ok(a) => a,
                     Err(e) => { yield Err(exec_datafusion_err!("Kafka {e}")); return; }
                 };
@@ -908,6 +919,17 @@ impl ExecutionPlan for KafkaSourceExec {
                     "realtime source inst={inst}/{parallelism} owns={:?}",
                     assignments.iter().map(|(_, p, s)| (*p, *s)).collect::<Vec<_>>()
                 );
+                // W3 (distributed-EO): publish the TOTAL partition count so the sink can gate its commit
+                // on GLOBAL COMPLETENESS — only advance `realtime/committed` when the offset set covers
+                // ALL `total_partitions` (a globally-consistent checkpoint), never a partial one that
+                // would drop a partition and re-read it on crash. Idempotent (every instance writes the
+                // same value); tiny.
+                let _ = ck
+                    .put(
+                        "sources/0/expected",
+                        bytes::Bytes::from(total_partitions.to_string()),
+                    )
+                    .await;
                 let mut tpl = rdkafka::TopicPartitionList::new();
                 let mut next: std::collections::HashMap<(String, i32), i64> = std::collections::HashMap::new();
                 for (topic, part, start) in assignments {
@@ -939,6 +961,17 @@ impl ExecutionPlan for KafkaSourceExec {
                 let flush_ms = LOW_LATENCY_FLUSH_MS.min(interval_ms.max(1)).max(1);
                 let mut flush_timer = tokio::time::interval(Duration::from_millis(flush_ms));
                 flush_timer.tick().await;
+                // Source-signaled idleness (Flink WatermarkStatus.IDLE): when a flush interval passes with
+                // NO data consumed (genuinely caught up to the partition head), emit ONE `Idle` marker so
+                // the downstream N→M merge excludes this partition from the watermark MIN. This replaces
+                // the exchange's wall-clock idle inference, which at scale wrongly marked a slow-but-active
+                // (unscheduled/backpressured) reader idle → premature window close → over-emit. Any new
+                // data clears the idle state (and re-activates the channel downstream).
+                // Source-signaled idleness (Flink WatermarkStatus.IDLE) driven by librdkafka PartitionEOF:
+                // emit `Idle` ONCE when a partition reaches its high-watermark (caught up = no more data),
+                // and re-activate on the next data. Exact — never mis-marks a slow-but-behind partition.
+                let idle_src = format!("kafka:{inst}");
+                let mut idle_signaled = false;
                 loop {
                     tokio::select! {
                         biased;
@@ -972,6 +1005,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         msg = msg_stream.next() => {
                             match msg {
                                 Some(Ok(m)) => {
+                                    idle_signaled = false; // data flowing again → active
                                     let (ts_ms, ts_type) = match m.timestamp() {
                                         Timestamp::NotAvailable => (-1i64, -1i32),
                                         Timestamp::CreateTime(ms) => (ms, 0i32),
@@ -998,6 +1032,24 @@ impl ExecutionPlan for KafkaSourceExec {
                                             Err(e) => { yield Err(e); return; }
                                         }
                                         batch_bytes = 0;
+                                    }
+                                }
+                                Some(Err(rdkafka::error::KafkaError::PartitionEOF(_))) => {
+                                    // Caught up to the partition high-watermark = genuinely idle. Flush any
+                                    // buffered rows first (never let the Idle marker overtake its data),
+                                    // then signal `Idle` ONCE so the downstream merge excludes this
+                                    // partition from the watermark MIN (Flink WatermarkStatus.IDLE).
+                                    if builders.len() > 0 {
+                                        let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
+                                        match b.finish_projected(&full_schema, &projection) {
+                                            Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                                            Err(e) => { yield Err(e); return; }
+                                        }
+                                        batch_bytes = 0;
+                                    }
+                                    if !idle_signaled {
+                                        idle_signaled = true;
+                                        yield Ok(FlowEvent::Marker(FlowMarker::Idle { source: idle_src.clone() }));
                                     }
                                 }
                                 Some(Err(e)) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }

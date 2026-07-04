@@ -8,6 +8,7 @@ message FlowMarker {
     Watermark watermark = 2;
     Checkpoint checkpoint = 3;
     EndOfData end_of_data = 4;
+    Idle idle = 5;
   }
 }
 
@@ -29,3 +30,12 @@ message Checkpoint {
 }
 
 message EndOfData {}
+
+// Emitted by a source instance when it is genuinely caught up (an empty poll: no data currently
+// available for its assigned partition), so downstream N->M merges can EXCLUDE it from the watermark
+// MIN (Flink WatermarkStatus.IDLE) without a wall-clock timeout — which at scale wrongly marks a
+// slow-but-active (backpressured/unscheduled) source idle and closes windows early. A source that
+// resumes delivering data/watermarks is implicitly active again.
+message Idle {
+  string source = 1;
+}

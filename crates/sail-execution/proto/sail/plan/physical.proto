@@ -648,6 +648,7 @@ message KafkaSinkExecNode {
   bool exactly_once = 7;
   optional string group_id = 8;
   optional string checkpoint_location = 9;
+  uint64 sink_partition = 10;
 }
 
 message SocketSourceExecNode {

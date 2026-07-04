@@ -457,6 +457,8 @@ async fn distribute(
 enum Mk {
     Data,
     Watermark(i64),
+    Checkpoint(u64),
+    Idle,
     EndOfData,
     Other,
 }
@@ -474,12 +476,24 @@ fn classify_mk(batch: &RecordBatch) -> Mk {
                 Ok(FlowMarker::Watermark { timestamp, .. }) => {
                     Mk::Watermark(timestamp.timestamp_micros())
                 }
+                Ok(FlowMarker::Checkpoint { id }) => Mk::Checkpoint(id),
+                Ok(FlowMarker::Idle { .. }) => Mk::Idle,
                 Ok(FlowMarker::EndOfData) => Mk::EndOfData,
                 _ => Mk::Other,
             };
         }
     }
     Mk::Data
+}
+
+/// Rebuild a `Checkpoint{id}` marker batch from a template (for emitting ONE aligned barrier
+/// downstream after every input reached epoch `id`).
+fn rewrite_checkpoint(template: &RecordBatch, id: u64) -> Result<RecordBatch> {
+    let idx = template.schema().index_of(MARKER_FIELD_NAME)?;
+    let bytes = FlowMarker::Checkpoint { id }.encode()?;
+    let mut cols = template.columns().to_vec();
+    cols[idx] = Arc::new(BinaryArray::from(vec![Some(bytes.as_slice())]));
+    Ok(RecordBatch::try_new(template.schema(), cols)?)
 }
 
 /// Rebuild a watermark marker batch from a template (reuses its non-null-column placeholders),
@@ -511,9 +525,21 @@ fn merge_output_subchannels(
         let mut receivers = subs;
         let mut wm: Vec<Option<i64>> = vec![None; n];
         let mut ended: Vec<bool> = vec![false; n];
-        // Per-channel last-activity time — a channel idle beyond `idle_timeout` is excluded from the
-        // watermark MIN (Flink withIdleness). Only consulted when `idle_timeout` is Some (realtime).
-        let mut last_active: Vec<std::time::Instant> = vec![std::time::Instant::now(); n];
+        // Flink ABS aligned checkpoint: per-channel highest `Checkpoint{e}` epoch seen. A barrier is
+        // BUFFERED (not forwarded) until EVERY non-ended input has reached it; then ONE aligned barrier
+        // is emitted downstream. This makes a window's state snapshot at epoch `e` reflect a consistent
+        // global cut (data ≤ every reader's `e` offset), so the recovery cut (offset + watermark +
+        // emitted_ends) is consistent and exactly-once holds. Forwarding one input's barrier (the old
+        // `Mk::Other` path) snapshotted an inconsistent cut → crash re-emitted committed windows.
+        let mut ckpt: Vec<Option<u64>> = vec![None; n];
+        let mut last_emitted_ckpt: Option<u64> = None;
+        let mut ckpt_template: Option<RecordBatch> = None;
+        // Source-signaled idleness (Flink WatermarkStatus.IDLE): a channel is idle iff its source last
+        // emitted an `Idle` marker (genuinely caught up), NOT a wall-clock gap — a slow-but-active
+        // (unscheduled/backpressured) source at scale must keep HOLDING the watermark MIN, or windows
+        // close early with partial data → over-emit. Set on `Idle`, cleared on any data/watermark/
+        // checkpoint from the channel. Only consulted when `idle_timeout` is Some (realtime).
+        let mut idle_marked: Vec<bool> = vec![false; n];
         let mut last_emitted: Option<i64> = None;
         let mut end_batch: Option<RecordBatch> = None;
         // A watermark batch kept as a template so an idle-tick MIN advance can emit even when no
@@ -552,12 +578,25 @@ fn merge_output_subchannels(
                     None => { ended[j] = true; recompute = true; } // channel closed = exhausted
                     Some(Err(e)) => { yield Err(e); return; }
                     Some(Ok(batch)) => {
-                        last_active[j] = std::time::Instant::now();
                         match classify_mk(&batch) {
-                            Mk::Data => yield Ok(batch),
+                            Mk::Data => { idle_marked[j] = false; yield Ok(batch); }
                             Mk::Watermark(ts) => {
+                                idle_marked[j] = false; // active again
                                 wm[j] = Some(wm[j].map_or(ts, |c| c.max(ts)));
                                 wm_template = Some(batch);
+                                recompute = true;
+                            }
+                            Mk::Checkpoint(e) => {
+                                idle_marked[j] = false;
+                                // Buffer this input's barrier; emit downstream only once aligned.
+                                ckpt[j] = Some(ckpt[j].map_or(e, |c| c.max(e)));
+                                ckpt_template = Some(batch);
+                                recompute = true;
+                            }
+                            Mk::Idle => {
+                                // Source is genuinely caught up — exclude from the watermark MIN
+                                // (consumed here, not forwarded downstream).
+                                idle_marked[j] = true;
                                 recompute = true;
                             }
                             Mk::EndOfData => {
@@ -579,7 +618,6 @@ fn merge_output_subchannels(
                 // continuous last-window edge). Among the remaining ACTIVE channels, if any has not yet
                 // reported a watermark, HOLD (None) — a slow-but-active channel must never be skipped
                 // (that would close a window early = the partial-count-split dup).
-                let now = std::time::Instant::now();
                 let merged = {
                     let mut min_active: Option<i64> = None;
                     let mut any_active_pending = false;
@@ -589,8 +627,8 @@ fn merge_output_subchannels(
                         if ended[k] {
                             continue;
                         }
-                        let idle = idle_timeout
-                            .is_some_and(|to| now.duration_since(last_active[k]) > to);
+                        // Source-signaled idle (Flink WatermarkStatus.IDLE), gated to realtime.
+                        let idle = idle_timeout.is_some() && idle_marked[k];
                         if idle {
                             // idle → excluded from the active MIN, but remember its wm for the
                             // all-idle drain case below.
@@ -610,11 +648,11 @@ fn merge_output_subchannels(
                         // slow-but-active channel must bound the watermark; excluded idle ones don't).
                         if any_active_pending { None } else { min_active }
                     } else {
-                        // ALL non-ended channels are IDLE (drained) — no active input holds the
-                        // watermark back, so advance to the MAX seen so the FINAL windows close (Flink
-                        // withIdleness "all sources idle" drain; late data on a re-activated channel is
-                        // append-mode-dropped, never re-emitted). This closes the continuous last-window
-                        // edge without the earlier stall-at-MIN (merged=None) that left W_n unclosed.
+                        // ALL non-ended channels are IDLE. Idle now means CAUGHT UP TO THE PARTITION
+                        // HIGH-WATERMARK (source-signaled `Idle` = consumed==high, all data drained) — NOT
+                        // a wall-clock gap — so advancing to the MAX seen safely closes the final windows
+                        // with COMPLETE data (no re-fire: nothing more will arrive). This is the Flink
+                        // withIdleness "all sources idle" drain done on the CORRECT idle definition.
                         max_idle
                     }
                 };
@@ -628,6 +666,41 @@ fn merge_output_subchannels(
                             }
                         }
                     }
+                }
+                // Aligned checkpoint (Flink ABS): the barrier safe to emit = MIN `Checkpoint` epoch over
+                // every non-ended input (a non-ended input that has not yet delivered any barrier HOLDS
+                // the alignment — it must never be skipped, or its data would land in the wrong epoch's
+                // snapshot). Emit one barrier per newly-aligned epoch, in order. Ended inputs are excluded
+                // (their stream is exhausted); an all-ended merge emits nothing (EndOfData path handles it).
+                let aligned = {
+                    let mut min_ck: Option<u64> = None;
+                    let mut hold = false;
+                    let mut any = false;
+                    for k in 0..n {
+                        if ended[k] {
+                            continue;
+                        }
+                        any = true;
+                        match ckpt[k] {
+                            Some(v) => min_ck = Some(min_ck.map_or(v, |c| c.min(v))),
+                            None => hold = true,
+                        }
+                    }
+                    if any && !hold { min_ck } else { None }
+                };
+                if let Some(a) = aligned {
+                    // First alignment: emit only `a` (epochs before the first-seen barrier — e.g. those
+                    // before a post-restart resume at committed+1 — were never triggered on this stream).
+                    let start = last_emitted_ckpt.map_or(a, |l| l + 1);
+                    for e in start..=a {
+                        if let Some(tmpl) = &ckpt_template {
+                            match rewrite_checkpoint(tmpl, e) {
+                                Ok(b) => yield Ok(b),
+                                Err(err) => { yield Err(err); return; }
+                            }
+                        }
+                    }
+                    last_emitted_ckpt = Some(a);
                 }
             }
         }

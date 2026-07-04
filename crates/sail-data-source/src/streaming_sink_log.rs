@@ -142,6 +142,70 @@ pub async fn clean_batch_dir(
     Ok(())
 }
 
+/// Recovery truncation (W4, distributed-EO): remove every epoch STRICTLY AFTER `last_committed` —
+/// its commit-log entry (`_spark_metadata/<id>[.compact]`) AND its data dir (`<base>/<id>/`). After a
+/// crash the sink may have made epoch `e` VISIBLE (`commit_batch` wrote `_spark_metadata/e`) while the
+/// atomic `realtime/committed` recovery line still points at `last_committed < e` (deferred/incomplete
+/// epochs under W3, or a crash between the visibility write and the offset write). Reprocessing then
+/// resumes from `last_committed`, re-closes those windows and re-commits them under a fresh epoch → the
+/// SAME (window,key) is committed twice = a real dup (Spark reads the sink via `_spark_metadata`, so it
+/// counts both). Truncating everything after the recovery line before reprocessing makes the visible set
+/// == the recovery line exactly: the re-done epochs land cleanly with no dup and no loss. This is Flink
+/// ABS "discard state after the last completed checkpoint" and Spark's deterministic batch overwrite.
+/// Idempotent; run once from the first sink task on startup.
+pub async fn truncate_after(
+    store: &Arc<dyn ObjectStore>,
+    base: &StorePath,
+    last_committed: u64,
+) -> object_store::Result<()> {
+    // 1. Un-commit: delete every commit-log file for an epoch > last_committed.
+    let dir = metadata_dir(base);
+    let mut listing = store.list(Some(&dir));
+    let mut meta_paths = vec![];
+    let mut data_epochs: Vec<u64> = vec![];
+    while let Some(meta) = listing.next().await.transpose()? {
+        let name = meta.location.filename().unwrap_or("");
+        let id_str = name.strip_suffix(".compact").unwrap_or(name);
+        if let Ok(id) = id_str.parse::<u64>() {
+            if id > last_committed {
+                meta_paths.push(meta.location);
+            }
+        }
+    }
+    for p in meta_paths {
+        store.delete(&p).await?;
+    }
+    // 2. Delete orphaned data dirs for epochs > last_committed (visible or deferred). Scan `<base>/`
+    //    top-level path segments; a data file lives at `<base>/<id>/part-*.parquet`.
+    let base_prefix = format!("{base}/");
+    let mut dlist = store.list(Some(base));
+    let mut data_paths = vec![];
+    while let Some(meta) = dlist.next().await.transpose()? {
+        let loc = meta.location.as_ref();
+        let Some(rest) = loc.strip_prefix(&base_prefix) else {
+            continue;
+        };
+        let seg = rest.split('/').next().unwrap_or("");
+        if let Ok(id) = seg.parse::<u64>() {
+            if id > last_committed {
+                data_paths.push(meta.location.clone());
+                data_epochs.push(id);
+            }
+        }
+    }
+    for p in data_paths {
+        store.delete(&p).await?;
+    }
+    if !data_epochs.is_empty() {
+        data_epochs.sort_unstable();
+        data_epochs.dedup();
+        log::info!(
+            "recovery truncation: dropped epochs > {last_committed} (data epochs {data_epochs:?})"
+        );
+    }
+    Ok(())
+}
+
 /// List the data files a batch wrote — the contents of `<base>/<batch_id>/`.
 pub async fn list_batch_files(
     store: &Arc<dyn ObjectStore>,

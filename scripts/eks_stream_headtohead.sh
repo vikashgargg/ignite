@@ -46,7 +46,7 @@ kk delete -f k8s/stream/flink-session.yaml --ignore-not-found
 kk delete job flink-runner --ignore-not-found
 
 echo "================ [4/6] Vajra ================"
-sed "s|__ECR__|$REG|g" k8s/stream/vajra-stream.yaml | kk apply -f -
+sed -e "s|__ECR__|$REG|g" -e "s|vajra:eo-multipart|vajra:${TAG:-realtime-fix}|g" k8s/stream/vajra-stream.yaml | kk apply -f -
 wait_ready vajra-stream
 kk apply -f k8s/stream/vajra-client.yaml
 kk wait --for=condition=ready --timeout=300s pod/vajra-client

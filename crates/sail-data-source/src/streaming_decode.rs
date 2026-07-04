@@ -714,29 +714,21 @@ impl ExecutionPlan for RealtimeFileSinkExec {
             ck: &Option<CheckpointStore>,
             epoch: u64,
         ) -> Result<()> {
-            // List all `<base>/<epoch>/part-*.parquet` and commit `_spark_metadata/<epoch>` so readers
-            // see the full epoch (all partitions' slices), then the atomic offset commit.
             let metas = crate::streaming_sink_log::list_batch_files(store, base, epoch)
                 .await
                 .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
-            crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
-                .await
-                .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
             if let Some(ck) = ck {
-                // T-EO-3: UNION every source instance's staged offsets for this epoch. Multi-instance
-                // realtime stages `sources/0/inst-<i>/staged-epoch-<epoch>` (one per FLIP-27 reader,
-                // disjoint partitions); the union is the complete committed offset set so EVERY
-                // partition resumes on restart (single-instance = just inst-0; the pre-T-EO-3 shared
-                // key `sources/0/staged-epoch-<epoch>` is still matched by the suffix for back-compat).
+                // W3 (distributed-EO GLOBAL COMPLETENESS): build the CUMULATIVE committed offset set
+                // (seed with the prior committed record, then max-merge every source instance's
+                // `sources/0/inst-<i>/staged-epoch-<epoch>` — monotone per partition, so this only ever
+                // grows and never loses a partition), THEN gate: only make this epoch VISIBLE
+                // (`_spark_metadata`) + commit the offsets (`realtime/committed`) when the set covers ALL
+                // `sources/0/expected` partitions = a globally-consistent checkpoint. An INCOMPLETE epoch
+                // (barrier skew across N readers → not every partition staged yet) is DEFERRED: neither
+                // committed nor made visible, so on crash the source resumes from the last COMPLETE epoch
+                // and the deferred epochs are re-done cleanly — never the pre-crash "9/16 partitions reset
+                // to 0 → re-read → cross-epoch re-emit → dup". Flink ABS: commit only a global snapshot.
                 let suffix = format!("staged-epoch-{epoch}");
-                // CUMULATIVE commit (crash-atomicity fix): SEED with the PRIOR committed offsets, then
-                // max-merge THIS epoch's staged offsets. Without this, the record was REPLACED with only
-                // the current epoch's staged set — so any partition whose reader hadn't staged exactly
-                // THIS epoch (barrier skew across N=16 FLIP-27 readers) was DROPPED from the record and
-                // resumed at offset 0 on crash (measured: 9/16 partitions reset to 0 → re-read whole
-                // partition → cross-epoch window re-emit → dups). Offsets are monotone per partition, so
-                // seeding with prior + max-merge never regresses and never loses a partition. Flink 2PC:
-                // the committed offset set must cover EVERY input, always.
                 let mut offsets: std::collections::BTreeMap<String, i64> =
                     match ck.get("realtime/committed").await.ok().flatten() {
                         Some(bytes) => serde_json::from_slice::<RealtimeCommitted>(&bytes)
@@ -751,8 +743,6 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                                 std::collections::BTreeMap<String, i64>,
                             >(&bytes)
                             {
-                                // keys are "topic:partition" — disjoint across instances, so the union
-                                // never conflicts; keep the max offset per partition defensively.
                                 for (k, v) in m {
                                     offsets
                                         .entry(k)
@@ -763,12 +753,40 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                         }
                     }
                 }
+                // Completeness gate: `sources/0/expected` = total partition count (written by the source).
+                let expected: Option<usize> = ck
+                    .get("sources/0/expected")
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|b| String::from_utf8(b.to_vec()).ok())
+                    .and_then(|s| s.trim().parse().ok());
+                if let Some(exp) = expected {
+                    if offsets.len() < exp {
+                        log::info!(
+                            "realtime commit DEFERRED epoch={epoch}: incomplete offset set {}/{exp}",
+                            offsets.len()
+                        );
+                        return Ok(()); // defer: NOT visible, NOT committed — re-done on restart
+                    }
+                }
+                // Globally complete → make visible THEN commit the offsets (data-before-offset ordering:
+                // a crash between leaves the epoch visible but not offset-committed → the source resumes
+                // from the prior complete epoch and re-does this one idempotently, no loss).
+                crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
+                    .await
+                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
                 let rec = RealtimeCommitted { epoch, offsets };
                 if let Ok(body) = serde_json::to_vec(&rec) {
                     ck.put("realtime/committed", bytes::Bytes::from(body))
                         .await
                         .map_err(|e| DataFusionError::External(Box::new(e)))?;
                 }
+            } else {
+                // No checkpoint store (no EO): commit visibility best-effort.
+                crate::streaming_sink_log::commit_batch(store, base, epoch, &metas)
+                    .await
+                    .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))?;
             }
             Ok(())
         }
@@ -861,6 +879,26 @@ impl ExecutionPlan for RealtimeFileSinkExec {
             let ck = checkpoint_location
                 .as_deref()
                 .and_then(|l| CheckpointStore::from_location(l).ok());
+            // W4 recovery truncation (distributed-EO): before processing, reconcile the visible sink
+            // state to the committed recovery line. Epochs made visible past `realtime/committed.epoch`
+            // (deferred/incomplete under W3, or a crash between the visibility write and the offset
+            // write) would otherwise be re-emitted under a fresh epoch → committed twice = dup. The
+            // first sink task drops every epoch strictly after `realtime/committed.epoch`. Idempotent.
+            if part_idx == 0 {
+                if let Some(ck) = &ck {
+                    if let Ok(Some(bytes)) = ck.get("realtime/committed").await {
+                        if let Ok(rec) = serde_json::from_slice::<RealtimeCommitted>(&bytes) {
+                            if let Err(e) = crate::streaming_sink_log::truncate_after(
+                                &store, &base, rec.epoch,
+                            )
+                            .await
+                            {
+                                yield Err(DataFusionError::ObjectStore(Box::new(e))); return;
+                            }
+                        }
+                    }
+                }
+            }
             let mut buffer: Vec<RecordBatch> = Vec::new();
             while let Some(item) = decoded.next().await {
                 match item {

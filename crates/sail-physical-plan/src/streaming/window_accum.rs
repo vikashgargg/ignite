@@ -378,6 +378,12 @@ struct AccumState {
     merge_newly_emitted: HashSet<i64>,
     /// The emit watermark of the active merge (the close threshold for this finalize).
     merge_emit_wm: Option<i64>,
+    /// Crash-recovery floor: every window with `end <= restore_wm_floor` was already fired AND committed
+    /// by the restored checkpoint (a consistent cut: the committed watermark implies those windows were
+    /// emitted+committed before it). On restore `emitted_ends` may have been PRUNED (P1 prune drops ends
+    /// far below the watermark), so it alone can't suppress a re-fire; the floor does, independent of
+    /// pruning. `i64::MIN` on a fresh start (no restore) so nothing is suppressed.
+    restore_wm_floor: i64,
     /// The marker (Watermark / EndOfData) to emit AFTER the active merge's output drains, so window
     /// output precedes the marker.
     after_merge_marker: Option<FlowEvent>,
@@ -415,6 +421,7 @@ impl AccumState {
             active_merge: None,
             merge_newly_emitted: HashSet::new(),
             merge_emit_wm: None,
+            restore_wm_floor: i64::MIN,
             after_merge_marker: None,
             inc_ckpt: false,
             epoch_chunks: VecDeque::new(),
@@ -677,6 +684,13 @@ impl ExecutionPlan for WindowAccumExec {
         // instances' state (Flink key-groups; REFERENCES §2b). Off by default → same-parallelism
         // restore is unchanged (no regression). Requires VAJRA_INC_CKPT staging format.
         let rescale_enabled = std::env::var("VAJRA_RESCALE").is_ok();
+        // Bounded-COMPLETE flush (gated VAJRA_COMPLETE_ON_END, default OFF = Spark availableNow parity):
+        // when the source is bounded/terminal (a batch-over-stream aggregation, like Flink
+        // `scan.bounded.mode`), flush ALL open windows at end-of-input (MAX watermark) — including the
+        // final boundary window whose end > max-event-time — even with a checkpoint. Default OFF keeps
+        // Spark availableNow semantics (incomplete windows carry over to the next run). Opt-in gives
+        // Flink-parity completeness for bounded ETL. (docs/design/three-tier-sdlc.md Gap 1.)
+        let complete_on_end = std::env::var("VAJRA_COMPLETE_ON_END").is_ok();
         if prof::enabled() {
             prof::mark_start();
         }
@@ -787,6 +801,9 @@ impl ExecutionPlan for WindowAccumExec {
                         if let Some((wm, ends)) = meta.split_first() {
                             acc.watermark_micros = (*wm != i64::MIN).then_some(*wm);
                             acc.emitted_ends = ends.iter().copied().collect();
+                            // Windows already fired+committed at/below the restored watermark must never
+                            // re-fire on resume, even though `emitted_ends` was pruned below it.
+                            acc.restore_wm_floor = *wm;
                         }
                     }
                     acc.restored = true;
@@ -1029,6 +1046,35 @@ impl ExecutionPlan for WindowAccumExec {
                                 state_budget_bytes
                             );
                             if let Some(ck) = &ck {
+                                if complete_on_end {
+                                    // Bounded-COMPLETE (Flink scan.bounded.mode parity): the source is
+                                    // terminal, so FLUSH every open window (emit_wm = MAX) — including the
+                                    // final boundary window — while still SNAPSHOTTING state first so a
+                                    // resumed run is consistent. This is the opt-in Flink-completeness mode.
+                                    let mut meta = vec![acc.watermark_micros.unwrap_or(i64::MIN)];
+                                    meta.extend(acc.emitted_ends.iter().copied());
+                                    let full = gather_partials(
+                                        &acc.pending_rows, &acc.spilled, Some(ck), &state_op_id,
+                                    )
+                                    .await;
+                                    crate::streaming::state_io::stage_state(
+                                        ck, &state_op_id, &partial_schema, &full, &meta,
+                                    )
+                                    .await;
+                                    match begin_finalize(
+                                        &acc, &final_group_by, &aggr_exprs, &partial_schema,
+                                        Some(ck), &state_op_id, ctx.clone(), state_budget_bytes,
+                                    ) {
+                                        Err(e) => return Some((Err(e), (input, acc, buf, ctx))),
+                                        Ok(stream) => {
+                                            acc.active_merge = Some(stream);
+                                            acc.merge_emit_wm = Some(i64::MAX);
+                                            acc.merge_newly_emitted.clear();
+                                            acc.after_merge_marker =
+                                                Some(FlowEvent::Marker(FlowMarker::EndOfData));
+                                        }
+                                    }
+                                } else {
                                 // Checkpointed run (availableNow/once): SNAPSHOT the open-window
                                 // partial state (write-ahead) so windows spanning runs complete
                                 // correctly — the runner commits it after the output is durable.
@@ -1050,6 +1096,7 @@ impl ExecutionPlan for WindowAccumExec {
                                 )
                                 .await;
                                 buf.push_back(FlowEvent::Marker(FlowMarker::EndOfData));
+                                }
                             } else {
                                 // No checkpoint: flush ALL remaining windows (terminal), resumably —
                                 // emit_wm = i64::MAX closes every window. The EndOfData marker is
@@ -1111,7 +1158,11 @@ impl ExecutionPlan for WindowAccumExec {
                                     // the live working set) references.
                                     acc.epoch_chunks.push_back((id, acc.spilled.clone()));
                                     acc.epoch_chunks.retain(|(e, _)| *e + 2 > id); // keep e > id-2
-                                    if id >= 2 {
+                                    // W4: don't GC at/after the committed epoch (see full-path note).
+                                    let committed_e = crate::streaming::state_io::committed_epoch(ck)
+                                        .await
+                                        .unwrap_or(0);
+                                    if id >= 2 && id - 2 < committed_e {
                                         crate::streaming::state_io::gc_epoch_incremental(
                                             ck,
                                             &state_op_id,
@@ -1154,7 +1205,16 @@ impl ExecutionPlan for WindowAccumExec {
                                         &meta,
                                     )
                                     .await;
-                                    if id >= 2 {
+                                    // W4 (distributed-EO): NEVER GC a snapshot at/after the COMMITTED
+                                    // epoch. Under W3's completeness-gated commit, realtime/committed
+                                    // lags the current epoch; GC'ing the committed epoch's snapshot left
+                                    // recovery with empty emitted_ends → re-emit of already-committed
+                                    // windows (the crash-EO dup). GC id-2 only once it is strictly older
+                                    // than the committed epoch (keep [committed..id] for recovery).
+                                    let committed = crate::streaming::state_io::committed_epoch(ck)
+                                        .await
+                                        .unwrap_or(0);
+                                    if id >= 2 && id - 2 < committed {
                                         crate::streaming::state_io::gc_epoch_state(
                                             ck,
                                             &state_op_id,
@@ -1251,7 +1311,7 @@ fn consume_merge_batch(
 ) -> Result<()> {
     match output_mode {
         WindowOutputMode::Append => {
-            if let Some(mask) = window_emit_mask(agg_batch, acc.merge_emit_wm, &acc.emitted_ends) {
+            if let Some(mask) = window_emit_mask(agg_batch, acc.merge_emit_wm, &acc.emitted_ends, acc.restore_wm_floor) {
                 if let Ok(filtered) = compute::filter_record_batch(agg_batch, &mask) {
                     if filtered.num_rows() > 0 {
                         let len = filtered.num_rows();
@@ -1611,12 +1671,15 @@ fn window_emit_mask(
     batch: &RecordBatch,
     watermark_micros: Option<i64>,
     emitted: &HashSet<i64>,
+    restore_wm_floor: i64,
 ) -> Option<BooleanArray> {
     let wm = watermark_micros?;
     let ends = window_end_micros(batch)?;
     let mut b = BooleanBuilder::with_capacity(ends.len());
     for end in &ends {
-        let emit = end.is_some_and(|e| e <= wm && !emitted.contains(&e));
+        // Fire iff closed (end<=wm), not already emitted, AND above the crash-restore floor (windows
+        // <= floor were fired+committed pre-crash; `emitted_ends` may have been pruned below the floor).
+        let emit = end.is_some_and(|e| e <= wm && e > restore_wm_floor && !emitted.contains(&e));
         b.append_value(emit);
     }
     Some(b.finish())

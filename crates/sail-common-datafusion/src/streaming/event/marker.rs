@@ -33,6 +33,12 @@ pub enum FlowMarker {
     /// When a sink receives this marker from all its input, it should wait for
     /// the next checkpoint marker and then the job can finish.
     EndOfData,
+    /// Emitted by a source instance when it is genuinely caught up (an empty poll — no data currently
+    /// available for its partition). Lets an N→M merge EXCLUDE it from the watermark MIN
+    /// (Flink `WatermarkStatus.IDLE`) WITHOUT a wall-clock timeout, which at scale wrongly marks a
+    /// slow-but-active (backpressured/unscheduled) source idle and closes windows early. A source that
+    /// resumes emitting data/watermarks is implicitly active again.
+    Idle { source: String },
 }
 
 impl FlowMarker {
@@ -59,6 +65,7 @@ impl FlowMarker {
                 gen::flow_marker::Kind::Checkpoint(gen::Checkpoint { id })
             }
             FlowMarker::EndOfData => gen::flow_marker::Kind::EndOfData(gen::EndOfData {}),
+            FlowMarker::Idle { source } => gen::flow_marker::Kind::Idle(gen::Idle { source }),
         };
         let message = gen::FlowMarker { kind: Some(kind) };
         Ok(message.encode_to_vec())
@@ -92,6 +99,9 @@ impl FlowMarker {
                 Ok(FlowMarker::Checkpoint { id })
             }
             Some(gen::flow_marker::Kind::EndOfData(gen::EndOfData {})) => Ok(FlowMarker::EndOfData),
+            Some(gen::flow_marker::Kind::Idle(gen::Idle { source })) => {
+                Ok(FlowMarker::Idle { source })
+            }
             None => plan_err!("missing marker kind"),
         }
     }
@@ -138,6 +148,17 @@ mod tests {
     #[test]
     fn test_encode_decode_end_of_data() -> Result<()> {
         let marker = FlowMarker::EndOfData;
+        let encoded = marker.clone().encode()?;
+        let decoded = FlowMarker::decode(&encoded)?;
+        assert_eq!(marker, decoded);
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_decode_idle() -> Result<()> {
+        let marker = FlowMarker::Idle {
+            source: "kafka:3".to_string(),
+        };
         let encoded = marker.clone().encode()?;
         let decoded = FlowMarker::decode(&encoded)?;
         assert_eq!(marker, decoded);
