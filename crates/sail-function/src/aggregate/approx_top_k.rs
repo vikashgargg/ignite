@@ -130,9 +130,6 @@ impl ApproxTopKFunction {
 }
 
 impl AggregateUDFImpl for ApproxTopKFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "approx_top_k"
@@ -223,9 +220,6 @@ impl ApproxTopKAccumulateFunction {
 }
 
 impl AggregateUDFImpl for ApproxTopKAccumulateFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "approx_top_k_accumulate"

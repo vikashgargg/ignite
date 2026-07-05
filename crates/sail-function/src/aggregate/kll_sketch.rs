@@ -148,9 +148,6 @@ macro_rules! kll_agg_udaf {
         }
 
         impl AggregateUDFImpl for $name {
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
 
             fn name(&self) -> &str {
                 $fn_name
@@ -364,9 +361,6 @@ impl KllSketchGetQuantileBigint {
 }
 
 impl ScalarUDFImpl for KllSketchGetQuantileBigint {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "kll_sketch_get_quantile_bigint"
@@ -409,9 +403,6 @@ impl KllSketchGetQuantileDouble {
 }
 
 impl ScalarUDFImpl for KllSketchGetQuantileDouble {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "kll_sketch_get_quantile_double"
@@ -454,9 +445,6 @@ impl KllSketchGetQuantileFloat {
 }
 
 impl ScalarUDFImpl for KllSketchGetQuantileFloat {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "kll_sketch_get_quantile_float"

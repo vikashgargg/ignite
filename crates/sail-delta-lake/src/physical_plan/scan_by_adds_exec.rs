@@ -697,9 +697,6 @@ impl ExecutionPlan for DeltaScanByAddsExec {
         "DeltaScanByAddsExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache

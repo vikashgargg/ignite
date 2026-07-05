@@ -476,9 +476,6 @@ impl ExecutionPlan for StreamJoinExec {
     fn name(&self) -> &str {
         "StreamJoinExec"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
@@ -906,7 +903,6 @@ mod tests {
     }
     impl ExecutionPlan for OneShotSource {
         fn name(&self) -> &str { "OneShotSource" }
-        fn as_any(&self) -> &dyn Any { self }
         fn properties(&self) -> &Arc<PlanProperties> { &self.props }
         fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> { vec![] }
         fn with_new_children(self: Arc<Self>, _: Vec<Arc<dyn ExecutionPlan>>) -> Result<Arc<dyn ExecutionPlan>> { Ok(self) }

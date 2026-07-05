@@ -74,9 +74,6 @@ impl ExecutionPlan for FlowEventToDataExec {
     fn name(&self) -> &str {
         "FlowEventToDataExec"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
@@ -176,9 +173,6 @@ impl ExecutionPlan for EmptySinkAdapterExec {
     fn name(&self) -> &str {
         "EmptySinkAdapterExec"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
@@ -262,9 +256,6 @@ impl ExecutionPlan for PartitionSelectExec {
     fn name(&self) -> &str {
         "PartitionSelectExec"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
@@ -345,9 +336,6 @@ impl DisplayAs for ParallelStreamSinkExec {
 impl ExecutionPlan for ParallelStreamSinkExec {
     fn name(&self) -> &str {
         "ParallelStreamSinkExec"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
     }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
@@ -475,9 +463,6 @@ impl DisplayAs for StreamingSinkCommitExec {
 impl ExecutionPlan for StreamingSinkCommitExec {
     fn name(&self) -> &str {
         "StreamingSinkCommitExec"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
     }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
@@ -654,9 +639,6 @@ struct RealtimeCommitted {
 impl ExecutionPlan for RealtimeFileSinkExec {
     fn name(&self) -> &str {
         "RealtimeFileSinkExec"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
     }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties

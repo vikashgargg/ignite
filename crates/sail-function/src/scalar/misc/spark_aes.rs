@@ -196,9 +196,6 @@ impl SparkAESEncrypt {
 
 // TODO: Support array batch
 impl ScalarUDFImpl for SparkAESEncrypt {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_aes_encrypt"
@@ -649,9 +646,6 @@ impl SparkAESDecrypt {
 
 // TODO: Support array batch
 impl ScalarUDFImpl for SparkAESDecrypt {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_aes_decrypt"
@@ -1036,9 +1030,6 @@ impl SparkTryAESEncrypt {
 }
 
 impl ScalarUDFImpl for SparkTryAESEncrypt {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_try_aes_encrypt"
@@ -1081,9 +1072,6 @@ impl SparkTryAESDecrypt {
 }
 
 impl ScalarUDFImpl for SparkTryAESDecrypt {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_try_aes_decrypt"

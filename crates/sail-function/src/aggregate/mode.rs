@@ -55,9 +55,6 @@ impl ModeFunction {
 }
 
 impl AggregateUDFImpl for ModeFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "mode"

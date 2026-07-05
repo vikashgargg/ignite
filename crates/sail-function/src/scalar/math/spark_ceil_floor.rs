@@ -201,7 +201,7 @@ fn ceil_floor_simplify<T: ScalarUDFImpl + 'static>(
     }
     // Idempotence: floor(floor(x)) = floor(x), ceil(ceil(x)) = ceil(x).
     if let Expr::ScalarFunction(ref func) = arg {
-        if func.func.inner().as_any().is::<T>() && func.args.len() == 1 {
+        if func.func.inner().downcast_ref::<T>().is_some() && func.args.len() == 1 {
             return Ok(ExprSimplifyResult::Simplified(arg));
         }
     }
@@ -228,9 +228,6 @@ impl SparkCeil {
 }
 
 impl ScalarUDFImpl for SparkCeil {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "spark_ceil"
     }
@@ -301,9 +298,6 @@ impl SparkFloor {
 }
 
 impl ScalarUDFImpl for SparkFloor {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "spark_floor"
     }

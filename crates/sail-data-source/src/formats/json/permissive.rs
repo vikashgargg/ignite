@@ -496,9 +496,6 @@ impl FileSource for PermissiveJsonSource {
         Ok(opener)
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn table_schema(&self) -> &TableSchema {
         &self.table_schema
@@ -563,9 +560,6 @@ impl PermissiveJsonFormat {
 
 #[async_trait::async_trait]
 impl FileFormat for PermissiveJsonFormat {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn get_ext(&self) -> String {
         self.inner().get_ext()

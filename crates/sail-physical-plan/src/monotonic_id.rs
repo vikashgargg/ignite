@@ -76,9 +76,6 @@ impl ExecutionPlan for MonotonicIdExec {
         "MonotonicIdExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties

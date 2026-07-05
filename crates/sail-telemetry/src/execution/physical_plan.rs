@@ -109,9 +109,6 @@ impl ExecutionPlan for TracingExec {
         "TracingExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn schema(&self) -> SchemaRef {
         self.inner.schema()
@@ -204,7 +201,7 @@ impl ExecutionPlan for TracingExec {
         self.inner.metrics()
     }
 
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Arc<Statistics>> {
         self.inner.partition_statistics(partition)
     }
 

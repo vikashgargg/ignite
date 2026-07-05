@@ -25,9 +25,6 @@ impl SparkTryToDate {
 }
 
 impl ScalarUDFImpl for SparkTryToDate {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_try_to_date"

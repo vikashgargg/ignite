@@ -145,7 +145,6 @@ pub(crate) fn extract_percentiles_array(expr: &Arc<dyn PhysicalExpr>) -> Result<
 
 fn evaluate_percentile_literal(expr: &Arc<dyn PhysicalExpr>) -> Result<ScalarValue> {
     if expr
-        .as_any()
         .downcast_ref::<datafusion_physical_expr::expressions::Literal>()
         .is_none()
     {

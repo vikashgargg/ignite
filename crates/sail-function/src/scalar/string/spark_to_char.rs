@@ -30,9 +30,6 @@ impl SparkToCharNumber {
 }
 
 impl ScalarUDFImpl for SparkToCharNumber {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_to_char_number"

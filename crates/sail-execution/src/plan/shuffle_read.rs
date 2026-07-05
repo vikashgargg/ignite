@@ -53,9 +53,6 @@ impl ExecutionPlan for ShuffleReadExec {
         "ShuffleReadExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties

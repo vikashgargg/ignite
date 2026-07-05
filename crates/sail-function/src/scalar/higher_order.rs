@@ -134,9 +134,6 @@ impl std::hash::Hash for SailArrayFilter {
 }
 
 impl ScalarUDFImpl for SailArrayFilter {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_array_filter"
     }
@@ -299,9 +296,6 @@ impl std::hash::Hash for SailArrayTransform {
 }
 
 impl ScalarUDFImpl for SailArrayTransform {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_array_transform"
     }
@@ -434,9 +428,6 @@ impl std::hash::Hash for SailArrayExists {
 }
 
 impl ScalarUDFImpl for SailArrayExists {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_array_exists"
     }
@@ -545,9 +536,6 @@ impl std::hash::Hash for SailArrayForAll {
 }
 
 impl ScalarUDFImpl for SailArrayForAll {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_array_forall"
     }
@@ -675,9 +663,6 @@ impl std::hash::Hash for SailArrayAggregate {
 }
 
 impl ScalarUDFImpl for SailArrayAggregate {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_array_aggregate"
     }
@@ -846,9 +831,6 @@ impl std::hash::Hash for SailArrayZipWith {
 }
 
 impl ScalarUDFImpl for SailArrayZipWith {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_array_zip_with"
     }
@@ -1046,9 +1028,6 @@ impl std::hash::Hash for SailArraySort {
 }
 
 impl ScalarUDFImpl for SailArraySort {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_array_sort"
     }
@@ -1304,9 +1283,6 @@ impl std::hash::Hash for SailMapTransformKeys {
 }
 
 impl ScalarUDFImpl for SailMapTransformKeys {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_map_transform_keys"
     }
@@ -1407,9 +1383,6 @@ impl std::hash::Hash for SailMapTransformValues {
 }
 
 impl ScalarUDFImpl for SailMapTransformValues {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_map_transform_values"
     }
@@ -1510,9 +1483,6 @@ impl std::hash::Hash for SailMapFilter {
 }
 
 impl ScalarUDFImpl for SailMapFilter {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_map_filter"
     }
@@ -1633,9 +1603,6 @@ impl std::hash::Hash for SailMapZipWith {
 }
 
 impl ScalarUDFImpl for SailMapZipWith {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "sail_map_zip_with"
     }

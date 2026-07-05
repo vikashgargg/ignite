@@ -210,9 +210,6 @@ impl ExecutionPlan for KafkaSinkExec {
     fn name(&self) -> &str {
         "KafkaSinkExec"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }

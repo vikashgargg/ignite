@@ -60,9 +60,6 @@ impl SketchScalarStub {
 }
 
 impl ScalarUDFImpl for SketchScalarStub {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         &self.name
@@ -207,9 +204,6 @@ impl Default for ThetaUnionFunc {
     }
 }
 impl ScalarUDFImpl for ThetaUnionFunc {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "theta_union"
     }
@@ -257,9 +251,6 @@ impl Default for ThetaIntersectionFunc {
     }
 }
 impl ScalarUDFImpl for ThetaIntersectionFunc {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "theta_intersection"
     }
@@ -303,9 +294,6 @@ impl Default for ThetaDifferenceFunc {
     }
 }
 impl ScalarUDFImpl for ThetaDifferenceFunc {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "theta_difference"
     }
@@ -346,9 +334,6 @@ impl Default for HllUnionFunc {
     }
 }
 impl ScalarUDFImpl for HllUnionFunc {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "hll_union"
     }
@@ -384,9 +369,6 @@ impl ThetaSketchEstimateFunc {
 }
 
 impl ScalarUDFImpl for ThetaSketchEstimateFunc {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "theta_sketch_estimate"
     }
@@ -449,9 +431,6 @@ impl HllSketchEstimateFunc {
 }
 
 impl ScalarUDFImpl for HllSketchEstimateFunc {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         "hll_sketch_estimate"
     }
@@ -490,9 +469,6 @@ impl CollationFunc {
 }
 
 impl ScalarUDFImpl for CollationFunc {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "collation"

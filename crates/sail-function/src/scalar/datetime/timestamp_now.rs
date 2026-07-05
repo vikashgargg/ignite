@@ -34,9 +34,6 @@ impl TimestampNow {
 }
 
 impl ScalarUDFImpl for TimestampNow {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "timestamp_now"

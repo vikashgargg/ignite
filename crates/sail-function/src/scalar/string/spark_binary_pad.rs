@@ -31,9 +31,6 @@ impl SparkBinaryLpad {
 }
 
 impl ScalarUDFImpl for SparkBinaryLpad {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_binary_lpad"
@@ -163,9 +160,6 @@ impl SparkBinaryRpad {
 }
 
 impl ScalarUDFImpl for SparkBinaryRpad {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_binary_rpad"

@@ -137,9 +137,6 @@ impl ExecutionPlan for StreamExchangeExec {
     fn name(&self) -> &str {
         "StreamExchangeExec"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
@@ -290,9 +287,6 @@ impl DisplayAs for StreamCoalesceExec {
 impl ExecutionPlan for StreamCoalesceExec {
     fn name(&self) -> &str {
         "StreamCoalesceExec"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
     }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties

@@ -130,9 +130,6 @@ impl ExecutionPlan for StaticBatchExec {
     fn name(&self) -> &str {
         "StaticBatchExec"
     }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
@@ -219,9 +216,6 @@ impl DisplayAs for SpillSourceExec {
 impl ExecutionPlan for SpillSourceExec {
     fn name(&self) -> &str {
         "SpillSourceExec"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
     }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
@@ -612,9 +606,6 @@ impl DisplayAs for WindowAccumExec {
 impl ExecutionPlan for WindowAccumExec {
     fn name(&self) -> &str {
         "WindowAccumExec"
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
     }
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
@@ -1937,7 +1928,6 @@ mod update_mode_e2e_tests {
     }
     impl ExecutionPlan for FlowEventSource {
         fn name(&self) -> &str { "FlowEventSource" }
-        fn as_any(&self) -> &dyn Any { self }
         fn properties(&self) -> &Arc<PlanProperties> { &self.properties }
         fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> { vec![] }
         fn with_new_children(self: Arc<Self>, _: Vec<Arc<dyn ExecutionPlan>>) -> Result<Arc<dyn ExecutionPlan>> { Ok(self) }

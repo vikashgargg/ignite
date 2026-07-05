@@ -364,9 +364,6 @@ impl ExecutionPlan for DeletionVectorRowsWriterExec {
         "DeletionVectorRowsWriterExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
@@ -642,9 +639,6 @@ impl ExecutionPlan for DeletionVectorWriterExec {
         "DeletionVectorWriterExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache

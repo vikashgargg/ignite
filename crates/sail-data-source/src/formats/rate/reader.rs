@@ -217,9 +217,6 @@ impl ExecutionPlan for RateSourceExec {
         Self::static_name()
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties

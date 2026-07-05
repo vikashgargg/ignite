@@ -124,9 +124,6 @@ impl PySparkGroupMapUDF {
 }
 
 impl AggregateUDFImpl for PySparkGroupMapUDF {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         &self.name

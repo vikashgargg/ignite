@@ -37,9 +37,6 @@ impl SparkToBinary {
 }
 
 impl ScalarUDFImpl for SparkToBinary {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_to_binary"
@@ -200,9 +197,6 @@ impl SparkTryToBinary {
 }
 
 impl ScalarUDFImpl for SparkTryToBinary {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_try_to_binary"

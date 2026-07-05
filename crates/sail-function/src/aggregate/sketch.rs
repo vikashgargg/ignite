@@ -137,9 +137,6 @@ impl ThetaSketchAgg {
 }
 
 impl AggregateUDFImpl for ThetaSketchAgg {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         &self.name
     }
@@ -243,9 +240,6 @@ impl ThetaSketchUnionAgg {
 }
 
 impl AggregateUDFImpl for ThetaSketchUnionAgg {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         &self.name
     }
@@ -333,9 +327,6 @@ impl ThetaSketchDistinctAgg {
 }
 
 impl AggregateUDFImpl for ThetaSketchDistinctAgg {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
     fn name(&self) -> &str {
         &self.name
     }
@@ -430,9 +421,6 @@ impl SketchAggStub {
 }
 
 impl AggregateUDFImpl for SketchAggStub {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         &self.name
@@ -500,9 +488,6 @@ impl Int64AggStub {
 }
 
 impl AggregateUDFImpl for Int64AggStub {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         &self.name

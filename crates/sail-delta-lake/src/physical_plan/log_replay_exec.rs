@@ -562,9 +562,6 @@ impl ExecutionPlan for DeltaLogReplayExec {
         "DeltaLogReplayExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
@@ -896,9 +893,6 @@ mod tests {
             "OneBatchExec"
         }
 
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
 
         fn properties(&self) -> &Arc<PlanProperties> {
             &self.cache

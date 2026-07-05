@@ -263,9 +263,6 @@ impl ExecutionPlan for IcebergCommitExec {
         "IcebergCommitExec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache

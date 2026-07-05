@@ -43,9 +43,6 @@ impl SparkTryToTimeWithFmt {
 }
 
 impl ScalarUDFImpl for SparkTryToTimeWithFmt {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 
     fn name(&self) -> &str {
         "spark_try_to_time_with_fmt"
