@@ -69,6 +69,30 @@ combination, which de-risks our upgrade. Plan:
   storage: directly useful for the **streaming Parquet/S3 sink + inc-ckpt** (O(delta) chunks).
 - Extension-type registry + vector ops (`cosine_distance`/`inner_product`) → AI-native lakehouse (charter).
 
+## 2c. DataFusion 54 migration — progress + precise remaining map (branch upgrade/datafusion54-arrow583)
+
+**DONE (committed 94253edb):** Arrow 58.3 (green); Cargo pins 53.1→54.0 + `avro` dropped from
+datafusion-common (`arrow-avro` auto-added); **sail-common-datafusion** + **sail-cache** fully migrated
+(`TableScopedPath` re-key + new `cache_limit`/`update_cache_limit`/`drop_table_entries`, ported from LakeSail
+v0.6.5); **ALL 254 `as_any` trait-impl overrides removed** (DF54 made `Any` a supertrait; downcasting now via
+inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downcast_ref`**.
+
+**REMAINING (compiler-mapped; fix to the correct DF54 API, ref LakeSail v0.6.5 diff, gate NO behavior change):**
+- *Mechanical:* `partition_statistics(&self, …) -> Result<Arc<Statistics>>` (2: delta relaxed_tz_exec:142,
+  scan_by_adds_exec:826); `PartitionedFile { …, table_reference: None }` (5: delta actions:66,
+  log_scan:108/129, iceberg provider:401, scan_by_data_files_exec:129); `CastColumnExpr → CastExpr` import
+  (iceberg expr_adapter:20).
+- *Semantic (care):* logical `Cast { data_type: DataType } → { field: FieldRef }` (5: delta
+  metadata_predicate:352, fn timestamp_now:67 / spark_ceil_floor:197 / spark_to_binary:144, iceberg
+  expr_adapter:20) — build a `Field` from the `DataType`; `PruningStatistics::row_counts(&self)` dropped its
+  per-column arg (3: delta pruning:483 + snapshot/stats:368, iceberg pruning:161) — the column-indexed delta
+  impl (pruning:483 uses `column.name()`) needs reconciliation to the container-level DF54 API.
+- *Higher-risk / our code (fresh focus):* sail-data-source (7 files: file_stream, json/permissive, kafka/sink,
+  python/{commit_exec,exec,write_exec}, streaming_decode), sail-plan, sail-spark-connect, **sail-execution/
+  codec.rs + the streaming execs (window_accum / exchange / kafka sink)** = the crash-EO / completeness /
+  parallel-sink code (EKS-confirmed) — migrate carefully, then re-run correctness_gate 6/6 + inc_ckpt crash
+  dup=0 + the streaming EKS smoke to prove NO behavior change.
+
 ## 3. LakeSail v0.6.5 features to adopt (mapped to Spark parity)
 
 Each is a Spark-compat win; cherry-pick from LakeSail v0.6.5 (same fork lineage) or reimplement to our bar.
