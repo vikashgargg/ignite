@@ -13,7 +13,6 @@
 //! Scope (first version): inner equi-join, append-only. Outer joins and watermark-based
 //! state eviction are documented follow-ups (see docs/design/streaming-stream-join.md).
 
-use std::any::Any;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -828,7 +827,6 @@ impl ExecutionPlan for StreamJoinExec {
 #[expect(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
 
     use datafusion::arrow::array::Int64Array;
     use datafusion::arrow::datatypes::{DataType, Field, Schema};

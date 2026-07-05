@@ -109,6 +109,11 @@ impl ExecutionPlan for TracingExec {
         "TracingExec"
     }
 
+    /// DataFusion 54: expose the wrapped plan so `downcast_ref`/`is` see through the
+    /// tracing wrapper (this exec is a transparent pass-through injected before execution).
+    fn downcast_delegate(&self) -> Option<&dyn ExecutionPlan> {
+        Some(self.inner.as_ref())
+    }
 
     fn schema(&self) -> SchemaRef {
         self.inner.schema()

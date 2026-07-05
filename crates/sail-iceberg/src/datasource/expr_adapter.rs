@@ -17,7 +17,7 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema as ArrowSchema, Schem
 use datafusion::common::tree_node::{Transformed, TransformedResult, TreeNode};
 use datafusion::common::{exec_err, Result, ScalarValue};
 use datafusion::functions::core::getfield::GetFieldFunc;
-use datafusion::physical_expr::expressions::{self, CastColumnExpr, Column, Literal};
+use datafusion::physical_expr::expressions::{self, CastExpr, Column, Literal};
 use datafusion::physical_expr::{PhysicalExpr, ScalarFunctionExpr};
 use datafusion::physical_expr_adapter::{PhysicalExprAdapter, PhysicalExprAdapterFactory};
 use datafusion_common::nested_struct::validate_struct_compatibility;
@@ -290,9 +290,8 @@ impl<'a> IcebergPhysicalExprRewriter<'a> {
             }
         }
 
-        Ok(Transformed::yes(Arc::new(CastColumnExpr::new(
+        Ok(Transformed::yes(Arc::new(CastExpr::new_with_target_field(
             column_expr,
-            Arc::new(physical_field.clone()),
             Arc::new(logical_field.clone()),
             None,
         ))))

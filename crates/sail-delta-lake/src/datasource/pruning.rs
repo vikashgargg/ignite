@@ -149,7 +149,6 @@ struct MaterializedColumnStats {
     min_values: Option<ArrayRef>,
     max_values: Option<ArrayRef>,
     null_counts: Option<ArrayRef>,
-    row_counts: Option<ArrayRef>,
 }
 
 #[derive(Debug)]
@@ -198,7 +197,6 @@ impl AddStatsPruningStatistics {
                             min_values: self.compute_min_values(&column),
                             max_values: self.compute_max_values(&column),
                             null_counts: self.compute_null_counts(&column),
-                            row_counts: self.compute_row_counts(&column),
                         },
                     )
                 })
@@ -452,9 +450,6 @@ impl AddStatsPruningStatistics {
         })
     }
 
-    fn compute_row_counts(&self, column: &Column) -> Option<ArrayRef> {
-        self.build_count_array(column, |_a, s| s.map(|s| s.num_records.max(0) as u64))
-    }
 }
 
 impl PruningStatistics for AddStatsPruningStatistics {
@@ -480,10 +475,19 @@ impl PruningStatistics for AddStatsPruningStatistics {
             .and_then(|stats| stats.null_counts.clone())
     }
 
-    fn row_counts(&self, column: &Column) -> Option<datafusion::arrow::array::ArrayRef> {
-        self.materialized_columns
-            .get(column.name())
-            .and_then(|stats| stats.row_counts.clone())
+    fn row_counts(&self) -> Option<datafusion::arrow::array::ArrayRef> {
+        // Row counts are container-level (per Add file's `num_records`), independent of column.
+        let mut has_value = false;
+        let values: Vec<Option<u64>> = self
+            .stats
+            .iter()
+            .map(|stats| {
+                let value = stats.as_ref().map(|s| s.num_records.max(0) as u64);
+                has_value |= value.is_some();
+                value
+            })
+            .collect();
+        has_value.then(|| Arc::new(UInt64Array::from(values)) as datafusion::arrow::array::ArrayRef)
     }
 
     fn contained(
@@ -557,7 +561,7 @@ mod tests {
 
         let stats = AddStatsPruningStatistics::try_new(table_schema, adds, referenced_columns)?;
         let array = stats
-            .row_counts(&Column::from_name("dec_col"))
+            .row_counts()
             .ok_or_else(|| {
                 DataFusionError::Internal("row count stats should be available".to_string())
             })?;

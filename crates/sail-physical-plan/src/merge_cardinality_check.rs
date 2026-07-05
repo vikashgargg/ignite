@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -153,7 +152,7 @@ impl ExecutionPlan for MergeCardinalityCheckExec {
         Ok(Box::pin(stream))
     }
 
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Arc<Statistics>> {
         self.input.partition_statistics(partition)
     }
 }

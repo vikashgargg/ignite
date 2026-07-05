@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{ArrayRef, ArrowNativeTypeOp, AsArray};
@@ -192,10 +191,10 @@ fn ceil_floor_simplify<T: ScalarUDFImpl + 'static>(
     match info.get_data_type(&arg)? {
         DataType::Int64 => return Ok(ExprSimplifyResult::Simplified(arg)),
         DataType::Int8 | DataType::Int16 | DataType::Int32 => {
-            return Ok(ExprSimplifyResult::Simplified(Expr::Cast(expr::Cast {
-                expr: Box::new(arg),
-                data_type: DataType::Int64,
-            })));
+            return Ok(ExprSimplifyResult::Simplified(Expr::Cast(expr::Cast::new(
+                Box::new(arg),
+                DataType::Int64,
+            ))));
         }
         _ => {}
     }

@@ -41,7 +41,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: Failed to coerce arguments to satisfy a call to 'kll_sketch_agg_bigint' function: coercion from Int32, Int32 to the signature Exact([Int64]) failed No function matches the given name and argument types 'kll_sketch_agg_bigint(Int32, Int32)'. You might need to add explicit type casts.\n\tCandidate functions:\n\tkll_sketch_agg_bigint(Int64)"
+        "success": "ok"
       }
     },
     {
@@ -85,7 +85,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: Failed to coerce arguments to satisfy a call to 'kll_sketch_agg_double' function: coercion from Float64, Int32 to the signature Exact([Float64]) failed No function matches the given name and argument types 'kll_sketch_agg_double(Float64, Int32)'. You might need to add explicit type casts.\n\tCandidate functions:\n\tkll_sketch_agg_double(Float64)"
+        "success": "ok"
       }
     },
     {
@@ -129,7 +129,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: Failed to coerce arguments to satisfy a call to 'kll_sketch_agg_float' function: coercion from Float32, Int32 to the signature Exact([Float32]) failed No function matches the given name and argument types 'kll_sketch_agg_float(Float32, Int32)'. You might need to add explicit type casts.\n\tCandidate functions:\n\tkll_sketch_agg_float(Float32)"
+        "success": "ok"
       }
     },
     {
@@ -421,7 +421,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: The function 'approx_top_k' expected 2 arguments but received 1 No function matches the given name and argument types 'approx_top_k(Int32)'. You might need to add explicit type casts.\n\tCandidate functions:\n\tapprox_top_k(Any, Any)"
+        "success": "ok"
       }
     },
     {
@@ -463,7 +463,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: The function 'approx_top_k' expected 2 arguments but received 3 No function matches the given name and argument types 'approx_top_k(Int32, Int32, Int32)'. You might need to add explicit type casts.\n\tCandidate functions:\n\tapprox_top_k(Any, Any)"
+        "success": "ok"
       }
     },
     {
@@ -547,7 +547,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: The function 'approx_top_k_accumulate' expected 2 arguments but received 1 No function matches the given name and argument types 'approx_top_k_accumulate(Int32)'. You might need to add explicit type casts.\n\tCandidate functions:\n\tapprox_top_k_accumulate(Any, Any)"
+        "success": "ok"
       }
     },
     {
@@ -631,7 +631,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: The function 'approx_top_k_accumulate' expected 2 arguments but received 1 No function matches the given name and argument types 'approx_top_k_accumulate(Int32)'. You might need to add explicit type casts.\n\tCandidate functions:\n\tapprox_top_k_accumulate(Any, Any)"
+        "success": "ok"
       }
     },
     {
@@ -1433,7 +1433,7 @@
         }
       },
       "output": {
-        "failure": "error in DataFusion: Error during planning: Failed to coerce arguments to satisfy a call to 'hll_union_agg' function: coercion from Binary, Boolean to the signature Exact([Binary]) failed No function matches the given name and argument types 'hll_union_agg(Binary, Boolean)'. You might need to add explicit type casts.\n\tCandidate functions:\n\thll_union_agg(Binary)"
+        "success": "ok"
       }
     },
     {

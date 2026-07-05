@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use arrow::datatypes::SchemaRef;

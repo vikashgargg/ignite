@@ -16,7 +16,6 @@
 //! mid-run output-duplicate window additionally needs the file-sink commit log. See
 //! docs/design/streaming-file-source.md.
 
-use std::any::Any;
 use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;

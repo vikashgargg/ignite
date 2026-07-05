@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -192,7 +191,6 @@ impl ExecutionPlan for StreamCollectorExec {
 #[expect(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
     use std::sync::Arc;
 
     use datafusion::arrow::array::{BooleanArray, Int64Array};

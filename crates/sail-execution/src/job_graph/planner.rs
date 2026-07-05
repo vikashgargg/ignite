@@ -52,7 +52,7 @@ fn ensure_single_input_partition_for_global_limit(
 ) -> ExecutionResult<Arc<dyn ExecutionPlan>> {
     // Rewrite *all* `GlobalLimitExec` nodes in the tree to ensure their input is single-partition.
     let result = plan.transform(|node| {
-        if let Some(gl) = node.as_any().downcast_ref::<GlobalLimitExec>() {
+        if let Some(gl) = node.downcast_ref::<GlobalLimitExec>() {
             let skip = gl.skip();
             let fetch = gl.fetch();
             let input = gl.input();
@@ -86,9 +86,9 @@ fn ensure_partitioned_hash_join_if_build_side_emits_unmatched_rows(
     ) -> Result<Arc<dyn ExecutionPlan>> {
         // We have to remove unnecessary repartitioning explicitly here
         // since no physical optimizer will run afterward.
-        let plan = if let Some(coalesce) = plan.as_any().downcast_ref::<CoalescePartitionsExec>() {
+        let plan = if let Some(coalesce) = plan.downcast_ref::<CoalescePartitionsExec>() {
             Arc::clone(coalesce.input())
-        } else if let Some(repartition) = plan.as_any().downcast_ref::<RepartitionExec>() {
+        } else if let Some(repartition) = plan.downcast_ref::<RepartitionExec>() {
             Arc::clone(repartition.input())
         } else {
             plan
@@ -100,7 +100,7 @@ fn ensure_partitioned_hash_join_if_build_side_emits_unmatched_rows(
     }
 
     let result = plan.transform_up(|plan| {
-        let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() else {
+        let Some(join) = plan.downcast_ref::<HashJoinExec>() else {
             return Ok(Transformed::no(plan));
         };
 
@@ -175,7 +175,7 @@ fn build_job_graph(
 ) -> ExecutionResult<Arc<dyn ExecutionPlan>> {
     // Recursively build the job graph for the children first
     // and propagate partition usage information.
-    let children = if let Some(join) = plan.as_any().downcast_ref::<HashJoinExec>() {
+    let children = if let Some(join) = plan.downcast_ref::<HashJoinExec>() {
         let (left, right) = join.children().two()?;
         match join.mode {
             PartitionMode::Partitioned => {
@@ -196,24 +196,24 @@ fn build_job_graph(
                 )));
             }
         }
-    } else if plan.as_any().is::<NestedLoopJoinExec>()
-        || plan.as_any().is::<CrossJoinExec>()
-        || plan.as_any().is::<PiecewiseMergeJoinExec>()
+    } else if plan.is::<NestedLoopJoinExec>()
+        || plan.is::<CrossJoinExec>()
+        || plan.is::<PiecewiseMergeJoinExec>()
     {
         let (left, right) = plan.children().two()?;
         vec![
             build_job_graph(left.clone(), PartitionUsage::Shared, graph)?,
             build_job_graph(right.clone(), usage, graph)?,
         ]
-    } else if plan.as_any().is::<RepartitionExec>()
-        || plan.as_any().is::<CoalescePartitionsExec>()
-        || plan.as_any().is::<SortPreservingMergeExec>()
+    } else if plan.is::<RepartitionExec>()
+        || plan.is::<CoalescePartitionsExec>()
+        || plan.is::<SortPreservingMergeExec>()
     {
         let child = plan.children().one()?;
         // At the stage boundary, we only expect to use the child partition once
         // since the shuffle writer can materialize the data for multiple consumption.
         vec![build_job_graph(child.clone(), PartitionUsage::Once, graph)?]
-    } else if plan.as_any().is::<RecursiveQueryExec>() {
+    } else if plan.is::<RecursiveQueryExec>() {
         // Recursive queries maintain a shared work table mutated across iterations
         // by RecursiveQueryExec and read by a WorkTableExec in the recursive term.
         // Both must run in the same task — splitting them across stages causes
@@ -232,7 +232,7 @@ fn build_job_graph(
         PartitionUsage::Once => ShuffleConsumption::Single,
         PartitionUsage::Shared => ShuffleConsumption::Multiple,
     };
-    let plan = if let Some(repartition) = plan.as_any().downcast_ref::<RepartitionExec>() {
+    let plan = if let Some(repartition) = plan.downcast_ref::<RepartitionExec>() {
         if repartition.preserve_order() {
             // We haven't found a case when order-preserving repartition can be constructed,
             // so it's fine to return an error for now.
@@ -258,7 +258,7 @@ fn build_job_graph(
                 create_shuffle(child, graph, properties, consumption)?
             }
         }
-    } else if let Some(coalesce) = plan.as_any().downcast_ref::<CoalescePartitionsExec>() {
+    } else if let Some(coalesce) = plan.downcast_ref::<CoalescePartitionsExec>() {
         let properties = coalesce.properties().clone();
         let child = plan.children().one()?;
         let fetch = coalesce.fetch();
@@ -268,11 +268,11 @@ fn build_job_graph(
         } else {
             shuffled
         }
-    } else if plan.as_any().is::<SortPreservingMergeExec>() {
+    } else if plan.is::<SortPreservingMergeExec>() {
         let child = plan.children().one()?;
         plan.clone()
             .with_new_children(vec![create_merge_input(child, graph)?])?
-    } else if plan.as_any().is::<SystemTableExec>() || plan.as_any().is::<CatalogCommandExec>() {
+    } else if plan.is::<SystemTableExec>() || plan.is::<CatalogCommandExec>() {
         plan.children().zero()?;
         create_driver_stage(&plan, graph)?
     } else {
@@ -346,7 +346,7 @@ fn rewrite_inputs(
 ) -> ExecutionResult<(Arc<dyn ExecutionPlan>, Vec<StageInput>)> {
     let mut inputs = vec![];
     let result = plan.transform(|node| {
-        if let Some(placeholder) = node.as_any().downcast_ref::<StageInputExec<StageInput>>() {
+        if let Some(placeholder) = node.downcast_ref::<StageInputExec<StageInput>>() {
             let index = inputs.len();
             inputs.push(placeholder.input().clone());
             let placeholder = StageInputExec::new(index, placeholder.properties().clone());

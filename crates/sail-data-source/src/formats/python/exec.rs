@@ -26,7 +26,6 @@
 //! - Programmatic access via `ctx.collect_metrics()`
 //! - UI dashboards for execution bottleneck visualization
 //!
-use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 

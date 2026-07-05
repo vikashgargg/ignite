@@ -207,6 +207,20 @@ hdfs-native-object-store = "0.16.0"
 # Override dependencies to use our forked versions.
 # You can use `path = "..."` to temporarily point to your local copy of the crates to speed up local development.
 
+[profile.dev]
+# Incremental compilation is DISABLED for dev/test. On a DataFusion-scale workspace the
+# `target/debug/incremental` cache grows unboundedly across rebuilds (stale `s-*` session
+# dirs are not aggressively GC'd) and was the direct cause of repeated `No space left on
+# device` build crashes (16 GiB+ of a 47 GiB target). We predominantly run full-workspace
+# builds (`cargo build/clippy/test --workspace`) where incremental buys little, and
+# `target/debug/deps` still caches all compiled dependencies, so only changed first-party
+# crates recompile from scratch. `test` inherits this; `release`/`coverage` already set it.
+incremental = false
+# Emit only line tables, not full DWARF. The default dev `debug = true` was ~60% of a 36 GiB
+# `target/debug/deps` (a DataFusion-scale dep graph). `"line-tables-only"` keeps panic/backtrace
+# file:line info (what we actually use) while cutting the on-disk footprint roughly in half.
+debug = "line-tables-only"
+
 [profile.release]
 # https://doc.rust-lang.org/cargo/reference/profiles.html#release
 opt-level = 3

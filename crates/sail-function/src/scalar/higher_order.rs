@@ -1,6 +1,5 @@
 //! Higher-order array/map function UDFs for Sail.
 
-use std::any::Any;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 

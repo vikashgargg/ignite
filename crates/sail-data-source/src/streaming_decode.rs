@@ -7,7 +7,6 @@
 //! stripped, yielding the original data columns. Retraction-aware output is a follow-up;
 //! for append-only sources this writes every data row.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch};

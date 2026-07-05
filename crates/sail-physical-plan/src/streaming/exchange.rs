@@ -11,7 +11,6 @@
 //! task consumes the input once and fans out, mirroring DataFusion `RepartitionExec` but
 //! with marker broadcast (which `RepartitionExec` cannot express).
 
-use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch, UInt32Array};

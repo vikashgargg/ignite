@@ -508,14 +508,20 @@ Ensure expand_row_level_op is enabled; MERGE is currently only supported for lak
                 node.aggr_exprs
                     .iter()
                     .map(|e| {
-                        let (agg_expr, _filter, _order_bys) =
-                            datafusion::physical_planner::create_aggregate_expr_and_maybe_filter(
+                        // DataFusion 54: `create_aggregate_expr_and_maybe_filter` is deprecated
+                        // in favor of `LoweredAggregateBuilder` (the wrapper is a thin call to
+                        // this builder). We only need the aggregate expr (no FILTER / ORDER BY on
+                        // streaming window aggregates); the builder's default name derivation
+                        // matches the old wrapper for aggregate exprs.
+                        let lowered =
+                            datafusion::physical_expr::aggregate::LoweredAggregateBuilder::new(
                                 e,
                                 &data_dfschema,
                                 &data_schema,
                                 session_state.execution_props(),
-                            )?;
-                        Ok(agg_expr)
+                            )
+                            .build()?;
+                        Ok(lowered.aggregate)
                     })
                     .collect::<datafusion_common::Result<_>>()?;
             // Parallel keyed path: hash the (watermarked) input by group key into N
@@ -716,7 +722,7 @@ fn shift_physical_columns(
     use datafusion::common::tree_node::{Transformed, TreeNode};
     use datafusion::physical_expr::expressions::Column;
     expr.transform_down(|e| {
-        if let Some(c) = e.as_any().downcast_ref::<Column>() {
+        if let Some(c) = e.downcast_ref::<Column>() {
             let idx = c.index() + by;
             let name = target.field(idx).name();
             Ok(Transformed::yes(

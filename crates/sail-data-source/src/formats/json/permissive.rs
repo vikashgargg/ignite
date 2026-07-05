@@ -7,7 +7,6 @@
 /// DROPMALFORMED: malformed lines are silently skipped.
 ///
 /// FAILFAST: any malformed line causes the read to abort with an error.
-use std::any::Any;
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{BufReader, Read, Seek, SeekFrom};

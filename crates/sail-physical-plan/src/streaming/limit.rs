@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{BooleanArray, RecordBatch};
@@ -150,10 +149,11 @@ impl ExecutionPlan for StreamLimitExec {
         Ok(Box::pin(EncodedFlowEventStream::new(stream)))
     }
 
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
-        self.input
-            .partition_statistics(partition)?
-            .with_fetch(self.fetch, self.skip, 1)
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Arc<Statistics>> {
+        let stats = self.input.partition_statistics(partition)?;
+        Ok(Arc::new(stats.as_ref().clone().with_fetch(
+            self.fetch, self.skip, 1,
+        )?))
     }
 
     fn supports_limit_pushdown(&self) -> bool {

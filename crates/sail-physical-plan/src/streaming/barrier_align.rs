@@ -18,7 +18,6 @@
 //! seal each globally-consistent epoch. Non-checkpoint broadcast markers (watermark/latency) are
 //! de-duplicated by forwarding only partition 0's copy; `EndOfData` is forwarded once all inputs end.
 
-use std::any::Any;
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch};

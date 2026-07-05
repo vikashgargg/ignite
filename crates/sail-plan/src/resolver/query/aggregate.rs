@@ -32,7 +32,7 @@ fn find_volatile_in_aggregate_context(expr: &Expr) -> Option<String> {
             if f.func.signature().volatility == Volatility::Volatile
                 && f.func
                     .inner()
-                    .as_any()
+                    
                     .downcast_ref::<SparkMonotonicallyIncreasingId>()
                     .is_none()
             {
@@ -335,7 +335,7 @@ impl PlanResolver<'_> {
                     if agg
                         .func
                         .inner()
-                        .as_any()
+                        
                         .downcast_ref::<PySparkGroupAggregateUDF>()
                         .is_some()
                     {

@@ -1,4 +1,3 @@
-use std::any::Any;
 
 use datafusion::arrow::array::builder::PrimitiveBuilder;
 use datafusion::arrow::array::{Array, AsArray, PrimitiveArray};

@@ -1,8 +1,6 @@
-use std::sync::Arc;
-
-use datafusion::arrow::datatypes::{DataType, Field};
+use datafusion::arrow::datatypes::DataType;
 use datafusion_common::ScalarValue;
-use datafusion_expr::{cast, lit, Expr, ExprSchemable, ScalarUDF};
+use datafusion_expr::{lit, Expr, ScalarUDF};
 use sail_common_datafusion::utils::items::ItemTaker;
 use sail_function::scalar::array::arrays_zip::ArraysZip;
 use sail_function::scalar::array::spark_array::SparkArray;
@@ -14,10 +12,7 @@ use crate::function::common::{ScalarFunction, ScalarFunctionInput};
 use crate::PlanResult;
 
 fn stack(input: ScalarFunctionInput) -> PlanResult<Expr> {
-    let ScalarFunctionInput {
-        arguments,
-        function_context,
-    } = input;
+    let ScalarFunctionInput { arguments, .. } = input;
 
     let (n_expr, mut args) = arguments.at_least_one()?;
 
@@ -52,39 +47,16 @@ fn stack(input: ScalarFunctionInput) -> PlanResult<Expr> {
         .map(|col| ScalarUDF::from(SparkArray::new()).call(col))
         .collect::<Vec<_>>();
 
-    let zipped = ScalarUDF::from(ArraysZip::new(vec![])).call(arrays);
+    // Name the zipped struct fields `col0..col{num_cols-1}` up front. Previously we let
+    // `arrays_zip` emit positional names ("0","1",…) and then `cast`ed the resulting
+    // `List<Struct<…>>` to rename the fields — but DataFusion 54 no longer supports a
+    // struct-field-*rename* cast inside a List (`simplify_expressions` errors with
+    // "Unsupported CAST from List(Struct("0",…)) to List(Struct("col0",…))"). Producing the
+    // final names directly avoids the cast entirely and preserves the exact output schema.
+    let field_names: Vec<String> = (0..num_cols).map(|i| format!("col{i}")).collect();
+    let zipped = ScalarUDF::from(ArraysZip::new(field_names)).call(arrays);
 
-    let err_struct = || {
-        Err(PlanError::internal(
-            "stack: arrays_zip call should return array<struct>",
-        ))
-    };
-
-    let DataType::List(field) = zipped.get_type(function_context.schema)? else {
-        return err_struct();
-    };
-
-    let DataType::Struct(fields) = field.data_type() else {
-        return err_struct();
-    };
-
-    let res_type = DataType::List(Arc::new(Field::new(
-        field.name(),
-        DataType::Struct(
-            fields
-                .iter()
-                .map(|field| {
-                    field
-                        .as_ref()
-                        .clone()
-                        .with_name(format!("col{}", field.name()))
-                })
-                .collect(),
-        ),
-        field.is_nullable(),
-    )));
-
-    Ok(ScalarUDF::from(Explode::new(ExplodeKind::Inline)).call(vec![cast(zipped, res_type)]))
+    Ok(ScalarUDF::from(Explode::new(ExplodeKind::Inline)).call(vec![zipped]))
 }
 
 fn variant_explode(input: ScalarFunctionInput) -> PlanResult<Expr> {

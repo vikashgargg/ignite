@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
@@ -139,16 +138,16 @@ impl ExecutionPlan for RelaxedTzCastExec {
         )))
     }
 
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Arc<Statistics>> {
         let statistics = self.input.partition_statistics(partition)?;
         if self.input.schema() == self.schema {
             Ok(statistics)
         } else {
-            Ok(map_statistics_to_schema(
-                &statistics,
+            Ok(Arc::new(map_statistics_to_schema(
+                statistics.as_ref(),
                 &self.input.schema(),
                 &self.schema,
-            ))
+            )))
         }
     }
 }
@@ -365,11 +364,11 @@ mod tests {
             Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
         }
 
-        fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+        fn partition_statistics(&self, partition: Option<usize>) -> Result<Arc<Statistics>> {
             if partition.is_none() {
-                Ok(self.statistics.clone())
+                Ok(Arc::new(self.statistics.clone()))
             } else {
-                Ok(Statistics::new_unknown(self.schema.as_ref()))
+                Ok(Arc::new(Statistics::new_unknown(self.schema.as_ref())))
             }
         }
     }

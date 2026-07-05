@@ -84,7 +84,7 @@ impl PlanResolver<'_> {
             Expr::Alias(alias) => Self::is_spark_nullable_cast(alias.expr.as_ref()),
             Expr::Cast(cast) => {
                 matches!(
-                    &cast.data_type,
+                    cast.field.data_type(),
                     DataType::Date32
                         | DataType::Timestamp(
                             TimeUnit::Second
@@ -112,7 +112,7 @@ impl PlanResolver<'_> {
                         if let Some(true) = sv
                             .try_as_str()
                             .flatten()
-                            .map(|s| s.to_uppercase() == "NAN" && cast.data_type.is_numeric())
+                            .map(|s| s.to_uppercase() == "NAN" && cast.field.data_type().is_numeric())
                         {
                             nan_positions.insert(idx);
                         }

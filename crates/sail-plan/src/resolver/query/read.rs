@@ -288,10 +288,10 @@ impl PlanResolver<'_> {
     ) -> PlanResult<f64> {
         let schema = Arc::new(DFSchema::empty());
         let resolved = self.resolve_expression(expr, &schema, state).await?;
-        let cast_expr = Expr::Cast(datafusion_expr::expr::Cast {
-            expr: Box::new(resolved),
-            data_type: DataType::Float64,
-        });
+        let cast_expr = Expr::Cast(datafusion_expr::expr::Cast::new(
+            Box::new(resolved),
+            DataType::Float64,
+            ));
         let evaluator = LiteralEvaluator::new();
         let scalar = evaluator
             .evaluate(&cast_expr)
@@ -343,7 +343,7 @@ impl PlanResolver<'_> {
             let udf = catalog_manager.get_function(&canonical_function_name)?;
             if let Some(f) = udf
                 .as_ref()
-                .and_then(|x| x.inner().as_any().downcast_ref::<PySparkUnresolvedUDF>())
+                .and_then(|x| x.inner().downcast_ref::<PySparkUnresolvedUDF>())
             {
                 if f.eval_type().is_table_function() {
                     let udtf = PythonUdtf {
@@ -425,6 +425,13 @@ impl PlanResolver<'_> {
                             "unknown table function: {function_name}"
                         )));
                     };
+                // DataFusion 54 deprecated `create_table_provider` in favor of
+                // `create_table_provider_with_args` (which threads a `Session` + supports named
+                // table-function args). Migrating requires our `TableFunctionImpl`s to implement
+                // `call_with_args`; deferred to the LakeSail v0.6.5 named-table-function-args
+                // adoption (plan §3) to avoid a behavior change here. `expect` (not `allow`) per
+                // the workspace `clippy::allow_attributes` deny.
+                #[expect(deprecated)]
                 let table_provider = table_function.create_table_provider(&arguments)?;
                 self.resolve_table_provider_with_rename(
                     table_provider,

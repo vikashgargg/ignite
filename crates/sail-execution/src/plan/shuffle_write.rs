@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
@@ -62,7 +61,7 @@ impl ShuffleWriteExec {
                 // https://github.com/apache/arrow-datafusion/issues/5184
                 Partitioning::Hash(
                     expr.into_iter()
-                        .filter(|e| e.as_any().downcast_ref::<UnKnownColumn>().is_none())
+                        .filter(|e| e.downcast_ref::<UnKnownColumn>().is_none())
                         .collect(),
                     n,
                 )

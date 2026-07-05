@@ -26,7 +26,7 @@ impl PlanResolver<'_> {
         expr: datafusion_expr::Expr,
         schema: &DFSchemaRef,
     ) -> PlanResult<Arc<dyn datafusion::physical_expr::PhysicalExpr>> {
-        let simplify_context = SimplifyContext::default().with_schema(schema.clone());
+        let simplify_context = SimplifyContext::builder().with_schema(schema.clone()).build();
         let simplifier = ExprSimplifier::new(simplify_context).with_max_cycles(10);
         let simplified = simplifier.simplify(expr)?;
         Ok(self.ctx.create_physical_expr(simplified, schema)?)

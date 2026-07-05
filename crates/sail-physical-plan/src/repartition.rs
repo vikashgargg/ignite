@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
@@ -96,11 +95,11 @@ impl ExecutionPlan for ExplicitRepartitionExec {
         )
     }
 
-    fn partition_statistics(&self, partition: Option<usize>) -> Result<Statistics> {
+    fn partition_statistics(&self, partition: Option<usize>) -> Result<Arc<Statistics>> {
         if partition.is_none() {
             self.input.partition_statistics(None)
         } else {
-            Ok(Statistics::new_unknown(&self.schema()))
+            Ok(Arc::new(Statistics::new_unknown(&self.schema())))
         }
     }
 

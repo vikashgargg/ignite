@@ -77,21 +77,35 @@ datafusion-common (`arrow-avro` auto-added); **sail-common-datafusion** + **sail
 v0.6.5); **ALL 254 `as_any` trait-impl overrides removed** (DF54 made `Any` a supertrait; downcasting now via
 inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downcast_ref`**.
 
-**REMAINING (compiler-mapped; fix to the correct DF54 API, ref LakeSail v0.6.5 diff, gate NO behavior change):**
-- *Mechanical:* `partition_statistics(&self, …) -> Result<Arc<Statistics>>` (2: delta relaxed_tz_exec:142,
-  scan_by_adds_exec:826); `PartitionedFile { …, table_reference: None }` (5: delta actions:66,
-  log_scan:108/129, iceberg provider:401, scan_by_data_files_exec:129); `CastColumnExpr → CastExpr` import
-  (iceberg expr_adapter:20).
-- *Semantic (care):* logical `Cast { data_type: DataType } → { field: FieldRef }` (5: delta
-  metadata_predicate:352, fn timestamp_now:67 / spark_ceil_floor:197 / spark_to_binary:144, iceberg
-  expr_adapter:20) — build a `Field` from the `DataType`; `PruningStatistics::row_counts(&self)` dropped its
-  per-column arg (3: delta pruning:483 + snapshot/stats:368, iceberg pruning:161) — the column-indexed delta
-  impl (pruning:483 uses `column.name()`) needs reconciliation to the container-level DF54 API.
-- *Higher-risk / our code (fresh focus):* sail-data-source (7 files: file_stream, json/permissive, kafka/sink,
-  python/{commit_exec,exec,write_exec}, streaming_decode), sail-plan, sail-spark-connect, **sail-execution/
-  codec.rs + the streaming execs (window_accum / exchange / kafka sink)** = the crash-EO / completeness /
-  parallel-sink code (EKS-confirmed) — migrate carefully, then re-run correctness_gate 6/6 + inc_ckpt crash
-  dup=0 + the streaming EKS smoke to prove NO behavior change.
+**WORKSPACE LIB COMPILES GREEN ON DF54** (`cargo build --workspace` = 0 errors). Landed the full remaining map:
+- *Mechanical (done):* `partition_statistics -> Result<Arc<Statistics>>` (delta relaxed_tz/scan_by_adds + 6 in
+  sail-physical-plan: merge_cardinality_check, monotonic_id, repartition, spark_partition_id, streaming
+  filter/limit — deref-clone `Arc` where the body mutates or calls `with_fetch`); `PartitionedFile.table_reference:
+  None` + `extensions: Default::default()` (DF54 changed `extensions` from `Option<Arc<dyn Any>>` to
+  `FileExtensions`); `CastColumnExpr → CastExpr::new_with_target_field` (iceberg expr_adapter, mirroring DF's own
+  `schema_rewriter`).
+- *Semantic (done):* logical `Cast`/`TryCast` construction → `Cast::new(expr, data_type)` (still takes `DataType`,
+  converts to `field: FieldRef` internally) across sail-function (3) + sail-plan (window/aggregate/misc/time_travel/
+  read/stat) + delta metadata_predicate destructure `Cast { expr, field }` using `field.data_type()`; reading
+  `cast.data_type` → `cast.field.data_type()` (values.rs); `PruningStatistics::row_counts(&self)` arg-drop —
+  delta impl reworked to **container-level** (per-Add `num_records`, column-independent, removed dead per-column
+  `row_counts` storage), iceberg + snapshot/stats trivially dropped the arg.
+- *DF54 API shifts caught:* `ScalarValue::ListView`/`LargeListView` new variants (formatter match arms);
+  `Ident`/`ObjectName` moved to `datafusion_expr::sql` and `ExcludeSelectItem` now holds `ObjectName` not `Ident`
+  (wildcard.rs); `TaskContext::new` gained `higher_order_functions` (window_accum); `CacheManagerConfig::
+  with_files_statistics_cache → with_file_statistics_cache`; **167 `.as_any()` call-sites removed** (DF54 inherent
+  downcast on `dyn ExecutionPlan`/`TableProvider`/`DataSource`/`DataSink`/`FileSource`/`PhysicalExpr`/UDFs — driven
+  by exact compiler spans so arrow-array `.as_any()` was never touched) + **177 now-unused `use std::any::Any`**
+  imports cleaned.
+- **sail-execution/codec.rs (the distributed round-trip — highest care):** DF54 merged `&TaskContext` + `&dyn
+  PhysicalExtensionCodec` into **`PhysicalPlanDecodeContext::new(task_ctx, codec)`** for every decode
+  (`parse_protobuf_file_scan_config` / `parse_physical_sort_exprs` / `parse_protobuf_partitioning`); every
+  serialize (`serialize_file_scan_config` / `serialize_physical_sort_exprs`) now takes `(items, codec,
+  proto_converter)` — re-threaded `self` (the codec) at both sides.
+- **STILL TODO before merge:** `cargo build --all-targets` (test/bench `.as_any()`, e.g. codec round-trip tests) →
+  `clippy --all-targets -D warnings` green → **NO-behavior-change gates: correctness_gate 6/6 + inc_ckpt crash
+  dup=0 + TPC-H/TPC-DS scorecard unchanged** → T2 kind + T3 EKS streaming smoke → all-in-one DF54 metric-gain run
+  (RepartitionExec batch-coalesce is the real streaming-throughput lever).
 
 ## 3. LakeSail v0.6.5 features to adopt (mapped to Spark parity)
 

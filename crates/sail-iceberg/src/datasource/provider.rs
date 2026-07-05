@@ -10,7 +10,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -404,8 +403,9 @@ impl IcebergTableProvider {
                 range: None,
                 statistics: Some(Arc::new(self.create_file_statistics(&data_file))),
                 ordering: None,
-                extensions: None,
+                extensions: Default::default(),
                 metadata_size_hint: None,
+                table_reference: None,
             };
 
             partitioned_files.push(partitioned_file);

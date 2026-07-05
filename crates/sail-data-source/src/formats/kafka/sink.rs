@@ -13,7 +13,6 @@
 //! Column mapping (Spark-compatible): `value` (required), optional `key`. The value/key
 //! column is cast to Utf8 and produced as its UTF-8 bytes.
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

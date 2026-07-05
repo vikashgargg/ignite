@@ -1,4 +1,3 @@
-use std::any::Any;
 
 use datafusion::arrow::array::Array;
 use datafusion::arrow::datatypes::DataType;

@@ -10,7 +10,6 @@
 //! Each phase (write, commit, abort) deserializes a fresh Python writer from
 //! pickled bytes. Writers must not rely on in-memory state across the
 //! write -> commit/abort boundary.
-use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
@@ -255,7 +254,7 @@ mod tests {
 
         let new_exec = exec.clone().with_new_children(vec![input2]).unwrap();
 
-        assert!(new_exec.as_any().is::<PythonDataSourceWriteExec>());
+        assert!(new_exec.is::<PythonDataSourceWriteExec>());
     }
 
     #[test]

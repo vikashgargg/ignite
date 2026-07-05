@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
@@ -296,6 +295,7 @@ fn bounded_agg_context(base: &TaskContext, budget_bytes: usize) -> Result<Arc<Ta
         base.session_id(),
         base.session_config().clone(),
         base.scalar_functions().clone(),
+        base.higher_order_functions().clone(),
         base.aggregate_functions().clone(),
         base.window_functions().clone(),
         runtime,
@@ -1878,7 +1878,6 @@ mod update_mode_tests {
 #[expect(clippy::unwrap_used)]
 #[cfg(test)]
 mod update_mode_e2e_tests {
-    use std::any::Any;
     use std::sync::Arc;
 
     use chrono::DateTime;

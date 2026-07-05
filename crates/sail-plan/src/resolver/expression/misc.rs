@@ -272,10 +272,10 @@ impl PlanResolver<'_> {
                         let extraction_type =
                             extraction_expr.get_type(schema).unwrap_or(DataType::Null);
                         if extraction_type != key_type {
-                            expr::Expr::Cast(expr::Cast {
-                                expr: Box::new(extraction_expr),
-                                data_type: key_type,
-                            })
+                            expr::Expr::Cast(expr::Cast::new(
+                                Box::new(extraction_expr),
+                                key_type,
+                                ))
                         } else {
                             extraction_expr
                         }

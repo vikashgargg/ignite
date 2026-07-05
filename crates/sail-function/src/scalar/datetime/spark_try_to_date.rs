@@ -1,4 +1,3 @@
-use std::any::Any;
 
 use datafusion::arrow::datatypes::DataType;
 use datafusion::functions::datetime::to_date::ToDateFunc;

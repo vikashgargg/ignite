@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::Arc;
