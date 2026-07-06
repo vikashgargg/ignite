@@ -118,11 +118,15 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
 - **DoD:** clean realtime Kafka→Kafka p50/throughput re-measured vs Flink on EKS; document the honest number.
 
 ### VAJ-BF2 — multi-node streaming + Arrow Flight zero-copy shuffle *(THE structural beat; chosen 2026-07-07)*
-- **Why this is the lever (MEASURED, not assumed):** single-node windowed-agg is **parse-bound PARITY**
-  — WM_PROF ranks `from_json 150s` (#1, intrinsic JSON tokenize Flink's Jackson also pays) > `exchange
-  95s` (in-memory) > `finalize 31s`; window is `STARVED(upstream)`. No single-node lever beats Flink
-  there (Vajra ~1.05× behind on identical work). Vajra's **structural** edge is the no-JVM Arrow
-  zero-copy NETWORK shuffle vs Flink's JVM-serialized network stack — but that only shows **multi-node**.
+- **Why this is the lever (COMPLETE measured ranking, 2026-07-07, source_read now instrumented):**
+  clean 20M/16-part profile — `from_json=135s` (#1, intrinsic JSON tokenize Flink's Jackson also pays,
+  already simd-json'd = PARITY, not the differentiator) > **`exchange=89.8s` (#2, the keyed shuffle =
+  the BF2 target)** > `finalize=27s` > `source_read=4.4s` (CHEAP — librdkafka bg prefetch; RULED OUT as
+  a lever) > `encode=0.3s`; window `STARVED(upstream)`. ⇒ single-node is parse-bound PARITY (Vajra
+  ~1.05× behind on identical work); the exchange is the #2 cost and the ONLY stage where Vajra's no-JVM
+  Arrow zero-copy NETWORK shuffle can STRUCTURALLY beat Flink's JVM-serialized shuffle — but that only
+  shows **multi-node** (here the exchange is in-memory). Measure-first RULED IN exchange, RULED OUT
+  source_read + parse.
 - **⚠️ SCOPING (code-verified 2026-07-07): BF2 is GREENFIELD, not an optimization.** The streaming path
   is **single-process today**: `StreamExchangeExec` moves data via in-memory `tokio::mpsc` channels
   (`exchange.rs:26`), and the deploy is ONE pod (`--mode local-cluster --workers 4`, `replicas:1`). There
