@@ -44,7 +44,7 @@ kk patch deploy vajra-stream --type=json -p='[{"op":"add","path":"/spec/template
 # VAJ-T7 source-fusion opt-in (T2 validation): parse `value`->struct in-source, elide raw value col.
 # Also raise the task-runner log so the "source-fusion: fused" line is greppable from pod logs.
 [ "${VAJRA_T7_FUSE:-0}" = "1" ] && kk set env deploy/vajra-stream \
-  VAJRA_T7_FUSE=1 RUST_LOG="warn,sail_execution::task_runner=debug" >/dev/null 2>&1
+  VAJRA_T7_FUSE=1 RUST_LOG="warn,sail_physical_plan::streaming::window_accum=info,sail_execution::task_runner::core=debug" >/dev/null 2>&1
 kk wait --for=condition=available --timeout=300s deployment/vajra-stream
 scale_kind < k8s/stream/vajra-client.yaml | kk apply -f -
 kk wait --for=condition=ready --timeout=300s pod/vajra-client

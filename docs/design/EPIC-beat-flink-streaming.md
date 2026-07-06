@@ -198,6 +198,29 @@ measured perf justification; keep opt-in).
 5. Claim ONLY the EKS head-to-head number; flag path-dependence; update `throughput-tickets.md` +
    `feedback_competitive_claims_bar` the same turn.
 
-## 4. Sequence
-VAJ-T7b (unblocks T7's parser) → **VAJ-T7 source-fusion** (the beat) → VAJ-BF1 (realtime re-measure) →
-VAJ-BF2/BF3 (exceed, not just beat). Do NOT interleave with unrelated work — this is the capstone.
+## 4. Sequence — REVISED by measurement (2026-07-07)
+Original plan assumed T7 (parse-in-source) was the beat. **T3 EKS + local WM_PROF proved otherwise**
+and redirect the sequence:
+- **DONE:** VAJ-T7b (simd-json) + VAJ-T7 (source-fusion) — implemented, T1/T2/T3 green (correct, EO-safe),
+  but **MEASURED = no throughput beat** (fused≈unfused; `from_json` already runs pre-exchange).
+- **MEASURED bottleneck:** WM_PROF shows the window operator is **`STARVED(upstream)`**
+  (`input_wait` ≫ stage CPU) — i.e. the throughput limit is the **source→exchange FEED RATE**, not any
+  per-record compute stage. The parse was never the lever.
+- **REAL levers (already KB-grounded — cite, don't re-derive):**
+  1. **VAJ-BF2 — Arrow Flight zero-copy exchange** (REFERENCES §4, Ballista 53.0.0 `DoGet`/`DoPut`) +
+     §2d streaming-shuffle. The exchange feeds the window; a zero-copy columnar shuffle raises feed rate.
+  2. **VAJ-BF3 — concurrent-stage scheduling + credit-based flow control** (REFERENCES §2d Spark 4.1
+     RT-mode pipelined stages; §Flink FLIP-8 credit backpressure). Decouple source/exchange/window so
+     they PIPELINE instead of the window starving on a blocking upstream. This directly attacks
+     `input_wait`.
+  3. **Kafka read/decode profile** — quantify the read path (librdkafka fetch + Arrow decode) with the
+     now-fixed WM_PROF (RUST_LOG must include `sail_physical_plan::streaming::window_accum=info`).
+- **PREREQUISITE (measure-first, prod-grade):** before building BF2/BF3, get a CLEAN per-stage EKS
+  profile (non-crash, 100M, correct RUST_LOG) to rank source_read vs exchange vs input_wait — pick the
+  lever from the ranked number, NOT a guess (the T7 lesson). BF2 vs BF3 priority = whichever the profile
+  ranks dominant.
+- **VAJ-T7 residual value:** may reduce RSS (raw `value` col not separately materialized) — UNMEASURED;
+  re-measure RSS fused vs unfused before any claim. Kept opt-in either way.
+
+**Do NOT interleave; architect-first each ticket from the cited official sources; T1→T2→T3; claim only
+measured head-to-head.**
