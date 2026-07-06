@@ -3,10 +3,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use datafusion::arrow::array::{
-    ArrayRef, BinaryBuilder, Int32Builder, Int64Builder, RecordBatch, StringBuilder,
-    TimestampMillisecondBuilder,
+    Array, ArrayRef, BinaryArray, BinaryBuilder, Int32Builder, Int64Builder, RecordBatch,
+    StringBuilder, TimestampMillisecondBuilder,
 };
-use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
+use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema, SchemaRef, TimeUnit};
 use datafusion::catalog::Session;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::logical_expr::Expr;
@@ -25,6 +25,7 @@ use sail_common_datafusion::streaming::event::schema::to_flow_event_schema;
 use sail_common_datafusion::streaming::event::stream::FlowEventStreamAdapter;
 use sail_common_datafusion::streaming::event::FlowEvent;
 use sail_common_datafusion::streaming::source::StreamSource;
+use sail_function::scalar::json::from_json::{parse_json_binary_to_struct, SparkFromJsonOptions};
 
 use crate::formats::kafka::options::KafkaReadOptions;
 
@@ -378,12 +379,82 @@ impl StreamSource for KafkaStreamSource {
 // KafkaSourceExec
 // ---------------------------------------------------------------------------
 
+/// VAJ-T7 source-fusion spec: parse the Kafka `value` column into a single struct column
+/// **in-source**, so the raw `value:Binary` column is never materialized past batch build and the
+/// downstream `from_json` projection + its `CAST` are elided (REFERENCES §6, columnar
+/// end-to-end). Set by the `fuse_streaming_source_parse` physical-optimizer rule when a
+/// `from_json(CAST(value AS string), schema).alias(name)` projection sits directly over the source.
+/// The emitted batch has exactly one column, `output_field: Struct(fields)`.
+#[derive(Debug, Clone)]
+pub struct ValueParseSpec {
+    /// Output struct column name = the elided projection's alias (e.g. `e`).
+    pub output_field: String,
+    /// The target struct fields (read off the `from_json` physical expr's resolved return type —
+    /// no schema-string re-parse).
+    pub fields: Fields,
+    /// Spark timestamp/date format options carried from the original `from_json` call.
+    pub options: SparkFromJsonOptions,
+}
+
+impl ValueParseSpec {
+    /// Data schema of the fused output batch: a single struct column named `output_field`.
+    fn output_data_schema(&self) -> SchemaRef {
+        Arc::new(Schema::new(vec![Field::new(
+            &self.output_field,
+            DataType::Struct(self.fields.clone()),
+            true,
+        )]))
+    }
+
+    /// Parse the `value` column of `batch` into the fused single-struct-column batch. `batch` is the
+    /// raw source batch projected to `[value:Binary]` (the reader forces this projection when fused).
+    fn fuse(&self, batch: &RecordBatch) -> Result<RecordBatch> {
+        let values = batch
+            .column_by_name("value")
+            .and_then(|c| c.as_any().downcast_ref::<BinaryArray>())
+            .ok_or_else(|| {
+                exec_datafusion_err!("VAJ-T7 fusion: source batch missing Binary `value` column")
+            })?;
+        let struct_arr =
+            parse_json_binary_to_struct(values, &self.fields, &self.options, "UTC")?;
+        RecordBatch::try_new(self.output_data_schema(), vec![Arc::new(struct_arr)])
+            .map_err(|e| arrow_datafusion_err!(e))
+    }
+
+    /// Fuse a data [`FlowEvent`] (parse its `value` column → the struct column); markers pass
+    /// through untouched. Row count is preserved, so the `retracted` mask stays valid.
+    fn fuse_event(&self, ev: FlowEvent) -> Result<FlowEvent> {
+        match ev {
+            FlowEvent::Data { batch, retracted } => Ok(FlowEvent::Data {
+                batch: self.fuse(&batch)?,
+                retracted,
+            }),
+            marker => Ok(marker),
+        }
+    }
+}
+
+/// Wrap a source event stream so that, when VAJ-T7 fusion is enabled, every data batch is parsed
+/// `value` → struct in-source (markers untouched). No-op when `spec` is `None` — the reader's
+/// non-fused behaviour is byte-identical to before.
+fn fuse_event_stream(
+    events: impl futures::Stream<Item = Result<FlowEvent>>,
+    spec: Option<ValueParseSpec>,
+) -> impl futures::Stream<Item = Result<FlowEvent>> {
+    events.map(move |ev| match (&spec, ev) {
+        (Some(s), Ok(fe)) => s.fuse_event(fe),
+        (_, other) => other,
+    })
+}
+
 #[derive(Debug)]
 pub struct KafkaSourceExec {
     options: KafkaReadOptions,
     original_schema: SchemaRef,
     projected_schema: SchemaRef,
     projection: Vec<usize>,
+    /// When set (VAJ-T7), parse `value` -> a single struct column in-source; see [`ValueParseSpec`].
+    parse_value_as: Option<ValueParseSpec>,
     /// Bounded micro-batch read (availableNow/once or each continuous re-plan): read up to the
     /// current end offsets, then `EndOfData`.
     bounded: bool,
@@ -438,8 +509,44 @@ impl KafkaSourceExec {
             checkpoint_location,
             realtime_interval_ms,
             parallelism,
+            parse_value_as: None,
             properties,
         })
+    }
+
+    /// VAJ-T7 — enable in-source `value` parse fusion. Forces the read projection to `[value]`
+    /// (only column needed), sets the plan's output to the fused single-struct schema (flow-event
+    /// wrapped), and records the [`ValueParseSpec`] used at execute time. The optimizer rule calls
+    /// this after verifying a `from_json(value)` projection sits directly over the source.
+    pub fn with_parse_value_as(mut self, spec: ValueParseSpec) -> Result<Self> {
+        // Read only `value` (index 1 in kafka_data_schema); parse produces every output column.
+        let value_idx = self
+            .original_schema
+            .index_of("value")
+            .map_err(|e| arrow_datafusion_err!(e))?;
+        self.projection = vec![value_idx];
+        self.projected_schema = Arc::new(self.original_schema.project(&[value_idx])?);
+        let output_schema = Arc::new(to_flow_event_schema(&spec.output_data_schema()));
+        let boundedness = if self.bounded {
+            Boundedness::Bounded
+        } else {
+            Boundedness::Unbounded {
+                requires_infinite_memory: false,
+            }
+        };
+        self.properties = Arc::new(PlanProperties::new(
+            EquivalenceProperties::new(output_schema),
+            Partitioning::UnknownPartitioning(self.parallelism),
+            EmissionType::Both,
+            boundedness,
+        ));
+        self.parse_value_as = Some(spec);
+        Ok(self)
+    }
+
+    /// The in-source parse-fusion spec, when VAJ-T7 fusion is enabled.
+    pub fn parse_value_as(&self) -> Option<&ValueParseSpec> {
+        self.parse_value_as.as_ref()
     }
 
     /// Source read parallelism (number of execution partitions).
@@ -531,6 +638,14 @@ impl ExecutionPlan for KafkaSourceExec {
         let projection = self.projection.clone();
         let full_schema = Arc::new(kafka_data_schema());
         let projected_schema = self.projected_schema.clone();
+        // VAJ-T7 source-fusion: when set, the generator emits raw `[value:Binary]` batches
+        // (projected_schema is `[value]`) and `fuse_event_stream` parses each to the single
+        // `[output_field:Struct]` column; `emit_schema` is what the plan/adapter declare.
+        let parse_spec = self.parse_value_as.clone();
+        let emit_schema = parse_spec
+            .as_ref()
+            .map(|s| s.output_data_schema())
+            .unwrap_or_else(|| projected_schema.clone());
         let max_batch = options.max_batch_size;
         // Per-poll fetch timeout (small -> responsive batching / low latency).
         let timeout = Duration::from_millis(options.fetch_timeout_ms);
@@ -790,7 +905,8 @@ impl ExecutionPlan for KafkaSourceExec {
                 }
                 yield Ok(FlowEvent::Marker(sail_common_datafusion::streaming::event::marker::FlowMarker::EndOfData));
             };
-            let stream = Box::pin(FlowEventStreamAdapter::new(projected_schema, events));
+            let events = fuse_event_stream(events, parse_spec);
+            let stream = Box::pin(FlowEventStreamAdapter::new(emit_schema, events));
             return Ok(Box::pin(EncodedFlowEventStream::new(stream)));
         }
 
@@ -1055,7 +1171,8 @@ impl ExecutionPlan for KafkaSourceExec {
                     }
                 }
             };
-            let stream = Box::pin(FlowEventStreamAdapter::new(projected_schema, events));
+            let events = fuse_event_stream(events, parse_spec);
+            let stream = Box::pin(FlowEventStreamAdapter::new(emit_schema, events));
             return Ok(Box::pin(EncodedFlowEventStream::new(stream)));
         }
 
@@ -1174,7 +1291,8 @@ impl ExecutionPlan for KafkaSourceExec {
         };
 
         let output = output.map(|x| Ok(FlowEvent::append_only_data(x?)));
-        let stream = Box::pin(FlowEventStreamAdapter::new(projected_schema, output));
+        let output = fuse_event_stream(output, parse_spec);
+        let stream = Box::pin(FlowEventStreamAdapter::new(emit_schema, output));
         Ok(Box::pin(EncodedFlowEventStream::new(stream)))
     }
 }

@@ -797,6 +797,14 @@ message KafkaSourceExecNode {
   optional string checkpoint_location = 12;
   optional uint64 realtime_interval_ms = 13;
   uint64 parallelism = 14;
+  // VAJ-T7 source-fusion: when parse_output_field is set, the source parses `value` into a
+  // single struct column named parse_output_field, with the struct schema in
+  // parse_fields_schema (arrow-encoded), using the timestamp/date formats below. Absent =
+  // no fusion (byte-identical to the pre-T7 source).
+  optional string parse_output_field = 15;
+  bytes parse_fields_schema = 16;
+  optional string parse_timestamp_format = 17;
+  optional string parse_date_format = 18;
 }
 
 message StreamLimitExecNode {

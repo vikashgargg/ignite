@@ -9,6 +9,9 @@ workspace = true
 [dependencies]
 sail-common = { path = "../sail-common" }
 sail-common-datafusion = { path = "../sail-common-datafusion" }
+# VAJ-T7 source-fusion: the Kafka reader parses `value` -> typed struct in-source via
+# sail-function's parse_json_binary_to_struct (acyclic downward edge — verified).
+sail-function = { path = "../sail-function" }
 sail-sql-analyzer = { path = "../sail-sql-analyzer" }
 
 async-trait = { workspace = true }

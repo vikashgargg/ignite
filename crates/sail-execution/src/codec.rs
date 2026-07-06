@@ -84,7 +84,9 @@ use sail_common_datafusion::udf::StreamUDF;
 use sail_data_source::formats::binary::source::BinarySource;
 use sail_data_source::formats::console::ConsoleSinkExec;
 use sail_data_source::formats::json::permissive::{JsonMode, PermissiveJsonSource};
-use sail_data_source::formats::kafka::{KafkaReadOptions, KafkaSinkExec, KafkaSourceExec};
+use sail_data_source::formats::kafka::{
+    KafkaReadOptions, KafkaSinkExec, KafkaSourceExec, ValueParseSpec,
+};
 use sail_data_source::formats::python::{
     InputPartition, PythonDataSourceExec, PythonDataSourceWriteCommitExec,
     PythonDataSourceWriteExec,
@@ -109,6 +111,7 @@ use sail_delta_lake::physical_plan::{
 };
 use sail_delta_lake::spec::{Action, ColumnMappingMode, DeltaOperation, StructType};
 use sail_function::aggregate::bitmap_and_agg::BitmapAndAggFunction;
+use sail_function::scalar::json::from_json::SparkFromJsonOptions;
 use sail_function::aggregate::bitmap_construct_agg::BitmapConstructAggFunction;
 use sail_function::aggregate::bitmap_or_agg::BitmapOrAggFunction;
 use sail_function::aggregate::histogram_numeric::HistogramNumericFunction;
@@ -1130,6 +1133,10 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 checkpoint_location,
                 realtime_interval_ms,
                 parallelism,
+                parse_output_field,
+                parse_fields_schema,
+                parse_timestamp_format,
+                parse_date_format,
             }) => {
                 let schema = Arc::new(self.try_decode_schema(&schema)?);
                 let projection = projection
@@ -1157,7 +1164,7 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     fetch_timeout_ms,
                     extra,
                 };
-                Ok(Arc::new(KafkaSourceExec::try_new(
+                let source = KafkaSourceExec::try_new(
                     options,
                     schema,
                     projection,
@@ -1165,7 +1172,27 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                     checkpoint_location,
                     realtime_interval_ms,
                     parallelism as usize,
-                )?))
+                )?;
+                // VAJ-T7: re-apply source-fusion if the encoded plan carried a parse spec.
+                let source = match parse_output_field {
+                    Some(output_field) => {
+                        let fields = self.try_decode_schema(&parse_fields_schema)?.fields().clone();
+                        let options = SparkFromJsonOptions {
+                            timestamp_format: parse_timestamp_format.unwrap_or_else(|| {
+                                SparkFromJsonOptions::default().timestamp_format
+                            }),
+                            date_format: parse_date_format
+                                .unwrap_or_else(|| SparkFromJsonOptions::default().date_format),
+                        };
+                        source.with_parse_value_as(ValueParseSpec {
+                            output_field,
+                            fields,
+                            options,
+                        })?
+                    }
+                    None => source,
+                };
+                Ok(Arc::new(source))
             }
             NodeKind::WindowAccum(gen::WindowAccumExecNode {
                 input,
@@ -2247,6 +2274,18 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
             let max_batch_size = u64::try_from(o.max_batch_size).map_err(|_| {
                 plan_datafusion_err!("cannot encode max_batch_size for KafkaSourceExec")
             })?;
+            // VAJ-T7 source-fusion round-trip: carry the parse spec (output name, struct fields
+            // as an encoded schema, format opts) so remote workers reconstruct the fused source.
+            let (parse_output_field, parse_fields_schema, parse_timestamp_format, parse_date_format) =
+                match kafka.parse_value_as() {
+                    Some(spec) => (
+                        Some(spec.output_field.clone()),
+                        self.try_encode_schema(&Schema::new(spec.fields.clone()))?,
+                        Some(spec.options.timestamp_format.clone()),
+                        Some(spec.options.date_format.clone()),
+                    ),
+                    None => (None, Vec::new(), None, None),
+                };
             NodeKind::KafkaSource(gen::KafkaSourceExecNode {
                 bootstrap_servers: o.bootstrap_servers.clone(),
                 subscribe: o.subscribe.clone(),
@@ -2262,6 +2301,10 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
                 checkpoint_location: kafka.checkpoint_location().map(str::to_string),
                 realtime_interval_ms: kafka.realtime_interval_ms(),
                 parallelism: kafka.parallelism() as u64,
+                parse_output_field,
+                parse_fields_schema,
+                parse_timestamp_format,
+                parse_date_format,
             })
         } else if let Some(window) = node.downcast_ref::<WindowAccumExec>() {
             let input = self.try_encode_plan(window.input().clone())?;
@@ -4737,6 +4780,61 @@ mod tests {
         assert_eq!(k.options().extra.get("security.protocol").map(String::as_str), Some("PLAINTEXT"));
         assert_eq!(k.checkpoint_location(), Some("file:///tmp/ck"));
         assert_eq!(k.realtime_interval_ms(), Some(1_000), "realtime EO config round-trips");
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_kafka_source_exec_fused() -> Result<()> {
+        use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema};
+        use sail_data_source::formats::kafka::{KafkaReadOptions, ValueParseSpec};
+        use sail_function::scalar::json::from_json::SparkFromJsonOptions;
+
+        // VAJ-T7: the source-fusion spec (output name, struct fields, format opts) must survive the
+        // codec so remote workers reconstruct the fused source (else distributed schema mismatch).
+        let codec = RemoteExecutionCodec;
+        let options = KafkaReadOptions {
+            bootstrap_servers: "localhost:9092".to_string(),
+            subscribe: Some("t".to_string()),
+            subscribe_pattern: None,
+            starting_offsets: "earliest".to_string(),
+            group_id: "g".to_string(),
+            max_batch_size: 1000,
+            max_offsets_per_trigger: None,
+            fetch_timeout_ms: 250,
+            extra: std::collections::HashMap::new(),
+        };
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Binary, true),
+            Field::new("value", DataType::Binary, true),
+        ]));
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+        let fields = Fields::from(vec![
+            Field::new("k", DataType::Int32, true),
+            Field::new("ts", DataType::Int64, true),
+        ]);
+        let source = KafkaSourceExec::try_new(options, schema, projection, true, None, None, 1)?
+            .with_parse_value_as(ValueParseSpec {
+                output_field: "e".to_string(),
+                fields: fields.clone(),
+                options: SparkFromJsonOptions {
+                    timestamp_format: "%Y".to_string(),
+                    date_format: "%d".to_string(),
+                },
+            })?;
+        let plan: Arc<dyn ExecutionPlan> = Arc::new(source);
+
+        let buf = codec.try_encode_plan(plan)?;
+        let decoded = codec.try_decode_plan(&buf, &TaskContext::default())?;
+        let k = decoded
+            .downcast_ref::<KafkaSourceExec>()
+            .ok_or_else(|| plan_datafusion_err!("decoded must be KafkaSourceExec"))?;
+        let spec = k
+            .parse_value_as()
+            .ok_or_else(|| plan_datafusion_err!("parse spec must round-trip"))?;
+        assert_eq!(spec.output_field, "e");
+        assert_eq!(spec.fields, fields, "struct fields round-trip");
+        assert_eq!(spec.options.timestamp_format, "%Y");
+        assert_eq!(spec.options.date_format, "%d");
         Ok(())
     }
 

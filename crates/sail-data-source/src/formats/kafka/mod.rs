@@ -17,7 +17,7 @@ use sail_common_datafusion::streaming::event::schema::is_flow_event_schema;
 use sail_common_datafusion::streaming::source::StreamSourceTableProvider;
 
 pub use crate::formats::kafka::options::KafkaReadOptions;
-pub use crate::formats::kafka::reader::KafkaSourceExec;
+pub use crate::formats::kafka::reader::{KafkaSourceExec, ValueParseSpec};
 use crate::formats::kafka::reader::KafkaStreamSource;
 pub use crate::formats::kafka::sink::KafkaSinkExec;
 

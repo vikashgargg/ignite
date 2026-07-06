@@ -4,16 +4,21 @@ use std::sync::Arc;
 use datafusion::catalog::memory::DataSourceExec;
 use datafusion::common::internal_err;
 use datafusion::common::tree_node::{Transformed, TransformedResult, TreeNode};
+use datafusion::arrow::datatypes::DataType;
 use datafusion::datasource::physical_plan::{FileScanConfig, FileScanConfigBuilder, ParquetSource};
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::physical_expr::ScalarFunctionExpr;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
+use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use log::debug;
 use prost::Message;
 use sail_common_datafusion::error::CommonErrorCause;
+use sail_data_source::formats::kafka::{KafkaSourceExec, ValueParseSpec};
 use sail_delta_lake::physical_plan::DeltaPhysicalExprAdapterFactory;
+use sail_function::scalar::json::from_json::SparkFromJsonOptions;
 use sail_python_udf::error::PyErrExtractor;
 use sail_server::actor::{Actor, ActorContext};
 use sail_telemetry::telemetry::global_metrics;
@@ -87,6 +92,7 @@ impl TaskRunner {
         let plan = PhysicalPlanNode::decode(definition.plan.as_ref())?;
         let plan = plan.try_into_physical_plan(&context, self.codec.as_ref())?;
         let plan = self.rewrite_parquet_adapters(plan)?;
+        let plan = Self::rewrite_source_fusion(plan)?;
         let plan = self.rewrite_shuffle(
             ctx,
             key,
@@ -140,6 +146,78 @@ impl TaskRunner {
             }
             let new_exec = DataSourceExec::from_data_source(builder.build());
             Ok(Transformed::yes(new_exec as Arc<dyn ExecutionPlan>))
+        });
+        Ok(result.data()?)
+    }
+
+    /// VAJ-T7 source-fusion (opt-in `VAJRA_T7_FUSE`): when a `ProjectionExec` whose single output
+    /// is `from_json(value)` sits directly over a `KafkaSourceExec`, push the parse INTO the source
+    /// (`with_parse_value_as`) and drop the projection. The source then parses `value` -> the struct
+    /// column in-batch, so the ~10 GB raw `value:Binary` column is never materialized past batch
+    /// build (REFERENCES §6: columnar end-to-end is the beat, not the parser). The fused source's
+    /// output schema equals the dropped projection's, so the parent (exchange/window) is unchanged.
+    ///
+    /// Runs per-worker on the decoded stage plan (source + from_json live in the same pre-shuffle
+    /// stage), alongside `rewrite_parquet_adapters`. Conservative: bails (plan unchanged) on any
+    /// shape it does not recognize, so correctness can never regress — at worst the fast path is
+    /// missed and logged. Opt-in until T2 kind + T3 EKS confirm; default is byte-identical.
+    fn rewrite_source_fusion(
+        plan: Arc<dyn ExecutionPlan>,
+    ) -> ExecutionResult<Arc<dyn ExecutionPlan>> {
+        if std::env::var_os("VAJRA_T7_FUSE").is_none() {
+            return Ok(plan);
+        }
+        let result = plan.transform(|node| {
+            let Some(proj) = node.downcast_ref::<ProjectionExec>() else {
+                return Ok(Transformed::no(node));
+            };
+            // Exactly one output column, produced by a `from_json` scalar call.
+            let exprs = proj.expr();
+            if exprs.len() != 1 {
+                return Ok(Transformed::no(node));
+            }
+            let Some(sfe) = exprs[0].expr.downcast_ref::<ScalarFunctionExpr>() else {
+                return Ok(Transformed::no(node));
+            };
+            if sfe.fun().name() != "from_json" {
+                return Ok(Transformed::no(node));
+            }
+            // The child must be an un-fused Kafka source (so `value` is available to parse).
+            let Some(src) = proj.input().downcast_ref::<KafkaSourceExec>() else {
+                return Ok(Transformed::no(node));
+            };
+            if src.parse_value_as().is_some() {
+                return Ok(Transformed::no(node));
+            }
+            // The output column's resolved type gives the struct fields directly (no schema re-parse).
+            let proj_schema = proj.schema();
+            let out_field = proj_schema.field(0);
+            let DataType::Struct(fields) = out_field.data_type().clone() else {
+                return Ok(Transformed::no(node));
+            };
+            // NOTE: options default to Spark defaults — correct for the measured benchmark (no
+            // timestampFormat/dateFormat). A from_json carrying non-default format options would
+            // parse them differently; extend by reading sfe.args()[2] when that case is targeted.
+            let spec = ValueParseSpec {
+                output_field: out_field.name().clone(),
+                fields,
+                options: SparkFromJsonOptions::default(),
+            };
+            let fused = KafkaSourceExec::try_new(
+                src.options().clone(),
+                src.original_schema().clone(),
+                src.projection().to_vec(),
+                src.bounded(),
+                src.checkpoint_location().map(str::to_string),
+                src.realtime_interval_ms(),
+                src.parallelism(),
+            )
+            .and_then(|s| s.with_parse_value_as(spec))?;
+            debug!(
+                "VAJ-T7 source-fusion: fused from_json('{}') into KafkaSourceExec (value parsed in-source)",
+                out_field.name()
+            );
+            Ok(Transformed::yes(Arc::new(fused) as Arc<dyn ExecutionPlan>))
         });
         Ok(result.data()?)
     }
