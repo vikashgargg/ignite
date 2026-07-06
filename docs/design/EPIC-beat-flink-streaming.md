@@ -35,15 +35,64 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
 
 ### VAJ-T7 — Source-fusion: parse JSON→typed cols inside the Kafka read *(THE big one)*
 - **Rank:** #1 (source_read 100.6s + from_json 31.7s = ~132s of ~206s upstream).
-- **Design:** Extend the T7a columnar `ColBuilder` so the Kafka reader parses `value` → typed struct
-  columns during `KafkaArrowBuilders` append, keyed by the projected schema. The raw value column is
-  produced ONLY when a query actually projects the raw string (rare); windowed-agg never does. Exchange
-  then carries narrow parsed cols (also shrinks the 66.5s exchange + the memory gap). Grounded: Flink
-  deserialize-in-source + DataFusion projection/expr pushdown into scan.
+- **Thesis:** the raw `value` column (Arrow `Binary`, ~10 GB @100M) is materialized by the reader, copied
+  through the exchange, then re-read by a downstream `from_json` projection. If the reader parses
+  `value` → the target struct columns *during* batch build, the raw column is **never materialized**,
+  the `from_json` projection + its `CAST(value AS string)` vanish, and the exchange carries only the
+  narrow parsed cols. Grounded: Flink `deserialize`-in-source (KB §Flink) + DataFusion projection/expr
+  pushdown into scan.
+
+#### Concrete architecture (dep-layering + codec RESOLVED 2026-07-06)
+- **Layering (resolved):** `sail-data-source → sail-function` is a **clean acyclic downward edge**
+  (`sail-function` deps = sail-common / sail-common-datafusion / sail-sql-analyzer; none reach
+  sail-data-source). So the reader may call the parse routine directly — no relocation to a shared
+  crate needed.
+- **Step 1 — expose a batch parse API in sail-function** (`scalar/json/from_json.rs`): promote
+  `parse_json_to_struct` to `pub fn parse_json_binary_to_struct(values: &BinaryArray, fields: &Fields,
+  options: &SparkFromJsonOptions, tz: &str) -> Result<StructArray>` (Binary variant of the existing
+  Utf8 path; UTF-8 lossy per-row like Spark; reuses `ColBuilder` + `simd_parse_value` from T7b). Unit
+  test it against the existing `from_json(CAST(value AS string), schema)` output for byte-identity.
+- **Step 2 — `KafkaSourceExec` gains `parse_value_as: Option<(Fields, SparkFromJsonOptions)>`**
+  (`formats/kafka/reader.rs`): `try_new` param + getter. When `Some`, `execute()`'s three read paths
+  (bounded / realtime / continuous) build the value column, then call
+  `parse_json_binary_to_struct` and emit the struct's fields (flow-event-wrapped) **instead of**
+  `value:Binary`. Output schema = `to_flow_event_schema(project(struct_fields))`. When `None`,
+  behaviour is byte-identical to today (default; zero risk to non-JSON pipelines).
+- **Step 3 — codec round-trip** (`sail-execution/src/codec.rs`, `KafkaSourceExecNode`): add proto
+  field `parse_value_as` (serialized `Fields` + options); encode in the `downcast_ref::<KafkaSourceExec>`
+  arm, decode in `NodeKind::KafkaSource`. Distributed round-trip test (the codec test at ~L4715).
+- **Step 4 — physical-optimizer fusion rule** (`sail-physical-optimizer`, new
+  `fuse_streaming_source_parse.rs`): match `ProjectionExec`/unnest whose sole expr over the streaming
+  source is `from_json(CAST(value AS Utf8), <schema-literal>)`; when the child is a `KafkaSourceExec`
+  with `parse_value_as == None`, rewrite to the source with `parse_value_as = Some(...)` and drop the
+  projection + CAST. Conservative: bail (leave plan unchanged) on any expr shape it doesn't recognize
+  → correctness can never regress, only the fast path is missed. Register in `lib.rs` after projection
+  pushdown, before TracingExec injection.
+- **Anti-scope:** the raw string IS still produced when a query projects `value` itself (rule only
+  fires when `from_json` is the sole consumer). No change to key/topic/offset/timestamp cols or to
+  barrier/watermark emission (parse happens strictly inside batch build, before the FlowEvent adapter).
 - **DoD:** WM_PROF `source_read + from_json` combined CPU **< Flink's equivalent**; EKS 100M **≤1.0×
-  Flink ev/s** (the beat); RSS ≤ Flink; correctness_gate 6/6 + inc_ckpt dup=0 UNCHANGED; simd-json
-  padding + semantic-parity tests (the 20 ColBuilder parity tests extended). Branch note:
-  `streaming/t7-parse-fusion` exists — resume there or fold in.
+  Flink ev/s** (the beat); RSS ≤ Flink; correctness_gate 6/6 + inc_ckpt dup=0 **UNCHANGED**; new
+  Binary-parse parity test + codec round-trip test green; T2 kind streaming/kafka-sink exact.
+- **Sequencing note:** T7b (`simd_parse_value`, DONE 153ae332) is the parser Step 1 reuses. Implement
+  T7 as a focused unit (reader path is EO-critical — do not land half-done); Steps 1+3 are low-risk and
+  independently testable, Steps 2+4 are the careful part.
+
+#### KB grounding (named sources — cite, don't re-derive)
+- **REFERENCES §6 "columnar edge" (the core thesis + a HONEST warning):** Flink's Kafka SplitReader
+  deserializes **per-record into JVM objects** (object churn + GC, row-at-a-time) — the structural
+  weakness a columnar engine beats. Arroyo (Rust+Arrow, *our* stack) beats Flink **5×+** by staying
+  **columnar end-to-end, never row-at-a-time**. **Critical nuance the KB already measured:** an
+  arrow-json columnar decoder *in isolation* was **~parity with serde_json** (0.418s) — "helps only if
+  fed zero-copy (no NDJSON rebuild)." **⇒ T7b (a faster parser) alone is expected ~parity; the BEAT is
+  T7 eliminating the raw-value materialize + exchange-copy + re-read (columnar end-to-end).** Set
+  expectations accordingly: do not claim a win from T7b in isolation.
+- **Polars (REFERENCES §8):** Arrow-native, zero-copy, vectorized + lazy **projection pushdown into
+  scan** — T7's optimizer rule is exactly projection-pushdown of `from_json` into the streaming source.
+- **prodgrade-practices Throughput row:** "vectorized batch ops, morsel-parallel, zero-copy shuffle,
+  **parallel parse**" — T7 is the parse-in-source half; VAJ-BF2 (Arrow Flight) is the shuffle half.
+- **RisingWave 3.0 (REFERENCES §8):** compute/state separation is the streaming frontier — informs
+  VAJ-BF3 (not T7), noted so the epic stays honest about where each engine's idea applies.
 
 ### VAJ-T7b — simd-json direct-to-builder (replace the serde_json tree)
 - **Rank:** #2 (the residual `serde_json` PARSE ~27s inside from_json).
