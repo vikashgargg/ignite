@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **DataFusion 54.0.0 + Arrow 58.3.0 upgrade** (2026-07-06): full workspace migrated. `cargo test --workspace`
+  860 passed / 0 failed, `clippy --all-targets -D warnings` clean, gold data byte-identical to DF53 (map/stack
+  nullability preserved). Adopted DF54's new optimizer rules (WindowTopN / TopKRepartition / HashJoinBuffering)
+  and coercion improvements; migrated the distributed codec (`PhysicalPlanDecodeContext`), `Cast`/`TryCast`
+  (`field: FieldRef`), `PruningStatistics::row_counts(&self)`, `ScalarValue::ListView`, `Ident`/`ObjectName`
+  moves, and the inherent-downcast (`as_any` removal).
+
+### Fixed
+- **DataFusion 54 distributed scan double-count** (critical): DF54's morsel-driven scan pools all files into a
+  shared work-source for in-process sibling work-stealing; an isolated distributed task has no siblings and
+  drained the whole pool → **every file read once per partition (N× row duplication)**, silently, on any file
+  format. Fixed with DF54's own opt-out — the per-task plan rewrite sets `partitioned_by_file_group=true` so
+  each partition reads only its own file group (`WorkSource::Local`). Verified: repro 400→200, inc_ckpt crash-EO
+  PASS, **T2 kind (real k8s): windowed-agg n_windows=5 / sum=5M exact, Kafka-sink 2M/2M delivered**. See
+  `docs/REFERENCES.md`.
+- **Build/disk hygiene**: `[profile.dev] incremental=false` + `debug="line-tables-only"` (bounds the debug
+  target 37 GiB → 7.6 GiB, ends the ENOSPC build crashes); threshold-driven launchd prune watchdog replacing a
+  TCC-blocked 3am cron.
+
 ### Added
 - **Streaming crash-EO exactly-once at scale** (EKS-confirmed, 2026-07-04): Flink-ABS **aligned checkpoint
   barriers** in the exchange + **exact source-signaled idleness** (librdkafka `PartitionEOF` = Flink

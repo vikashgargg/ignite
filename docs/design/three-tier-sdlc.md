@@ -47,3 +47,20 @@ that only moves a metric without satisfying the invariant is rejected.
    continuous-throughput harness (the latency harness co-locates loadgen+engine; the availableNow one loses
    data); (b) per-stage profile the continuous path (VAJRA_WM_PROF); (c) design from Flink pipelined-exchange
    + credit-based flow-control + Spark 4.1 RT-mode. Do NOT rush it into a mixed session.
+
+---
+
+## T2 kind — DataFusion 54 migration validated (2026-07-06)
+
+The DF54 upgrade + the distributed morsel-scan fix (`partitioned_by_file_group=true`, see
+`docs/REFERENCES.md`) were validated on the **real kind cluster** with the arm64 image built on a
+throwaway c7g EC2 → ECR (`scripts/eks_build_image.sh`, builder auto-terminated → AWS $0), pulled and
+`kind load`ed. Both T2 gates GREEN on real Kubernetes (3 nodes: control-plane / kafka / compute):
+
+- **Streaming windowed-agg** (`kind_streaming_test.sh`, N=5M, 16-part Kafka): `T2_COMPLETENESS
+  n_windows=5 sum_count=5000000` = expected — **sum EXACT (not 10M)**, the direct proof the morsel-scan
+  double-count is fixed at scale on distributed k8s; completeness matches Flink (all 5 windows incl. final).
+- **Parallel Kafka sink** (`kind_kafka_sink_test.sh`, N=2M passthrough): `T2_KAFKA_SINK delivered=2000000
+  of 2000000 PASS` — every partition read, exactly-once, no loss.
+
+T1 (860 unit tests + inc_ckpt crash-EO dup=0) and T2 (above) green. T3/EKS is confirm-only for scale.

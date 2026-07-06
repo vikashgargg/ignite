@@ -1,8 +1,17 @@
 # Vajra — Build Status
 
-> Last updated: 2026-07-05
-> Branch: `main`
-> **Latest (2026-07-04, streaming milestone on `main`):** crash-EO exactly-once (16-part continuous `kill -9`,
+> Last updated: 2026-07-06
+> Branch: `upgrade/datafusion54-arrow583`
+> **Latest (2026-07-06): DataFusion 54.0.0 + Arrow 58.3.0 upgrade COMPLETE + validated.** Full workspace
+> migrated — `cargo test --workspace` 860/0, `clippy --all-targets -D warnings` clean, gold byte-identical to
+> DF53. Root-caused + fixed a critical DF54 **distributed scan double-count** (morsel-driven shared work-source
+> pooled all files → isolated distributed tasks read each file N× → silent N× duplication; fixed with DF54's
+> `partitioned_by_file_group=true` opt-out). Validated **T1** (860 tests + inc_ckpt crash-EO dup=0) → **T2 kind**
+> on real k8s (streaming n_windows=5/sum=5M exact, Kafka-sink 2M/2M), image built on throwaway EC2 → ECR (AWS $0).
+> Adopted DF54 optimizer rules (WindowTopN/TopKRepartition/HashJoinBuffering) + coercion improvements. Details:
+> [spark-parity-and-upgrade-plan.md](docs/design/spark-parity-and-upgrade-plan.md), [REFERENCES.md](docs/REFERENCES.md).
+>
+> **Prior (2026-07-04, streaming milestone on `main`):** crash-EO exactly-once (16-part continuous `kill -9`,
 > EKS-confirmed dup=0 exact), final-window completeness (`VAJRA_COMPLETE_ON_END` = Flink `scan.bounded.mode`
 > parity, 10 windows/100M), and a **parallel Kafka sink** (fixed a 15/16-partition data-loss bug + ~300×
 > throughput; 100M/100M @ 1.67M msg/s). All validated **T1 local → T2 kind → T3 EKS** ([3-tier SDLC](docs/design/three-tier-sdlc.md)). Next: DataFusion 54 / Arrow 58.3 upgrade + LakeSail v0.6.5 features — see
