@@ -116,6 +116,8 @@ inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downca
 ## 3. LakeSail v0.6.5 features to adopt (mapped to Spark parity)
 
 Each is a Spark-compat win; cherry-pick from LakeSail v0.6.5 (same fork lineage) or reimplement to our bar.
+
+**AUDIT 2026-07-06 (codebase grep):** MOST already adopted via fork lineage + our work — PIVOT, lambda higher-order (filter/transform/exists/forall/array_sort), window_time, to_xml, schema_of_json, percentile_disc, HLL/theta sketches, variant (base), Delta identity cols/check constraints/default values, to_csv, try_parse_json, file write modes, DF54/Arrow58.3. **REMAINING GAPS (5): (1) lambda AGGREGATES (`reduce`/`aggregate` higher-order agg); (2) catalog-managed Delta/Iceberg tables + catalog exec context (charter unified-catalog — HIGH value); (3) Variant SHREDDING for Delta/Iceberg; (4) `grouping_id` aggregate (GROUPING SETS/CUBE/ROLLUP); (5) `timestampadd` fn.** Cherry-pick from LakeSail v0.6.5. Priority: (2) catalog > (1) lambda-agg > (4) grouping_id > (3) shredding > (5) timestampadd. NOTE the bigger "beat Flink" lever is the DF54 RepartitionExec batch-coalesce ported into StreamExchangeExec (realtime throughput gap), independent of these.
 - **SQL:** `PIVOT` operator (rewrite → aggregate with per-value FILTER); **named window clauses**; lambda
   expressions `filter`/`transform`/`exists`/`forall`/`array_sort` + **lambda aggregates** (big Spark
   higher-order-function gap); `window_time` + more window fns.
