@@ -71,6 +71,15 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
 - **Anti-scope:** the raw string IS still produced when a query projects `value` itself (rule only
   fires when `from_json` is the sole consumer). No change to key/topic/offset/timestamp cols or to
   barrier/watermark emission (parse happens strictly inside batch build, before the FlowEvent adapter).
+- **⚠️ SCHEMA-CONTRACT COUPLING (design finding 2026-07-06, Step 1 done):** the fused output schema is
+  defined by the *removed* projection — `value:Binary` becomes a single `parsed:Struct(fields)` column
+  named by that projection's output alias, alongside whichever kafka cols the query still keeps. So
+  `parse_value_as` must carry `(output_field_name, Fields, SparkFromJsonOptions)` and the reader must
+  recompute `projected_schema`/`output_schema` (swap value→struct) — and that computed schema MUST
+  equal what Step 4's rule expects after dropping the projection. **⇒ Steps 2+3+4 are ONE atomic unit
+  (co-design the schema contract; the reader can only be integration-tested via T2 kind once Step 4
+  fires the path). Do not land Step 2's field in isolation.** Step 1 (`parse_json_binary_to_struct`,
+  DONE 7898f8d3) is the isolated, unit-tested foundation the atomic unit builds on.
 - **DoD:** WM_PROF `source_read + from_json` combined CPU **< Flink's equivalent**; EKS 100M **≤1.0×
   Flink ev/s** (the beat); RSS ≤ Flink; correctness_gate 6/6 + inc_ckpt dup=0 **UNCHANGED**; new
   Binary-parse parity test + codec round-trip test green; T2 kind streaming/kafka-sink exact.
