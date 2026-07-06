@@ -1101,6 +1101,12 @@ impl ExecutionPlan for KafkaSourceExec {
                 // and re-activate on the next data. Exact — never mis-marks a slow-but-behind partition.
                 let idle_src = format!("kafka:{inst}");
                 let mut idle_signaled = false;
+                // Source-read CPU attribution (VAJRA_WM_PROF): the continuous path is event-driven, so
+                // we accumulate the per-record append + batch-build time and flush to SOURCE_READ_NS at
+                // each emit (the bounded path times the whole read loop; this is the streaming analog).
+                // Without this the continuous-mode profile shows source_read=0, hiding the read cost.
+                let prof = sail_common_datafusion::streaming::event::encoding::wm_prof_enabled();
+                let mut read_acc: u64 = 0;
                 loop {
                     tokio::select! {
                         biased;
@@ -1109,11 +1115,22 @@ impl ExecutionPlan for KafkaSourceExec {
                         _ = timer.tick() => {
                             if builders.len() > 0 {
                                 let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
+                                let _f = prof.then(std::time::Instant::now);
                                 match b.finish_projected(&full_schema, &projection) {
-                                    Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
+                                    Ok(batch) => {
+                                        if let Some(t) = _f { read_acc += t.elapsed().as_nanos() as u64; }
+                                        yield Ok(FlowEvent::append_only_data(batch));
+                                    }
                                     Err(e) => { yield Err(e); return; }
                                 }
                                 batch_bytes = 0;
+                            }
+                            // Flush accumulated source-read CPU (append + batch-build) once per epoch.
+                            if prof && read_acc > 0 {
+                                sail_common_datafusion::streaming::event::encoding::prof_add(
+                                    &sail_common_datafusion::streaming::event::encoding::SOURCE_READ_NS,
+                                    std::mem::take(&mut read_acc),
+                                );
                             }
                             write_staged_epoch_offsets(&ck, inst, epoch, &next).await;
                             yield Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id: epoch }));
@@ -1150,7 +1167,11 @@ impl ExecutionPlan for KafkaSourceExec {
                                         + topic.len();
                                     next.insert((topic.to_string(), part), off + 1);
                                     // Append borrowed bytes straight into the Arrow buffers (no to_vec).
+                                    let _a = prof.then(std::time::Instant::now);
                                     builders.append(key, value, topic, part, off, ts_ms, ts_type);
+                                    if let Some(t) = _a {
+                                        read_acc += t.elapsed().as_nanos() as u64;
+                                    }
                                     // Flush on row OR byte cap for throughput (epoch still delimits
                                     // the commit; mid-epoch batches just carry data forward). Byte cap
                                     // keeps Utf8/Binary columns under Arrow's i32 offset limit.
