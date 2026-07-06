@@ -351,6 +351,26 @@ impl ColBuilder {
     }
 }
 
+/// VAJ-T7b — parse one JSON document with simd-json's vectorized tokenizer into the SAME
+/// [`serde_json::Value`] consumed by [`ColBuilder::append`]/[`json_value_to_scalar`], via
+/// simd-json's default `serde_impl` bridge. Downstream conversion is byte-identical to the
+/// previous `serde_json::from_str` path (the parity tests are unchanged); only the tokenize
+/// stage is SIMD. This is the shared parse routine VAJ-T7 (source-fusion) calls from the
+/// Kafka reader.
+///
+/// `scratch` is a caller-owned buffer reused across the row loop: simd-json tokenizes in
+/// place (mutating the bytes), so we copy each row's bytes in; reuse avoids a per-row alloc.
+/// simd-json handles SIMD padding internally for the standard `from_slice` entry point.
+///
+/// Malformed input → `Err`, which every call-site treats exactly as before (PERMISSIVE
+/// null-struct / wrapped-null), preserving Spark JSON semantics.
+#[inline]
+fn simd_parse_value(json: &str, scratch: &mut Vec<u8>) -> Result<Value, simd_json::Error> {
+    scratch.clear();
+    scratch.extend_from_slice(json.as_bytes());
+    simd_json::serde::from_slice::<Value>(scratch.as_mut_slice())
+}
+
 fn parse_json_to_struct(
     rows: &StringArray,
     fields: &Fields,
@@ -363,6 +383,7 @@ fn parse_json_to_struct(
         .map(|f| ColBuilder::new(f.data_type(), num_rows))
         .collect();
     let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
+    let mut scratch: Vec<u8> = Vec::new();
 
     for i in 0..num_rows {
         if rows.is_null(i) {
@@ -371,7 +392,7 @@ fn parse_json_to_struct(
             }
             validity.push(false);
         } else {
-            match serde_json::from_str::<Value>(rows.value(i)) {
+            match simd_parse_value(rows.value(i), &mut scratch) {
                 Ok(Value::Object(obj)) => {
                     for (b, field) in builders.iter_mut().zip(fields.iter()) {
                         b.append(obj.get(field.name()), options, session_timezone)?;
@@ -412,6 +433,7 @@ fn parse_json_to_list(
     let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
     let mut current_offset: i32 = 0;
     offsets.push(current_offset);
+    let mut scratch: Vec<u8> = Vec::new();
 
     for i in 0..num_rows {
         if rows.is_null(i) {
@@ -419,7 +441,7 @@ fn parse_json_to_list(
             validity.push(false);
         } else {
             let json_str = rows.value(i);
-            match serde_json::from_str::<Value>(json_str) {
+            match simd_parse_value(json_str, &mut scratch) {
                 Ok(Value::Array(arr)) => {
                     for item in &arr {
                         all_values.push(json_value_to_scalar(
@@ -490,6 +512,7 @@ fn parse_json_to_map(
     let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
     let mut current_offset: i32 = 0;
     offsets.push(current_offset);
+    let mut scratch: Vec<u8> = Vec::new();
 
     for i in 0..num_rows {
         if rows.is_null(i) {
@@ -497,7 +520,7 @@ fn parse_json_to_map(
             validity.push(false);
         } else {
             let json_str = rows.value(i);
-            match serde_json::from_str::<Value>(json_str) {
+            match simd_parse_value(json_str, &mut scratch) {
                 Ok(Value::Object(obj)) => {
                     for (k, v) in &obj {
                         all_keys.push(json_value_to_scalar(

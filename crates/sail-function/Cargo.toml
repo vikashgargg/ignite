@@ -42,5 +42,6 @@ parquet-variant-json = { workspace = true }
 jiter = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
+simd-json = { workspace = true }
 xee-xpath = { workspace = true }
 xot = { workspace = true }
