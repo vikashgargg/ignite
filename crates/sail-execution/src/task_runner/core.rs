@@ -4,7 +4,7 @@ use std::sync::Arc;
 use datafusion::catalog::memory::DataSourceExec;
 use datafusion::common::internal_err;
 use datafusion::common::tree_node::{Transformed, TransformedResult, TreeNode};
-use datafusion::datasource::physical_plan::{FileScanConfigBuilder, ParquetSource};
+use datafusion::datasource::physical_plan::{FileScanConfig, FileScanConfigBuilder, ParquetSource};
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
@@ -117,17 +117,29 @@ impl TaskRunner {
         plan: Arc<dyn ExecutionPlan>,
     ) -> ExecutionResult<Arc<dyn ExecutionPlan>> {
         let result = plan.transform(|node| {
-            if let Some(ds) = node.downcast_ref::<DataSourceExec>() {
-                if let Some((base_config, _parquet)) = ds.downcast_to_file_source::<ParquetSource>()
-                {
-                    let adapter_factory = Arc::new(DeltaPhysicalExprAdapterFactory {});
-                    let builder = FileScanConfigBuilder::from(base_config.clone())
-                        .with_expr_adapter(Some(adapter_factory));
-                    let new_exec = DataSourceExec::from_data_source(builder.build());
-                    return Ok(Transformed::yes(new_exec as Arc<dyn ExecutionPlan>));
-                }
+            let Some(ds) = node.downcast_ref::<DataSourceExec>() else {
+                return Ok(Transformed::no(node));
+            };
+            let Some(config) = ds.data_source().downcast_ref::<FileScanConfig>() else {
+                return Ok(Transformed::no(node));
+            };
+            // Distributed execution runs each output partition as an ISOLATED task. DataFusion 54's
+            // morsel-driven file scan pools every file into a `SharedWorkSource` across sibling
+            // partition streams so in-process siblings steal work and read each file exactly once.
+            // A distributed task has no in-process siblings, so it would drain the whole pool and
+            // re-read every file once per partition (N file groups -> N× duplication). Marking the
+            // scan `partitioned_by_file_group` disables the shared work source (see
+            // `FileScanConfig::create_sibling_state`), so each partition reads ONLY its own file
+            // group via `WorkSource::Local` — which is exactly the fixed one-group-per-task model
+            // the scheduler already assigns.
+            let mut builder =
+                FileScanConfigBuilder::from(config.clone()).with_partitioned_by_file_group(true);
+            // Parquet additionally gets the Delta schema-evolution expr adapter.
+            if ds.downcast_to_file_source::<ParquetSource>().is_some() {
+                builder = builder.with_expr_adapter(Some(Arc::new(DeltaPhysicalExprAdapterFactory {})));
             }
-            Ok(Transformed::no(node))
+            let new_exec = DataSourceExec::from_data_source(builder.build());
+            Ok(Transformed::yes(new_exec as Arc<dyn ExecutionPlan>))
         });
         Ok(result.data()?)
     }

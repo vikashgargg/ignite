@@ -348,3 +348,28 @@ stealing; the goal is the **union of the best**, built on our Arrow/DataFusion n
 workloads) before claiming "better than Flink/Spark", path-dependence flagged. The win is the **union** —
 Flink's correctness + RW's decoupled state/MV incrementalism + Polars' vectorized single-node speed +
 Vajra's no-JVM Arrow core — that no single incumbent has all of.
+
+---
+
+## DataFusion 54 — morsel-driven file scan vs distributed execution (CRITICAL, 2026-07-06)
+
+**Fact (from `datafusion-datasource-54.0.0` source):** DF54 rewrote file scans to be morsel-driven
+with in-process sibling **work-stealing**. `DataSourceExec::execute(partition)` lazily builds ONE
+`shared_state = data_source.create_sibling_state()` and passes it to every partition stream via
+`OpenArgs::with_shared_state`. `FileScanConfig::create_sibling_state()` returns
+`Some(SharedWorkSource::from_config(self))` — a pool of **all files across all file groups** — UNLESS
+`self.preserve_order || self.partitioned_by_file_group`, in which case it returns `None` and each
+partition uses `WorkSource::Local(file_groups[partition])`.
+
+**Implication for a distributed engine (Vajra/Ballista-style):** when each output partition runs as an
+ISOLATED task (separate process, no in-process siblings), each task builds its own pool of ALL files
+and, with nobody to steal from, drains the whole pool → **every file is read once per partition → N×
+row duplication** for N file groups. Single-process (`--mode local`) is correct because real siblings
+steal; 1 file group is coincidentally correct. This silently breaks distributed correctness (wrong
+counts / duplicated rows) with NO error, on ANY file format, and is invisible to single-node tests.
+
+**Prod-grade fix:** in the per-task plan rewrite (worker/task runner), rebuild each `FileScanConfig`
+scan with `FileScanConfigBuilder::from(cfg).with_partitioned_by_file_group(true)`. This is DF54's own
+opt-out: it disables the shared work source so each partition reads only its assigned file group —
+exactly the fixed one-group-per-task model a distributed scheduler already assigns. (Vajra:
+`sail-execution/src/task_runner/core.rs::rewrite_parquet_adapters`.)
