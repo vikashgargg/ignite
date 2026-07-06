@@ -150,6 +150,30 @@ KafkaSourceExec` — and the matcher now targets it exactly (identity-map-except
 scheduler/network, not just local process. (Throughput on kind is not representative; the
 source_read-drop measurement is deferred to T3 EKS where it is meaningful vs Flink.)
 
+**🔴 T3 EKS RESULT (2026-07-07, 100M, c7g.4xlarge, vs Flink 1.19) — T7 is CORRECT but NOT a throughput
+beat (HONEST negative result):**
+| Engine | ev/s | RSS |
+|---|---|---|
+| Flink 1.19 | **5.580M** | 8.57 GiB |
+| Vajra unfused (baseline) | 5.255M | — |
+| Vajra **fused (T7)** ×3 | 5.24 / 5.24 / 5.40M | — |
+Fusion FIRED (verified `T7FUSE=1` + `fused count:1` + plan dump), EO-safe, counts exact — but
+throughput is **unchanged vs unfused**, still ~1.05× behind Flink. **Do NOT flip default-on** (no
+measured perf justification; keep opt-in).
+- **Root-cause of the null result (mechanistic):** in the *unfused* plan `from_json` already runs in
+  the projection BEFORE the exchange, so the raw `value` column was never shuffled. T7 only changes
+  WHERE the identical simd-json parse happens and saves one in-memory column materialize — NOT the
+  dominant `source_read` cost, which is the **Kafka network read + Arrow decode of the value bytes**
+  (unavoidable regardless of parse placement). ⇒ the earlier "source_read 100.6s = the lever"
+  attribution conflated the Kafka read with parse-placement. **The real levers are the Kafka read
+  path + the exchange, not where from_json sits.** Redirect: VAJ-BF2 (Arrow Flight zero-copy
+  exchange) + a Kafka-read/decode profile become the priority; T7 stays as a correct, low-risk,
+  opt-in mechanism that may help memory (raw col not materialized) — re-measure RSS specifically.
+- **Methodology bug caught (fixed forward):** the head-to-head's `kk set env` AFTER deploy triggered a
+  maxSurge=1 rollout deadlock on the 16-vCPU node → the FIRST run silently used the UNFUSED old pod
+  (fused count:0). Caught it, patched `maxSurge=0` + forced the fused pod, re-ran (fused count:1).
+  Fix forward: set VAJRA_T7_FUSE in the deploy YAML env (not post-hoc set-env), or maxSurge=0 default.
+
 **Remaining validation:**
 2. **Validation runbook (T1→T2→T3):**
    - **T1 local:** `inc_ckpt_gate.sh` with `VAJRA_T7_FUSE=1` → dup=0 + correct counts (EO across
