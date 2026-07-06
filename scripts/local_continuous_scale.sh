@@ -24,7 +24,7 @@ BOOT=localhost:9092 TOPIC=$TOPIC N=$N K=$K EPMS=$EPMS NP=$NP KPOD="$KPOD" CLOSER
 [ "${PIPESTATUS[0]}" = "0" ] || { echo "ABORT: producer self-check failed (no valid data to test)"; exit 3; }
 
 start_srv() {
-  RUST_LOG=warn "$BIN" server --ip 127.0.0.1 --port "$PORT" --mode local-cluster --workers "$WORKERS" >/tmp/contscale_server.log 2>&1 &
+  RUST_LOG="${RUST_LOG:-warn}" "$BIN" server --ip 127.0.0.1 --port "$PORT" --mode local-cluster --workers "$WORKERS" >/tmp/contscale_server.log 2>&1 &
   SRV=$!; for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done
 }
 run_query() { # background

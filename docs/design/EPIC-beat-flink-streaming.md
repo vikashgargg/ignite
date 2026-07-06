@@ -117,12 +117,37 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
   Flink KafkaSink batching + librdkafka producer batching.
 - **DoD:** clean realtime Kafka→Kafka p50/throughput re-measured vs Flink on EKS; document the honest number.
 
-### VAJ-BF2 (stretch — "beyond matching") — Arrow Flight zero-copy shuffle
-- **Rank:** the distributed-shuffle ⬜ gap (matrix: "Flight zero-copy").
-- **Design:** Replace the in-memory stream shuffle with Arrow Flight `DoGet`/`DoPut` (Ballista 53.0.0
-  model) between stages — zero-copy columnar exchange, disaggregated. Marker-aware; receiver MIN-merges
-  watermarks. This is where Vajra can EXCEED Flink's network stack (no serialization, no JVM copies).
-- **DoD:** EKS multi-node windowed-agg throughput ≥ Flink at ≥16-part; EO preserved; documented.
+### VAJ-BF2 — multi-node streaming + Arrow Flight zero-copy shuffle *(THE structural beat; chosen 2026-07-07)*
+- **Why this is the lever (MEASURED, not assumed):** single-node windowed-agg is **parse-bound PARITY**
+  — WM_PROF ranks `from_json 150s` (#1, intrinsic JSON tokenize Flink's Jackson also pays) > `exchange
+  95s` (in-memory) > `finalize 31s`; window is `STARVED(upstream)`. No single-node lever beats Flink
+  there (Vajra ~1.05× behind on identical work). Vajra's **structural** edge is the no-JVM Arrow
+  zero-copy NETWORK shuffle vs Flink's JVM-serialized network stack — but that only shows **multi-node**.
+- **⚠️ SCOPING (code-verified 2026-07-07): BF2 is GREENFIELD, not an optimization.** The streaming path
+  is **single-process today**: `StreamExchangeExec` moves data via in-memory `tokio::mpsc` channels
+  (`exchange.rs:26`), and the deploy is ONE pod (`--mode local-cluster --workers 4`, `replicas:1`). There
+  is NO cross-node streaming shuffle and Arrow Flight is NOT in the streaming path (it IS in the *batch*
+  ShuffleWrite/Read path — reuse that transport). So BF2 must ADD distributed streaming.
+- **Design (architect-first; grounded in REFERENCES §4 Ballista 53.0.0 Flight + §2d + Flink FLIP-8):**
+  1. Distributed streaming topology: N worker pods (not local-cluster-in-one-pod); the driver assigns
+     source/exchange/window stages across pods.
+  2. `StreamExchangeExec` network transport: replace/augment mpsc with **Arrow Flight `DoGet`/`DoPut`
+     (or the existing batch Flight transport)** for cross-pod sub-channels; zero-copy Arrow IPC, no
+     JVM copy. Same-pod links stay mpsc (don't pay network for co-located).
+  3. Marker/watermark alignment ACROSS the network: the receiver MIN-merges watermarks + buffers
+     `Checkpoint{e}` barriers across network sub-channels (extend the existing aligned-barrier logic).
+  4. **Credit-based backpressure across the network** (Flink FLIP-8) — bound in-flight Flight batches
+     (the mpsc `channel_capacity` is the local analog; make it a network credit).
+  5. EO preserved across nodes (barrier-aligned commit already exists — verify across the network cut).
+- **Measure-first PREREQ:** build a MULTI-NODE benchmark (≥2 compute nodes, 16-part) + get the CLEAN
+  per-stage profile WITH source_read instrumented (**note: `SOURCE_READ_NS` prof_add exists only in the
+  BOUNDED read path `reader.rs:886`, NOT the continuous path — wire it there first so the distributed
+  profile is complete**). Rank exchange-network vs source_read vs parse BEFORE committing the transport.
+- **DoD:** EKS **multi-node** (≥2 compute) windowed-agg throughput **> Flink** at ≥16-part; EO preserved
+  (dup=0 across crash + across the network cut); per-stage profile shows the network exchange < Flink's;
+  T1 (local multi-process) → T2 kind (multi-pod) → T3 EKS multi-node. Claim only the measured number.
+- **HONEST scope:** this is a multi-session, next-generation capability (distributed streaming execution
+  + network shuffle + cross-node EO), NOT a patch. Architect-first each sub-part from the cited sources.
 
 ### VAJ-BF3 (stretch) — concurrent stage scheduling + credit-based flow control w/ metrics
 - Pipeline stages instead of block (Spark 4.1 RT-mode shape); explicit credit backpressure + Prometheus
