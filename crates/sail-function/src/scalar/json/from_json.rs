@@ -45,11 +45,14 @@ pub struct SparkFromJson {
     signature: Signature,
 }
 
-/// Configuration options for the `from_json` function.
-#[derive(Debug)]
-struct SparkFromJsonOptions {
-    timestamp_format: String,
-    date_format: String,
+/// Configuration options for the `from_json` function. Public so the VAJ-T7 source-fusion path
+/// (Kafka reader + codec round-trip) can carry the same timestamp/date formats into the
+/// in-source `parse_json_binary_to_struct` call. Fields are chrono strftime patterns already
+/// translated from Spark format strings.
+#[derive(Debug, Clone)]
+pub struct SparkFromJsonOptions {
+    pub timestamp_format: String,
+    pub date_format: String,
 }
 
 impl SparkFromJsonOptions {
@@ -365,10 +368,48 @@ impl ColBuilder {
 /// Malformed input → `Err`, which every call-site treats exactly as before (PERMISSIVE
 /// null-struct / wrapped-null), preserving Spark JSON semantics.
 #[inline]
-fn simd_parse_value(json: &str, scratch: &mut Vec<u8>) -> Result<Value, simd_json::Error> {
+fn simd_parse_value(json: &[u8], scratch: &mut Vec<u8>) -> Result<Value, simd_json::Error> {
     scratch.clear();
-    scratch.extend_from_slice(json.as_bytes());
+    scratch.extend_from_slice(json);
     simd_json::serde::from_slice::<Value>(scratch.as_mut_slice())
+}
+
+/// Append one JSON document's fields (or nulls) to the per-column `builders`, returning the
+/// struct-level validity bit. `payload = None` means a SQL-null input row (validity false);
+/// `Some(bytes)` parses and, on parse error or non-object, appends null fields with validity
+/// true (PERMISSIVE mode). This is the SINGLE source of truth for struct-parse semantics —
+/// both the Utf8 (`parse_json_to_struct`) and Binary (`parse_json_binary_to_struct`, the
+/// VAJ-T7 source-fusion entry) paths call it, so they cannot drift.
+#[inline]
+fn append_struct_row(
+    payload: Option<&[u8]>,
+    builders: &mut [ColBuilder],
+    fields: &Fields,
+    scratch: &mut Vec<u8>,
+    options: &SparkFromJsonOptions,
+    session_timezone: &str,
+) -> Result<bool> {
+    let (obj_opt, validity) = match payload {
+        None => (None, false),
+        Some(bytes) => match simd_parse_value(bytes, scratch) {
+            Ok(Value::Object(obj)) => (Some(obj), true),
+            // Parse error or non-object → struct with null fields (PERMISSIVE mode).
+            _ => (None, true),
+        },
+    };
+    match obj_opt {
+        Some(obj) => {
+            for (b, field) in builders.iter_mut().zip(fields.iter()) {
+                b.append(obj.get(field.name()), options, session_timezone)?;
+            }
+        }
+        None => {
+            for b in builders.iter_mut() {
+                b.append(None, options, session_timezone)?;
+            }
+        }
+    }
+    Ok(validity)
 }
 
 fn parse_json_to_struct(
@@ -386,28 +427,16 @@ fn parse_json_to_struct(
     let mut scratch: Vec<u8> = Vec::new();
 
     for i in 0..num_rows {
-        if rows.is_null(i) {
-            for b in builders.iter_mut() {
-                b.append(None, options, session_timezone)?;
-            }
-            validity.push(false);
-        } else {
-            match simd_parse_value(rows.value(i), &mut scratch) {
-                Ok(Value::Object(obj)) => {
-                    for (b, field) in builders.iter_mut().zip(fields.iter()) {
-                        b.append(obj.get(field.name()), options, session_timezone)?;
-                    }
-                    validity.push(true);
-                }
-                _ => {
-                    // Parse error or non-object → struct with null fields (PERMISSIVE mode)
-                    for b in builders.iter_mut() {
-                        b.append(None, options, session_timezone)?;
-                    }
-                    validity.push(true);
-                }
-            }
-        }
+        let payload = (!rows.is_null(i)).then(|| rows.value(i).as_bytes());
+        let bit = append_struct_row(
+            payload,
+            &mut builders,
+            fields,
+            &mut scratch,
+            options,
+            session_timezone,
+        )?;
+        validity.push(bit);
     }
 
     let children_arrays: Vec<ArrayRef> =
@@ -418,6 +447,51 @@ fn parse_json_to_struct(
         children_arrays,
         Some(validity.into()),
     )))
+}
+
+/// VAJ-T7 Step 1 — parse a Binary JSON column directly into a `StructArray` of `fields`, the
+/// in-source counterpart of `from_json(CAST(value AS string), schema)`. Shares
+/// [`append_struct_row`] with the Utf8 path, so semantics are byte-identical by construction
+/// (permissive: SQL-null row → null-field struct with validity false; parse error / non-object
+/// → null-field struct with validity true). Kafka payloads are raw bytes, so this skips the
+/// intermediate `Binary → Utf8` cast + column materialization entirely (REFERENCES §6:
+/// columnar-end-to-end is the beat, not the parser). simd-json validates UTF-8 during
+/// tokenization, matching Spark's permissive handling of invalid encodings (→ null struct).
+pub fn parse_json_binary_to_struct(
+    values: &BinaryArray,
+    fields: &Fields,
+    options: &SparkFromJsonOptions,
+    session_timezone: &str,
+) -> Result<StructArray> {
+    let num_rows = values.len();
+    let mut builders: Vec<ColBuilder> = fields
+        .iter()
+        .map(|f| ColBuilder::new(f.data_type(), num_rows))
+        .collect();
+    let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
+    let mut scratch: Vec<u8> = Vec::new();
+
+    for i in 0..num_rows {
+        let payload = (!values.is_null(i)).then(|| values.value(i));
+        let bit = append_struct_row(
+            payload,
+            &mut builders,
+            fields,
+            &mut scratch,
+            options,
+            session_timezone,
+        )?;
+        validity.push(bit);
+    }
+
+    let children_arrays: Vec<ArrayRef> =
+        builders.into_iter().map(|b| b.finish()).collect::<Result<_>>()?;
+
+    Ok(StructArray::new(
+        fields.clone(),
+        children_arrays,
+        Some(validity.into()),
+    ))
 }
 
 /// Parse JSON strings into a ListArray.
@@ -441,7 +515,7 @@ fn parse_json_to_list(
             validity.push(false);
         } else {
             let json_str = rows.value(i);
-            match simd_parse_value(json_str, &mut scratch) {
+            match simd_parse_value(json_str.as_bytes(), &mut scratch) {
                 Ok(Value::Array(arr)) => {
                     for item in &arr {
                         all_values.push(json_value_to_scalar(
@@ -520,7 +594,7 @@ fn parse_json_to_map(
             validity.push(false);
         } else {
             let json_str = rows.value(i);
-            match simd_parse_value(json_str, &mut scratch) {
+            match simd_parse_value(json_str.as_bytes(), &mut scratch) {
                 Ok(Value::Object(obj)) => {
                     for (k, v) in &obj {
                         all_keys.push(json_value_to_scalar(
@@ -1322,6 +1396,40 @@ mod tests {
     fn test_parse_simple_spark_json_schema_string() -> Result<()> {
         let data_type = parse_schema_to_data_type(r#""integer""#, "UTC")?;
         assert_eq!(data_type, DataType::Int32);
+        Ok(())
+    }
+
+    /// VAJ-T7 Step 1 — the Binary in-source parse (`parse_json_binary_to_struct`) MUST be
+    /// byte-identical to the Utf8 `from_json` path (`parse_json_to_struct`) across every Spark
+    /// permissive case: object, missing field (→ null), malformed (→ null struct, valid),
+    /// SQL-null row (→ invalid), non-object (→ null struct, valid), and i64 max boundary.
+    #[test]
+    fn test_parse_json_binary_matches_utf8_path() -> Result<()> {
+        let fields = Fields::from(vec![
+            Field::new("a", DataType::Int64, true),
+            Field::new("b", DataType::Utf8, true),
+            Field::new("c", DataType::Boolean, true),
+        ]);
+        let docs: Vec<Option<&str>> = vec![
+            Some(r#"{"a":1,"b":"x","c":true}"#),
+            Some(r#"{"a":2,"c":false}"#),
+            Some("not json"),
+            None,
+            Some("[1,2,3]"),
+            Some(r#"{"a":9223372036854775807,"b":"y","c":false}"#),
+        ];
+        let utf8 = StringArray::from(docs.clone());
+        let bin = BinaryArray::from_iter(docs.iter().map(|o| o.map(str::as_bytes)));
+        let options = SparkFromJsonOptions::default();
+
+        let utf8_out = parse_json_to_struct(&utf8, &fields, &options, "UTC")?;
+        let utf8_struct = utf8_out
+            .as_any()
+            .downcast_ref::<StructArray>()
+            .ok_or_else(|| DataFusionError::Internal("expected StructArray".into()))?;
+        let bin_out = parse_json_binary_to_struct(&bin, &fields, &options, "UTC")?;
+
+        assert_eq!(&bin_out, utf8_struct);
         Ok(())
     }
 
