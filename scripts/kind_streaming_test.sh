@@ -41,6 +41,10 @@ sed -e "s#__ECR__/vajra:eo-multipart#vajra:$TAG#g" -e 's/imagePullPolicy: Always
 # ensure the loaded local image is used (never pulled) + bounded-complete flush (Flink-parity)
 kk patch deploy vajra-stream --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null 2>&1
 [ "${COMPLETE:-1}" = "1" ] && kk set env deploy/vajra-stream VAJRA_COMPLETE_ON_END=1 >/dev/null 2>&1
+# VAJ-T7 source-fusion opt-in (T2 validation): parse `value`->struct in-source, elide raw value col.
+# Also raise the task-runner log so the "source-fusion: fused" line is greppable from pod logs.
+[ "${VAJRA_T7_FUSE:-0}" = "1" ] && kk set env deploy/vajra-stream \
+  VAJRA_T7_FUSE=1 RUST_LOG="warn,sail_execution::task_runner=debug" >/dev/null 2>&1
 kk wait --for=condition=available --timeout=300s deployment/vajra-stream
 scale_kind < k8s/stream/vajra-client.yaml | kk apply -f -
 kk wait --for=condition=ready --timeout=300s pod/vajra-client

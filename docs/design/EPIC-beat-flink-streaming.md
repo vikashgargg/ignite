@@ -144,6 +144,12 @@ per-key window counts). The T1 dump pinned the real plan shape —
 KafkaSourceExec` — and the matcher now targets it exactly (identity-map-except-value, unwrap the
 `CooperativeExec`). Next: T2 kind (rule fires on real k8s + WM_PROF source_read drop) → T3 EKS beat.
 
+**✅ T2 KIND GREEN (2026-07-07):** `TAG=t7fuse VAJRA_T7_FUSE=1 kind_streaming_test.sh` on real k8s
+(control-plane + kafka + compute nodes) → `T2_COMPLETENESS n_windows=2 sum_count=2000000 ... PASS`
++ `source-fusion: fused` FIRES in the compute pod logs. Confirms the rule matches on a real k8s
+scheduler/network, not just local process. (Throughput on kind is not representative; the
+source_read-drop measurement is deferred to T3 EKS where it is meaningful vs Flink.)
+
 **Remaining validation:**
 2. **Validation runbook (T1→T2→T3):**
    - **T1 local:** `inc_ckpt_gate.sh` with `VAJRA_T7_FUSE=1` → dup=0 + correct counts (EO across
