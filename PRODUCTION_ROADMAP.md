@@ -9,8 +9,8 @@
 > **Current state (2026-07-04):** streaming milestone landed on `main` — crash-EO exactly-once (EKS-confirmed),
 > final-window completeness (`VAJRA_COMPLETE_ON_END`, Flink `scan.bounded.mode` parity), and a **parallel Kafka
 > sink** (fixed a 15/16 data-loss bug + ~300× throughput; 100M/100M @ 1.67M msg/s on EKS). The **3-tier SDLC**
-> (T1 local → T2 `kind` → T3 EKS) + [kind tier](k8s/kind/) are established. Versions: DataFusion 53.1.0,
-> Arrow 58.1.0 (upgrade to DF 54.0 / Arrow 58.3 planned, ref LakeSail v0.6.5).
+> (T1 local → T2 `kind` → T3 EKS) + [kind tier](k8s/kind/) are established. Versions: DataFusion 54.0.0 (upgraded 2026-07-06),
+> Arrow 58.3.0 (DF54 upgrade COMPLETE + T2-kind validated 2026-07-06; morsel-scan distributed fix).
 
 ---
 

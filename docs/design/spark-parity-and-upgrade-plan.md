@@ -6,7 +6,7 @@ architect-first, T1→T2→T3 ([three-tier-sdlc.md](three-tier-sdlc.md)); update
 
 ## 1. Current state (2026-07-04)
 
-- **Versions:** DataFusion **53.1.0**, Arrow **58.1.0** (`Cargo.toml`). (Note: Arrow-rs is at 58.x — "Arrow
+- **Versions:** DataFusion **54.0.0**, Arrow **58.3.0** (`Cargo.toml`) — upgraded 2026-07-06, T2-validated. (Note: Arrow-rs is at 58.x — "Arrow
   25" was a version mix-up; the real target is 58.3.0.)
 - **Streaming (just landed, merged to main cfae68f1):** crash-EO exactly-once (aligned barriers + exact
   PartitionEOF idle + emit floor) EKS-confirmed; final-window completeness (opt-in `VAJRA_COMPLETE_ON_END`,
@@ -102,10 +102,16 @@ inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downca
   (`parse_protobuf_file_scan_config` / `parse_physical_sort_exprs` / `parse_protobuf_partitioning`); every
   serialize (`serialize_file_scan_config` / `serialize_physical_sort_exprs`) now takes `(items, codec,
   proto_converter)` — re-threaded `self` (the codec) at both sides.
-- **STILL TODO before merge:** `cargo build --all-targets` (test/bench `.as_any()`, e.g. codec round-trip tests) →
-  `clippy --all-targets -D warnings` green → **NO-behavior-change gates: correctness_gate 6/6 + inc_ckpt crash
-  dup=0 + TPC-H/TPC-DS scorecard unchanged** → T2 kind + T3 EKS streaming smoke → all-in-one DF54 metric-gain run
-  (RepartitionExec batch-coalesce is the real streaming-throughput lever).
+- **DONE + VALIDATED (2026-07-06):** `clippy --all-targets -D warnings` green; `cargo test --workspace` **860/0**;
+  gold data byte-identical to DF53; `inc_ckpt` crash-EO **dup=0 PASS**. **CRITICAL DF54 BUG root-caused + fixed:**
+  the morsel-driven scan pools all files into a shared work-source for in-process sibling work-stealing, so an
+  isolated distributed task drained the whole pool → **every file read once per partition (silent N× row
+  duplication)**. Fix = per-task plan rewrite sets `partitioned_by_file_group=true` (DF54's own opt-out →
+  `WorkSource::Local(file_groups[partition])`); see `docs/REFERENCES.md`. **T2 kind (real k8s, image built on a
+  throwaway c7g EC2 → ECR, AWS $0): streaming n_windows=5 / sum=5M EXACT + Kafka-sink 2M/2M delivered.** Adopted
+  DF54's new optimizer rules (WindowTopN/TopKRepartition/HashJoinBuffering) + coercion improvements. Merged to
+  `main`. FOLLOW-UP: all-in-one DF54 metric-gain run (RepartitionExec batch-coalesce, sort-merge join, morsel
+  scan, foldhash) on EC2/EKS — local release benchmark blocked by this laptop's LTO swap-thrashing.
 
 ## 3. LakeSail v0.6.5 features to adopt (mapped to Spark parity)
 

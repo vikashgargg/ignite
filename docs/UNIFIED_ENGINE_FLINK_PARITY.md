@@ -160,7 +160,7 @@ After each P0: a measured, fair head-to-head vs Flink (same input, no workaround
 
 ## 5. Dependency edge — DataFusion 54.0.0 upgrade (own sprint)
 
-Vajra is on **DataFusion 53.1.0 / Arrow 58.1.0**. DataFusion **54.0.0** (released 2026-06-12) brings
+Vajra is on **DataFusion 54.0.0 / Arrow 58.3.0** (upgraded 2026-07-06). DataFusion **54.0.0** (released 2026-06-12) brings
 engine-core wins that flow straight into Vajra's batch *and* streaming without us writing them — the
 "leaner substrate" thesis paying off via the upstream:
 - **Repartition coalesce → up to 50% faster on skew** — directly speeds Vajra's keyed
