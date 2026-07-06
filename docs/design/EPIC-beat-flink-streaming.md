@@ -137,11 +137,14 @@ clean + codec round-trip tested. NOT yet behaviourally validated (needs a runnin
   `rewrite_source_fusion` per-worker rule in `task_runner/core.rs` (matches
   `ProjectionExec[from_json(value)]` over `KafkaSourceExec`, conservative-bail).
 
-**⚠️ Open validation (the plan-shape match is UNVERIFIED — I could not dump a plan locally):**
-1. **Does the rule fire?** The worker logs already dump the stage plan
-   (`DisplayableExecutionPlan`); with `VAJRA_T7_FUSE=1` grep for `VAJ-T7 source-fusion: fused`.
-   If it does NOT fire, the dump shows the real shape (e.g. an intermediate node between the
-   projection and the source) → refine the matcher. Correctness is safe either way (bail = no change).
+**✅ T1 LOCAL GREEN (2026-07-07, a0525f0c):** `inc_ckpt_gate.sh` with `VAJRA_T7_FUSE=1` →
+`VAJ-T7 source-fusion: fused from_json -> '#7'` FIRES + `exit=0` (dup=0 EO across kill-9, exact
+per-key window counts). The T1 dump pinned the real plan shape —
+`ProjectionExec[_marker,_retracted,from_json(value@2) as #7,partition@3] -> CooperativeExec ->
+KafkaSourceExec` — and the matcher now targets it exactly (identity-map-except-value, unwrap the
+`CooperativeExec`). Next: T2 kind (rule fires on real k8s + WM_PROF source_read drop) → T3 EKS beat.
+
+**Remaining validation:**
 2. **Validation runbook (T1→T2→T3):**
    - **T1 local:** `inc_ckpt_gate.sh` with `VAJRA_T7_FUSE=1` → dup=0 + correct counts (EO across
      crash on the fused path); and WITHOUT the flag → unchanged (regression guard).

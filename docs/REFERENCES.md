@@ -333,10 +333,31 @@ stealing; the goal is the **union of the best**, built on our Arrow/DataFusion n
   on one node. Vajra's DataFusion core (§5) is the distributed equivalent; steal Polars' optimizer rigor +
   morsel scheduling for the single-node hot path.
 
+### Apache Fluss (Incubating) — columnar streaming storage; validates the T7 pushdown thesis (2026-07-07)
+Sources: https://fluss.apache.org/ · https://www.alibabacloud.com/blog/fluss-redefining-streaming-storage-for-real-time-data-analytics-and-ai_602412 · https://jack-vanlightly.com/blog/2025/9/2/understanding-apache-fluss · Flink Forward Asia 2025.
+- **What it is:** next-gen **columnar log streaming storage built on Apache Arrow** (Arrow IPC as the native
+  storage + wire format), sub-second streaming read/write. Disaggregated cluster (tablet servers +
+  coordinators), **separate from the Flink compute cluster** (compute/state separation, like RisingWave 3.0).
+  Union reads (streaming + batch), lakehouse tiering to Iceberg/Paimon.
+- **The on-thesis fact:** because it is columnar, Fluss does **server-side projection + predicate pushdown +
+  partition pruning on the Arrow stream** — "if a job reads 3 of 20 columns, Fluss sends only those 3,"
+  claimed **up to 10× I/O/network/CPU** savings. This is the SAME principle as **VAJ-T7 source-fusion**
+  (don't materialize/transmit what the query doesn't need — Vajra parses `value`→typed cols in-source so the
+  raw value column is never materialized), and it is an **official Flink-ecosystem design** validating the
+  approach. Fluss pushes at the *storage* layer; Vajra pushes at the *source-parse* layer — same columnar-
+  end-to-end thesis (§6).
+- **Where it informs the epic:** (a) **VAJ-T7** — projection/parse pushdown into the columnar source is the
+  right axis (Fluss + Polars + DataFusion all agree). (b) **VAJ-BF2** — Arrow IPC as the zero-copy streaming
+  wire (Fluss uses exactly this) reinforces Arrow Flight shuffle. (c) **VAJ-BF3 / roadmap** — disaggregated
+  storage/compute (Fluss + RW Hummock) is the scale-out frontier. **Honest scope:** Fluss is a *storage
+  system*, not an engine; Vajra doesn't adopt Fluss, it adopts the **columnar-pushdown + disaggregation
+  principles** it validates. Not yet measured head-to-head (no claim).
+
 ### Synthesis — the "best of all" bar for Vajra (cite this in streaming/engine work)
 | Concern | Best source | Vajra target (build to this) |
 |---|---|---|
 | Exactly-once | Flink barriers + RW barriers | Barrier-aligned union commit (T-EO-3), crash-proven ✅ |
+| Columnar source pushdown | **Fluss** (Arrow server-side projection) + Polars | **VAJ-T7 parse-in-source** — raw `value` never materialized (T1 green, opt-in) 🟡 |
 | Watermarks | Flink `withIdleness` + RW per-partition | Per-instance FLIP-27 + idleness merge (T-EO-1/3.5) ✅ |
 | Large state / rescale | Flink 2.0 ForSt + RW Hummock (S3) | F5 immutable Arrow chunks + inc-ckpt on object store ✅ |
 | Incremental results | RW materialized views | Changelog/retraction mode → full MV maintenance ⬜ |
