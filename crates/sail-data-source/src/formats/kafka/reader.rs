@@ -397,27 +397,40 @@ pub struct ValueParseSpec {
 }
 
 impl ValueParseSpec {
-    /// Data schema of the fused output batch: a single struct column named `output_field`.
-    fn output_data_schema(&self) -> SchemaRef {
-        Arc::new(Schema::new(vec![Field::new(
+    /// Fused output DATA schema: `source_schema` with the `value:Binary` field replaced IN PLACE by
+    /// `output_field: Struct(fields)`, every other projected column (e.g. `partition`) kept as-is.
+    /// This equals the dropped `from_json` projection's data output (marker/retracted are added by
+    /// flow-event encoding downstream, not here).
+    fn output_data_schema(&self, source_schema: &Schema) -> Result<SchemaRef> {
+        let idx = source_schema
+            .index_of("value")
+            .map_err(|e| arrow_datafusion_err!(e))?;
+        let mut fields: Vec<Arc<Field>> = source_schema.fields().iter().cloned().collect();
+        fields[idx] = Arc::new(Field::new(
             &self.output_field,
             DataType::Struct(self.fields.clone()),
             true,
-        )]))
+        ));
+        Ok(Arc::new(Schema::new(fields)))
     }
 
-    /// Parse the `value` column of `batch` into the fused single-struct-column batch. `batch` is the
-    /// raw source batch projected to `[value:Binary]` (the reader forces this projection when fused).
+    /// Parse the `value` column of `batch` into a struct column IN PLACE, keeping all other columns
+    /// (position + values unchanged). `batch` is the raw source batch (projected to include `value`
+    /// plus whatever other columns the query keeps, e.g. `partition`).
     fn fuse(&self, batch: &RecordBatch) -> Result<RecordBatch> {
+        let idx = batch
+            .schema()
+            .index_of("value")
+            .map_err(|_| exec_datafusion_err!("VAJ-T7 fusion: source batch missing `value` column"))?;
         let values = batch
-            .column_by_name("value")
-            .and_then(|c| c.as_any().downcast_ref::<BinaryArray>())
-            .ok_or_else(|| {
-                exec_datafusion_err!("VAJ-T7 fusion: source batch missing Binary `value` column")
-            })?;
-        let struct_arr =
-            parse_json_binary_to_struct(values, &self.fields, &self.options, "UTC")?;
-        RecordBatch::try_new(self.output_data_schema(), vec![Arc::new(struct_arr)])
+            .column(idx)
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .ok_or_else(|| exec_datafusion_err!("VAJ-T7 fusion: `value` column is not Binary"))?;
+        let struct_arr = parse_json_binary_to_struct(values, &self.fields, &self.options, "UTC")?;
+        let mut columns: Vec<ArrayRef> = batch.columns().to_vec();
+        columns[idx] = Arc::new(struct_arr);
+        RecordBatch::try_new(self.output_data_schema(batch.schema().as_ref())?, columns)
             .map_err(|e| arrow_datafusion_err!(e))
     }
 
@@ -514,19 +527,23 @@ impl KafkaSourceExec {
         })
     }
 
-    /// VAJ-T7 — enable in-source `value` parse fusion. Forces the read projection to `[value]`
-    /// (only column needed), sets the plan's output to the fused single-struct schema (flow-event
-    /// wrapped), and records the [`ValueParseSpec`] used at execute time. The optimizer rule calls
-    /// this after verifying a `from_json(value)` projection sits directly over the source.
+    /// VAJ-T7 — enable in-source `value` parse fusion. Keeps the existing read projection (which
+    /// already includes `value` plus any other kept columns, e.g. `partition`), and sets the plan's
+    /// output to that projected schema with `value` replaced in place by the parsed struct column
+    /// (flow-event wrapped). Records the [`ValueParseSpec`] used at execute time. The optimizer rule
+    /// calls this after verifying a `from_json(value)` projection sits directly over the source and
+    /// that the projection's other outputs are passthrough columns (so it can be dropped).
     pub fn with_parse_value_as(mut self, spec: ValueParseSpec) -> Result<Self> {
-        // Read only `value` (index 1 in kafka_data_schema); parse produces every output column.
-        let value_idx = self
-            .original_schema
-            .index_of("value")
-            .map_err(|e| arrow_datafusion_err!(e))?;
-        self.projection = vec![value_idx];
-        self.projected_schema = Arc::new(self.original_schema.project(&[value_idx])?);
-        let output_schema = Arc::new(to_flow_event_schema(&spec.output_data_schema()));
+        // `value` must be among the projected columns (it is — the from_json projection needs it).
+        if self.projected_schema.index_of("value").is_err() {
+            return plan_err!(
+                "VAJ-T7 fusion requires `value` in the source projection, got {:?}",
+                self.projected_schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>()
+            );
+        }
+        let output_schema = Arc::new(to_flow_event_schema(
+            spec.output_data_schema(self.projected_schema.as_ref())?.as_ref(),
+        ));
         let boundedness = if self.bounded {
             Boundedness::Bounded
         } else {
@@ -642,10 +659,10 @@ impl ExecutionPlan for KafkaSourceExec {
         // (projected_schema is `[value]`) and `fuse_event_stream` parses each to the single
         // `[output_field:Struct]` column; `emit_schema` is what the plan/adapter declare.
         let parse_spec = self.parse_value_as.clone();
-        let emit_schema = parse_spec
-            .as_ref()
-            .map(|s| s.output_data_schema())
-            .unwrap_or_else(|| projected_schema.clone());
+        let emit_schema = match parse_spec.as_ref() {
+            Some(s) => s.output_data_schema(projected_schema.as_ref())?,
+            None => projected_schema.clone(),
+        };
         let max_batch = options.max_batch_size;
         // Per-poll fetch timeout (small -> responsive batching / low latency).
         let timeout = Duration::from_millis(options.fetch_timeout_ms);

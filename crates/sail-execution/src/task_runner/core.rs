@@ -7,6 +7,7 @@ use datafusion::common::tree_node::{Transformed, TransformedResult, TreeNode};
 use datafusion::arrow::datatypes::DataType;
 use datafusion::datasource::physical_plan::{FileScanConfig, FileScanConfigBuilder, ParquetSource};
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::physical_expr::expressions::Column;
 use datafusion::physical_expr::ScalarFunctionExpr;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
 use datafusion::physical_plan::projection::ProjectionExec;
@@ -171,35 +172,71 @@ impl TaskRunner {
             let Some(proj) = node.downcast_ref::<ProjectionExec>() else {
                 return Ok(Transformed::no(node));
             };
-            // Exactly one output column, produced by a `from_json` scalar call.
-            let exprs = proj.expr();
-            if exprs.len() != 1 {
-                return Ok(Transformed::no(node));
-            }
-            let Some(sfe) = exprs[0].expr.downcast_ref::<ScalarFunctionExpr>() else {
-                return Ok(Transformed::no(node));
-            };
-            if sfe.fun().name() != "from_json" {
-                return Ok(Transformed::no(node));
-            }
-            // The child must be an un-fused Kafka source (so `value` is available to parse).
-            let Some(src) = proj.input().downcast_ref::<KafkaSourceExec>() else {
-                return Ok(Transformed::no(node));
-            };
+            // The child is the (un-fused) Kafka source, possibly behind a single-child transparent
+            // wrapper the optimizer inserts (e.g. `CooperativeExec` from EnforceCooperative). Unwrap
+            // one level; re-wrap the fused source in it below so cooperative scheduling is preserved.
+            let input = proj.input();
+            let (src, wrapper): (&KafkaSourceExec, bool) =
+                if let Some(s) = input.downcast_ref::<KafkaSourceExec>() {
+                    (s, false)
+                } else if input.children().len() == 1 {
+                    match input.children()[0].downcast_ref::<KafkaSourceExec>() {
+                        Some(s) => (s, true),
+                        None => return Ok(Transformed::no(node)),
+                    }
+                } else {
+                    return Ok(Transformed::no(node));
+                };
             if src.parse_value_as().is_some() {
                 return Ok(Transformed::no(node));
             }
-            // The output column's resolved type gives the struct fields directly (no schema re-parse).
-            let proj_schema = proj.schema();
-            let out_field = proj_schema.field(0);
-            let DataType::Struct(fields) = out_field.data_type().clone() else {
+            // Fusion is provably equivalent iff the projection is an IDENTITY map over the source's
+            // (flow-event encoded) output EXCEPT the `value` column, which becomes
+            // `from_json(CAST(value)) AS <alias>`. i.e. every other output column is an unrenamed
+            // passthrough `Column@i`, and the value column carries the sole from_json. Then dropping
+            // the projection and parsing `value` in-source yields the identical batch. The real plan
+            // shape (T1 dump): `[_marker@0, _retracted@1, from_json(value@2) as #7, partition@3]`.
+            let input_schema = proj.input().schema();
+            let Ok(value_idx) = input_schema.index_of("value") else {
+                return Ok(Transformed::no(node));
+            };
+            let exprs = proj.expr();
+            let out_schema = proj.schema();
+            if exprs.len() != input_schema.fields().len() {
+                return Ok(Transformed::no(node));
+            }
+            let mut from_json: Option<(String, datafusion::arrow::datatypes::Fields)> = None;
+            for (i, pe) in exprs.iter().enumerate() {
+                if i == value_idx {
+                    let Some(sfe) = pe.expr.downcast_ref::<ScalarFunctionExpr>() else {
+                        return Ok(Transformed::no(node));
+                    };
+                    if sfe.fun().name() != "from_json" {
+                        return Ok(Transformed::no(node));
+                    }
+                    let DataType::Struct(fields) = out_schema.field(i).data_type().clone() else {
+                        return Ok(Transformed::no(node));
+                    };
+                    from_json = Some((out_schema.field(i).name().clone(), fields));
+                } else {
+                    // Unrenamed identity passthrough of input column i.
+                    let Some(col) = pe.expr.downcast_ref::<Column>() else {
+                        return Ok(Transformed::no(node));
+                    };
+                    if col.index() != i
+                        || out_schema.field(i).name() != input_schema.field(i).name()
+                    {
+                        return Ok(Transformed::no(node));
+                    }
+                }
+            }
+            let Some((output_field, fields)) = from_json else {
                 return Ok(Transformed::no(node));
             };
             // NOTE: options default to Spark defaults — correct for the measured benchmark (no
-            // timestampFormat/dateFormat). A from_json carrying non-default format options would
-            // parse them differently; extend by reading sfe.args()[2] when that case is targeted.
+            // timestampFormat/dateFormat). Extend by reading the from_json options arg when targeted.
             let spec = ValueParseSpec {
-                output_field: out_field.name().clone(),
+                output_field: output_field.clone(),
                 fields,
                 options: SparkFromJsonOptions::default(),
             };
@@ -213,11 +250,17 @@ impl TaskRunner {
                 src.parallelism(),
             )
             .and_then(|s| s.with_parse_value_as(spec))?;
+            let fused_arc: Arc<dyn ExecutionPlan> = Arc::new(fused);
+            // Drop the projection; keep the wrapper (if any) around the fused source.
+            let new_node = if wrapper {
+                input.clone().with_new_children(vec![fused_arc])?
+            } else {
+                fused_arc
+            };
             debug!(
-                "VAJ-T7 source-fusion: fused from_json('{}') into KafkaSourceExec (value parsed in-source)",
-                out_field.name()
+                "VAJ-T7 source-fusion: fused from_json -> '{output_field}' into KafkaSourceExec (value parsed in-source)"
             );
-            Ok(Transformed::yes(Arc::new(fused) as Arc<dyn ExecutionPlan>))
+            Ok(Transformed::yes(new_node))
         });
         Ok(result.data()?)
     }
