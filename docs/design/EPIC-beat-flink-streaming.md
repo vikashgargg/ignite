@@ -128,6 +128,32 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
 - Pipeline stages instead of block (Spark 4.1 RT-mode shape); explicit credit backpressure + Prometheus
   per-operator throughput/watermark-lag/ckpt metrics (matrix Observability P0 + Backpressure).
 
+### VAJ-T7 — IMPLEMENTATION STATUS (2026-07-06)
+**All 4 steps landed, opt-in behind `VAJRA_T7_FUSE`, default byte-identical. Compiles + clippy
+clean + codec round-trip tested. NOT yet behaviourally validated (needs a running plan).**
+- Step 1 `parse_json_binary_to_struct` — DONE 7898f8d3 (20/20 parity, byte-identity test).
+- Steps 2+3+4 — DONE 47b8206d: reader `parse_value_as` fusion (3 read paths via `fuse_event_stream`);
+  codec `KafkaSourceExecNode` round-trip (`test_round_trip_kafka_source_exec_fused` green);
+  `rewrite_source_fusion` per-worker rule in `task_runner/core.rs` (matches
+  `ProjectionExec[from_json(value)]` over `KafkaSourceExec`, conservative-bail).
+
+**⚠️ Open validation (the plan-shape match is UNVERIFIED — I could not dump a plan locally):**
+1. **Does the rule fire?** The worker logs already dump the stage plan
+   (`DisplayableExecutionPlan`); with `VAJRA_T7_FUSE=1` grep for `VAJ-T7 source-fusion: fused`.
+   If it does NOT fire, the dump shows the real shape (e.g. an intermediate node between the
+   projection and the source) → refine the matcher. Correctness is safe either way (bail = no change).
+2. **Validation runbook (T1→T2→T3):**
+   - **T1 local:** `inc_ckpt_gate.sh` with `VAJRA_T7_FUSE=1` → dup=0 + correct counts (EO across
+     crash on the fused path); and WITHOUT the flag → unchanged (regression guard).
+   - **T2 kind:** `kind_streaming_test.sh` + windowed-agg benchmark with `VAJRA_T7_FUSE=1` →
+     n_windows/sum exact; confirm the rule fired in worker logs; per-stage WM_PROF shows
+     `source_read` dropped (raw-value materialize gone).
+   - **T3 EKS:** 100M head-to-head vs Flink with `VAJRA_T7_FUSE=1` → the measured beat
+     (source_read+from_json combined CPU < Flink; ev/s ≤1.0× Flink; RSS ≤ Flink). Image via
+     `eks_build_image.sh`.
+3. **Then flip default-on** once T1+T2+T3 green, and update `throughput-tickets.md` +
+   `feedback_competitive_claims_bar` with the measured number (claim ONLY the EKS head-to-head).
+
 ## 3. SDLC / Definition of Done (every ticket)
 1. **Architect-first:** design + acceptance test cases written and cited to a KB source BEFORE code.
 2. **T1 local:** `correctness_gate.sh` 6/6 + `inc_ckpt_gate.sh` dup=0 (EO NEVER regresses) + WM_PROF
