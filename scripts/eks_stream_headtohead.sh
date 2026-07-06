@@ -47,6 +47,9 @@ kk delete job flink-runner --ignore-not-found
 
 echo "================ [4/6] Vajra ================"
 sed -e "s|__ECR__|$REG|g" -e "s|vajra:eo-multipart|vajra:${TAG:-realtime-fix}|g" k8s/stream/vajra-stream.yaml | kk apply -f -
+# VAJ-T7 source-fusion opt-in + per-stage CPU profile (source_read drop is the beat).
+[ "${VAJRA_T7_FUSE:-0}" = "1" ] && kk set env deploy/vajra-stream \
+  VAJRA_T7_FUSE=1 VAJRA_WM_PROF=1 RUST_LOG="warn,sail_execution::task_runner=debug" >/dev/null 2>&1
 wait_ready vajra-stream
 kk apply -f k8s/stream/vajra-client.yaml
 kk wait --for=condition=ready --timeout=300s pod/vajra-client
