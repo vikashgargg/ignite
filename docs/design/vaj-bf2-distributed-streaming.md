@@ -158,6 +158,34 @@ Spark/Flink across all three modes:**
 worker pods (the placement Exp 2 showed pinned to one), counts exact. Then T-BF2.3 (N→M receiver align)
 + T-BF2.4 (credit backpressure) → T3 EKS multi-node vs Flink on the ranked #2 exchange stage.
 
+## 4e. T2 kind multi-pod result (2026-07-08) — TWO real blockers found (before EKS spend)
+Ran the gate-ON `vajra:bf2` on a 3-node kind cluster (`kind-multinode.yaml`), driver flag
+`VAJRA_DISTRIBUTED_STREAM=1` confirmed, 400k seeded. **Two findings, both root-caused from code:**
+
+1. **The multi-partition Kafka benchmark is the N→M case, NOT 1→N.** The realtime Kafka source sets
+   `parallelism = count_kafka_partitions()` (reader.rs:361) = 8 for an 8-partition topic ⇒ plan is
+   `KafkaSource(8) → StreamExchange(8→8) → Window(8)`. `distributed_stream_boundary` correctly requires
+   `partition_count()==1`, so it does **not** fire (N→M needs receiver align = T-BF2.3). ⇒ T-BF2.2 alone
+   never touches the real benchmark; **T-BF2.3 is on the critical path**, not optional-later.
+2. **Even the 1→N case does not distribute — the scheduler PACKS a stage onto one worker.** With a
+   1-partition topic (`events1` ⇒ `KafkaSource(1) → StreamExchange(1→8)`, gate fires, plan = 2 stages
+   per the unit test), a fresh-pool isolated run STILL ran all 8 window partitions (`F5_PEAK p0..p7`) on
+   ONE worker pod. **Root cause:** `TaskSlotAssigner::next()` (task_assigner/core.rs:284) is a fill-first
+   bin-packer — `self.slots.iter_mut().find_map(|(w,slots)| slots.pop())` drains worker[0]'s slots
+   entirely before moving to worker[1]. So an N-partition stage lands wholly on one worker if it has ≥N
+   free slots. Flink spreads subtasks across TaskManagers (slot spreading); Spark has spread-out
+   scheduling. ⇒ **new ticket T-BF2.5 (spread a stage's partitions across workers) is the actual
+   distribution unlock** — cutting the stage boundary is necessary but not sufficient.
+
+**Net (honest):** T-BF2.2 is correct + validated (plan-level 2-stage cut, 6/6 correctness) but
+**insufficient alone**. The distributed-streaming beat needs, in order: **T-BF2.5** round-robin/even
+task placement (small, surgical, but changes global placement → gate + batch-correctness T1) →
+**T-BF2.3** N→M cross-network barrier align (so the 8-partition benchmark distributes) → **T-BF2.4**
+credit backpressure → T3 EKS. T2 caught this before EKS spend — exactly its purpose (kind torn down,
+AWS $0). *(Secondary harness note: kind cross-node `file:///tmp/sail` read still flaky for the post-hoc
+verify — the F5_PEAK worker logs are the reliable placement signal; use an object-store/S3 sink for the
+EKS verify, per f2f3 §F3-d.)*
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)

@@ -63,15 +63,21 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 |--------|------|-----------|:---:|:---:|:---:|:---:|:---:|:---:|--------|
 | **BF2-Exp1** distributed exec on kind | K8s | f2f3 §F3-d | — | ✅ | ✅ | — | ✅ | — | 417cfc8e(prior) |
 | **BF2-Exp2** root-cause: streaming pinned to 1 worker | network | planner.rs | — | ✅ | ✅ | — | ✅ | — | 417cfc8e |
-| **T-BF2.2** cut stage boundary at StreamExchangeExec (1→N) | network/shuffle | f2f3 marker-shuffle | — | ✅ | ✅ | ✅ | 🟡 | ⬜ | d816eac7 |
-| **T-BF2.3** N→M cross-network barrier/watermark align | FT/EO | Chandy-Lamport, RisingWave merger | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
+| **T-BF2.2** cut stage boundary at StreamExchangeExec (1→N) | network/shuffle | f2f3 marker-shuffle | — | ✅ | ✅ | ✅ | ✅* | ⬜ | d816eac7 |
+| **T-BF2.5** spread a stage's partitions across workers (CRITICAL — found at T2) | scale/placement | Flink slot-spread / Spark spread-out | ✅ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
+| **T-BF2.3** N→M cross-network barrier/watermark align (benchmark is N→M) | FT/EO | Chandy-Lamport, RisingWave merger | ✅ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **T-BF2.4** credit-based network backpressure | backpressure | Flink FLIP-8/FLIP-2 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
 
 **T1 gate for T-BF2.2 (green):** unit tests gate-off→1 stage / gate-on→2 stages; `dist_streaming_smoke`
 6/6 gate-ON local-cluster (`windowed_file=97` through the new shuffle) + 6/6 local; clippy `-D` green.
 **Deployment parity (green):** local 6/6 · local-cluster 6/6 · kubernetes-cluster worker-launch confirmed.
-**T2 next:** kind multi-pod, gate ON — prove N window instances land on **different** pods + counts exact.
+**T2 result (2026-07-08, *=partial):** stage boundary cut confirmed, BUT (1) the multi-partition Kafka
+benchmark is **N→M** (source parallelism = #kafka-partitions) so T-BF2.2's 1→N gate doesn't touch it
+→ **T-BF2.3 is critical path**; (2) even 1→N did NOT spread — `TaskSlotAssigner::next()` fill-first-packs
+a stage onto one worker → **new critical ticket T-BF2.5 (even placement)**. Cutting the boundary is
+necessary but not sufficient. Kind torn down, AWS $0. Detail: [vaj-bf2 §4e](design/vaj-bf2-distributed-streaming.md).
+**Critical path now:** T-BF2.5 (spread placement) → T-BF2.3 (N→M align) → T-BF2.4 → T3 EKS.
 
 ---
 
