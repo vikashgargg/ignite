@@ -133,6 +133,31 @@ no new shuffle-write path — one planner arm + wiring the source stage's output
 shuffle. (Then verify barrier alignment across the network cut = T-BF2.3, credit backpressure =
 T-BF2.4.)
 
+## 4d. T-BF2.2 IMPLEMENTED + T1-validated (2026-07-07, commit d816eac7)
+Added the `StreamExchangeExec` stage-boundary arm to `build_job_graph` (planner.rs), gated
+`VAJRA_DISTRIBUTED_STREAM=1` (resolved once at `try_new`, threaded — not per-node env). It emits the
+existing marker-aware Hash shuffle via `create_shuffle` (the exchange's properties already carry
+`Partitioning::Hash(keys, N)`), so the N window instances distribute across workers. **Prod-grade
+guards:** default keeps the F2/F3-validated inline path (additive/reversible); only the **align-free
+1→N** case is cut (single-partition source ⇒ each window instance has one upstream ⇒ broadcast marker
+arrives once ⇒ Flink single-input needs no alignment); **N→M is left INLINE** until T-BF2.3 wires
+`StreamBarrierAlignExec` at the cross-node receiver, so we never silently mis-align a multi-upstream
+barrier. **T1 green:** deterministic unit tests (gate OFF→1 stage, gate ON→2 stages — proves it fires
+only when gated); `dist_streaming_smoke` **6/6** with the gate ON (local-cluster, workers=4;
+`windowed_file=97` preserved through the new shuffle); clippy `-D warnings` green.
+
+**Deployment-mode parity check (2026-07-07) — Vajra runs the full batch+streaming suite like
+Spark/Flink across all three modes:**
+| Mode | Spark/Flink analogue | `dist_streaming_smoke` |
+|------|----------------------|------------------------|
+| `local` (single process) | Spark `local[N]` | **6/6** |
+| `local-cluster` (driver + N in-proc workers), gate ON | Spark standalone / Flink local cluster | **6/6** (exercises the new shuffle boundary) |
+| `kubernetes-cluster` (driver pod dynamically launches worker pods) | Spark/Flink on k8s / EKS | worker-pod launch + Flight shuffle confirmed on kind (Exp 1/2) |
+
+**Next (T2):** kind multi-pod with the gate ON — confirm the N window instances land on **different**
+worker pods (the placement Exp 2 showed pinned to one), counts exact. Then T-BF2.3 (N→M receiver align)
++ T-BF2.4 (credit backpressure) → T3 EKS multi-node vs Flink on the ranked #2 exchange stage.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
