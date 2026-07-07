@@ -80,6 +80,19 @@ streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the dep
    network-exchange CPU < Flink's shuffle; EO dup=0 across crash + network cut. Claim ONLY the measured
    multi-node head-to-head; tear to $0.
 
+## 4b. Experiment 1 result (kind, 2026-07-07) — distributed execution CONFIRMED (batch); streaming pending
+Deployed `k8s/sail.yaml` (kubernetes-cluster driver, `vajra:t7fuse`) on kind. A trivial distributed
+query (`spark.range(0,1e6,1,8).sum`) returned the correct result **and the driver dynamically launched
+5 worker pods** (`sail-worker-*-1..5`) — so kubernetes-cluster worker-pod launch + cross-pod Flight
+shuffle + correct result are **PROVEN on kind**. The hard part (distributed worker launch + Flight
+shuffle) works. **Still UNOBSERVED:** the STREAMING windowed-agg cross-pod behavior — the streaming run
+was blocked by kind Kafka data-path friction (topic empty: producer BOOT namespace, slow single-broker
+kind Kafka), NOT a Vajra issue. **Next-session step (skip the friction):** get a small `events` topic
+populated in the driver's namespace (fix producer BOOT to `kafka.<ns>.svc`, or pre-create+seed the
+topic), run `stream_windowed_agg.py` against the kubernetes-cluster driver, and watch: does the
+streaming DAG spread across the launched worker pods, and does `StreamExchangeExec` (mpsc) error /
+fall-back / route cross-pod? That single observation scopes T-BF2.2.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
