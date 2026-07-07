@@ -394,3 +394,25 @@ scan with `FileScanConfigBuilder::from(cfg).with_partitioned_by_file_group(true)
 opt-out: it disables the shared work source so each partition reads only its assigned file group —
 exactly the fixed one-group-per-task model a distributed scheduler already assigns. (Vajra:
 `sail-execution/src/task_runner/core.rs::rewrite_parquet_adapters`.)
+
+## 9. Task placement across workers — even-spread vs fill-first (fetched 2026-07-08; cite for scheduling)
+The scheduler decision "which worker gets each of a stage's N task partitions" determines whether a
+distributed stage actually parallelizes across nodes or collapses onto one. Two canonical policies:
+
+- **Flink `cluster.evenly-spread-out-slots`** (SlotManager / ResourceManager): when `true`, each slot
+  request is placed on the TaskManager with the **most free slots**, so a job's subtasks **fan out
+  evenly** across all TMs (max parallelism, no hot TM). **Default is `false`** — Flink fills up
+  already-used TMs first, which is *resource-efficient for reactive scale-down* (fewer TMs held) but
+  co-locates subtasks. ⇒ for maximizing throughput/utilization on a **fixed** cluster you want
+  even-spread; for elastic scale-in you want fill-first. (Flink docs: Deployment > Config >
+  `cluster.evenly-spread-out-slots`; Flink slot-sharing groups place one subtask of each pipelined
+  operator per slot.)
+- **Spark `spark.deploy.spreadOut`** (Standalone, **default `true`**): spread an app's executors across
+  as many worker nodes as possible (better data locality + parallelism) rather than consolidating on
+  few nodes. Spark's task scheduler then round-robins tasks across executors within locality levels.
+- **Synthesis for Vajra (VAJ-BF2 T-BF2.5):** the driver's `TaskSlotAssigner` was pure fill-first
+  (`slots.iter_mut().find_map(pop)` drains worker[0] first) — measured cause of "all N window
+  instances on one pod" (T2). Added an **even-spread policy** (pick the worker with the most free
+  slots; Flink's algorithm) gated on distributed streaming (`VAJRA_DISTRIBUTED_STREAM`/`VAJRA_EVEN_SPREAD`),
+  default fill-first so batch/scale-down behavior is unchanged. Cutting a stage boundary (T-BF2.2) is
+  necessary but only *distributes* when paired with even-spread placement.

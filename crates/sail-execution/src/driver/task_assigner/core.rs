@@ -260,7 +260,7 @@ impl TaskAssigner {
                 }
             })
             .collect::<Vec<_>>();
-        TaskSlotAssigner::new(slots)
+        TaskSlotAssigner::new(slots, placement_policy())
     }
 }
 
@@ -270,21 +270,76 @@ impl TaskAssignmentGetter for TaskAssigner {
     }
 }
 
+/// VAJ-BF2 T-BF2.5: task-placement policy across workers.
+///
+/// **Grounded (docs/REFERENCES.md — scheduler/placement):** Flink `cluster.evenly-spread-out-slots`
+/// (SlotManager places each slot on the TaskManager with the MOST free slots so subtasks fan out
+/// evenly across TMs) and Spark `spark.deploy.spreadOut` (spread executors/tasks across workers).
+/// Flink's *default* is fill-first (resource-efficient for reactive scale-down); even-spread is the
+/// opt-in that maximizes parallelism/utilization on a fixed cluster — which is what a distributed
+/// streaming stage needs (a keyed windowed-agg's N instances must land on different workers, not one).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PlacementPolicy {
+    /// Fill one worker's slots before the next (Flink default; resource-efficient, but co-locates a
+    /// stage's partitions on one worker — the T2-measured cause of "all 8 window instances on 1 pod").
+    FillFirst,
+    /// Place on the worker with the most free slots (Flink evenly-spread-out-slots) so a stage's
+    /// partitions distribute across workers. Deterministic: ties break to the lowest slot-vector index.
+    EvenSpread,
+}
+
+/// Resolve the placement policy ONCE (process-global config, like `channel_capacity`). Even-spread is
+/// enabled when distributed streaming is on (`VAJRA_DISTRIBUTED_STREAM=1`) — a cut streaming stage only
+/// actually distributes if its partitions also spread — or explicitly via `VAJRA_EVEN_SPREAD=1`. Default
+/// stays FillFirst so batch/existing placement is unchanged (additive + reversible).
+fn placement_policy() -> PlacementPolicy {
+    static POLICY: std::sync::OnceLock<PlacementPolicy> = std::sync::OnceLock::new();
+    *POLICY.get_or_init(|| {
+        let on = std::env::var("VAJRA_DISTRIBUTED_STREAM").as_deref() == Ok("1")
+            || std::env::var("VAJRA_EVEN_SPREAD").as_deref() == Ok("1");
+        if on {
+            PlacementPolicy::EvenSpread
+        } else {
+            PlacementPolicy::FillFirst
+        }
+    })
+}
+
 /// Assigns task regions to driver or worker slots, consuming available slots as tasks are placed.
 struct TaskSlotAssigner {
     /// The available task slots on workers.
     slots: Vec<(WorkerId, Vec<usize>)>,
+    policy: PlacementPolicy,
 }
 
 impl TaskSlotAssigner {
-    fn new(slots: Vec<(WorkerId, Vec<usize>)>) -> Self {
-        Self { slots }
+    fn new(slots: Vec<(WorkerId, Vec<usize>)>, policy: PlacementPolicy) -> Self {
+        Self { slots, policy }
     }
 
     fn next(&mut self) -> Option<(WorkerId, usize)> {
-        self.slots
-            .iter_mut()
-            .find_map(|(worker_id, slots)| slots.pop().map(|slot| (*worker_id, slot)))
+        match self.policy {
+            PlacementPolicy::FillFirst => self
+                .slots
+                .iter_mut()
+                .find_map(|(worker_id, slots)| slots.pop().map(|slot| (*worker_id, slot))),
+            PlacementPolicy::EvenSpread => {
+                // Pick the worker with the most free slots (Flink evenly-spread-out-slots). Strict `>`
+                // keeps the FIRST worker on ties (lowest index) → deterministic round-robin across
+                // equal-capacity workers, so a stage's N partitions fan out one-per-worker.
+                let mut best: Option<usize> = None;
+                let mut best_len = 0usize;
+                for (i, (_, slots)) in self.slots.iter().enumerate() {
+                    if slots.len() > best_len {
+                        best_len = slots.len();
+                        best = Some(i);
+                    }
+                }
+                let i = best?;
+                let (worker_id, slots) = &mut self.slots[i];
+                slots.pop().map(|slot| (*worker_id, slot))
+            }
+        }
     }
 
     fn try_assign_task_region(
@@ -317,5 +372,59 @@ impl TaskSlotAssigner {
             }
         }
         Ok(assignments)
+    }
+}
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod placement_tests {
+    use crate::id::WorkerId;
+
+    use super::{PlacementPolicy, TaskSlotAssigner};
+
+    // 3 workers, 2 vacant slots each. Slot indices per worker are irrelevant to the policy.
+    fn three_workers() -> Vec<(WorkerId, Vec<usize>)> {
+        vec![
+            (WorkerId::from(1), vec![0, 1]),
+            (WorkerId::from(2), vec![0, 1]),
+            (WorkerId::from(3), vec![0, 1]),
+        ]
+    }
+
+    fn drain(policy: PlacementPolicy) -> Vec<u64> {
+        let mut a = TaskSlotAssigner::new(three_workers(), policy);
+        // 6 tasks (== total slots) — record which worker each lands on.
+        (0..6)
+            .map(|_| u64::from(a.next().unwrap().0))
+            .collect()
+    }
+
+    // VAJ-BF2 T-BF2.5: fill-first PACKS a stage onto one worker (the T2-measured "all on one pod");
+    // even-spread FANS OUT one-per-worker (Flink evenly-spread-out-slots) so the N partitions
+    // distribute. This is the difference that makes a cut streaming stage actually distribute.
+    #[test]
+    fn fill_first_packs_one_worker_before_the_next() {
+        // Worker 1's two slots drain fully before worker 2, etc.
+        assert_eq!(drain(PlacementPolicy::FillFirst), vec![1, 1, 2, 2, 3, 3]);
+    }
+
+    #[test]
+    fn even_spread_fans_out_across_workers() {
+        // Round-robin across equal-capacity workers: 1,2,3 then 1,2,3.
+        assert_eq!(drain(PlacementPolicy::EvenSpread), vec![1, 2, 3, 1, 2, 3]);
+    }
+
+    #[test]
+    fn even_spread_prefers_the_worker_with_most_free_slots() {
+        // Worker 2 starts with more free slots -> it is chosen first until balanced.
+        let slots = vec![
+            (WorkerId::from(1), vec![0]),
+            (WorkerId::from(2), vec![0, 1, 2]),
+        ];
+        let mut a = TaskSlotAssigner::new(slots, PlacementPolicy::EvenSpread);
+        let seq: Vec<u64> = (0..4).map(|_| u64::from(a.next().unwrap().0)).collect();
+        // w2(3) > w1(1): pick w2 -> now w2(2)>w1(1): w2 -> w2(1)==w1(1): first index (w1) ->
+        // remaining w2(1): w2. Net: 2,2,1,2 (spreads load onto the emptier-later worker w2).
+        assert_eq!(seq, vec![2, 2, 1, 2]);
     }
 }
