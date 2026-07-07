@@ -44,12 +44,18 @@ streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the dep
   in-process `mpsc`, so it does NOT distribute — that's T-BF2.2. Investigate whether a streaming DAG
   placed on `kubernetes-cluster` already spreads stages across worker pods (like batch), leaving only
   the exchange transport to swap.
-- **T-BF2.2 — `StreamExchangeExec` over Flight for cross-pod sub-channels.** Keep same-pod links on
-  `mpsc` (don't pay network for co-located instances); for cross-pod sub-channels, the distributor
-  writes the `EncodedFlowEventStream` to a Flight endpoint (a `Ticket` = (stage, output-partition,
-  input-partition)), and the receiver opens a `do_get` `FlightRecordBatchStream` → `DecodedFlowEventStream`.
-  The existing N→M keyed hash-route + per-sub-channel structure is unchanged — only the channel
-  implementation swaps mpsc↔Flight based on co-location.
+- **T-BF2.2 — cut a distributed stage boundary at `StreamExchangeExec` (the real, root-caused gap;
+  Exp 2 2026-07-07).** The distributed planner (`job_graph/planner.rs::build_job_graph`) only cuts
+  stage boundaries at `RepartitionExec`/`CoalescePartitionsExec`/`SortPreservingMergeExec`, so a
+  streaming plan collapses to ONE stage on ONE worker (Exp 2 §4c: all 8 window partitions ran on
+  worker 1; the mpsc exchange never crossed a pod). **Fix:** add a `StreamExchangeExec` arm to
+  `build_job_graph` that emits the ALREADY-BUILT, ALREADY-MARKER-AWARE cross-node streaming shuffle
+  stack via `create_shuffle` — `ShuffleWriteExec` (broadcasts markers, shuffle_write.rs:202–228) on
+  the producer side, `StageInputExec`/`ShuffleReadExec` on the consumer, carrying the
+  `FlowEventToData(StreamCoalesce(StreamExchange(child)))` stack that the codec already round-trips
+  (codec.rs:4652). Same-pod links can stay mpsc later as an optimization; the FIRST correctness cut is
+  simply "make the streaming exchange a real distributed stage." **No new transport, no new wire format
+  — one planner arm + source→shuffle partitioning wiring.**
 - **T-BF2.3 — Cross-network barrier/watermark alignment.** The receiver already MIN-merges watermarks
   and buffers `Checkpoint{e}` barriers across sub-channels (`merge_output_subchannels`,
   aligned-barrier logic). Verify it operates identically when a sub-channel is a network Flight stream
@@ -92,6 +98,40 @@ populated in the driver's namespace (fix producer BOOT to `kafka.<ns>.svc`, or p
 topic), run `stream_windowed_agg.py` against the kubernetes-cluster driver, and watch: does the
 streaming DAG spread across the launched worker pods, and does `StreamExchangeExec` (mpsc) error /
 fall-back / route cross-pod? That single observation scopes T-BF2.2.
+
+## 4c. Experiment 2 result (kind, 2026-07-07) — ROOT-CAUSED: streaming DAG pinned to ONE worker
+Seeded a small `events` topic (400k rows, 8 parts, exact `{"k","ts","v"}` scheme) **in the driver's
+namespace** (`vajra`), skipping the flaky producer BOOT path, then ran the bounded windowed-agg
+(`trigger(availableNow=True)`) against the kubernetes-cluster driver. Observed:
+- **The driver launched 5 worker pods for the STREAMING job** (`sail-worker-nwfrntow45-1..5`, all
+  Running) — so worker-pod launch happens for streaming, not just batch.
+- **BUT the entire windowed-agg ran on ONE worker.** Worker 1's log shows `F5_PEAK p0..p7` — **all 8
+  window partitions on a single pod**; workers 2–5 started their server, did **zero** window work, and
+  were aborted at shutdown. The query executed to completion with **no exchange error** — it only
+  failed the post-hoc `read.parquet` verification (`No files found in file:///tmp/sail/wagg_out/`),
+  which is expected kind hostPath locality (sink wrote on worker 1's node; driver read its own node),
+  **not** a Vajra fault.
+- ⇒ `StreamExchangeExec`'s mpsc **never crossed a pod** — not because it errors, but because the whole
+  streaming pipeline (source → exchange → window) is co-located on one worker.
+
+**ROOT CAUSE (code-traced, `job_graph/planner.rs::build_job_graph`):** the distributed planner cuts a
+cross-node stage boundary — via `create_shuffle` → `ShuffleWriteExec`/`StageInputExec` — **only** for
+`RepartitionExec`, `CoalescePartitionsExec`, `SortPreservingMergeExec` (planner.rs:208–210).
+`StreamExchangeExec` is **not in that match**, so it falls through the `else` (line 223/278): children
+stay in the same stage, plan unchanged. The streaming exchange is therefore a *within-stage* mpsc
+exchange, the whole pipeline is one stage, and one-stage → one-worker. **That is the single reason
+streaming doesn't distribute** (batch does, because batch shuffles ARE `RepartitionExec`).
+
+**This SHARPENS + DE-RISKS T-BF2.2 dramatically** (see revised §2). The cross-node streaming shuffle
+machinery is ALREADY built and marker-aware — `ShuffleWriteExec::shuffle_write` broadcasts markers
+(watermark/checkpoint/EndOfData) to all sinks (shuffle_write.rs:202–228), and the codec ALREADY
+round-trips the streaming shuffle stack `FlowEventToData(StreamCoalesce(StreamExchange(child)))`
+(codec.rs:4652; `StreamCoalesceExec` exists at exchange.rs:255). The **only** missing piece is the
+**planner arm**: teach `build_job_graph` to recognize `StreamExchangeExec` as a stage boundary and emit
+that already-built streaming shuffle stack via `create_shuffle`. No new transport, no new wire format,
+no new shuffle-write path — one planner arm + wiring the source stage's output partitioning to the
+shuffle. (Then verify barrier alignment across the network cut = T-BF2.3, credit backpressure =
+T-BF2.4.)
 
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
