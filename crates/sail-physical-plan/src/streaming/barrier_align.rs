@@ -21,6 +21,7 @@
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch};
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
@@ -130,26 +131,49 @@ impl ExecutionPlan for StreamBarrierAlignExec {
             .output_partitioning()
             .partition_count();
         let schema = self.input.schema();
-        let schema_out = schema.clone();
+        let streams = (0..n)
+            .map(|i| self.input.execute(i, context.clone()))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(align_flow_event_streams(streams, schema))
+    }
+}
 
-        // One forwarder task per input partition → its own bounded channel. Blocking an input
-        // during alignment = simply not receiving from its channel; the bounded channel applies
-        // natural backpressure that holds the input's post-barrier data upstream.
-        let mut receivers: Vec<Receiver<BatchResult>> = Vec::with_capacity(n);
-        for i in 0..n {
-            let mut stream = self.input.execute(i, context.clone())?;
-            let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY);
-            receivers.push(rx);
-            tokio::spawn(async move {
-                while let Some(item) = stream.next().await {
-                    if tx.send(item).await.is_err() {
-                        break;
-                    }
+/// VAJ-BF2 T-BF2.3a: the Chandy-Lamport barrier-**alignment** merge over N flow-event streams,
+/// factored out of [`StreamBarrierAlignExec`] so it can be reused by the cross-network streaming
+/// shuffle read (a keyed N→M exchange's consumer partition receives its N producer sub-streams and
+/// must align them — the same algorithm, but the sub-streams arrive over Arrow Flight instead of
+/// in-process partitions). Behaviour is identical to the previous inline implementation:
+/// - **Data** batches pass through immediately.
+/// - **`Checkpoint{e}`** blocks its input until *every* non-ended input has reached `e`, then forwards
+///   ONE stashed marker batch (barriers never overtake records; consistent cut).
+/// - Other broadcast markers (watermark/latency) are de-duplicated by forwarding only input 0's copy.
+///   *(N→M shuffle consumers instead need a MIN-merge across distinct source watermarks — added as a
+///   mode in T-BF2.3b; this factoring keeps the exact current N→1 broadcast behaviour.)*
+/// - **`EndOfData`** ends its input; one real `EndOfData` is forwarded once all inputs end.
+///
+/// Each input gets a bounded forwarder channel: "blocking an input" during alignment = not receiving
+/// from its channel, so the bounded channel applies natural upstream backpressure.
+pub fn align_flow_event_streams(
+    streams: Vec<SendableRecordBatchStream>,
+    schema: SchemaRef,
+) -> SendableRecordBatchStream {
+    let n = streams.len();
+    let schema_out = schema;
+
+    let mut receivers: Vec<Receiver<BatchResult>> = Vec::with_capacity(n);
+    for mut stream in streams {
+        let (tx, rx) = channel::<BatchResult>(CHANNEL_CAPACITY);
+        receivers.push(rx);
+        tokio::spawn(async move {
+            while let Some(item) = stream.next().await {
+                if tx.send(item).await.is_err() {
+                    break;
                 }
-            });
-        }
+            }
+        });
+    }
 
-        let out = async_stream::stream! {
+    let out = async_stream::stream! {
             // Per-input state: `reached` = the epoch this input is currently blocked at (Some),
             // `ended` = the input is exhausted. An input contributes to the next barrier once it is
             // blocked; an ended input no longer needs to reach barriers. We stash the actual
@@ -226,8 +250,7 @@ impl ExecutionPlan for StreamBarrierAlignExec {
                 }
             }
         };
-        Ok(Box::pin(RecordBatchStreamAdapter::new(schema_out, out)))
-    }
+    Box::pin(RecordBatchStreamAdapter::new(schema_out, out))
 }
 
 #[expect(clippy::unwrap_used)]
@@ -350,5 +373,44 @@ mod tests {
             1 + 2 + 3 + 4 + 5 + 6,
             "no data lost or duplicated"
         );
+    }
+
+    // VAJ-BF2 T-BF2.3a: the align algorithm works as a standalone combinator over N arbitrary
+    // flow-event streams (not just an ExecutionPlan's partitions) — this is what the cross-network
+    // streaming shuffle read will call with its N producer sub-streams.
+    #[tokio::test]
+    async fn combinator_aligns_arbitrary_streams() {
+        use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+
+        use super::align_flow_event_streams;
+
+        let schema = flow_schema();
+        let mk = |batches: Vec<RecordBatch>| -> datafusion::execution::SendableRecordBatchStream {
+            Box::pin(RecordBatchStreamAdapter::new(
+                flow_schema(),
+                futures::stream::iter(batches.into_iter().map(Ok)),
+            ))
+        };
+        let s0 = mk(vec![
+            data(&[10, 20]),
+            marker(FlowMarker::Checkpoint { id: 7 }),
+            data(&[30]),
+            marker(FlowMarker::EndOfData),
+        ]);
+        let s1 = mk(vec![
+            data(&[40]),
+            marker(FlowMarker::Checkpoint { id: 7 }),
+            data(&[50, 60]),
+            marker(FlowMarker::EndOfData),
+        ]);
+
+        let out: Vec<RecordBatch> = align_flow_event_streams(vec![s0, s1], schema)
+            .try_collect()
+            .await
+            .unwrap();
+
+        // Exactly ONE aligned Checkpoint{7}; all data across both streams preserved once.
+        assert_eq!(count_checkpoints(&out), vec![7], "one aligned barrier");
+        assert_eq!(sum_data(&out), 10 + 20 + 30 + 40 + 50 + 60, "no loss/dup");
     }
 }

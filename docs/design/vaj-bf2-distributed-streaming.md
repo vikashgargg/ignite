@@ -186,6 +186,59 @@ AWS $0). *(Secondary harness note: kind cross-node `file:///tmp/sail` read still
 verify — the F5_PEAK worker logs are the reliable placement signal; use an object-store/S3 sink for the
 EKS verify, per f2f3 §F3-d.)*
 
+## 4f. T-BF2.3 architecture (N→M cross-network barrier align) — DESIGN (2026-07-08)
+**Goal:** distribute the REAL benchmark — `KafkaSource(N) → StreamExchange(N→M) → Window(M)` — across
+workers with correct exactly-once (the N→M case T-BF2.2 deliberately left inline). Grounded:
+REFERENCES §2 (Flink Chandy-Lamport: barriers never overtake records; multi-input operators align on
+every input before snapshot), §8 (RisingWave merger aligns barriers at multi-upstream actors),
+docs/design/streaming-prodgrade-practices.md row "Distributed shuffle" (receiver MIN-merges watermarks).
+
+**What's already built (traced 2026-07-08):**
+- Sender half = `ShuffleWriteExec` — hash-routes data + **broadcasts markers** to all M outputs
+  (shuffle_write.rs:202–228). Reusable as-is for N→M.
+- The in-process `StreamExchangeExec` receiver ALREADY does the correct N→M merge: per output
+  partition it keeps N sub-channels, **MIN-merges watermarks** (Flink keyBy) + **aligns Checkpoint
+  barriers** + drains-to-max on all-idle. The ONLY problem is those sub-channels are `tokio::mpsc`
+  (in-process), so cutting the exchange into a batch shuffle loses them.
+- `StreamBarrierAlignExec` (barrier_align.rs) has the Chandy-Lamport align state machine over N
+  streams, BUT it **dedups** watermarks (forwards only input-0's copy — correct only when the N inputs
+  are broadcast COPIES of one upstream, NOT for N distinct source partitions).
+
+**The blocker (traced):** the generic `ShuffleReadExec` merges the N producer sub-streams with
+`MergedRecordBatchStream` = `futures::select_all` = a **naive interleave** (no marker awareness). So a
+batch-style shuffle read cannot align N→M: it interleaves N copies of each barrier + N distinct
+watermarks with no MIN-merge → wrong epochs / early window fire. This is why T-BF2.2 correctly gates to
+1→N (where each consumer has exactly ONE sub-stream, so select_all is trivially correct).
+
+**Design (chosen): a marker-aware aligning merge for streaming shuffle reads.** For a flow-event
+shuffle (marker schema present), the consumer partition's `ShuffleReadExec` must merge its N
+sub-streams with an operator that (a) **MIN-merges watermarks** across the N sources, (b) **aligns
+Checkpoint{e}** (block a source that reached e until all reach e, forward ONE barrier), (c) forwards
+`EndOfData` once all N end, (d) supports Flink-style **idleness** (a source with no data excluded from
+the watermark MIN so a window still closes). This is exactly `StreamExchangeExec`'s receiver logic —
+so the prod-grade path is to **factor that receiver into a reusable `align_flow_event_streams(streams,
+mode)` combinator** (mode = `MinMerge` for N→M shuffle / `Dedup` for broadcast N→1), then call it from
+BOTH `StreamExchangeExec`'s receiver AND the streaming `ShuffleReadExec` (batch shuffles keep
+`select_all`). ONE alignment implementation, no duplication, no new wire format (markers already ride
+the shuffle as flow-event batches).
+
+**Increments (each T1-gated; no patch):**
+- **T-BF2.3a — factor the align combinator** (behavior-preserving): extract the align state machine so
+  `StreamBarrierAlignExec` (Dedup mode) is unchanged (its existing unit tests + `dist_streaming_smoke`
+  stay green) and a `MinMerge` mode exists. Unit test both modes on synthetic N-stream inputs.
+- **T-BF2.3b — marker-aware `ShuffleReadExec`**: when the shuffle schema is a flow-event schema, use
+  `align_flow_event_streams(sub_streams, MinMerge)` instead of `MergedRecordBatchStream`; batch keeps
+  select_all. Round-trip any new flag in codec.
+- **T-BF2.3c — planner cuts the N→M boundary**: extend `distributed_stream_boundary` to also cut
+  `StreamExchangeExec` when input partition_count>1 (now that the aligning read exists); pairs with
+  T-BF2.5 even-spread so the M window instances land on different pods.
+- **T1 gate:** N→M windowed-agg (multi-partition Kafka/file source) counts EXACT + crash-EO dup=0
+  through the aligning cross-network shuffle (correctness_gate + inc_ckpt) → T2 kind pods spread → T3.
+
+**Correctness note (charter anti-patch):** only dup=0 via a CONSISTENT CUT advances the invariant.
+The align + MIN-merge is the consistent-cut guarantee across the network; any early-fire/dup means the
+alignment is wrong — do not paper over it.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
