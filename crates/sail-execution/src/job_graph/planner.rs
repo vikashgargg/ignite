@@ -18,6 +18,7 @@ use datafusion::physical_plan::{
 use sail_catalog_system::physical_plan::SystemTableExec;
 use sail_common_datafusion::utils::items::ItemTaker;
 use sail_physical_plan::catalog_command::CatalogCommandExec;
+use sail_physical_plan::streaming::exchange::StreamExchangeExec;
 
 use crate::error::{ExecutionError, ExecutionResult};
 use crate::job_graph::{
@@ -27,13 +28,24 @@ use crate::plan::{ShuffleConsumption, StageInputExec};
 
 impl JobGraph {
     pub fn try_new(plan: Arc<dyn ExecutionPlan>) -> ExecutionResult<Self> {
+        // VAJ-BF2 T-BF2.2: resolve the distributed-streaming gate ONCE (not per-node).
+        let distributed_stream = std::env::var("VAJRA_DISTRIBUTED_STREAM").as_deref() == Ok("1");
+        Self::try_new_with_distributed_stream(plan, distributed_stream)
+    }
+
+    /// Explicit-flag entry point (deterministic; used by `try_new` after resolving the env gate,
+    /// and by unit tests that must not depend on process-global env).
+    pub fn try_new_with_distributed_stream(
+        plan: Arc<dyn ExecutionPlan>,
+        distributed_stream: bool,
+    ) -> ExecutionResult<Self> {
         let plan = ensure_single_input_partition_for_global_limit(plan)?;
         let plan = ensure_partitioned_hash_join_if_build_side_emits_unmatched_rows(plan)?;
         let mut graph = Self {
             stages: vec![],
             schema: plan.schema(),
         };
-        let last = build_job_graph(plan, PartitionUsage::Once, &mut graph)?;
+        let last = build_job_graph(plan, PartitionUsage::Once, &mut graph, distributed_stream)?;
         let (last, inputs) = rewrite_inputs(last)?;
         graph.stages.push(Stage {
             inputs,
@@ -167,11 +179,41 @@ enum PartitionUsage {
     Shared,
 }
 
-/// Recursively splits an execution plan into stages at shuffle boundaries and adds them to the job graph.
+/// VAJ-BF2 T-BF2.2: whether to cut a **cross-node stage boundary** at a `StreamExchangeExec`,
+/// so a keyed streaming windowed-aggregation distributes its N window instances across worker
+/// pods (instead of collapsing the whole source→exchange→window pipeline onto one worker — the
+/// root cause measured in Exp 2, docs/design/vaj-bf2-distributed-streaming.md §4c).
+///
+/// Grounded in the F2/F3 distributed-streaming design (docs/design/distributed-streaming-f2f3.md):
+/// the existing marker-aware Hash shuffle (`ShuffleWriteExec` broadcasts watermark/checkpoint/
+/// end-of-data markers, hash-routes data; `StageInputExec`/`ShuffleReadExec` receive) IS the
+/// cross-node `StreamExchangeExec`. A single-partition source (1→N) needs **no** receiver-side
+/// barrier alignment — each window instance has exactly one upstream, so the broadcast marker
+/// arrives once per instance (Flink single-input operators need no alignment). We therefore only
+/// cut the boundary for the 1→N case; N→M (multi-partition source) still needs `StreamBarrierAlignExec`
+/// at the receiver (T-BF2.3) and is left INLINE (the validated default) until that lands, so we never
+/// silently mis-align a multi-upstream barrier.
+///
+/// Opt-in via `VAJRA_DISTRIBUTED_STREAM=1` — the default keeps the in-process `StreamExchangeExec`
+/// (the F2/F3-validated single-stage path), so this is additive and reversible. The flag is resolved
+/// ONCE at `JobGraph::try_new` and threaded in (not read per-node), so it is deterministic and unit
+/// testable via `try_new_with_distributed_stream`.
+fn distributed_stream_boundary(plan: &Arc<dyn ExecutionPlan>, distributed_stream: bool) -> bool {
+    if !distributed_stream {
+        return false;
+    }
+    let Some(exchange) = plan.downcast_ref::<StreamExchangeExec>() else {
+        return false;
+    };
+    // Only the 1→N case is align-free and thus safe to shuffle here (see doc-comment).
+    exchange.input().output_partitioning().partition_count() == 1
+}
+
 fn build_job_graph(
     plan: Arc<dyn ExecutionPlan>,
     usage: PartitionUsage,
     graph: &mut JobGraph,
+    distributed_stream: bool,
 ) -> ExecutionResult<Arc<dyn ExecutionPlan>> {
     // Recursively build the job graph for the children first
     // and propagate partition usage information.
@@ -180,14 +222,14 @@ fn build_job_graph(
         match join.mode {
             PartitionMode::Partitioned => {
                 vec![
-                    build_job_graph(left.clone(), usage, graph)?,
-                    build_job_graph(right.clone(), usage, graph)?,
+                    build_job_graph(left.clone(), usage, graph, distributed_stream)?,
+                    build_job_graph(right.clone(), usage, graph, distributed_stream)?,
                 ]
             }
             PartitionMode::CollectLeft => {
                 vec![
-                    build_job_graph(left.clone(), PartitionUsage::Shared, graph)?,
-                    build_job_graph(right.clone(), usage, graph)?,
+                    build_job_graph(left.clone(), PartitionUsage::Shared, graph, distributed_stream)?,
+                    build_job_graph(right.clone(), usage, graph, distributed_stream)?,
                 ]
             }
             PartitionMode::Auto => {
@@ -202,17 +244,18 @@ fn build_job_graph(
     {
         let (left, right) = plan.children().two()?;
         vec![
-            build_job_graph(left.clone(), PartitionUsage::Shared, graph)?,
-            build_job_graph(right.clone(), usage, graph)?,
+            build_job_graph(left.clone(), PartitionUsage::Shared, graph, distributed_stream)?,
+            build_job_graph(right.clone(), usage, graph, distributed_stream)?,
         ]
     } else if plan.is::<RepartitionExec>()
         || plan.is::<CoalescePartitionsExec>()
         || plan.is::<SortPreservingMergeExec>()
+        || distributed_stream_boundary(&plan, distributed_stream)
     {
         let child = plan.children().one()?;
         // At the stage boundary, we only expect to use the child partition once
         // since the shuffle writer can materialize the data for multiple consumption.
-        vec![build_job_graph(child.clone(), PartitionUsage::Once, graph)?]
+        vec![build_job_graph(child.clone(), PartitionUsage::Once, graph, distributed_stream)?]
     } else if plan.is::<RecursiveQueryExec>() {
         // Recursive queries maintain a shared work table mutated across iterations
         // by RecursiveQueryExec and read by a WorkTableExec in the recursive term.
@@ -223,7 +266,7 @@ fn build_job_graph(
     } else {
         plan.children()
             .into_iter()
-            .map(|x| build_job_graph(x.clone(), usage, graph))
+            .map(|x| build_job_graph(x.clone(), usage, graph, distributed_stream))
             .collect::<ExecutionResult<Vec<_>>>()?
     };
     let plan = with_new_children_if_necessary(plan, children)?;
@@ -272,6 +315,17 @@ fn build_job_graph(
         let child = plan.children().one()?;
         plan.clone()
             .with_new_children(vec![create_merge_input(child, graph)?])?
+    } else if distributed_stream_boundary(&plan, distributed_stream) {
+        // VAJ-BF2 T-BF2.2: cut the keyed streaming exchange into a cross-node Hash shuffle so the
+        // N window instances distribute across workers. `StreamExchangeExec`'s properties already
+        // carry `Partitioning::Hash(hash_keys, partition_count)` — the exact shape `create_shuffle`
+        // turns into `OutputDistribution::Hash` — and the marker-aware `ShuffleWriteExec` broadcasts
+        // barriers/watermarks while hash-routing data (shuffle_write.rs). The exchange NODE is
+        // replaced by the `StageInputExec` (Shuffle); the shuffle writer performs the fan-out. Only
+        // reached for the align-free 1→N case (see `distributed_stream_boundary`).
+        let properties = plan.properties().clone();
+        let child = plan.children().one()?;
+        create_shuffle(child, graph, properties, consumption)?
     } else if plan.is::<SystemTableExec>() || plan.is::<CatalogCommandExec>() {
         plan.children().zero()?;
         create_driver_stage(&plan, graph)?
@@ -380,4 +434,62 @@ fn create_driver_stage(
         },
         plan.properties().clone(),
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    #[expect(clippy::unwrap_used)]
+    mod stage_boundary {
+        use std::sync::Arc;
+
+        use datafusion::arrow::datatypes::{DataType, Field, Schema};
+        use datafusion::physical_expr::expressions::Column;
+        use datafusion::physical_plan::empty::EmptyExec;
+        use datafusion::physical_plan::ExecutionPlan;
+        use sail_common_datafusion::streaming::event::schema::{
+            MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
+        };
+        use sail_physical_plan::streaming::exchange::StreamExchangeExec;
+
+        use crate::job_graph::JobGraph;
+
+        /// A `StreamExchangeExec` over a single-partition (flow-event) source — the 1→N keyed
+        /// exchange the realtime Kafka windowed-agg builds (WindowAccum sits above it; here we
+        /// test the exchange boundary in isolation).
+        fn single_partition_stream_exchange() -> Arc<dyn ExecutionPlan> {
+            let flow_schema = Arc::new(Schema::new(vec![
+                Field::new(MARKER_FIELD_NAME, DataType::Binary, true),
+                Field::new(RETRACTED_FIELD_NAME, DataType::Boolean, false),
+                Field::new("k", DataType::Int64, true),
+            ]));
+            // EmptyExec is single-partition => the align-free 1→N case.
+            let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema));
+            Arc::new(
+                StreamExchangeExec::try_new(child, vec![Arc::new(Column::new("k", 2))], 3).unwrap(),
+            )
+        }
+
+        // VAJ-BF2 T-BF2.2: with the gate OFF the streaming exchange stays INLINE (one stage — the
+        // validated F2/F3 default); with the gate ON it is cut into a cross-node shuffle (the source
+        // becomes its own producer stage), so the N window instances can distribute across workers.
+        #[test]
+        fn gate_off_keeps_stream_exchange_inline_single_stage() {
+            let graph =
+                JobGraph::try_new_with_distributed_stream(single_partition_stream_exchange(), false)
+                    .unwrap();
+            assert_eq!(graph.stages.len(), 1, "gate off must not cut a stage boundary");
+        }
+
+        #[test]
+        fn gate_on_cuts_stream_exchange_stage_boundary() {
+            let graph =
+                JobGraph::try_new_with_distributed_stream(single_partition_stream_exchange(), true)
+                    .unwrap();
+            assert_eq!(
+                graph.stages.len(),
+                2,
+                "gate on must cut the streaming exchange into a producer + consumer stage"
+            );
+        }
+    }
 }
