@@ -75,6 +75,28 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 
 ---
 
+## 2b. Epics registry (the full epic list — done / active / planned)
+
+| Epic | Axis focus | State | Evidence / doc |
+|------|-----------|:---:|---|
+| **E1** DF54/Arrow58.3 upgrade | foundation | ✅ | main @ merged; 860 tests, clippy green |
+| **E2** Distributed batch (driver/worker, Flight shuffle, staged job graph) | scale/network | ✅ | dist_streaming_smoke batch 6/6 |
+| **E3** Batch perf vs Spark | throughput/memory | ✅ | P4 6.2×; TPC-H 36×; ClickBench parity |
+| **E4** Distributed stateful streaming (F2/F3) | streaming/state | ✅ | 6/6 vs Spark; multi-node KIND; continuous stateful EO across crash |
+| **E5** Crash-EO correctness (aligned barriers, exact idle, emit floor) | FT/EO | ✅ | EKS dup=0 exact |
+| **E6** Completeness + parallel Kafka sink | completeness | ✅ | EKS 10 windows/100M; 100M delivered @1.67M msg/s |
+| **E7** Incremental checkpoint + rescale | ckpt/elasticity | ✅ | O(delta) merged; rescale key-groups (FLIP-8) |
+| **E8** F5 spillable state | memory/state | 🟡 | out==N @5M; bounded-peak proof = F5.4 open |
+| **E9** GA distribution/repo readiness | DX/ops | 🟡 | [public-ga-readiness-board](design/public-ga-readiness-board.md) |
+| **E10** Prod-grade dimensions (D1–D10 measured) | all metrics | 🟡 | [scorecard](design/prodgrade-dimensions-scorecard.md); D2/D4/D10 unmeasured |
+| **VAJ-T7** source-fusion throughput | throughput | ✅(null) | measured NO beat; kept opt-in; root-caused |
+| **VAJ-BF2** distributed streaming exchange (Arrow-Flight) | network/throughput | 🟡 **ACTIVE** | §2 above; T-BF2.2 T1-green |
+| **E-LAT** latency/cold-start/recovery-time measurement | latency | 🔴 | D2/D4/D5 — unmeasured, backlog |
+| **E-RT** realtime Kafka→Kafka passthrough | latency/throughput | 🔴 | behind Flink; batch the Kafka sink |
+| **E-AI** AI-native execution | AI-native | ⬜ | charter axis; not started |
+| **E-LAKE** lakehouse (Delta/Iceberg) parity | lakehouse | 🟡 | Delta 144/163; Iceberg partial |
+| **E-PEERS** vs ClickHouse/Trino/DuckDB/Polars | interactive SQL | ⬜ | charter peers; unmeasured |
+
 ## 3. Backlog (charter axes not yet in an active epic)
 - 🔴 **D2 latency probe** (e2e event→sink p50/p99/p999) — the headline real-time axis, never measured.
 - 🔴 **D4 cold start** (launch→first-output) — quick no-JVM win to quantify.
