@@ -91,12 +91,18 @@ streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the dep
   coalescing before Flight send (like the batch shuffle's IPC batching).
 
 ## 6. First step when building (T-BF2.1 resolved → sharpened)
-The distributed mode (`kubernetes-cluster`) exists; the concrete first move is:
-1. **Deploy vajra-stream in `kubernetes-cluster` mode across ≥2 worker pods** (not `local-cluster`
-   single-pod) and run the windowed-agg. Observe: does the driver spread the streaming stages across
-   worker pods (like batch), and what happens at the `StreamExchangeExec` boundary — does it error
-   (mpsc can't cross pods), fall back, or already route via Flight? This one experiment tells us
-   exactly how much of T-BF2.2 is needed.
+The distributed mode (`kubernetes-cluster`) exists AND a distributed manifest exists: **`k8s/sail.yaml`**
+= driver Deployment (`SAIL_MODE=kubernetes-cluster`) + Service + RBAC (Role/ServiceAccount/RoleBinding
+so the driver launches worker pods via the k8s API) + a worker pod-template patch. The driver
+DYNAMICALLY launches worker pods (`KubernetesWorkerManager::launch_worker`); workers `register_worker`
+back (`driver/actor/handler.rs:62`). So the experiment adapts `k8s/sail.yaml`, not greenfield. Concrete
+first move:
+1. **On kind, deploy `k8s/sail.yaml` (kubernetes-cluster driver, image `vajra:TAG`) + run the
+   windowed-agg** so the driver launches ≥2 worker pods. Observe: does the streaming DAG spread its
+   stages across worker pods (like batch), and what happens at the `StreamExchangeExec` boundary — does
+   it error (mpsc can't cross pods), fall back, or already route via Flight? This ONE experiment tells
+   us exactly how much of T-BF2.2 is needed. (Watch for: RBAC on kind, worker image pull policy, the
+   realtime source pinned `parallelism=1` — memory — which may force the source stage onto one pod.)
 2. Based on that: swap `StreamExchangeExec` cross-pod sub-channels to the existing Flight `do_get`
    transport (carrying `EncodedFlowEventStream` RecordBatches), same-pod stays mpsc, behind an env gate
    (`VAJRA_DISTRIBUTED_STREAM`). T1 multi-process (multiple `vajra` processes on one host) first —
