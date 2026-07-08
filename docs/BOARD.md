@@ -86,8 +86,11 @@ necessary but not sufficient. Kind torn down, AWS $0. Detail: [vaj-bf2 §4e](des
 **T2 kind (vajra:bf4):** T-BF2.6 CONFIRMED — with `worker_task_slots=2` the 8 window instances spread across
 4 pods (2 each, clean even-spread p0/4 p1/5 p2/6 p3/7). At the DEFAULT slots=8 they pack on 1 pod: one worker
 holds the whole 8-task region AND the region is assigned before other workers register (timing race) → **T-BF2.7**
-(wait-for-workers before assigning; Spark minRegisteredResourcesRatio / Flink slot-wait). **Critical path now:**
-T-BF2.7 (window spreads at default slots) → T-BF2.4 credit backpressure → T3 EKS multi-node vs Flink.
+(wait-for-workers before assigning; Spark minRegisteredResourcesRatio / Flink slot-wait). **VAJ-BF2 distribution
++ credit COMPLETE + KIND-PENETRATED, MERGED TO MAIN (2026-07-08):** T-BF2.2/2.5/2.3/2.6/2.7/2.4 all T1+T2 green
+(source+exchange+window distribute across pods, dup=0 + crash-EO, credit bounds in-flight); merge gates green
+(workspace test + clippy); kind penetration §4n. **Critical path now:** T3 EKS multi-node throughput vs Flink
+= the BEAT measurement (scale + head-to-head, no unknowns).
 
 ---
 
