@@ -292,6 +292,42 @@ exactly-once across a hard crash. **Reproducible gate: `VAJRA_DISTRIBUTED_STREAM
 scripts/f3c_stateful_crash.sh`.** ⇒ T-BF2.3 T1 is COMPLETE (counts-exact `nm_dist_gate` + crash-EO f3c).
 Next: T2 kind (pods spread) + the Kafka N→M throughput benchmark → T-BF2.4 → T3 EKS vs Flink.
 
+## 4j. T2 kind result (2026-07-08, vajra:bf3) — cut distributes the SOURCE, NOT the window (T-BF2.6)
+Ran the gate-ON `vajra:bf3` (all of T-BF2.2/2.5/2.3) on a 3-node kind cluster, 8-partition Kafka
+windowed-agg. **The N→M cut fired** (driver debug: `stage 1 inputs=[StageInput(stage=0, mode=Shuffle)]`,
+`Hash([#8@3], 8)`; 2 stages). **Stage 0 (source) ran as 8 distributed tasks.** BUT the window still ran
+all 8 `F5_PEAK p0..p7` on ONE pod. Root cause from the driver's TaskRegion + stage-1 plan:
+```
+stage 1 (ONE output partition => ONE task):
+  StreamingSinkCommit → ParquetSink → FlowEventToData → Projection
+    → StreamBarrierAlignExec        (N→1 funnel: 8 window instances → 1, for the single sink)
+      → WindowAccumExec (8 instances)
+        → StageInput(Hash, 8)        (the 8 shuffle partitions from stage 0)
+```
+So `WindowAccumExec` is **bundled in the same stage as the downstream `StreamBarrierAlignExec` N→1
+funnel**, which makes the consumer stage a **single output partition = single task** — the 8 window
+instances run in-process on one pod. This is exactly the batch pattern where `CoalescePartitionsExec`
+(N→1) is a **stage boundary** so the aggregate distributes *before* the funnel. Streaming's
+`StreamBarrierAlignExec` is the N→1 funnel but is NOT a stage boundary.
+
+**T-BF2.6 — make the window distribute (design fork; resolve by reading code before coding):**
+- **Option A — cut a stage boundary at `StreamBarrierAlignExec`** (like `CoalescePartitionsExec`), so
+  `WindowAccum` runs as its own 8-partition distributed stage (8 tasks) and `StreamBarrierAlign` reads
+  the 8 outputs in a funnel stage. **Subtlety:** the align needs the 8 window-instance streams kept
+  SEPARATE + identity-preserved (partition p = instance p) to align barriers — so the stage1→stage2
+  shuffle must be an **identity N→N forward**, not Hash/RoundRobin (which would re-route/mix rows).
+  Need to confirm the shuffle infra supports partition-preserving forward (InputMode::Forward exists).
+- **Option B — parallel sink, no funnel** (the f2f3 `ParallelStreamSinkExec` path already used for the
+  N-parallel Kafka/file sink): each of the 8 window instances writes its own part-file per epoch and
+  the last-to-finish does the global commit — so there is NO `StreamBarrierAlign` funnel, the window
+  stage has 8 output partitions → 8 distributed tasks. Matches the already-validated parallel-sink EO.
+- Correctness is NOT at risk today (counts-exact + crash-EO already dup=0 with the window on one pod);
+  this is purely the **throughput distribution** the epic targets. Pick the option, T1 (task-region
+  shows 8 window tasks + nm_dist_gate dup=0), then re-T2 kind (window F5_PEAK across ≥2 pods).
+
+**Honest T2 status:** source distributes (8 tasks, even-spread across pods) + counts-exact + crash-EO —
+but the compute-heavy WINDOW does not distribute yet (T-BF2.6). Kind torn down, AWS $0.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)

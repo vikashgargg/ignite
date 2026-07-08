@@ -70,6 +70,7 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 | **T-BF2.3c** planner cuts N→M StreamExchange boundary | network | REFERENCES §9 | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | 0a9d631d |
 | **T-BF2.3-crashEO** N→M exactly-once across kill-9 (cut confirmed: Hash shuffle + multi-stage) | FT/EO | Chandy-Lamport ABS | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | f3c+gate |
 | **T-BF2.3d** ~~streaming FILE-source double-read~~ FALSE ALARM (test-harness input accumulation, not engine) | correctness | — | — | — | — | ✅ | — | — | nm_dist_gate |
+| **T-BF2.6** distribute WindowAccum across pods (cut boundary at StreamBarrierAlign funnel / parallel sink) | throughput/scale | Spark aggregate+coalesce stage split | ✅ | 🟡 | ⬜ | ⬜ | ⬜ | ⬜ | — (T2-found) |
 | **T-BF2.4** credit-based network backpressure | backpressure | Flink FLIP-8/FLIP-2 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
 
@@ -81,9 +82,10 @@ benchmark is **N→M** (source parallelism = #kafka-partitions) so T-BF2.2's 1�
 → **T-BF2.3 is critical path**; (2) even 1→N did NOT spread — `TaskSlotAssigner::next()` fill-first-packs
 a stage onto one worker → **new critical ticket T-BF2.5 (even placement)**. Cutting the boundary is
 necessary but not sufficient. Kind torn down, AWS $0. Detail: [vaj-bf2 §4e](design/vaj-bf2-distributed-streaming.md).
-**Critical path now:** T-BF2.3 T1 COMPLETE (counts-exact `nm_dist_gate` + crash-EO dup=0 through the
-confirmed N→M cut via `VAJRA_DISTRIBUTED_STREAM=1 f3c_stateful_crash.sh`) → T2 kind pods-spread + Kafka
-N→M throughput → T-BF2.4 credit backpressure → T3 EKS multi-node vs Flink.
+**T2 kind (vajra:bf3):** N→M cut fires + SOURCE distributes (8 tasks even-spread across pods) + counts-exact
++ crash-EO dup=0. BUT the WINDOW still runs on ONE pod — WindowAccum is bundled with the StreamBarrierAlign
+N→1 funnel in a single-output-partition consumer stage (see §4j). **Critical path now:** T-BF2.6 (distribute
+WindowAccum — cut at the funnel OR parallel sink) → re-T2 (window across ≥2 pods) → T-BF2.4 credit → T3 EKS.
 
 ---
 
