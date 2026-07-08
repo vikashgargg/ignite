@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch, UInt32Array};
 use datafusion::arrow::compute::take;
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning, PhysicalExprRef};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
@@ -509,6 +510,41 @@ fn rewrite_watermark(template: &RecordBatch, micros: i64) -> Result<RecordBatch>
 /// through; watermarks are MIN-merged across the N input channels and emitted only when the min
 /// strictly advances (so a fast input never closes a window before a slow input's data on its own
 /// channel arrives); a single `EndOfData` is forwarded once all N inputs have ended.
+/// VAJ-BF2 T-BF2.3b: the exchange's validated N→M receiver merge ([`merge_output_subchannels`] —
+/// MIN-merge of DISTINCT source watermarks (Flink keyBy), aligned Chandy-Lamport barriers, source
+/// idleness, one `EndOfData`), exposed as a stream combinator so the distributed streaming
+/// `ShuffleReadExec` can align its N producer sub-streams that arrive over Arrow Flight. The generic
+/// batch shuffle merge (`select_all`) naively interleaves and would mis-align barriers / skip the
+/// watermark MIN — this is the streaming-correct counterpart. `realtime` gates Flink `withIdleness`
+/// (a drained continuous partition excluded from the MIN); bounded shuffles keep the exact MIN
+/// (`idle_timeout=None`) since their sub-channels END when drained.
+///
+/// Each input stream gets a bounded forwarder channel (natural backpressure); for the degenerate 1→N
+/// case (one sub-stream per consumer) it is a correct pass-through with marker handling.
+pub fn merge_flow_event_streams(
+    streams: Vec<SendableRecordBatchStream>,
+    schema: SchemaRef,
+    realtime: bool,
+) -> SendableRecordBatchStream {
+    let mut receivers: Vec<Receiver<BatchResult>> = Vec::with_capacity(streams.len());
+    for mut stream in streams {
+        let (tx, rx) = channel::<BatchResult>(channel_capacity());
+        receivers.push(rx);
+        tokio::spawn(async move {
+            while let Some(item) = stream.next().await {
+                if tx.send(item).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    let idle_timeout = realtime.then(realtime_idle_timeout);
+    Box::pin(RecordBatchStreamAdapter::new(
+        schema,
+        merge_output_subchannels(receivers, idle_timeout),
+    ))
+}
+
 fn merge_output_subchannels(
     subs: Vec<Receiver<BatchResult>>,
     idle_timeout: Option<std::time::Duration>,

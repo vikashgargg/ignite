@@ -187,26 +187,22 @@ enum PartitionUsage {
 /// Grounded in the F2/F3 distributed-streaming design (docs/design/distributed-streaming-f2f3.md):
 /// the existing marker-aware Hash shuffle (`ShuffleWriteExec` broadcasts watermark/checkpoint/
 /// end-of-data markers, hash-routes data; `StageInputExec`/`ShuffleReadExec` receive) IS the
-/// cross-node `StreamExchangeExec`. A single-partition source (1→N) needs **no** receiver-side
-/// barrier alignment — each window instance has exactly one upstream, so the broadcast marker
-/// arrives once per instance (Flink single-input operators need no alignment). We therefore only
-/// cut the boundary for the 1→N case; N→M (multi-partition source) still needs `StreamBarrierAlignExec`
-/// at the receiver (T-BF2.3) and is left INLINE (the validated default) until that lands, so we never
-/// silently mis-align a multi-upstream barrier.
+/// cross-node `StreamExchangeExec`.
+/// - **1→N** (single-partition source): each window instance has exactly one upstream, so the
+///   broadcast marker arrives once per instance — no receiver alignment needed (Flink single-input).
+/// - **N→M** (multi-partition source): each consumer receives its N producer sub-streams, whose
+///   markers must be **MIN-merged (watermarks) + Chandy-Lamport aligned (barriers)** at the receiver.
+///   As of T-BF2.3b the streaming `ShuffleReadExec` does exactly this (`merge_flow_event_streams` =
+///   the exchange's validated receiver logic), so N→M is now safe to cut too. Paired with T-BF2.5
+///   even-spread placement, the M window instances distribute across workers.
 ///
 /// Opt-in via `VAJRA_DISTRIBUTED_STREAM=1` — the default keeps the in-process `StreamExchangeExec`
 /// (the F2/F3-validated single-stage path), so this is additive and reversible. The flag is resolved
 /// ONCE at `JobGraph::try_new` and threaded in (not read per-node), so it is deterministic and unit
 /// testable via `try_new_with_distributed_stream`.
 fn distributed_stream_boundary(plan: &Arc<dyn ExecutionPlan>, distributed_stream: bool) -> bool {
-    if !distributed_stream {
-        return false;
-    }
-    let Some(exchange) = plan.downcast_ref::<StreamExchangeExec>() else {
-        return false;
-    };
-    // Only the 1→N case is align-free and thus safe to shuffle here (see doc-comment).
-    exchange.input().output_partitioning().partition_count() == 1
+    // Both 1→N and N→M are now handled (the streaming shuffle read aligns N producer sub-streams).
+    distributed_stream && plan.is::<StreamExchangeExec>()
 }
 
 fn build_job_graph(
