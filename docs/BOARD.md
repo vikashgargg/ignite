@@ -72,7 +72,7 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 | **T-BF2.3d** ~~streaming FILE-source double-read~~ FALSE ALARM (test-harness input accumulation, not engine) | correctness | — | — | — | — | ✅ | — | — | nm_dist_gate |
 | **T-BF2.6** distribute WindowAccum (cut boundary at StreamBarrierAlign N→1 funnel) | throughput/scale | Spark aggregate+coalesce stage split | — | ✅ | ✅ | ✅ | ✅ | ⬜ | 824dbda0 |
 | **T-BF2.7** wait for workers before assigning (Spark min-registered-resources) | scale/placement | Spark minRegisteredResourcesRatio / Flink slot-wait | — | ✅ | ✅ | ✅ | ✅ | ⬜ | b812100b |
-| **T-BF2.4** credit-based network backpressure (bound shuffle in-flight buffer) | backpressure/memory | Flink FLIP-2 flow control | ✅ | 🟡 | ⬜ | ⬜ | ⬜ | ⬜ | — (naive blocking MEASURED lossy, reverted; needs lifecycle-aware credit — §4m) |
+| **T-BF2.4** credit-based network backpressure (bound shuffle in-flight buffer) | backpressure/memory | Flink FLIP-2 flow control | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | bounded-overflow+reserve permit; nm_dist_gate dup=0 + f3c PASS — §4m |
 | **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
 
 **T1 gate for T-BF2.2 (green):** unit tests gate-off→1 stage / gate-on→2 stages; `dist_streaming_smoke`

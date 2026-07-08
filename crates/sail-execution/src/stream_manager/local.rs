@@ -80,6 +80,19 @@ struct MemoryStreamReplicaSender {
     overflow: Vec<VecDeque<TaskStreamResult<RecordBatch>>>,
 }
 
+/// VAJ-BF2 T-BF2.4: opt-in credit-based flow control (Flink FLIP-2). The credit = the max in-flight
+/// overflow depth before the producer BLOCKS. Resolved once (process-global, like the exchange's
+/// `channel_capacity`). Default 0 = OFF = the current unbounded-overflow behaviour (additive/reversible).
+fn credit_cap() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("VAJRA_CREDIT_BACKPRESSURE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0)
+    })
+}
+
 #[tonic::async_trait]
 impl TaskStreamSink for MemoryStreamReplicaSender {
     async fn write(&mut self, batch: TaskStreamResult<RecordBatch>) -> TaskStreamSinkState {
@@ -141,6 +154,37 @@ impl TaskStreamSink for MemoryStreamReplicaSender {
                 overflow.clear();
             } else {
                 active = true;
+            }
+        }
+        // VAJ-BF2 T-BF2.4: credit-based backpressure (Flink FLIP-2). The try_send+overflow above never
+        // loses data (the batch is safely in the channel or `overflow`); this ONLY BOUNDS the overflow
+        // so a fast producer can't buffer without bound at a slow receiver (the in-flight memory
+        // regression vs Flink). When `overflow` exceeds the credit cap, BLOCK draining it FIFO via
+        // `reserve()` (an atomic permit — `permit.send` is infallible, so no batch is dropped), which
+        // awaits the receiver making room = "wait for credit". `reserve()` errors only if the receiver
+        // is gone (handled like the existing Closed path). Deadlock-safe in the streaming DAG: the
+        // barrier-align receiver keeps draining non-barriered inputs during alignment.
+        let cap = credit_cap();
+        if cap > 0 {
+            for i in 0..self.senders.len() {
+                while self.overflow[i].len() > cap {
+                    // Clone the cheap Arc-backed sender so the borrow ends before the await + mutation.
+                    let Some(tx) = self.senders[i].as_ref().cloned() else {
+                        break;
+                    };
+                    let permit = match tx.reserve().await {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            self.senders[i] = None;
+                            self.overflow[i].clear();
+                            break;
+                        }
+                    };
+                    match self.overflow[i].pop_front() {
+                        Some(item) => permit.send(item),
+                        None => break,
+                    }
+                }
             }
         }
         if active {

@@ -401,7 +401,7 @@ an early-finishing merge). Blocking `send().await` drops the in-flight batch (`E
 when the receiver isn't yet connected or has already closed — the lifecycle race. So credit backpressure
 cannot simply replace the overflow.
 
-**Correct design (T-BF2.4, for a focused pass):** a lifecycle-aware bounded credit — keep transient
+**RESOLVED (commit pending): bounded-overflow credit — the Flink FLIP-2 model, one prod solution.** Keep the existing lossless try_send+overflow (it never drops during operation + drains on close), then BOUND the overflow: when it exceeds the credit cap, block draining it FIFO via `tx.reserve().await` — an ATOMIC permit (`permit.send` is infallible, so no batch is ever dropped) that awaits the receiver making room = wait-for-credit. Opt-in `VAJRA_CREDIT_BACKPRESSURE=<cap>` (0=off default). **MEASURED: nm_dist_gate dup=0 AND deterministic (3990×3) + f3c crash-EO PASS** (vs the naive blocking-send which was non-deterministically lossy). The earlier lifecycle race is gone because the new batch is always parked in `overflow` first (never consumed by a blocking send that can hit a closed receiver); only the FIFO drain blocks, via an atomic permit. This is credit-based flow control — keep transient
 pre-subscription/close buffering, but BOUND the slow-receiver case: cap `overflow` at a credit limit and
 block (await channel capacity) only once the receiver is *connected and actively consuming*, so a
 straggler-vs-closed-receiver never loses data. Grounded in Flink FLIP-2 (receiver grants credit;
