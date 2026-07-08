@@ -70,7 +70,8 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 | **T-BF2.3c** planner cuts N→M StreamExchange boundary | network | REFERENCES §9 | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | 0a9d631d |
 | **T-BF2.3-crashEO** N→M exactly-once across kill-9 (cut confirmed: Hash shuffle + multi-stage) | FT/EO | Chandy-Lamport ABS | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | f3c+gate |
 | **T-BF2.3d** ~~streaming FILE-source double-read~~ FALSE ALARM (test-harness input accumulation, not engine) | correctness | — | — | — | — | ✅ | — | — | nm_dist_gate |
-| **T-BF2.6** distribute WindowAccum (cut boundary at StreamBarrierAlign N→1 funnel) | throughput/scale | Spark aggregate+coalesce stage split | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | 824dbda0 |
+| **T-BF2.6** distribute WindowAccum (cut boundary at StreamBarrierAlign N→1 funnel) | throughput/scale | Spark aggregate+coalesce stage split | — | ✅ | ✅ | ✅ | ✅ | ⬜ | 824dbda0 |
+| **T-BF2.7** wait for workers before assigning (else region packs on 1 pod at default slots=8) | scale/placement | Spark minRegisteredResourcesRatio / Flink slot-wait | ✅ | 🟡 | ⬜ | ⬜ | ⬜ | ⬜ | — (T2-found) |
 | **T-BF2.4** credit-based network backpressure | backpressure | Flink FLIP-8/FLIP-2 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
 
@@ -82,10 +83,11 @@ benchmark is **N→M** (source parallelism = #kafka-partitions) so T-BF2.2's 1�
 → **T-BF2.3 is critical path**; (2) even 1→N did NOT spread — `TaskSlotAssigner::next()` fill-first-packs
 a stage onto one worker → **new critical ticket T-BF2.5 (even placement)**. Cutting the boundary is
 necessary but not sufficient. Kind torn down, AWS $0. Detail: [vaj-bf2 §4e](design/vaj-bf2-distributed-streaming.md).
-**T2 kind (vajra:bf3):** N→M cut fires + SOURCE distributes (8 tasks even-spread across pods) + counts-exact
-+ crash-EO dup=0. BUT the WINDOW still runs on ONE pod — WindowAccum is bundled with the StreamBarrierAlign
-N→1 funnel in a single-output-partition consumer stage (see §4j). **Critical path now:** T-BF2.6 (distribute
-WindowAccum — cut at the funnel OR parallel sink) → re-T2 (window across ≥2 pods) → T-BF2.4 credit → T3 EKS.
+**T2 kind (vajra:bf4):** T-BF2.6 CONFIRMED — with `worker_task_slots=2` the 8 window instances spread across
+4 pods (2 each, clean even-spread p0/4 p1/5 p2/6 p3/7). At the DEFAULT slots=8 they pack on 1 pod: one worker
+holds the whole 8-task region AND the region is assigned before other workers register (timing race) → **T-BF2.7**
+(wait-for-workers before assigning; Spark minRegisteredResourcesRatio / Flink slot-wait). **Critical path now:**
+T-BF2.7 (window spreads at default slots) → T-BF2.4 credit backpressure → T3 EKS multi-node vs Flink.
 
 ---
 

@@ -341,9 +341,26 @@ Option A, and the sink-path rework of Option B, are both avoided — the RoundRo
 read handle it). **T1 green:** the WINDOW stage now has **8 tasks (was 1)** — driver plan dump
 stage-partitions `0:4 (source) / 1:8 (window) / 2:1 (sink)`; `nm_dist_gate` dup=0 (counts-exact through
 the funnel cut); `f3c` crash-EO dup=0 (align via the shuffle read preserves EO); `dist_streaming_smoke`
-6/6; 4 stage-boundary unit tests (exchange + funnel × gate on/off); clippy `-D` green. **Next: re-T2
-kind** — confirm the 8 window instances' `F5_PEAK` now land on ≥2 pods (T-BF2.5 even-spread places the
-8 window tasks across workers).
+6/6; 4 stage-boundary unit tests (exchange + funnel × gate on/off); clippy `-D` green.
+
+**T2 kind (vajra:bf4) — WINDOW DISTRIBUTES CONFIRMED + a new scheduler gap (T-BF2.7):**
+- With the DEFAULT `worker_task_slots=8` the 8 window instances still ran on ONE pod. Root-caused from
+  the driver log (not guessed): the region is 8 task-sets `{stage0 pi, stage1 pi}` (pipeline-co-located),
+  but (a) `worker_task_slots=8` ⇒ **one worker can hold the entire 8-task region**, and (b) the region
+  is **assigned before the other workers register** (`ScheduleTaskRegion` at 06:57:37, workers register
+  after) — so even-spread has only the first worker to place on → packs. This is a distributed-scheduler
+  gap analogous to **Spark `spark.scheduler.minRegisteredResourcesRatio` / `maxRegisteredResourcesWaitingTime`**
+  and **Flink slot-wait** (wait for the required slots/resources before deploying). = **T-BF2.7.**
+- **PROOF the window distributes** (root-cause confirmed, no rebuild): set `SAIL_CLUSTER__WORKER_TASK_SLOTS=2`
+  so the 8-task region can't fit on one worker → the 8 window instances spread across **4 pods, 2
+  partitions each** — `p1/p5, p2/p6, p3/p7, p0/p4` = a clean even-spread round-robin (T-BF2.5 working).
+  ⇒ **T-BF2.6 is validated: the window compute distributes across worker pods.**
+- (Pod→NODE spreading is a separate k8s-scheduler concern — kind packed the 4 pods on one node; the
+  window compute is on 4 distinct pods = 4 processes = distributed. On EKS with node anti-affinity /
+  more nodes the pods spread across nodes too.)
+- **Next: T-BF2.7** — wait for the requested workers to register (or a min-ratio) before assigning, so
+  even-spread distributes across all of them at the default slots (Spark min-registered-resources /
+  Flink slot-wait). Kind torn down, AWS $0.
 
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
