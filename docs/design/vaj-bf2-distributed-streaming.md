@@ -358,9 +358,26 @@ the funnel cut); `f3c` crash-EO dup=0 (align via the shuffle read preserves EO);
 - (Pod→NODE spreading is a separate k8s-scheduler concern — kind packed the 4 pods on one node; the
   window compute is on 4 distinct pods = 4 processes = distributed. On EKS with node anti-affinity /
   more nodes the pods spread across nodes too.)
-- **Next: T-BF2.7** — wait for the requested workers to register (or a min-ratio) before assigning, so
-  even-spread distributes across all of them at the default slots (Spark min-registered-resources /
-  Flink slot-wait). Kind torn down, AWS $0.
+- **T-BF2.7 (next):** wait for the requested workers to register before assigning. See §4l.
+
+## 4l. T-BF2.7 IMPLEMENTED + T2-VALIDATED (2026-07-08, commit b812100b) — window distributes at DEFAULT slots
+**Fix:** gate `assign_tasks` on `requested_worker_count == 0` — don't assign while requested workers are
+still registering (`run_tasks` fires `assign_tasks` on EVERY registration, so the first worker to arrive
+grabbed the whole region). Wait until every requested worker has registered OR been marked failed, so
+even-spread distributes across ALL of them. **Deadlock-safe:** the pending-worker probe
+(`handle_probe_pending_worker → track_worker_failed_to_start`) times out a worker that never starts and
+decrements the count, so it always reaches 0 within `task_launch_timeout`. No-op when no workers were
+requested. = Spark `spark.scheduler.minRegisteredResourcesRatio` / Flink slot-wait.
+**T2 kind (vajra:bf5, DEFAULT `worker_task_slots=8`, no workaround):** the 8 window instances now spread
+across **4 pods, 2 partitions each** — `p0/p4, p1/p5, p2/p6, p3/p7`, clean even-spread. The earlier
+provisioning worry was unfounded: ~4 workers ARE provisioned for the streaming query; the ONLY problem
+was the assign-before-register timing race, which the wait-gate fixes. **T1:** nm_dist_gate dup=0 +
+smoke 6/6 (gate doesn't break local-cluster) + clippy green. ⇒ **the WINDOW compute distributes across
+worker pods at default config.** (All 4 pods landed on one kind node — pod→NODE anti-affinity is a
+separate k8s-scheduler concern; on EKS with ≥2 compute nodes + anti-affinity they spread across nodes.)
+Kind torn down, AWS $0. **VAJ-BF2 distribution is COMPLETE (T1+T2): source + exchange + window all
+distribute across workers, counts-exact + crash-EO dup=0. Next: T-BF2.4 credit backpressure → T3 EKS
+multi-node throughput vs Flink (the beat measurement).**
 
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to

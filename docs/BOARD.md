@@ -28,7 +28,7 @@ Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmea
 | **Latency (e2e event→sink)** | `?` | `?` | 🔴 | UNMEASURED (D2) — likely no-GC win | [D2](design/prodgrade-dimensions-scorecard.md) |
 | **Memory** | `>` | `~` | 🟡 | Continuous: 7.06 vs Flink 8.58 GiB (win); bounded: 10.38 vs 8.57 (lose) → **path-dependent** | [D3](design/prodgrade-dimensions-scorecard.md), F5 spill |
 | **CPU / per-stage** | — | `~` | 🟡 | Per-stage ranked: from_json 135s > exchange 89.8s > finalize 27s > source_read 4.4s | VAJ-BF2 |
-| **Network / shuffle** | — | `?` | 🟡 | Arrow-Flight zero-copy shuffle exists (batch); streaming exchange now distributable (T-BF2.2) | **VAJ-BF2** |
+| **Network / shuffle** | — | `?` | 🟡 | Streaming source+exchange+window DISTRIBUTE across pods (T-BF2.2/2.5/2.3/2.6/2.7, T2-kind); T3 throughput vs Flink pending | **VAJ-BF2** |
 | **State mgmt** | — | `=` | ✅ | Spillable windowed-agg+join state (F5), out==N exact @5M; 64k-cap fixed | [F5](design/streaming-spillable-state-f5.md) |
 | **Fault tolerance / EO** | `=` | `=` | ✅ | dup=0 across kill-9 on EKS (aligned barriers + exact idle + emit floor) | [distributed-eo](design/distributed-eo-coordinator-wiring.md) |
 | **Recovery time** | — | `?` | 🟡 | Correctness proven; TIME not measured (Flink 2.0 ForSt 49× claim) | [D5](design/prodgrade-dimensions-scorecard.md) |
@@ -71,7 +71,7 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 | **T-BF2.3-crashEO** N→M exactly-once across kill-9 (cut confirmed: Hash shuffle + multi-stage) | FT/EO | Chandy-Lamport ABS | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | f3c+gate |
 | **T-BF2.3d** ~~streaming FILE-source double-read~~ FALSE ALARM (test-harness input accumulation, not engine) | correctness | — | — | — | — | ✅ | — | — | nm_dist_gate |
 | **T-BF2.6** distribute WindowAccum (cut boundary at StreamBarrierAlign N→1 funnel) | throughput/scale | Spark aggregate+coalesce stage split | — | ✅ | ✅ | ✅ | ✅ | ⬜ | 824dbda0 |
-| **T-BF2.7** wait for workers before assigning (else region packs on 1 pod at default slots=8) | scale/placement | Spark minRegisteredResourcesRatio / Flink slot-wait | ✅ | 🟡 | ⬜ | ⬜ | ⬜ | ⬜ | — (T2-found) |
+| **T-BF2.7** wait for workers before assigning (Spark min-registered-resources) | scale/placement | Spark minRegisteredResourcesRatio / Flink slot-wait | — | ✅ | ✅ | ✅ | ✅ | ⬜ | b812100b |
 | **T-BF2.4** credit-based network backpressure | backpressure | Flink FLIP-8/FLIP-2 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
 
