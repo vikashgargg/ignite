@@ -66,8 +66,9 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 | **T-BF2.2** cut stage boundary at StreamExchangeExec (1→N) | network/shuffle | f2f3 marker-shuffle | — | ✅ | ✅ | ✅ | ✅* | ⬜ | d816eac7 |
 | **T-BF2.5** spread a stage's partitions across workers | scale/placement | Flink evenly-spread-out-slots / Spark spreadOut | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | d02670ed |
 | **T-BF2.3a** factor align combinator (reusable) | FT/EO | Chandy-Lamport | — | ✅ | ✅ | ✅ | — | — | e8b26a80 |
-| **T-BF2.3b** marker-aware ShuffleRead (MinMerge watermarks) | FT/EO | Flink keyBy watermark MIN | ✅ | ✅ | ⬜ | ⬜ | ⬜ | ⬜ | — |
-| **T-BF2.3c** planner cuts N→M StreamExchange boundary | network | REFERENCES §9 | ✅ | ✅ | ⬜ | ⬜ | ⬜ | ⬜ | — |
+| **T-BF2.3b** marker-aware ShuffleRead (MinMerge watermarks) | FT/EO | Flink keyBy watermark MIN | — | ✅ | ✅ | ✅ | — | — | 0a9d631d |
+| **T-BF2.3c** planner cuts N→M StreamExchange boundary | network | REFERENCES §9 | — | ✅ | ✅ | 🟡 | ⬜ | ⬜ | 0a9d631d |
+| **T-BF2.3d** fix multi-partition streaming FILE-source distributed double-read | correctness | DF54 morsel | ✅ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **T-BF2.4** credit-based network backpressure | backpressure | Flink FLIP-8/FLIP-2 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
 

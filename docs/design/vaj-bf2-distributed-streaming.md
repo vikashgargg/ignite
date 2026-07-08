@@ -239,6 +239,30 @@ the shuffle as flow-event batches).
 The align + MIN-merge is the consistent-cut guarantee across the network; any early-fire/dup means the
 alignment is wrong — do not paper over it.
 
+## 4g. T-BF2.3b/c IMPLEMENTED + T1 result (2026-07-08, commit 0a9d631d)
+Implemented: `merge_flow_event_streams` (exchange.rs — the validated `merge_output_subchannels`
+N→M receiver exposed as a combinator) + streaming `ShuffleReadExec` uses it for flow-event shuffles
+(batch keeps `select_all`) + `distributed_stream_boundary` now cuts N→M too. **T1:**
+`dist_streaming_smoke` 6/6 gate-ON (flow-event shuffle via the new merge; `windowed_file=97`) + 6/6
+local; align/exchange/planner unit tests green; clippy `-D` green.
+**N→M probe (4-partition FILE source → windowed-agg, gate OFF vs ON):**
+`distinct(window,key)=390` **EXACT in both** ⇒ the alignment + hash-routing is CORRECT. **BUT** gate-ON
+`sum=780` = **2× the data** (each row counted twice). Symptom (distinct exact, sum doubled) = a
+**SOURCE-read volume dup**, not an alignment error.
+- **Root cause (narrowed, NOT yet fixed):** cutting the boundary distributes the multi-partition
+  streaming `FileSourceExec` — a path NEVER exercised before (all prior streaming-file tests used
+  `coalesce(1)` = 1→N). This is a DF54-morsel-CLASS double-read, but **`partitioned_by_file_group` is
+  NOT the fix** — applying it at the streaming scan made the *in-process* baseline WORSE (390→1170),
+  so the streaming `FileSourceExec` whole-file partitioning model conflicts with it. Reverted. The real
+  fix needs proper root-causing of how the streaming file scan splits/reads under distribution =
+  **T-BF2.3d**.
+- **Orthogonal to alignment + to the Kafka benchmark:** the real throughput target reads Kafka (no
+  parquet scan), so this dup does not apply to it; but Kafka N→M is UNVALIDATED locally (bounded-Kafka
+  harness produces no output gate ON **and** OFF — a separate pre-existing harness issue, not this
+  change). **Per charter anti-patch, T-BF2.3 is NOT dup=0-validated end-to-end yet.**
+- **Next:** T-BF2.3d (root-cause the streaming-file-source distributed double-read) + get a clean Kafka
+  N→M dup=0 signal (fix the local bounded-Kafka harness or use the T2 kind path with an S3/shared sink).
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
