@@ -279,6 +279,19 @@ needed.** Permanent self-checking gate: **`scripts/nm_dist_gate.sh`** (fresh inp
 run is mandatory — cross-run file accumulation silently masqueraded as an engine dup. **Remaining T1 for
 T-BF2.3: crash-EO N→M dup=0** (counts-exact done) + the Kafka N→M path (real benchmark; no parquet scan).
 
+## 4i. T-BF2.3 crash-EO N→M VALIDATED dup=0 (2026-07-08) — T1 COMPLETE
+Ran the existing committed crash-EO gate `f3c_stateful_crash.sh` (continuous stateful windowed-agg over
+a **4-partition** Kafka topic = N→M, local-cluster, `kill -9` mid-run → restart → verify) with
+`VAJRA_DISTRIBUTED_STREAM=1`. **Result: `F3C_STATEFUL_EO_ACROSS_CRASH PASS` — `no_dup=True`,
+`all_counts_10=True`, rows=12/6 windows, IDENTICAL to the gate-OFF baseline.** Confirmed the N→M cut was
+genuinely active (not a silent fallback): the task-runner plan dump shows
+`ShuffleWriteExec: partitioning=Hash([#8@3], 8)` over the streaming source + a multi-stage job
+(`job 1 stage 0/1`) — i.e. the keyed exchange was cut into a distributed cross-network Hash shuffle whose
+receiver aligns Chandy-Lamport barriers to a consistent cut. So the aligning shuffle preserves
+exactly-once across a hard crash. **Reproducible gate: `VAJRA_DISTRIBUTED_STREAM=1 bash
+scripts/f3c_stateful_crash.sh`.** ⇒ T-BF2.3 T1 is COMPLETE (counts-exact `nm_dist_gate` + crash-EO f3c).
+Next: T2 kind (pods spread) + the Kafka N→M throughput benchmark → T-BF2.4 → T3 EKS vs Flink.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
