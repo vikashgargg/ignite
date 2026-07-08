@@ -25,7 +25,7 @@ Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmea
 |------|:---:|:---:|:---:|---|---|
 | **Batch throughput** | `>` | — | ✅ | P4 200M ETL: 5.92s vs Spark 36.94s = **6.2×**; TPC-H SF1 1.78 vs 63.46s | [P4](design/production-workload-benchmark.md) |
 | **Streaming throughput** | — | `<<` | 🟡 | Single-node ~5M vs Flink 5.58M (~1.05–1.15× behind). **FAIR T3 2-node A/B (§4p): Vajra 1.456M vs Flink 2-TM 5.22M ev/s = Flink 3.6× FASTER.** Distributed-streaming throughput BEAT REFUTED — Vajra correct (cross-node+EO+S3) but ~3.6× slower than Flink. `<<` not `<` | **VAJ-BF2** |
-| **Latency (e2e event→sink)** | `?` | `?` | 🔴 | UNMEASURED (D2) — likely no-GC win | [D2](design/prodgrade-dimensions-scorecard.md) |
+| **Latency (Kafka→Kafka passthrough)** | — | `>` | 🟢 | **T2/kind fair (parallelism=2 both): Vajra p50=30/p99=125/p999=127/max=128ms vs Flink p50=42/p99=580/p999=765/max=767ms — WINS every pct, TAIL 4.6–6× (no-GC).** Full windowed e2e still TODO | [D2](design/prodgrade-dimensions-scorecard.md) |
 | **Memory** | `>` | `~` | 🟡 | Continuous: 7.06 vs Flink 8.58 GiB (win); bounded: 10.38 vs 8.57 (lose) → **path-dependent** | [D3](design/prodgrade-dimensions-scorecard.md), F5 spill |
 | **CPU / per-stage** | — | `~` | 🟡 | Per-stage ranked: from_json 135s > exchange 89.8s > finalize 27s > source_read 4.4s | VAJ-BF2 |
 | **Network / shuffle** | — | `?` | 🟡 | Streaming source+exchange+window DISTRIBUTE across pods (T-BF2.2/2.5/2.3/2.6/2.7, T2-kind); T3 throughput vs Flink pending | **VAJ-BF2** |
@@ -38,7 +38,7 @@ Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmea
 | **Cost (idle→$0)** | — | — | ✅ | AWS torn to $0 when idle (standing discipline) | — |
 | **Completeness** | `=` | `=` | ✅ | EKS 100M: 10 windows/100M matches Flink (VAJRA_COMPLETE_ON_END) | [completeness](design/EPIC-beat-flink-streaming.md) |
 | **Parallel Kafka sink** | — | `=` | ✅ | 100M/100M delivered @1.67M msg/s (N parallel tasks, per-task txn.id) | [f2f3](design/distributed-streaming-f2f3.md) |
-| **Realtime passthrough latency/thruput** | — | `<` | 🔴 | Vajra ~1.3K/s p50=257ms vs Flink 20K/s p50=98ms (un-batched Kafka sink) | [gap](design/EPIC-beat-flink-streaming.md) |
+| **Realtime passthrough latency/thruput** | — | `>lat` | 🟡 | LATENCY now WINS on T2/kind fair (see Latency row: Vajra p50=30/max=128 vs Flink p50=42/max=767ms). Earlier p50=257ms was the pre-fix 1/16-partition sink bug. Throughput at scale still TODO on EKS | [gap](design/EPIC-beat-flink-streaming.md) |
 | **DX / PySpark-compat** | `=` | — | ✅ | PySpark runs unchanged; batch+streaming smoke 6/6 vs Spark 3.5.3 | [f2f3](design/distributed-streaming-f2f3.md) |
 | **Interactive SQL** | `~` | — | 🟡 | ClickBench 60.11 vs LakeSail 65.50s (shared core); vs ClickHouse/Trino unmeasured | [clickbench](design/) |
 | **AI-native execution** | `?` | `?` | ⬜ | Not started (charter axis; backlog) | — |
