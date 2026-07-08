@@ -427,6 +427,26 @@ baseline, dup=0, deterministic) with IDENTICAL shuffle/align/window code + codec
 EKS uses S3 (prior EKS runs proved counts + crash-EO to S3). ⇒ EKS = scale + Flink head-to-head
 measurement, not discovery. Kind torn down, AWS $0.
 
+
+## 4o. T3 EKS multi-node result (2026-07-08, vajra:bf6, 2x c7g.2xlarge compute + kafka) — HONEST NEGATIVE
+Ran the distributed windowed-agg (100M/16-part Kafka -> S3) on a 2-compute-node EKS cluster,
+kubernetes-cluster mode, all gates on (DISTRIBUTED=1 + CREDIT=16). **What WORKED (capability proven at
+scale):** (1) the window DISTRIBUTES CROSS-NODE — 4 worker pods, 2 per compute node (verified `get pods
+-o wide`); (2) the **S3 sink + read work** (the kind-penetration gap CLOSED) — counts read back from S3:
+`groups=9000 total=90M n_windows=9 n_keys=1000` (9 windows = the known no-COMPLETE_ON_END last-window
+drop, not a dup; distinct exact). **What did NOT (the beat thesis):** **throughput = 1.734M ev/s**, vs
+the single-node c7g.4xlarge ~5M ev/s (both 16 vCPU total). **Distributing across 2 nodes REGRESSED
+throughput ~3x** — the cross-node Flight shuffle overhead (+ likely single-Kafka-broker read bound)
+outweighs the parallelism gain at this scale/config. **The "distribute the exchange to structurally beat
+Flink" thesis is NOT validated by measurement** — the distribution is CORRECT (cross-node, counts-exact,
+S3 EO) but SLOWER than single-node. HONEST like the VAJ-T7 null result. **Opens (for the beat, not done):**
+(a) fair Flink-2-TM head-to-head (Flink also pays network cost multi-node — the real comparison, not run);
+(b) root-cause the 3x regression (WM_PROF didn't emit on EKS — the dump-site fix is a prerequisite; is it
+Flight shuffle serialize/copy, Kafka-broker-bound, or credit throttling?); (c) same-node mpsc vs cross-node
+Flight (§3 design: co-located links should stay mpsc — verify the exchange isn't serializing same-node).
+**Cluster torn down to $0** (eksctl delete). Distribution CAPABILITY is prod-grade + validated; the
+throughput BEAT is unproven and currently a regression.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)

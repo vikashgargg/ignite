@@ -24,7 +24,7 @@ Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmea
 | Axis | vs S | vs F | State | Evidence (measured) | Owning epic/ticket |
 |------|:---:|:---:|:---:|---|---|
 | **Batch throughput** | `>` | — | ✅ | P4 200M ETL: 5.92s vs Spark 36.94s = **6.2×**; TPC-H SF1 1.78 vs 63.46s | [P4](design/production-workload-benchmark.md) |
-| **Streaming throughput** | — | `<` | 🟡 | EKS 100M bounded: 4.92–5.40M vs Flink 5.58–5.67M ev/s = **~1.05–1.15× behind** (path-dep) | **VAJ-BF2** (distribute exchange) |
+| **Streaming throughput** | — | `<` | 🟡 | Single-node ~5M vs Flink 5.58M (~1.05–1.15× behind). **T3 2-node DISTRIBUTED = 1.734M ev/s = REGRESSED ~3×** (network shuffle overhead > parallelism gain; §4o). Distribution CORRECT (cross-node + S3 counts-exact) but beat UNPROVEN | **VAJ-BF2** |
 | **Latency (e2e event→sink)** | `?` | `?` | 🔴 | UNMEASURED (D2) — likely no-GC win | [D2](design/prodgrade-dimensions-scorecard.md) |
 | **Memory** | `>` | `~` | 🟡 | Continuous: 7.06 vs Flink 8.58 GiB (win); bounded: 10.38 vs 8.57 (lose) → **path-dependent** | [D3](design/prodgrade-dimensions-scorecard.md), F5 spill |
 | **CPU / per-stage** | — | `~` | 🟡 | Per-stage ranked: from_json 135s > exchange 89.8s > finalize 27s > source_read 4.4s | VAJ-BF2 |
