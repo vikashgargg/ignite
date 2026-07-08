@@ -1,0 +1,95 @@
+# Official Apache Flink 1.19 standalone session cluster for the streaming
+# head-to-head. TaskManager gets a DEDICATED c7g.4xlarge (role=compute, 16 slots,
+# ~24g) — the exact 16-vCPU Graviton class of Flink's published 1.82M events/s
+# windowed-aggregation baseline, so per-core numbers are directly comparable.
+# JobManager + sql-runner sit on the kafka node.
+#
+# The flink-sql-connector-kafka jar must be on the classpath BEFORE the JVM
+# starts, so an initContainer seeds a shared volume with the image's own
+# /opt/flink/lib/* PLUS the connector jar, and the main container mounts that
+# volume at /opt/flink/lib.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: flink-config, namespace: stream }
+data:
+  FLINK_PROPERTIES: |
+    jobmanager.rpc.address: flink-jm.stream.svc.cluster.local
+    taskmanager.numberOfTaskSlots: 8
+    parallelism.default: 16
+    jobmanager.memory.process.size: 2048m
+    taskmanager.memory.process.size: 11264m
+    taskmanager.memory.managed.fraction: 0.5
+    rest.address: flink-jm.stream.svc.cluster.local
+    rest.bind-address: 0.0.0.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: flink-jm, namespace: stream }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: flink, component: jm } }
+  template:
+    metadata: { labels: { app: flink, component: jm } }
+    spec:
+      nodeSelector: { role: kafka }
+      initContainers:
+        - name: seed-lib
+          image: flink:1.19.1-scala_2.12-java17
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              cp -a /opt/flink/lib/. /flinklib/
+              curl -fsSL -o /flinklib/flink-sql-connector-kafka-3.2.0-1.19.jar \
+                https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.2.0-1.19/flink-sql-connector-kafka-3.2.0-1.19.jar
+              ls -la /flinklib | tail -5
+          volumeMounts: [ { name: flinklib, mountPath: /flinklib } ]
+      containers:
+        - name: jobmanager
+          image: flink:1.19.1-scala_2.12-java17
+          args: ["jobmanager"]
+          ports: [ {containerPort: 6123}, {containerPort: 8081} ]
+          envFrom: [ { configMapRef: { name: flink-config } } ]
+          resources: { requests: {cpu: "1", memory: "2Gi"}, limits: {cpu: "2", memory: "3Gi"} }
+          volumeMounts: [ { name: flinklib, mountPath: /opt/flink/lib } ]
+      volumes: [ { name: flinklib, emptyDir: {} } ]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: flink-jm, namespace: stream }
+spec:
+  selector: { app: flink, component: jm }
+  ports: [ {name: rpc, port: 6123}, {name: blob, port: 6124}, {name: rest, port: 8081} ]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: flink-tm, namespace: stream }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: flink, component: tm } }
+  template:
+    metadata: { labels: { app: flink, component: tm } }
+    spec:
+      nodeSelector: { role: compute }
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: { matchLabels: { app: flink, component: tm } }
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: seed-lib
+          image: flink:1.19.1-scala_2.12-java17
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              cp -a /opt/flink/lib/. /flinklib/
+              curl -fsSL -o /flinklib/flink-sql-connector-kafka-3.2.0-1.19.jar \
+                https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.2.0-1.19/flink-sql-connector-kafka-3.2.0-1.19.jar
+          volumeMounts: [ { name: flinklib, mountPath: /flinklib } ]
+      containers:
+        - name: taskmanager
+          image: flink:1.19.1-scala_2.12-java17
+          args: ["taskmanager"]
+          envFrom: [ { configMapRef: { name: flink-config } } ]
+          resources: { requests: {cpu: "15", memory: "26Gi"}, limits: {cpu: "16", memory: "28Gi"} }
+          volumeMounts: [ { name: flinklib, mountPath: /opt/flink/lib } ]
+      volumes: [ { name: flinklib, emptyDir: {} } ]
