@@ -70,7 +70,7 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 | **T-BF2.3c** planner cuts N→M StreamExchange boundary | network | REFERENCES §9 | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | 0a9d631d |
 | **T-BF2.3-crashEO** N→M exactly-once across kill-9 (cut confirmed: Hash shuffle + multi-stage) | FT/EO | Chandy-Lamport ABS | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | f3c+gate |
 | **T-BF2.3d** ~~streaming FILE-source double-read~~ FALSE ALARM (test-harness input accumulation, not engine) | correctness | — | — | — | — | ✅ | — | — | nm_dist_gate |
-| **T-BF2.6** distribute WindowAccum across pods (cut boundary at StreamBarrierAlign funnel / parallel sink) | throughput/scale | Spark aggregate+coalesce stage split | ✅ | 🟡 | ⬜ | ⬜ | ⬜ | ⬜ | — (T2-found) |
+| **T-BF2.6** distribute WindowAccum (cut boundary at StreamBarrierAlign N→1 funnel) | throughput/scale | Spark aggregate+coalesce stage split | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | 824dbda0 |
 | **T-BF2.4** credit-based network backpressure | backpressure | Flink FLIP-8/FLIP-2 | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | ⬜ | — |
 | **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
 

@@ -328,6 +328,23 @@ instances run in-process on one pod. This is exactly the batch pattern where `Co
 **Honest T2 status:** source distributes (8 tasks, even-spread across pods) + counts-exact + crash-EO —
 but the compute-heavy WINDOW does not distribute yet (T-BF2.6). Kind torn down, AWS $0.
 
+## 4k. T-BF2.6 IMPLEMENTED + T1-COMPLETE (2026-07-08, commit 824dbda0)
+**Chosen: Option A, refined — cut a stage boundary at `StreamBarrierAlignExec`.** It is the streaming
+analog of `CoalescePartitionsExec` (already a boundary in `build_job_graph`), so the fix is one line:
+add `StreamBarrierAlignExec` to `distributed_stream_boundary`. Its properties
+(`UnknownPartitioning(1)`) drive `create_shuffle` to a **RoundRobin{1} funnel**, so the child
+(`WindowAccumExec`, N partitions) runs as **N distributed tasks**; the marker-aware aligning shuffle
+read (`merge_flow_event_streams`) does the N→1 barrier-align + watermark MIN that `StreamBarrierAlign`
+did in-process (a proven SUPERSET — MIN-merge vs dedup), so the funnel node is subsumed by the shuffle.
+**No new distribution variant, no parallel-sink rework** (the identity-N→N-forward subtlety of the naive
+Option A, and the sink-path rework of Option B, are both avoided — the RoundRobin{1} funnel + aligning
+read handle it). **T1 green:** the WINDOW stage now has **8 tasks (was 1)** — driver plan dump
+stage-partitions `0:4 (source) / 1:8 (window) / 2:1 (sink)`; `nm_dist_gate` dup=0 (counts-exact through
+the funnel cut); `f3c` crash-EO dup=0 (align via the shuffle read preserves EO); `dist_streaming_smoke`
+6/6; 4 stage-boundary unit tests (exchange + funnel × gate on/off); clippy `-D` green. **Next: re-T2
+kind** — confirm the 8 window instances' `F5_PEAK` now land on ≥2 pods (T-BF2.5 even-spread places the
+8 window tasks across workers).
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
