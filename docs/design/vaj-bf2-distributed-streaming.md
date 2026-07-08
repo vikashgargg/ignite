@@ -474,6 +474,38 @@ single-engine, no-JVM. Distributed streaming THROUGHPUT is NOT a win and would n
 one; the board should reflect this and the team should decide whether to root-cause the 3.6x or invest
 in the proven axes.
 
+
+## 4q. ROOT-CAUSE of the throughput gap — MEASURED (2026-07-08, local WM_PROF + gate A/B) — the honest, complete picture
+Frustration warranted; here is what the MEASUREMENTS say (not guesses), ruling causes IN and OUT:
+- **Micro-batch loop: NOT the cause.** A/B on the distributed path: `maxOffsetsPerTrigger=4M` (5 micro-batches)
+  0.531M vs `=20M` (1 micro-batch) 0.500M ev/s — identical. (The KB's suspected availableNow re-plan/commit
+  loop is NOT the lever.)
+- **Same-node distributed shuffle logic: cheap (~16%).** Local-cluster gate-OFF (in-process exchange) 0.542M
+  vs gate-ON (distributed cut) 0.465M — the shuffle machinery (cut+align+credit) costs only ~16% same-node
+  (Arc-clone, no IPC). ⇒ the EKS 3.4× regression is ENTIRELY the CROSS-NODE Flight/gRPC transport, NOT the
+  shuffle logic.
+- **Small-batch IPC: NOT the cause.** The Kafka source emits LARGE batches (`MAX_BATCH_BYTES=128 MiB`), so the
+  cross-node Flight sends are large — not a per-small-batch framing problem.
+- **Single-node per-stage CPU (WM_PROF, 20M, summed): `exchange=267.8s > from_json=131.7s > source_read=52s
+  > finalize=18s > encode=0.2s`, `input_wait=610%`.** BUT the "exchange" timer WRAPS `senders[owner].send().await`,
+  which BLOCKS on the bounded channel when the window is slow — so **most of the 267s is BACKPRESSURE-WAIT, not
+  CPU.** `input_wait=610%` confirms the window is INPUT-STARVED. The genuine CPU bottleneck is **`from_json` (the
+  parse, 131s)** — and per KB §6 Vajra's Rust parse is already **~parity with Flink's Jackson** (being Rust not
+  JVM is the edge, already realized).
+
+**HONEST CONCLUSION (the prod-bar truth):** on this windowed-COUNT workload Vajra is **parse-bound at ~PARITY
+with Flink single-node** (1.05–1.15× — small + intrinsic), and **distribution does NOT help — the workload does
+not scale with nodes** (Flink 2-node 5.22M ≈ Flink 1-node 5.58M; neither engine gains), while Vajra's cross-node
+shuffle is less optimized so it REGRESSES. **This is not a single missed-prod-bar bug to "fix" — it is a workload
+where neither engine's advantages dominate, and Vajra is already competitive.** To genuinely BEAT Flink the lever
+is NOT this workload's raw parse-throughput; it is (a) workloads that leverage Vajra's REAL edges — columnar
+vectorized compute-heavy aggregation, no-GC tail latency (D2, unmeasured), memory-bounded state; or (b) a
+CONFIRMED exchange route-CPU optimization (the per-row key-group loop + N-way `take` in `distribute`) — but that
+needs finer profiling to separate route-CPU from backpressure-wait first (the current timer conflates them; fix
+= time the route separately from the send-await). WM_PROF worker-env now fixed (was driver-only) so a future
+distributed profile can attribute per-worker. **Do NOT claim a distributed-streaming throughput beat — measured
+false. Vajra's measured wins remain batch (6.2× vs Spark), memory, unified, no-JVM.**
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)

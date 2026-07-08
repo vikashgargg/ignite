@@ -42,7 +42,7 @@ raw = (s.readStream.format("kafka")
        .option("kafka.bootstrap.servers", BOOT)
        .option("subscribe", TOPIC)
        .option("startingOffsets", "earliest")
-       .option("maxOffsetsPerTrigger", 4000000)
+       .option("maxOffsetsPerTrigger", int(os.environ.get("MAXOFFSETS","4000000")))
        .load())
 
 parsed = (raw.select(F.from_json(F.col("value").cast("string"), schema).alias("e"))
