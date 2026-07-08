@@ -447,6 +447,33 @@ Flight (§3 design: co-located links should stay mpsc — verify the exchange is
 **Cluster torn down to $0** (eksctl delete). Distribution CAPABILITY is prod-grade + validated; the
 throughput BEAT is unproven and currently a regression.
 
+
+## 4p. T3 EKS FAIR A/B — Vajra distributed vs Flink 2-TM, SAME 2-node cluster (2026-07-08) — DECISIVE NEGATIVE
+Recreated the cluster and ran BOTH engines sequentially on the SAME 2x c7g.2xlarge compute (16 vCPU
+total) + same 100M/16-part Kafka topic + IDENTICAL 10s tumbling-window keyed COUNT (Flink SQL == Vajra
+stream_windowed_agg). Fair head-to-head:
+| Engine (2-node, 16 vCPU) | wall_s | throughput |
+|--------------------------|--------|------------|
+| **Vajra distributed** (kubernetes-cluster, all gates) | 68.67 | **1.456M ev/s** (counts exact via S3; 8 workers 4/4 across nodes) |
+| **Flink 2-TM** (2 TMs, one per node, parallelism 16) | 19.17 | **5.22M ev/s** |
+**Flink is ~3.6x FASTER than Vajra at equal 2-node resources.** The "distribute the exchange to
+STRUCTURALLY BEAT Flink" thesis (the whole VAJ-BF2 premise) is **REFUTED BY MEASUREMENT** — Vajra's
+distributed streaming is CORRECT (cross-node, EO, S3 counts-exact) but ~3.6x SLOWER than Flink's mature
+network stack, not faster. (Honest, like the VAJ-T7 null result — claim only measured.) Cluster torn to $0.
+
+**What this means (honest):** VAJ-BF2 delivered a genuinely prod-grade *distributed streaming capability*
+(merged to main, T1+T2+T3-correct) but NOT a throughput win. The ~3.6x gap is large and needs deep
+root-causing IF the distributed-throughput beat is still the goal: candidates = (a) the Arrow-IPC Flight
+shuffle serialize/copy per batch (vs Flink's optimized network + operator chaining that avoids
+serialization for chained/local ops); (b) NON-FUSED stages (each cut stage is a separate task with its
+own scheduling/stream overhead — Flink fuses/chains); (c) same-node links NOT staying mpsc (the §3
+design says co-located should skip serialization — verify); (d) credit backpressure throttling; (e)
+WM_PROF didn't emit on EKS so NONE of this is attributed yet (fixing the dump-site is prerequisite #1).
+**Strategic honesty:** Vajra's PROVEN wins are batch (6.2x vs Spark), memory (path-dependent), unified
+single-engine, no-JVM. Distributed streaming THROUGHPUT is NOT a win and would need major work to become
+one; the board should reflect this and the team should decide whether to root-cause the 3.6x or invest
+in the proven axes.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
