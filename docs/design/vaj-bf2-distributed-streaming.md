@@ -379,6 +379,37 @@ Kind torn down, AWS $0. **VAJ-BF2 distribution is COMPLETE (T1+T2): source + exc
 distribute across workers, counts-exact + crash-EO dup=0. Next: T-BF2.4 credit backpressure → T3 EKS
 multi-node throughput vs Flink (the beat measurement).**
 
+## 4m. T-BF2.4 credit-based backpressure — root-caused; naive fix MEASURED LOSSY, reverted (2026-07-08)
+**The gap (confirmed, grounded in Flink FLIP-2):** the task-stream (shuffle) memory sink
+`MemoryStreamReplicaSender::write` (`stream_manager/local.rs`) uses non-blocking `try_send`, and when
+the receiver's bounded channel (`cluster.task_stream_buffer`, default 16) is full it spills to an
+**UNBOUNDED `overflow: VecDeque`** "to avoid blocking sending for slow senders." So a fast producer
+buffers WITHOUT BOUND at a slow receiver — exactly the streaming in-flight memory regression vs Flink
+(no credit-based flow control on the cross-stage/cross-pod shuffle; the in-process exchange already has
+coarse bounded-blocking credit via `channel_capacity`).
+
+**Naive fix attempted + MEASURED (opt-in `VAJRA_CREDIT_BACKPRESSURE`, blocking `send().await` instead
+of overflow):** f3c crash-EO PASSED (no deadlock — the align receiver drains non-barriered inputs, as
+predicted), BUT `nm_dist_gate` showed **non-deterministic DATA LOSS** (distributed availableNow file
+source: 3990 correct then 3630 = −360 rows, same config = a race). **Reverted — will not ship lossy
+code (charter: only dup=0 via a consistent cut advances the invariant).**
+
+**Root cause of the loss (why the naive fix is wrong):** the `overflow` VecDeque serves a DUAL purpose —
+(1) bounding slow-receiver buffering (what we want to fix) AND (2) buffering data around the
+subscription/close LIFECYCLE (data produced before the consumer subscribes, or a straggler producer vs
+an early-finishing merge). Blocking `send().await` drops the in-flight batch (`Err` = receiver gone)
+when the receiver isn't yet connected or has already closed — the lifecycle race. So credit backpressure
+cannot simply replace the overflow.
+
+**Correct design (T-BF2.4, for a focused pass):** a lifecycle-aware bounded credit — keep transient
+pre-subscription/close buffering, but BOUND the slow-receiver case: cap `overflow` at a credit limit and
+block (await channel capacity) only once the receiver is *connected and actively consuming*, so a
+straggler-vs-closed-receiver never loses data. Grounded in Flink FLIP-2 (receiver grants credit;
+producer blocks when credit exhausted) — the receiver-connected condition is the credit grant. Validate:
+`nm_dist_gate` dup=0 AND deterministic + f3c crash-EO dup=0 + a slow-sink memory-bound test (RSS
+plateaus, doesn't grow O(N)). **Not correctness-critical for the throughput beat** (distribution +
+counts-exact + crash-EO already done); it's the MEMORY-bound lever (bounds in-flight vs Flink).
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
