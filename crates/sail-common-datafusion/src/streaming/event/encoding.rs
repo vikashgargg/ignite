@@ -38,6 +38,8 @@ pub static SOURCE_READ_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 /// Cumulative ns in the keyed shuffle distribute/route+send (across instances). Written by
 /// streaming/exchange.rs, read by the window prof dump.
 pub static EXCHANGE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Exchange time SPENT BLOCKED on the bounded send channel (backpressure-wait, NOT route CPU).
+pub static EXCHANGE_WAIT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Convenience: add `nanos` to a profiling counter only when profiling is enabled (cheap guard).
 pub fn prof_add(counter: &std::sync::atomic::AtomicU64, nanos: u64) {
     counter.fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);

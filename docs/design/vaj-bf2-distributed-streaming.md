@@ -506,6 +506,21 @@ needs finer profiling to separate route-CPU from backpressure-wait first (the cu
 distributed profile can attribute per-worker. **Do NOT claim a distributed-streaming throughput beat — measured
 false. Vajra's measured wins remain batch (6.2× vs Spark), memory, unified, no-JVM.**
 
+
+## 4r. DECISIVE: split exchange CPU vs backpressure-wait (2026-07-08) — the exchange is ~FREE, parse is the bottleneck
+Instrumented `distribute()` to separate route-CPU from `send().await` backpressure (the old timer conflated
+them). Single-node WM_PROF, 20M: **`exchange_cpu=6.1s` (route/hash/take = NEGLIGIBLE) vs `exchange_wait=272s`
+(blocked on the bounded channel).** So the "exchange=267s" was 98% BACKPRESSURE-WAIT, not our CPU. Real CPU:
+**`from_json=135s` (parse, 64% of real work) > source_read=56s > finalize=20s > exchange_cpu=6s.** The parse is
+already SIMD (simd-json) and ~parity with Flink's Jackson (KB §6, being Rust not JVM = the edge, already realized).
+**⇒ single-node is PARSE-BOUND at PARITY — there is NO exchange/route inefficiency to fix (proven 6s). The 3.6×
+distributed regression is the cross-node Flight/gRPC transport (a SEPARATE path: `do_get` FlightDataEncoderBuilder
+IPC + gRPC, only exercised cross-node — NOT `exchange_cpu`), but distribution does not help this workload anyway
+(Flink flat 1->2 nodes). NO missed-prod-bar bug exists on windowed-COUNT; Vajra is competitive (parity), not
+lagging, single-node.** Instrumentation kept (EXCHANGE_WAIT_NS) for future distributed profiling. Beat lever is
+NOT this workload's parse throughput; it is Vajra's real edges (columnar compute-heavy agg per Arroyo's 10x sliding
+windows; no-GC latency D2; memory).
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)

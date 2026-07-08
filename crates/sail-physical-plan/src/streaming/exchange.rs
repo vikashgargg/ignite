@@ -375,6 +375,7 @@ async fn distribute(
                 // Throughput attribution (VAJRA_WM_PROF): time the shuffle route+coalesce+send.
                 let _ex = sail_common_datafusion::streaming::event::encoding::wm_prof_enabled()
                     .then(std::time::Instant::now);
+                let mut wait_ns: u64 = 0; // time BLOCKED on send (backpressure) — separated from route CPU
                 let sch = batch.schema();
                 let nrows = batch.num_rows();
                 // Per-row key-group (matches BatchPartitioner) -> owning instance, then ONE take per
@@ -426,14 +427,23 @@ async fn distribute(
                             return;
                         }
                     };
+                    let _w = _ex.map(|_| std::time::Instant::now());
                     if senders[owner].send(Ok(b)).await.is_err() {
                         return;
                     }
+                    if let Some(w) = _w {
+                        wait_ns = wait_ns.saturating_add(w.elapsed().as_nanos() as u64);
+                    }
                 }
                 if let Some(t) = _ex {
+                    let total = t.elapsed().as_nanos() as u64;
                     sail_common_datafusion::streaming::event::encoding::prof_add(
                         &sail_common_datafusion::streaming::event::encoding::EXCHANGE_NS,
-                        t.elapsed().as_nanos() as u64,
+                        total.saturating_sub(wait_ns),
+                    );
+                    sail_common_datafusion::streaming::event::encoding::prof_add(
+                        &sail_common_datafusion::streaming::event::encoding::EXCHANGE_WAIT_NS,
+                        wait_ns,
                     );
                 }
             }
