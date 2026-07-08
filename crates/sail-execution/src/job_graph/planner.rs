@@ -18,6 +18,7 @@ use datafusion::physical_plan::{
 use sail_catalog_system::physical_plan::SystemTableExec;
 use sail_common_datafusion::utils::items::ItemTaker;
 use sail_physical_plan::catalog_command::CatalogCommandExec;
+use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
 use sail_physical_plan::streaming::exchange::StreamExchangeExec;
 
 use crate::error::{ExecutionError, ExecutionResult};
@@ -201,8 +202,20 @@ enum PartitionUsage {
 /// ONCE at `JobGraph::try_new` and threaded in (not read per-node), so it is deterministic and unit
 /// testable via `try_new_with_distributed_stream`.
 fn distributed_stream_boundary(plan: &Arc<dyn ExecutionPlan>, distributed_stream: bool) -> bool {
-    // Both 1→N and N→M are now handled (the streaming shuffle read aligns N producer sub-streams).
-    distributed_stream && plan.is::<StreamExchangeExec>()
+    if !distributed_stream {
+        return false;
+    }
+    // Two streaming stage boundaries:
+    // - `StreamExchangeExec` (keyed N→M exchange): properties = `Hash(keys, N)` → an N-partition Hash
+    //   shuffle; the marker-aware read aligns N producer sub-streams (T-BF2.2/2.3).
+    // - `StreamBarrierAlignExec` (N→1 funnel before the sink): properties = `UnknownPartitioning(1)` →
+    //   a RoundRobin{1} funnel shuffle. This is the streaming analog of `CoalescePartitionsExec` (also
+    //   a boundary): cutting here makes the CHILD (`WindowAccumExec`, N partitions) run as N DISTRIBUTED
+    //   tasks instead of collapsing onto the single funnel task (T2-measured: 8 window instances on one
+    //   pod). The N→1 barrier-align + watermark MIN that `StreamBarrierAlign` did in-process is then
+    //   performed by the aligning shuffle read (`merge_flow_event_streams`, a proven superset) — so the
+    //   funnel node is subsumed by the shuffle. (T-BF2.6.)
+    plan.is::<StreamExchangeExec>() || plan.is::<StreamBarrierAlignExec>()
 }
 
 fn build_job_graph(
@@ -312,13 +325,14 @@ fn build_job_graph(
         plan.clone()
             .with_new_children(vec![create_merge_input(child, graph)?])?
     } else if distributed_stream_boundary(&plan, distributed_stream) {
-        // VAJ-BF2 T-BF2.2: cut the keyed streaming exchange into a cross-node Hash shuffle so the
-        // N window instances distribute across workers. `StreamExchangeExec`'s properties already
-        // carry `Partitioning::Hash(hash_keys, partition_count)` — the exact shape `create_shuffle`
-        // turns into `OutputDistribution::Hash` — and the marker-aware `ShuffleWriteExec` broadcasts
-        // barriers/watermarks while hash-routing data (shuffle_write.rs). The exchange NODE is
-        // replaced by the `StageInputExec` (Shuffle); the shuffle writer performs the fan-out. Only
-        // reached for the align-free 1→N case (see `distributed_stream_boundary`).
+        // VAJ-BF2 T-BF2.2/2.6: cut a streaming stage boundary. The node's own `properties` carry the
+        // output partitioning `create_shuffle` needs — `Hash(keys, N)` for `StreamExchangeExec` (N→M
+        // keyed shuffle; distributes the source), `UnknownPartitioning(1)` → `RoundRobin{1}` for
+        // `StreamBarrierAlignExec` (N→1 funnel; makes the child `WindowAccum` run as N distributed
+        // tasks — see `distributed_stream_boundary`). The marker-aware `ShuffleWriteExec` broadcasts
+        // barriers/watermarks while routing data, and the aligning shuffle read (`merge_flow_event_
+        // streams`) MIN-merges watermarks + aligns barriers on the consumer side. The boundary node is
+        // replaced by the `StageInputExec`; the shuffle performs the fan-out / funnel.
         let properties = plan.properties().clone();
         let child = plan.children().one()?;
         create_shuffle(child, graph, properties, consumption)?
@@ -445,24 +459,35 @@ mod tests {
         use sail_common_datafusion::streaming::event::schema::{
             MARKER_FIELD_NAME, RETRACTED_FIELD_NAME,
         };
+        use sail_physical_plan::streaming::barrier_align::StreamBarrierAlignExec;
         use sail_physical_plan::streaming::exchange::StreamExchangeExec;
 
         use crate::job_graph::JobGraph;
+
+        fn flow_schema() -> Arc<Schema> {
+            Arc::new(Schema::new(vec![
+                Field::new(MARKER_FIELD_NAME, DataType::Binary, true),
+                Field::new(RETRACTED_FIELD_NAME, DataType::Boolean, false),
+                Field::new("k", DataType::Int64, true),
+            ]))
+        }
 
         /// A `StreamExchangeExec` over a single-partition (flow-event) source — the 1→N keyed
         /// exchange the realtime Kafka windowed-agg builds (WindowAccum sits above it; here we
         /// test the exchange boundary in isolation).
         fn single_partition_stream_exchange() -> Arc<dyn ExecutionPlan> {
-            let flow_schema = Arc::new(Schema::new(vec![
-                Field::new(MARKER_FIELD_NAME, DataType::Binary, true),
-                Field::new(RETRACTED_FIELD_NAME, DataType::Boolean, false),
-                Field::new("k", DataType::Int64, true),
-            ]));
             // EmptyExec is single-partition => the align-free 1→N case.
-            let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema));
+            let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema()));
             Arc::new(
                 StreamExchangeExec::try_new(child, vec![Arc::new(Column::new("k", 2))], 3).unwrap(),
             )
+        }
+
+        /// A `StreamBarrierAlignExec` (the N→1 funnel that sits above `WindowAccum` before the sink).
+        /// Cutting here makes the funnel's CHILD (the window) run as its own distributed stage.
+        fn stream_barrier_align_funnel() -> Arc<dyn ExecutionPlan> {
+            let child: Arc<dyn ExecutionPlan> = Arc::new(EmptyExec::new(flow_schema()));
+            Arc::new(StreamBarrierAlignExec::new(child))
         }
 
         // VAJ-BF2 T-BF2.2: with the gate OFF the streaming exchange stays INLINE (one stage — the
@@ -485,6 +510,28 @@ mod tests {
                 graph.stages.len(),
                 2,
                 "gate on must cut the streaming exchange into a producer + consumer stage"
+            );
+        }
+
+        // VAJ-BF2 T-BF2.6: the N→1 `StreamBarrierAlignExec` funnel is a stage boundary when gated, so
+        // its child (`WindowAccum`) distributes as N tasks instead of collapsing onto the funnel task.
+        #[test]
+        fn gate_off_keeps_stream_barrier_align_inline() {
+            let graph =
+                JobGraph::try_new_with_distributed_stream(stream_barrier_align_funnel(), false)
+                    .unwrap();
+            assert_eq!(graph.stages.len(), 1, "gate off must not cut the funnel");
+        }
+
+        #[test]
+        fn gate_on_cuts_stream_barrier_align_funnel_boundary() {
+            let graph =
+                JobGraph::try_new_with_distributed_stream(stream_barrier_align_funnel(), true)
+                    .unwrap();
+            assert_eq!(
+                graph.stages.len(),
+                2,
+                "gate on must cut the funnel so the window child runs as its own distributed stage"
             );
         }
     }
