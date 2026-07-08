@@ -98,6 +98,22 @@ impl TaskAssigner {
     }
 
     pub fn assign_tasks(&mut self) -> Vec<TaskSetAssignment> {
+        // VAJ-BF2 T-BF2.7: don't assign while requested workers are still registering. `run_tasks`
+        // fires `assign_tasks` on EVERY worker registration, so assigning on the FIRST worker's arrival
+        // packs a whole stage onto it (one worker holds `worker_task_slots` tasks) — defeating the
+        // even-spread placement (T-BF2.5) and pinning e.g. all 8 window instances to one pod (T2
+        // measured). Wait until every requested worker has either registered OR been marked failed
+        // (`requested_worker_count == 0`) so even-spread distributes across ALL of them. This is the
+        // Spark `spark.scheduler.minRegisteredResourcesRatio` / Flink slot-wait discipline (deploy only
+        // once the resources are present). DEADLOCK-SAFE: a worker that never starts is timed out by the
+        // pending-worker probe (`handle_probe_pending_worker` → `track_worker_failed_to_start`), which
+        // decrements `requested_worker_count` — so the count always reaches 0 within `task_launch_timeout`.
+        // (When no workers were requested — pure-driver tasks or already-active workers — the count is 0
+        // and assignment proceeds immediately, so this is a no-op for the non-scale-up path.)
+        if self.requested_worker_count > 0 {
+            return vec![];
+        }
+
         let mut assignments = vec![];
         let mut assigner = self.build_worker_task_slot_assigner();
 
