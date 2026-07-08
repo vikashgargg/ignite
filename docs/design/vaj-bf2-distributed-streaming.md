@@ -263,6 +263,22 @@ local; align/exchange/planner unit tests green; clippy `-D` green.
 - **Next:** T-BF2.3d (root-cause the streaming-file-source distributed double-read) + get a clean Kafka
   N→M dup=0 signal (fix the local bounded-Kafka harness or use the T2 kind path with an S3/shared sink).
 
+## 4h. T-BF2.3d RESOLVED — the "2× dup" was a TEST-HARNESS confound, N→M is dup=0 (2026-07-08)
+Root-caused by instrumentation + reading the actual task plan (NOT guessing): `rewrite_parquet_adapters`
+fired for the input-**write** scans (groups=4, groups=8) but the streaming READ scan showed **7 file
+groups = 21 files with 6 different random-hash prefixes** — i.e. my probe reused `/tmp/nm_probe_in` and
+**never `rm`'d it**, so ~6 probe runs of the same 400-row write ACCUMULATED. `distinct(window,key)` was
+always exact (alignment correct); only `sum` inflated (390→780→1170→1950→2340) from the duplicate INPUT
+files. **The engine had no dup.** Re-tested with a FRESH unique input, identical for both gates:
+gate OFF == gate ON == deterministic (`3990/3990/3990` at 4000 rows/50 keys/8 parts;
+`90/90/90` at 400 rows). **T-BF2.3 N→M is VALIDATED dup=0** — the MIN-merge + Chandy-Lamport alignment
+is correct across the distributed cross-network shuffle. My earlier `partitioned_by_file_group`-at-source
+"fix" was chasing this phantom (and made the confounded baseline worse) — **reverted; no engine change
+needed.** Permanent self-checking gate: **`scripts/nm_dist_gate.sh`** (fresh input, asserts distributed
+== in-process baseline + deterministic). LESSON (charter anti-patch): a fresh, uniquely-named input per
+run is mandatory — cross-run file accumulation silently masqueraded as an engine dup. **Remaining T1 for
+T-BF2.3: crash-EO N→M dup=0** (counts-exact done) + the Kafka N→M path (real benchmark; no parquet scan).
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
