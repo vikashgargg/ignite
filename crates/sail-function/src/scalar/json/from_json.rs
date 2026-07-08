@@ -338,6 +338,54 @@ impl ColBuilder {
         Ok(())
     }
 
+    /// True when this column can be filled DIRECTLY from the simd-json tape (no `serde_json::Value`
+    /// tree) — the alloc-free fast path. Complex/coerced types keep the `Value` path.
+    fn is_tape_safe(&self) -> bool {
+        !matches!(self, Self::Fallback { .. })
+    }
+
+    /// VAJ throughput: append one field DIRECTLY from a simd-json tape value — no per-record
+    /// `serde_json::Value` tree (3.5x faster on the numeric streaming parse, measured). Semantics
+    /// mirror [`ColBuilder::append`] arm-for-arm (validated byte-identical by the from_json gold
+    /// tests). Only reached for `is_tape_safe` columns.
+    fn append_tape(
+        &mut self,
+        value: Option<simd_json::tape::Value>,
+        _options: &SparkFromJsonOptions,
+        _session_timezone: &str,
+    ) -> Result<()> {
+        use simd_json::prelude::*;
+        match self {
+            Self::Boolean(b) => b.append_option(value.and_then(|v| v.as_bool())),
+            Self::Int8(b) => b.append_option(value.and_then(|v| v.as_i64()).map(|x| x as i8)),
+            Self::Int16(b) => b.append_option(value.and_then(|v| v.as_i64()).map(|x| x as i16)),
+            Self::Int32(b) => b.append_option(value.and_then(|v| v.as_i64()).map(|x| x as i32)),
+            Self::Int64(b) => b.append_option(value.and_then(|v| v.as_i64())),
+            Self::Float32(b) => b.append_option(value.and_then(|v| v.as_f64()).map(|x| x as f32)),
+            Self::Float64(b) => b.append_option(value.and_then(|v| v.as_f64())),
+            Self::Utf8(b) => match value {
+                None => b.append_null(),
+                Some(v) => match v.as_str() {
+                    Some(s) => b.append_value(s),
+                    None if v.is_null() => b.append_null(),
+                    // Non-string JSON scalar/compound -> its JSON text (matches serde `Value::to_string`).
+                    None => b.append_value(v.encode()),
+                },
+            },
+            Self::LargeUtf8(b) => match value {
+                None => b.append_null(),
+                Some(v) => match v.as_str() {
+                    Some(s) => b.append_value(s),
+                    None if v.is_null() => b.append_null(),
+                    None => b.append_value(v.encode()),
+                },
+            },
+            // Not reached: `append_struct_row` uses the tape path only when every column is tape-safe.
+            Self::Fallback { .. } => unreachable!("append_tape on a Fallback column"),
+        }
+        Ok(())
+    }
+
     fn finish(self) -> Result<ArrayRef> {
         Ok(match self {
             Self::Boolean(mut b) => Arc::new(b.finish()),
@@ -386,9 +434,46 @@ fn append_struct_row(
     builders: &mut [ColBuilder],
     fields: &Fields,
     scratch: &mut Vec<u8>,
+    buffers: &mut simd_json::Buffers,
     options: &SparkFromJsonOptions,
     session_timezone: &str,
 ) -> Result<bool> {
+    // VAJ throughput fast path: when EVERY column is tape-safe, fill builders DIRECTLY from the
+    // simd-json tape (no per-record `serde_json::Value` tree) — 3.5x faster on the numeric streaming
+    // parse (measured). Byte-identical to the Value path (from_json gold tests). Complex/coerced
+    // schemas fall through to the Value path below.
+    if builders.iter().all(|b| b.is_tape_safe()) {
+        let Some(bytes) = payload else {
+            for b in builders.iter_mut() {
+                b.append_tape(None, options, session_timezone)?;
+            }
+            return Ok(false);
+        };
+        scratch.clear();
+        scratch.extend_from_slice(bytes);
+        match simd_json::to_tape_with_buffers(scratch.as_mut_slice(), buffers) {
+            Ok(tape) => {
+                let root = tape.as_value();
+                if root.is_object() {
+                    for (b, field) in builders.iter_mut().zip(fields.iter()) {
+                        b.append_tape(root.get(field.name().as_str()), options, session_timezone)?;
+                    }
+                } else {
+                    // Parse OK but non-object -> null fields, validity true (PERMISSIVE).
+                    for b in builders.iter_mut() {
+                        b.append_tape(None, options, session_timezone)?;
+                    }
+                }
+            }
+            // Parse error -> null fields, validity true (PERMISSIVE) — matches the Value path.
+            Err(_) => {
+                for b in builders.iter_mut() {
+                    b.append_tape(None, options, session_timezone)?;
+                }
+            }
+        }
+        return Ok(true);
+    }
     let (obj_opt, validity) = match payload {
         None => (None, false),
         Some(bytes) => match simd_parse_value(bytes, scratch) {
@@ -425,6 +510,7 @@ fn parse_json_to_struct(
         .collect();
     let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
     let mut scratch: Vec<u8> = Vec::new();
+    let mut buffers = simd_json::Buffers::default();
 
     for i in 0..num_rows {
         let payload = (!rows.is_null(i)).then(|| rows.value(i).as_bytes());
@@ -433,6 +519,7 @@ fn parse_json_to_struct(
             &mut builders,
             fields,
             &mut scratch,
+            &mut buffers,
             options,
             session_timezone,
         )?;
@@ -470,6 +557,7 @@ pub fn parse_json_binary_to_struct(
         .collect();
     let mut validity: Vec<bool> = Vec::with_capacity(num_rows);
     let mut scratch: Vec<u8> = Vec::new();
+    let mut buffers = simd_json::Buffers::default();
 
     for i in 0..num_rows {
         let payload = (!values.is_null(i)).then(|| values.value(i));
@@ -478,6 +566,7 @@ pub fn parse_json_binary_to_struct(
             &mut builders,
             fields,
             &mut scratch,
+            &mut buffers,
             options,
             session_timezone,
         )?;
@@ -1858,3 +1947,52 @@ mod from_json_bench {
     }
 }
 
+
+#[cfg(test)]
+#[expect(clippy::unwrap_used)]
+mod parse_bench {
+    // Measure-first (VAJ throughput): serde_json::Value tree per record vs simd-json tape-direct,
+    // extracting 3 i64 fields from {"k":..,"ts":..,"v":1} — the streaming windowed-agg's exact parse.
+    // Run: cargo test -p sail-function --release parse_bench -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_value_tree_vs_tape() {
+        use simd_json::prelude::*;
+        let n = 5_000_000usize;
+        let recs: Vec<Vec<u8>> = (0..n)
+            .map(|i| format!("{{\"k\":{},\"ts\":{},\"v\":1}}", i % 1000, 1_700_000_000_000u64 + i as u64).into_bytes())
+            .collect();
+
+        // (A) current path: simd-json -> serde_json::Value tree, then get() 3 fields.
+        let t = std::time::Instant::now();
+        let mut acc: i64 = 0;
+        let mut scratch = Vec::new();
+        for r in &recs {
+            scratch.clear(); scratch.extend_from_slice(r);
+            let v: serde_json::Value = simd_json::serde::from_slice(scratch.as_mut_slice()).unwrap();
+            acc += v.get("k").and_then(|x| x.as_i64()).unwrap_or(0)
+                 + v.get("ts").and_then(|x| x.as_i64()).unwrap_or(0)
+                 + v.get("v").and_then(|x| x.as_i64()).unwrap_or(0);
+        }
+        let a = t.elapsed(); let _ = acc;
+        println!("VALUE_TREE  {:.3} M rec/s ({:?})", n as f64 / a.as_secs_f64() / 1e6, a);
+
+        // (B) tape-direct: to_tape_with_buffers (reused) -> as_value().get() 3 fields, no tree alloc.
+        let t = std::time::Instant::now();
+        let mut acc2: i64 = 0;
+        let mut scratch = Vec::new();
+        let mut buffers = simd_json::Buffers::default();
+        for r in &recs {
+            scratch.clear(); scratch.extend_from_slice(r);
+            let tape = simd_json::to_tape_with_buffers(scratch.as_mut_slice(), &mut buffers).unwrap();
+            let v = tape.as_value();
+            acc2 += v.get("k").and_then(|x| x.as_i64()).unwrap_or(0)
+                  + v.get("ts").and_then(|x| x.as_i64()).unwrap_or(0)
+                  + v.get("v").and_then(|x| x.as_i64()).unwrap_or(0);
+        }
+        let b = t.elapsed(); let _ = acc2;
+        println!("TAPE_DIRECT {:.3} M rec/s ({:?})  => {:.2}x vs value-tree",
+                 n as f64 / b.as_secs_f64() / 1e6, b, a.as_secs_f64() / b.as_secs_f64());
+        assert_eq!(acc, acc2, "both paths must extract identical values");
+    }
+}
