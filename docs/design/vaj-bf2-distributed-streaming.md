@@ -410,6 +410,23 @@ producer blocks when credit exhausted) — the receiver-connected condition is t
 plateaus, doesn't grow O(N)). **Not correctness-critical for the throughput beat** (distribution +
 counts-exact + crash-EO already done); it's the MEMORY-bound lever (bounds in-flight vs Flink).
 
+
+## 4n. Kind PENETRATION (E2E prod-grade verify, 2026-07-08, vajra:bf6 = all VAJ-BF2 incl T-BF2.4)
+Full-stack verify on a 3-node kind cluster with ALL gates on (kubernetes-cluster, VAJRA_DISTRIBUTED_STREAM=1,
+VAJRA_CREDIT_BACKPRESSURE=16) so EKS has no unknowns. **Merge-readiness gates GREEN first:** `cargo test
+--workspace` EXIT=0 (all pass) + `cargo clippy --workspace --all-targets -D warnings` 0 issues.
+**Penetration result:** the distributed windowed-agg RAN E2E on real k8s — source + exchange + window
+DISTRIBUTE across **4 worker pods** (2 window partitions each: p0/p4 p1/p5 p2/p6 p3/p7 = clean
+even-spread), the query **completed without hang/deadlock** (credit backpressure T-BF2.4 active, no loss),
+even-spread + wait-for-workers place at default `worker_task_slots=8`. **The EKS unknowns are cleared:
+the full distributed topology + credit + placement all work on real k8s.** Counts-exact on kind's FILE
+sink is NOT verifiable here — the distributed file-sink part files land on the sink pod's local fs, not
+the shared hostPath (the DOCUMENTED "distributed sink needs an object store" limitation; kind hostPath is
+an imperfect S3 substitute). Counts-exact is proven at T1 (`nm_dist_gate`: distributed == in-process
+baseline, dup=0, deterministic) with IDENTICAL shuffle/align/window code + codec round-trip tests, and
+EKS uses S3 (prior EKS runs proved counts + crash-EO to S3). ⇒ EKS = scale + Flink head-to-head
+measurement, not discovery. Kind torn down, AWS $0.
+
 ## 5. Risks / open questions (resolve before coding each ticket)
 - Does the driver run long-lived multi-stage streaming tasks across pods, or is streaming pinned to
   one pod by design? (T-BF2.1 is the gating unknown — investigate first.)
