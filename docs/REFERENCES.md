@@ -261,6 +261,18 @@ arrow-rs raw JSON reader PR #3479.
     micro-batch re-plan/commit/checkpoint-per-trigger tax (~25× at 100M — RisingWave/Flink/Arroyo run ONE
     long-lived pipeline; this is THE structural difference), and (B) exchange = BATCH + pool + zero-copy
     Arrow-Flight (Arroyo Shuffle-Edge / Ballista), no per-batch IPC re-encode.** Focus here, not parse.
+  - **DISTRIBUTED A/B UN-BLINDED (2026-07-09, EKS 1× c7g.4xlarge, 100M, torn $0)** — per-pod WM_PROF_PROC +
+    Flight send/recv timing (:distprof image, commit 22aba4bc). Vajra distributed 2.09–2.27M ev/s vs Flink
+    5.77M = **Flink 2.77× faster**. Per-pod (cumulative cpu-ms): worker(source+window) source_read=44.2s
+    from_json=11.4s **exchange_cpu=0** shuffle_send=43s **shuffle_recv=598s** (24450 batches); worker(source)
+    source_read=39.6s from_json=11.3s **exchange_cpu=0 shuffle_send=143s** (24468 batches). **MEASURED
+    CONCLUSION: the lag is the FLIGHT SHUFFLE, not compute/routing.** (a) exchange_cpu=0 → keyed-route is free;
+    cost MOVED into cross-pod Flight IPC (was untimed = why prior A/B was blind). (b) **24,468 batches / 100M
+    = ~4,000 rows/batch = tiny** → per-batch IPC framing/serialize dominates (send 143s = ~5.8ms/small-batch).
+    (c) shuffle_recv=598s is mostly BLOCKED-waiting (starvation) — receiver idles behind the small-batch send.
+    **FIX = Arroyo Shuffle-Edge/Ballista: COALESCE big batches before the Flight boundary + connection-pool +
+    zero-copy (Utf8View, no re-encode) to amortize per-batch IPC.** Lever (B), evidence-backed. Runner:
+    scripts/eks_dist_instrumented_ab.sh. source_read/from_json secondary.
 - **VERSION-UPGRADE perf targets (separate upgrade repo; verify in release notes before hand-tuning):**
   (1) **arrow-rs `Utf8View`/`BinaryView` (StringView)** — fewer allocs/copies on string + JSON + shuffle
   paths (big for the value column + exchange re-encode). (2) **DataFusion grouped-`AggregateExec`** perf
