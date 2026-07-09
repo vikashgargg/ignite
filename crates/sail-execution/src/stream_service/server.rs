@@ -117,7 +117,29 @@ impl FlightService for TaskStreamFlightServer {
         let stream = FlightDataEncoderBuilder::new()
             .build(stream)
             .map_err(Status::from);
-        Ok(Response::new(Box::pin(stream) as Self::DoGetStream))
+        if sail_common_datafusion::streaming::event::encoding::wm_prof_enabled() {
+            // WM_PROF: time the cross-pod SEND (produce + IPC-encode each FlightData) + count messages,
+            // so the distributed-shuffle serialize cost is attributed per producer pod (SHUFFLE_SEND_NS).
+            use futures::StreamExt;
+            let timed = futures::stream::unfold(Box::pin(stream), |mut st| async move {
+                let t = std::time::Instant::now();
+                match st.next().await {
+                    Some(item) => {
+                        use sail_common_datafusion::streaming::event::encoding as prof;
+                        prof::prof_add(&prof::SHUFFLE_SEND_NS, t.elapsed().as_nanos() as u64);
+                        if item.is_ok() {
+                            prof::SHUFFLE_SEND_BATCHES
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Some((item, st))
+                    }
+                    None => None,
+                }
+            });
+            Ok(Response::new(Box::pin(timed) as Self::DoGetStream))
+        } else {
+            Ok(Response::new(Box::pin(stream) as Self::DoGetStream))
+        }
     }
 
     type DoPutStream = BoxedFlightStream<PutResult>;
