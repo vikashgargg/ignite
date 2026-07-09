@@ -241,6 +241,26 @@ arrow-rs raw JSON reader PR #3479.
   checkpoint per `maxOffsetsPerTrigger` batch, ~25× at 100M — vs Flink's ONE continuous pipeline).
   NEXT = split exchange vs micro-batch (bigger maxOffsetsPerTrigger A/B + an exchange-side timer).
   Multi-instance/Flight = continuous/multi-node, not this gap. See throughput-robustness-review.md.
+- **RisingWave 3.0 + Arroyo data-plane (2026-07-08, added on request).** Sources:
+  risingwavelabs.github.io/risingwave/design/streaming-overview · docs.risingwave.com/get-started/architecture ·
+  arroyo.dev + github.com/ArroyoSystems/arroyo · goldsky streamling.
+  - **RisingWave** = actor-model streaming; data plane is the **Stream Chunk = columnar Data Chunk +
+    visibility array + an ops column** (Insert/Delete/UpdateInsert/UpdateDelete — the built-in changelog,
+    cf. our WindowOutputMode::Update retract). Local actor→actor via channels; cross-node via an
+    **exchange service**. State = shared S3 object store; source connector **offsets persisted in
+    checkpoints → exactly-once** (== our design). Vectorized batch-at-a-time, never per-row.
+  - **Arroyo 0.10** rebuilt on **Arrow + DataFusion** (interpreted columnar exec, SIMD/cache) = +3×; its
+    **Shuffle Edge** = key-hash partitioning with **connection pooling + BATCHING to amortize per-batch
+    overhead** (directly relevant to our StreamExchange per-batch cost). Kafka msgs are batched into Arrow
+    RecordBatches on the source side. Roar/Streamling: Kafka→RecordBatch→**Arrow Flight zero-copy**.
+  - **CONCLUSION for Vajra (measured, don't re-chase parse):** our source consume loop is ALREADY
+    alloc-free + columnar (kafka/reader.rs:877 appends borrowed bytes into Arrow builders, interned topic
+    idx, batched to RecordBatch; read path already tuned 2.1×) and parse is already Rust-fast (tape, ~15%
+    of pipeline). So the columnar-source box is CHECKED. The two prod-grade levers that remain — the ones a
+    columnar streaming engine actually wins on — are: **(A) CONTINUOUS dataflow vs Spark `availableNow`
+    micro-batch re-plan/commit/checkpoint-per-trigger tax (~25× at 100M — RisingWave/Flink/Arroyo run ONE
+    long-lived pipeline; this is THE structural difference), and (B) exchange = BATCH + pool + zero-copy
+    Arrow-Flight (Arroyo Shuffle-Edge / Ballista), no per-batch IPC re-encode.** Focus here, not parse.
 - **VERSION-UPGRADE perf targets (separate upgrade repo; verify in release notes before hand-tuning):**
   (1) **arrow-rs `Utf8View`/`BinaryView` (StringView)** — fewer allocs/copies on string + JSON + shuffle
   paths (big for the value column + exchange re-encode). (2) **DataFusion grouped-`AggregateExec`** perf
