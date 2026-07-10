@@ -28,7 +28,7 @@ Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmea
 | **Latency (Kafka→Kafka passthrough)** | — | `>` | 🟢 | **T2/kind fair (parallelism=2 both): Vajra p50=30/p99=125/p999=127/max=128ms vs Flink p50=42/p99=580/p999=765/max=767ms — WINS every pct, TAIL 4.6–6× (no-GC).** Full windowed e2e still TODO | [D2](design/prodgrade-dimensions-scorecard.md) |
 | **Memory** | `>` | `~` | 🟡 | Continuous: 7.06 vs Flink 8.58 GiB (win); bounded: 10.38 vs 8.57 (lose) → **path-dependent** | [D3](design/prodgrade-dimensions-scorecard.md), F5 spill |
 | **CPU / per-stage** | — | `~` | 🟡 | Per-stage ranked: from_json 135s > exchange 89.8s > finalize 27s > source_read 4.4s | VAJ-BF2 |
-| **Network / shuffle** | — | `?` | 🟡 | Streaming source+exchange+window DISTRIBUTE across pods (T-BF2.2/2.5/2.3/2.6/2.7, T2-kind); T3 throughput vs Flink pending | **VAJ-BF2** |
+| **Network / shuffle** | — | `>msgs` | 🟡 | Distributed shuffle ROOT-CAUSED (per-pod WM_PROF): Flight small-batch IPC (24k ~4k-row msgs; exchange_cpu=0). FIXED: periodic watermarks (9cd7d05c) + `coalesce_flow_events` (276d7d8d/b1313f45). **T1+T2-free VALIDATED: 2.14× fewer Flight messages, counts EXACT** (`local_dist_coalesce_check.sh`, `kind_shuffle_coalesce_ab.sh`). T3 throughput NUMBER pending. Design: [shuffle-throughput](design/distributed-shuffle-throughput.md) | **VAJ-BF2** |
 | **State mgmt** | — | `=` | ✅ | Spillable windowed-agg+join state (F5), out==N exact @5M; 64k-cap fixed | [F5](design/streaming-spillable-state-f5.md) |
 | **Fault tolerance / EO** | `=` | `=` | ✅ | dup=0 across kill-9 on EKS (aligned barriers + exact idle + emit floor) | [distributed-eo](design/distributed-eo-coordinator-wiring.md) |
 | **Recovery time** | — | `?` | 🟡 | Correctness proven; TIME not measured (Flink 2.0 ForSt 49× claim) | [D5](design/prodgrade-dimensions-scorecard.md) |
@@ -73,7 +73,14 @@ Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.
 | **T-BF2.6** distribute WindowAccum (cut boundary at StreamBarrierAlign N→1 funnel) | throughput/scale | Spark aggregate+coalesce stage split | — | ✅ | ✅ | ✅ | ✅ | ⬜ | 824dbda0 |
 | **T-BF2.7** wait for workers before assigning (Spark min-registered-resources) | scale/placement | Spark minRegisteredResourcesRatio / Flink slot-wait | — | ✅ | ✅ | ✅ | ✅ | ⬜ | b812100b |
 | **T-BF2.4** credit-based network backpressure (bound shuffle in-flight buffer) | backpressure/memory | Flink FLIP-2 flow control | — | ✅ | ✅ | ✅ | ⬜ | ⬜ | bounded-overflow+reserve permit; nm_dist_gate dup=0 + f3c PASS — §4m |
-| **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ⬜ | ⬜ | — | — | — | ⬜ | — |
+| **BF2-measure** multi-node exchange profile vs Flink | throughput/CPU | eks_stream_headtohead | ✅ | ✅ | — | — | — | ✅ | 22aba4bc (WM_PROF un-blinded: Flight small-batch IPC = the gap) |
+| **T-BF2.8** shuffle coalescer + periodic watermark (Flight small-batch IPC) | throughput/shuffle | [shuffle-throughput](design/distributed-shuffle-throughput.md) (DF54 CoalesceBatches + Arrow BatchCoalescer + Flink buffer-timeout/auto-watermark-interval + RisingWave dispatcher) | — | ✅ | ✅ | ✅ | 🟡 | 9cd7d05c+276d7d8d+b1313f45 (T1+T2-free: 2.14× fewer msgs, counts exact; T3 number pending) |
+
+**NEXT items (sprint backlog, ordered):** (1) T-BF2.8 T3 EKS A/B — the throughput NUMBER vs Flink (kind
+T2 green first). (2) D3 zero-copy: Arrow `Utf8View`/`StringView` on value+shuffle columns + Flight
+client-cache (Ballista) — cut residual encoder copy. (3) Helm chart (driver+worker+kafka+minio/S3, mode
+toggle) for repeatable deploy. (4) Realtime passthrough throughput (batch Kafka sink). (5) Then proven-axis
+board: cold-start D4, lakehouse (Delta/Iceberg), AI-native. Follow [delivery-sdlc](design/delivery-sdlc.md).
 
 **T1 gate for T-BF2.2 (green):** unit tests gate-off→1 stage / gate-on→2 stages; `dist_streaming_smoke`
 6/6 gate-ON local-cluster (`windowed_file=97` through the new shuffle) + 6/6 local; clippy `-D` green.
