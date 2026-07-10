@@ -131,3 +131,21 @@ Flink reads 100M in 19.7s. **⇒ The throughput lever is the Kafka SOURCE READ +
 shuffle** (exchange_cpu=0; the coalescer, though correct + 2.14× fewer msgs, does NOT move throughput and
 regresses single-node). NEXT STEP = profile + optimize source_read (kafka/reader.rs: rdkafka consume loop,
 batch sizing, Arrow build; compare to Flink KafkaSource FLIP-27 fetch parallelism/mini-batch). Cluster torn $0.
+
+## 9. source_read fix plan (the throughput lever — measured, grounded in Flink FLIP-27)
+MEASURED split (local 5M, WM_PROF SOURCE_POLL/BUILD): source_read=21.6s = **poll 12.6s (58%)** +
+per-message bookkeeping ~7.9s (37%) + **build 1.0s (5%)**. The Arrow columnar build is NOT the bottleneck
+(5%). source_read is PER-MESSAGE CONSUME-bound. Flink KafkaConsumer.poll() returns ~500 records/call.
+
+**Fix (ordered, each T1-measured local before EKS):**
+1. **Per-partition offset arrays (bookkeeping, low-risk):** replace the hot per-message `next: HashMap<u64,i64>`
+   `insert` + `ends: HashMap<u64,i64>` `get` (kafka/reader.rs ~756/864/883) with `Vec<i64>` indexed by a
+   dense (topic_idx, partition) index — O(1) no-hash per message. Cuts a chunk of the 37%.
+2. **Batch the consume (poll 58%, the big lever, FLIP-27 SplitReader model):** the `msg_stream.next()
+   .now_or_never()` per-message future poll is the cost. Prod-grade = a DEDICATED consume thread
+   (spawn_blocking) running `BaseConsumer::poll()` in a tight loop, building Arrow batches, handing full
+   batches to the async pipeline via a bounded channel (decouples sync fetch from async, no per-msg future
+   machinery). Grounded: Flink FLIP-27 (SplitReader.fetch returns a batch), rust-rdkafka BaseConsumer.
+3. (measure after 1+2) if still gapped: source parallelism / assignment vs Flink's per-partition readers.
+**Target:** source_read → ~1/2, throughput 2.32M → toward Flink 5.07M. Validate T1 (local WM_PROF split)
+→ T2 kind → T3 EKS head-to-head. NOT the shuffle (exchange_cpu=0; coalescer is correct but orthogonal).
