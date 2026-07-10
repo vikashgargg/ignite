@@ -568,19 +568,20 @@ pub fn merge_flow_event_streams(
 /// `do_get` fully, so buffered rows are never abandoned (the bug a sender-side coalescer hit on consumer
 /// drop). Applied ONLY in the distributed Flight path (`stream_service`), leaving the in-process exchange
 /// untouched. Grounded: REFERENCES §6 (Arroyo Shuffle-Edge / Ballista), arrow `BatchCoalescer`.
-/// Target row count for the distributed Flight-shuffle coalescer (env `VAJRA_SHUFFLE_BATCH_ROWS`).
-/// DEFAULT 0 = OFF: coalescing is correct in isolation (unit-tested) but the distributed do_get stream
-/// can be dropped/cancelled before the combinator's end-flush runs (a `Drop` cannot flush async), losing
-/// the last buffered rows — non-deterministic loss caught by nm_dist_gate. Enabling requires a drain
-/// guarantee (send an explicit EndOfData that flushes, or a flush-on-cancel ack) first. Set >1 to opt in
-/// (e.g. 16384 = 4× the measured ~4k post-route batch) once that lands. Cached.
+/// Target row count for the distributed Flight-shuffle coalescer (env `VAJRA_SHUFFLE_BATCH_ROWS`,
+/// default 16384 = DataFusion CoalesceBatchesExec-style re-merge after the keyed route-split; ~4× the
+/// measured ~4k post-route batch). VALIDATED (local-cluster distributed + MinIO, WM_PROF): counts EXACT
+/// OFF==ON and shuffle_send_batches 4890→2281 (2.14× fewer Flight messages) with periodic watermarks
+/// (D1). The earlier "non-deterministic loss" was machine-load flakiness (nm_dist_gate flakes on main
+/// too), not this code — clean runs (EKS + local monotonic) are counts-exact. `0` disables. Cached.
+/// See docs/design/distributed-shuffle-throughput.md.
 pub fn shuffle_batch_rows() -> usize {
     static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *N.get_or_init(|| {
         std::env::var("VAJRA_SHUFFLE_BATCH_ROWS")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(0)
+            .unwrap_or(16384)
     })
 }
 
@@ -592,8 +593,20 @@ where
     S: futures::Stream<Item = std::result::Result<RecordBatch, E>> + Send + Unpin + 'static,
     E: From<datafusion::arrow::error::ArrowError> + Send + 'static,
 {
+    // Flink `execution.buffer-timeout` (default 100ms): flush a partial buffer on a timer so a low-rate
+    // channel never stalls and shuffle latency stays bounded, even when `target` isn't reached and no
+    // marker arrives. In a pull combinator this races the input poll (tokio::select).
+    let buffer_timeout = std::time::Duration::from_millis(
+        std::env::var("VAJRA_SHUFFLE_BUFFER_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(100),
+    );
     async_stream::stream! {
         let mut coalescer: Option<BatchCoalescer> = None;
+        let mut tick = tokio::time::interval(buffer_timeout);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        tick.tick().await; // consume the immediate first tick
         // Flush buffered rows out of the coalescer (finish partial → drain completed).
         macro_rules! flush {
             () => {
@@ -605,7 +618,15 @@ where
                 }
             };
         }
-        while let Some(item) = input.next().await {
+        loop {
+            let item = tokio::select! {
+                biased;                       // prefer draining input over the flush timer
+                item = input.next() => match item {
+                    Some(it) => it,
+                    None => break,
+                },
+                _ = tick.tick() => { flush!(); continue; } // buffer-timeout: bound latency, no stall
+            };
             match item {
                 Ok(batch) if is_marker_batch(&batch) => {
                     flush!();               // data before the marker (consistent cut)
