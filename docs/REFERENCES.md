@@ -448,3 +448,27 @@ distributed stage actually parallelizes across nodes or collapses onto one. Two 
   slots; Flink's algorithm) gated on distributed streaming (`VAJRA_DISTRIBUTED_STREAM`/`VAJRA_EVEN_SPREAD`),
   default fill-first so batch/scale-down behavior is unchanged. Cutting a stage boundary (T-BF2.2) is
   necessary but only *distributes* when paired with even-spread placement.
+
+## 8. Kafka source-read throughput — the FLIP-27 fetch model (fetched 2026-07-10; the source_read lever)
+Sources: rust-rdkafka docs.rs/GitHub (fede1024) · users.rust-lang.org "high performance kafka consumer" ·
+Flink FLIP-27 (cwiki) + KafkaPartitionSplitReader/SourceReaderBase · Flink DataStream Kafka connector docs.
+- **MEASURED (Vajra, WM_PROF SOURCE_POLL/BUILD split, local 5M):** source_read = poll 58% + per-message
+  bookkeeping 37% + Arrow build **5%**. The columnar build is NOT the bottleneck (as it should be); the
+  per-message CONSUME dominates.
+- **rust-rdkafka:** **`BaseConsumer` is considerably FASTER than `StreamConsumer` for small messages** —
+  StreamConsumer adds per-message channel/future overhead (the async convenience layer). High-throughput
+  path = BaseConsumer. (Our current code uses `StreamConsumer::stream()` + `.next().now_or_never()` = the
+  slow path for our small JSON events.) rust-rdkafka does NOT expose `rd_kafka_consume_batch` in the safe
+  API (batch drain needs the C FFI).
+- **Flink KafkaSource (FLIP-27):** `KafkaPartitionSplitReader` runs inside a DEDICATED fetcher thread
+  (`SourceReaderBase` spawns fetcher threads for the sync `SplitReader`); `consumer.poll()` returns
+  **MULTIPLE records per call** (plural, amortizes I/O — not single-record). One reader per split (partition).
+- **PROD-GRADE DESIGN for Vajra (synthesis — beats Flink):** per source instance (already 1/partition,
+  FLIP-27), a DEDICATED consume thread (std::thread / spawn_blocking, off the tokio runtime) runs a
+  **BaseConsumer** in a tight `poll()` loop, building **columnar Arrow batches** (our KafkaArrowBuilders,
+  alloc-free = the advantage Flink lacks — it deserializes per-record into JVM objects), handing FULL
+  batches to the async pipeline via a BOUNDED channel (backpressure = Flink credit-flow). + per-partition
+  `Vec<i64>` offsets (not HashMap) to kill the 37% bookkeeping. Net: match Flink's batched poll AND keep our
+  columnar/no-JVM edge ⇒ should EXCEED Flink's 5.07M. MEASURE via `KAFKA_BENCH` micro-bench (isolated read,
+  local/free) before wiring. CAUTION: the rewrite must preserve EO offset-commit, markers (watermark/
+  checkpoint/EndOfData), idleness, and all 3 paths (bounded/realtime/unbounded) — kafka/reader.rs.
