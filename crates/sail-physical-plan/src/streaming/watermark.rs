@@ -177,6 +177,18 @@ impl ExecutionPlan for WatermarkExec {
             datafusion_common::exec_datafusion_err!("WatermarkExec decode (input {names:?}): {e}")
         })?;
 
+        // Emit watermarks PERIODICALLY (Flink `pipeline.auto-watermark-interval`, default 200ms), NOT
+        // after every data batch. A time-ordered backlog advances the watermark on every batch, so
+        // per-batch emission puts a marker between every data batch → the distributed shuffle can never
+        // coalesce them (measured: 24k tiny Flight messages = the throughput gap) and the exchange
+        // broadcasts N× the markers. Interval-gating keeps windows correct (watermark still monotonic;
+        // final windows flush at end/EndOfData) while letting data batches accumulate between markers.
+        let watermark_interval = std::time::Duration::from_millis(
+            std::env::var("VAJRA_WATERMARK_INTERVAL_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(200),
+        );
         // Per-partition state: partition -> (max_et, last_seen instant). `start` for the startup grace.
         type PerPart = std::collections::HashMap<i64, (i64, std::time::Instant)>;
         type State = (
@@ -185,6 +197,7 @@ impl ExecutionPlan for WatermarkExec {
             PerPart,        // per-partition (max_et, last_seen)
             Option<i64>,    // last emitted watermark (monotonic)
             std::time::Instant, // operator start (startup grace)
+            Option<std::time::Instant>, // last watermark EMIT time (interval gate)
             VecDeque<FlowEvent>,
         );
         let init: State = (
@@ -193,15 +206,16 @@ impl ExecutionPlan for WatermarkExec {
             std::collections::HashMap::new(),
             None,
             std::time::Instant::now(),
+            None,
             VecDeque::new(),
         );
 
         let event_stream = stream::unfold(
             init,
-            move |(mut input, mut max_ts, mut per_part, mut last_wm, start, mut pending)| async move {
+            move |(mut input, mut max_ts, mut per_part, mut last_wm, start, mut last_emit, mut pending)| async move {
                 loop {
                     if let Some(ev) = pending.pop_front() {
-                        return Some((Ok(ev), (input, max_ts, per_part, last_wm, start, pending)));
+                        return Some((Ok(ev), (input, max_ts, per_part, last_wm, start, last_emit, pending)));
                     }
                     // Per-partition path: race the input against a periodic tick so an IDLE partition
                     // is excluded (and the watermark advances) even when no new data arrives — this is
@@ -230,7 +244,7 @@ impl ExecutionPlan for WatermarkExec {
                                                 source: "watermark".to_string(),
                                                 timestamp: ts,
                                             })),
-                                            (input, max_ts, per_part, last_wm, start, pending),
+                                            (input, max_ts, per_part, last_wm, start, last_emit, pending),
                                         ));
                                     }
                                 }
@@ -239,7 +253,7 @@ impl ExecutionPlan for WatermarkExec {
                         }
                         Some(None) => return None, // input ended
                         Some(Some(Err(e))) => {
-                            return Some((Err(e), (input, max_ts, per_part, last_wm, start, pending)))
+                            return Some((Err(e), (input, max_ts, per_part, last_wm, start, last_emit, pending)))
                         }
                         Some(Some(Ok(FlowEvent::Data { batch, retracted }))) => {
                             let candidate: Option<i64> = match (event_time_idx, part_idx) {
@@ -269,17 +283,28 @@ impl ExecutionPlan for WatermarkExec {
                                 _ => None,
                             };
                             pending.push_back(FlowEvent::Data { batch, retracted });
-                            if let Some(m) = candidate {
-                                let wm = m - delay;
-                                if last_wm.is_none_or(|l| wm > l) {
-                                    last_wm = Some(wm);
-                                    if let Some(ts) = DateTime::from_timestamp_micros(wm) {
-                                        pending.push_back(FlowEvent::Marker(
-                                            FlowMarker::Watermark {
-                                                source: "watermark".to_string(),
-                                                timestamp: ts,
-                                            },
-                                        ));
+                            // Interval gate (Flink auto-watermark-interval): emit at most once per
+                            // `watermark_interval`, so a time-ordered backlog does not put a marker
+                            // between every data batch (which defeats the shuffle coalescer). max_ts /
+                            // per_part keep updating every batch, so the watermark we DO emit is current;
+                            // final windows still flush at input-end / EndOfData.
+                            let now = std::time::Instant::now();
+                            let due = last_emit
+                                .is_none_or(|le: std::time::Instant| now.duration_since(le) >= watermark_interval);
+                            if due {
+                                if let Some(m) = candidate {
+                                    let wm = m - delay;
+                                    if last_wm.is_none_or(|l| wm > l) {
+                                        last_wm = Some(wm);
+                                        last_emit = Some(now);
+                                        if let Some(ts) = DateTime::from_timestamp_micros(wm) {
+                                            pending.push_back(FlowEvent::Marker(
+                                                FlowMarker::Watermark {
+                                                    source: "watermark".to_string(),
+                                                    timestamp: ts,
+                                                },
+                                            ));
+                                        }
                                     }
                                 }
                             }
@@ -287,7 +312,7 @@ impl ExecutionPlan for WatermarkExec {
                         Some(Some(Ok(other))) => {
                             return Some((
                                 Ok(other),
-                                (input, max_ts, per_part, last_wm, start, pending),
+                                (input, max_ts, per_part, last_wm, start, last_emit, pending),
                             ));
                         }
                     }
