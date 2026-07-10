@@ -35,6 +35,10 @@ pub static FROM_JSON_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// Cumulative ns in the Kafka source read+batch-build loop (across source instances). Written by
 /// kafka/reader.rs, read by the window prof dump — the COMPLETE per-stage breakdown for EKS pinpointing.
 pub static SOURCE_READ_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// SOURCE_READ split (VAJRA_WM_PROF): time in the rdkafka message drain (`msg_stream.next`) vs the Arrow
+/// batch build (`builders.append`) — pinpoints whether source_read is CONSUME-bound or BUILD-bound.
+pub static SOURCE_POLL_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static SOURCE_BUILD_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Cumulative ns in the keyed shuffle distribute/route+send (across instances). Written by
 /// streaming/exchange.rs, read by the window prof dump.
 pub static EXCHANGE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -83,6 +87,8 @@ fn ensure_process_dumper() {
                     std::thread::sleep(std::time::Duration::from_secs(10));
                     let vals = [
                         ("source_read", SOURCE_READ_NS.load(Relaxed)),
+                        ("source_poll", SOURCE_POLL_NS.load(Relaxed)),
+                        ("source_build", SOURCE_BUILD_NS.load(Relaxed)),
                         ("from_json", FROM_JSON_NS.load(Relaxed)),
                         ("exchange_cpu", EXCHANGE_NS.load(Relaxed)),
                         ("exchange_wait", EXCHANGE_WAIT_NS.load(Relaxed)),

@@ -817,6 +817,7 @@ impl ExecutionPlan for KafkaSourceExec {
                     // of payload size — matching how Arrow/DataFusion size-bound batches.
                     let mut batch_bytes: usize = 0;
                     let mut stream_ended = false;
+                    let (mut poll_ns, mut build_ns) = (0u64, 0u64); // source_read split (poll vs build)
                     while builders.len() < target_batch
                         && batch_bytes < max_batch_bytes()
                         && remaining(&next) > 0
@@ -826,6 +827,7 @@ impl ExecutionPlan for KafkaSourceExec {
                         // registration dominates CPU). Only when nothing is buffered do we either
                         // flush the rows we have or — if empty — await with the poll timeout, which
                         // drives stall detection / EndOfData.
+                        let _tp = _rd.map(|_| std::time::Instant::now());
                         let msg_opt = if fast_drain {
                             match msg_stream.next().now_or_never() {
                                 Some(item) => item,
@@ -846,6 +848,9 @@ impl ExecutionPlan for KafkaSourceExec {
                                 Err(_) => break,
                             }
                         };
+                        if let Some(t) = _tp {
+                            poll_ns = poll_ns.saturating_add(t.elapsed().as_nanos() as u64);
+                        }
                         match msg_opt {
                             Some(Ok(msg)) => {
                                 empty_polls = 0; // made progress -> reset the stall budget
@@ -875,7 +880,11 @@ impl ExecutionPlan for KafkaSourceExec {
                                     + key.map_or(0, |k| k.len())
                                     + topic.len();
                                 // Append borrowed bytes straight into the Arrow buffers (no to_vec).
+                                let _tb = _rd.map(|_| std::time::Instant::now());
                                 builders.append(key, value, topic, part, off, ts_ms, ts_type);
+                                if let Some(t) = _tb {
+                                    build_ns = build_ns.saturating_add(t.elapsed().as_nanos() as u64);
+                                }
                                 next.insert(k, off + 1);
                             }
                             Some(Err(e)) => { yield Err(exec_datafusion_err!("Kafka error: {e}")); return; }
@@ -884,10 +893,10 @@ impl ExecutionPlan for KafkaSourceExec {
                     }
                     if builders.len() > 0 {
                         if let Some(t) = _rd {
-                            sail_common_datafusion::streaming::event::encoding::prof_add(
-                                &sail_common_datafusion::streaming::event::encoding::SOURCE_READ_NS,
-                                t.elapsed().as_nanos() as u64,
-                            );
+                            use sail_common_datafusion::streaming::event::encoding as prof;
+                            prof::prof_add(&prof::SOURCE_READ_NS, t.elapsed().as_nanos() as u64);
+                            prof::prof_add(&prof::SOURCE_POLL_NS, poll_ns);
+                            prof::prof_add(&prof::SOURCE_BUILD_NS, build_ns);
                         }
                         match builders.finish_projected(&full_schema, &projection) {
                             Ok(batch) => yield Ok(FlowEvent::append_only_data(batch)),
