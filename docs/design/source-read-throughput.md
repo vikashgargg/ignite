@@ -80,3 +80,38 @@ Per AIM, leverage our columnar/Arrow edge. KB findings (REFERENCES §6/§8):
   source_read lever.
 **Conclusion:** the columnar stack is already our edge; the source_read fix is a batch-CONSUME fix that
 FEEDS the columnar build faster (not a new columnar decode). StringView is the next columnar lever after.
+
+## 8. C1 measurement (2026-07-11, local 10M/16-part, release) — hypothesis REFUTED, refined
+| variant | throughput |
+|---|---|
+| StreamConsumer (current, now_or_never + prefetch-tuned) | **2.357M rows/s** |
+| BaseConsumer-thread (poll 100ms, under-tuned) | 1.913M rows/s (SLOWER) |
+- **Per-message BaseConsumer is NOT the win** — the current StreamConsumer.now_or_never is already tuned.
+  The confidence gate C1 correctly STOPPED the production rewrite (would not have helped).
+- Raw read 2.357M ≈ pipeline 2.32M ⇒ pipeline IS source-read-bound; 2.357M is the current PER-MESSAGE
+  consume ceiling.
+- **Caveats making C1 not yet decisive:** (a) the variant used blocking `poll(100ms)` vs the baseline's
+  non-blocking `now_or_never`, and lacked `apply_consumer_throughput_defaults` (unfair). (b) `BaseConsumer.
+  poll()` is still PER-MESSAGE — it does NOT test Flink's BATCHED poll. The real lever = **`rd_kafka_consume
+  _batch`** (librdkafka batch API, N messages/call, unsafe FFI) → build ONE Arrow batch from the message
+  array. **NEXT C1b:** fair BaseConsumer (equal tuning + poll(0)) AND a `rd_kafka_consume_batch` variant;
+  proceed to the production rewrite ONLY if batch-consume materially beats 2.357M. Else: the source_read gap
+  vs Flink is the rust-rdkafka per-message API vs Java's batched KafkaConsumer.poll — flag honestly.
+
+## 9. C1b FAIR measurement (2026-07-11, equal tuning + non-blocking poll) — CONSUME REWRITE REFUTED
+| variant (fair: apply_consumer_throughput_defaults + poll(0)) | throughput |
+|---|---|
+| BaseConsumer-thread | 2.529M rows/s |
+| StreamConsumer (current) | 2.518M rows/s |
+**IDENTICAL (0.4% noise).** BaseConsumer gives NO win; and the variant OMITS the per-message HashMap
+bookkeeping yet is the same speed ⇒ the `Vec`-offsets bookkeeping fix is ALSO not the lever. Both refuted.
+The source read is at the **per-message poll ceiling ~2.5M rows/s** (16-part, this box). The gate C1
+correctly PREVENTED the BaseConsumer-fetch-thread + Vec-offsets production rewrite (≈0% gain).
+**Remaining consume lever:** `rd_kafka_consume_batch` (librdkafka batch API, N msgs/call, unsafe FFI) — the
+only thing that reduces the per-CALL count (Flink's batched poll analog). Likely MODEST (~20-30%: saves the
+poll call, not the per-msg BorrowedMessage+append+copy), NOT 2×. HONEST: the ~2× read gap vs Flink is
+substantially the rust-rdkafka per-message consume vs Java KafkaConsumer.poll(500)-batched; closing it fully
+may need the batch FFI + is not guaranteed. **Vajra's PROVEN wins stand: memory (3.70 vs 9.27 GiB), batch
+6.2× vs Spark, latency (no-GC), unified engine, correctness/EO.** DECISION POINT: (a) build the batch-FFI
+variant + measure (modest, some risk) OR (b) accept streaming-throughput as competitive-not-beating on this
+per-message-consume-bound axis and invest in the proven-win axes.

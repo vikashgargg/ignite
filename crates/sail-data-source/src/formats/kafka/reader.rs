@@ -1494,7 +1494,7 @@ mod bench {
     use datafusion::physical_plan::ExecutionPlan;
     use futures::StreamExt;
 
-    use super::{kafka_data_schema, KafkaSourceExec};
+    use super::{kafka_data_schema, KafkaArrowBuilders, KafkaSourceExec};
     use crate::formats::kafka::options::KafkaReadOptions;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1553,6 +1553,127 @@ mod bench {
         eprintln!(
             "KAFKA_READ_BENCH topic={topic} parts={parts} rows={total_rows} batches={total_batches} \
              wall_s={dt:.3} throughput={:.3}M_rows/s",
+            total_rows as f64 / dt / 1e6
+        );
+    }
+
+    /// C1 variant: the FLIP-27 prod-grade design — a DEDICATED std::thread per partition running a
+    /// BaseConsumer (rust-rdkafka: BaseConsumer is considerably faster than StreamConsumer for small
+    /// messages) in a tight `poll()` loop, building the SAME columnar Arrow batches (KafkaArrowBuilders +
+    /// finish, so build cost is counted). A/B vs `kafka_read_bench` (StreamConsumer.now_or_never) proves
+    /// the source_read consume win in isolation — NO EO/marker/idle complexity, no cloud cost.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn kafka_read_bench_baseconsumer() {
+        if std::env::var("KAFKA_BENCH").ok().as_deref() != Some("1") {
+            eprintln!("set KAFKA_BENCH=1 to run");
+            return;
+        }
+        let boot = std::env::var("BENCH_BOOTSTRAP").unwrap_or_else(|_| "localhost:9092".into());
+        let topic = std::env::var("BENCH_TOPIC").unwrap_or_else(|_| "repro_under".into());
+        let parts: usize = std::env::var("BENCH_PARTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
+        let schema = Arc::new(kafka_data_schema());
+        let full_schema = Arc::clone(&schema);
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+
+        let t0 = Instant::now();
+        let mut handles = vec![];
+        for p in 0..parts {
+            let (boot, topic) = (boot.clone(), topic.clone());
+            let projection = projection.clone();
+            let full_schema = Arc::clone(&full_schema);
+            handles.push(std::thread::spawn(move || {
+                use std::time::Duration;
+
+                use rdkafka::config::ClientConfig;
+                use rdkafka::consumer::{BaseConsumer, Consumer};
+                use rdkafka::message::Timestamp;
+                use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
+                use rdkafka::Message;
+
+                let mut cfg = ClientConfig::new();
+                cfg.set("bootstrap.servers", &boot)
+                    .set("group.id", format!("bench-bc-{p}-{}", std::process::id()))
+                    .set("enable.auto.commit", "false");
+                super::apply_consumer_throughput_defaults(&mut cfg); // SAME tuning as the current path (fair)
+                let consumer: BaseConsumer = cfg.create().expect("base consumer");
+                let mut tpl = TopicPartitionList::new();
+                tpl.add_partition_offset(&topic, p as i32, Offset::Beginning)
+                    .expect("tpl");
+                consumer.assign(&tpl).expect("assign");
+                let (_lo, hi) = consumer
+                    .fetch_watermarks(&topic, p as i32, Duration::from_secs(15))
+                    .expect("watermarks");
+                let target = 8192usize;
+                let mut rows: u64 = 0;
+                let mut batches: u64 = 0;
+                let mut builders = KafkaArrowBuilders::with_capacity(target, &projection);
+                let mut empty = 0u32;
+                loop {
+                    // Non-blocking drain (fair vs the baseline's now_or_never): poll(0) takes a buffered
+                    // message; only block-wait (poll 100ms) when the prefetch buffer is momentarily empty.
+                    let msg_opt = match consumer.poll(Duration::from_millis(0)) {
+                        Some(item) => Some(item),
+                        None => consumer.poll(Duration::from_millis(100)),
+                    };
+                    match msg_opt {
+                        Some(Ok(msg)) => {
+                            empty = 0;
+                            let off = msg.offset();
+                            let (ts_ms, ts_type) = match msg.timestamp() {
+                                Timestamp::NotAvailable => (-1i64, -1i32),
+                                Timestamp::CreateTime(ms) => (ms, 0i32),
+                                Timestamp::LogAppendTime(ms) => (ms, 1i32),
+                            };
+                            builders.append(
+                                msg.key(),
+                                msg.payload(),
+                                msg.topic(),
+                                msg.partition(),
+                                off,
+                                ts_ms,
+                                ts_type,
+                            );
+                            if builders.len() >= target {
+                                rows += builders.len() as u64;
+                                batches += 1;
+                                let _ = builders.finish_projected(&full_schema, &projection);
+                                builders = KafkaArrowBuilders::with_capacity(target, &projection);
+                            }
+                            if off + 1 >= hi {
+                                break; // reached the partition high-watermark (bounded read)
+                            }
+                        }
+                        Some(Err(_)) => break,
+                        None => {
+                            empty += 1;
+                            if empty > 30 {
+                                break; // drained
+                            }
+                        }
+                    }
+                }
+                if builders.len() > 0 {
+                    rows += builders.len() as u64;
+                    batches += 1;
+                    let _ = builders.finish_projected(&full_schema, &projection);
+                }
+                (rows, batches)
+            }));
+        }
+        let (mut total_rows, mut total_batches) = (0u64, 0u64);
+        for h in handles {
+            let (r, b) = h.join().expect("join");
+            total_rows += r;
+            total_batches += b;
+        }
+        let dt = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "KAFKA_READ_BENCH_BASECONSUMER topic={topic} parts={parts} rows={total_rows} \
+             batches={total_batches} wall_s={dt:.3} throughput={:.3}M_rows/s",
             total_rows as f64 / dt / 1e6
         );
     }
