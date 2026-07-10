@@ -113,3 +113,21 @@ without EKS. 5M rows, 16-part, monotonic, COMPLETE_ON_END:
 - **Mechanism: shuffle_send_batches 4890/4888 (OFF) → 2281/2294 (ON) = 2.13–2.14× fewer Flight messages.**
 Repeatable across runs. Confirms D1+D2 correct + effective. (Throughput delta needs release+scale = one
 future EKS A/B for the number; mechanism + correctness proven here for free.) `scripts/local_dist_coalesce_check.sh`.
+
+## 8. FAIR head-to-head vs Flink (2026-07-10, EKS 1× c7g.4xlarge, 100M, BOTH → S3) — WHERE WE LAG
+Both engines: identical 10s tumbling windowed COUNT, same 100M Kafka topic, WRITE TO S3 (Flink parquet via
+flink-s3-fs-hadoop + flink-sql-parquet + flink-shaded-hadoop-2-uber + checkpoints-after-tasks-finish; Vajra
+parquet). Bounded catch-up = throughput.
+| Metric | Flink 1.19 | Vajra |
+|---|---|---|
+| Throughput | **5.07M ev/s** (19.7s) | 2.32M ev/s (43s) — Flink **2.2×** |
+| Peak memory | 9.27 GiB (1 TM) | **3.70 GiB/pod** (Vajra lower) |
+| Correctness | 48 files | 100M/10 windows/1000 keys exact |
+
+**ROOT CAUSE OF THE 2.2× (Vajra per-pod WM_PROF, cpu-ms):** source_read=40–49s (≈ the 43s WALL) >> from_json
+=11–12s > exchange_cpu=**0**. shuffle_recv=608s is BLOCKED-WAIT (window starves behind the source), NOT CPU.
+**Vajra is SOURCE-READ BOUND** — Kafka consume + Arrow batch build dominates; the window is idle waiting.
+Flink reads 100M in 19.7s. **⇒ The throughput lever is the Kafka SOURCE READ + Arrow decode path, NOT the
+shuffle** (exchange_cpu=0; the coalescer, though correct + 2.14× fewer msgs, does NOT move throughput and
+regresses single-node). NEXT STEP = profile + optimize source_read (kafka/reader.rs: rdkafka consume loop,
+batch sizing, Arrow build; compare to Flink KafkaSource FLIP-27 fetch parallelism/mini-batch). Cluster torn $0.
