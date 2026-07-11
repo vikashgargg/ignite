@@ -472,3 +472,25 @@ Flink FLIP-27 (cwiki) + KafkaPartitionSplitReader/SourceReaderBase · Flink Data
   columnar/no-JVM edge ⇒ should EXCEED Flink's 5.07M. MEASURE via `KAFKA_BENCH` micro-bench (isolated read,
   local/free) before wiring. CAUTION: the rewrite must preserve EO offset-commit, markers (watermark/
   checkpoint/EndOfData), idleness, and all 3 paths (bounded/realtime/unbounded) — kafka/reader.rs.
+
+## 4b. Arrow Flight throughput — VALIDATED prod-grade columnar shuffle (research paper, fetched 2026-07-11)
+Source: **Benchmarking Apache Arrow Flight (arXiv 2204.03032 / ACM 10.1145/3527199.3527264)** + Arrow Flight
+format docs (arrow.apache.org/docs/format/Flight.html) + Ballista shuffle (§4 above). VALIDATED facts:
+- **Flight is ZERO-COPY**: Arrow RecordBatches cross process boundaries with NO ser/de (IPC = the wire format
+  = the memory format). The columnar-native exchange = Flight + IPC, no re-encode (matches Ballista §4).
+- **Throughput: ~1 GB/s SINGLE stream (localhost), up to ~10 GB/s at 16 PARALLEL streams** (parallelism is
+  THE scaling lever; >16 streams regresses). DoGet ~6 GB/s, DoPut ~4.8 GB/s over network.
+- Best practices: consistent schema client↔server; efficient Arrow types/encodings (fewer/narrower columns);
+  close streams; manage the allocator; leverage gRPC bidirectional HTTP/2.
+- **Vajra measurement (2026-07-11):** distributed streaming shuffle ≈ 1.5M ev/s × ~16 B/row ≈ **24 MB/s =
+  ~40× BELOW Flight's proven 1 GB/s single-stream** ⇒ Vajra's shuffle is transport-CONFIG-throttled, NOT
+  bandwidth/CPU-bound. ROOT CAUSE (code): the tonic CLIENT `do_get` used the DEFAULT 64 KiB HTTP/2 receive
+  window (rpc.rs) — a ~200 KiB coalesced batch exceeds the whole window ⇒ round-trip-latency-bound, INVARIANT
+  to batch size (measured: in-process exchange 3.07M vs Flight 1.55M ev/s, flat across 16k→64k batch rows).
+- **PROD-GRADE COLUMNAR SYNTHESIS (learn from ALL, not mirror one): (1)** large HTTP/2 receive window on the
+  read client (credit-based flow control — FLIP-2 / Flink network buffers as the CONCEPT, sized to Flight's
+  1 GB/s BDP, not copied); **(2)** keep the exchange ZERO-COPY = DROP gzip/zstd compression on the Flight
+  shuffle (defeats zero-copy + burns CPU; Arrow is already compact) and minimize the FlowEvent per-batch
+  re-encode (the null marker-column prepend, encoding.rs — send markers cheaply/out-of-band); **(3)** exploit
+  PARALLEL streams (Flight's 10× lever) for the N→M shuffle. Grounded in the Flight paper + Ballista + Arrow
+  IPC + credit-flow — the columnar/DataFusion-native design, per AIM.

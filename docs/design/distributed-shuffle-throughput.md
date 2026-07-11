@@ -149,3 +149,19 @@ per-message bookkeeping ~7.9s (37%) + **build 1.0s (5%)**. The Arrow columnar bu
 3. (measure after 1+2) if still gapped: source parallelism / assignment vs Flink's per-partition readers.
 **Target:** source_read → ~1/2, throughput 2.32M → toward Flink 5.07M. Validate T1 (local WM_PROF split)
 → T2 kind → T3 EKS head-to-head. NOT the shuffle (exchange_cpu=0; coalescer is correct but orthogonal).
+
+## 10. Cross-node shuffle is LATENCY-BOUND (2026-07-11) — the honest root cause + grounded fix
+DECISIVE isolation (release, same box, 5M): in-process exchange **3.07M** vs Flight shuffle **1.55M** = flat
+2×, UNCHANGED by 16k→64k batch rows AND by the HTTP/2 window fix on loopback (1.52–1.57M). Reconciled with
+the REAL EKS data: single-node (4 in-process workers, loopback shuffle) = **4.92M = 1.15× behind Flink**
+(near-parity ✅); multi-node (cross-node Flight) = **1.46M = 3.6× behind** ❌. So the in-process/loopback
+shuffle is FINE at scale; the gap is CROSS-NODE only. Cross-node runs at 1.46M×16B ≈ **24 MB/s = ~50× below
+the c7g NIC (~1250 MB/s) and ~40× below Flight's proven 1 GB/s single-stream** (REFERENCES §4b, arXiv
+2204.03032) ⇒ **LATENCY-bound, not compute/bandwidth.** Grounded fix (applied, rpc.rs): the tonic read
+client used the DEFAULT 64 KiB HTTP/2 receive window → gave it 8 MiB stream / 16 MiB connection + tcp_nodelay
+(credit-based flow control CONCEPT sized to Flight's BDP; NOT a copied Flink knob). **Loopback (μs RTT) can't
+validate a window fix — nor can single-host kind (docker bridge ~0.1ms). Only real MULTI-NODE network (cross-
+AZ ~0.5ms RTT) exercises the throttle.** Companion levers (REFERENCES §4b, Flight paper): PARALLEL streams
+(up to 16 = ~10× on localhost) for the N→M shuffle; keep zero-copy (gzip/zstd verified INACTIVE — client
+never negotiates; NOT a fix). Window fix is grounded but **UNVALIDATED until one multi-node EKS A/B**
+(current vs fixed). Alternative: single-node scale-UP is already 1.15× behind Flink + wins memory/unified.
