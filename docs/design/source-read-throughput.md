@@ -177,3 +177,19 @@ per-stage throughput profile on real cores** (source→count, +from_json→count
 vs Flink per-operator (Flink web UI). Build+validate the harness FREE on kind (correctness), then ONE EKS run
 pinpoints the exact 2× stage. Until then: do NOT implement a source rewrite (all free evidence says it won't
 move the 2×). Vajra's PROVEN wins stand: batch 6.2× vs Spark, memory, latency (no-GC tail), unified, EO.
+
+## 13. Per-stage profiler built + VALIDATED FREE locally (2026-07-11) — local is SOURCE-bound; the 2× is CROSS-NODE Flight IPC
+Built `scripts/stream_stage_profile.py` + `scripts/stage_profile_local.sh` (progressive stages via the PROVEN
+parquet-append sink; COMPLETE_ON_END flushes every window ⇒ equal counts = fair). Free-validation findings
+(each a real harness lesson, caught before EKS): (a) Vajra streaming has NO memory/complete sink (rows=None) —
+use parquet; (b) a giant window never closes in append mode (watermark) — use 10s windows that close;
+(c) macOS bash 3.2 has no assoc arrays; (d) normalize throughput by ACTUAL emitted rows, not assumed N.
+**Local result (bench_src 10M, equal counts):** nokey(from_json+window, 1 hot group) 2.251M/s ≈ source ceiling
+~2.3M; full(+keyed, 1000 groups) 3.069M/s FASTER (parallel groups, not the exchange). ⇒ **locally parse+window
+add ~nothing over the source; the whole single-node pipeline is SOURCE/FETCH-bound and the same-node shuffle is
+mpsc (zero-copy, free).** The one thing local CANNOT exercise = the **CROSS-NODE Flight shuffle serialization**
+(single-node stays mpsc). KB already root-caused exactly this ([[project_shuffle_coalesce_wip]]: distributed lag
+= Flight small-batch IPC, Vajra 2.09M vs Flink 5.77M = 2.77×) — matches the user's "no-serde-but-slow" intuition:
+same-node no serde, CROSS-node serializes via Flight IPC. **NEXT (free): run the SAME profiler on kind (T2,
+multi-pod = REAL Flight shuffle) to measure the cross-pod shuffle delta before EKS.** The lever is the Flight
+shuffle IPC (batch-size / zero-copy / coalescing), NOT the Kafka source. Don't rewrite the source.
