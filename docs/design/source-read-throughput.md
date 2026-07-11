@@ -155,3 +155,25 @@ runtime) runs the tight consume+build loop, hands FULL Arrow batches to the pipe
 on one task (serialized, today) vs (b) fetch-thread + bounded channel + from_json+encode on the main task
 (overlapped). Proceed to the production fetch-thread ONLY if (b) materially beats (a). This measures the RIGHT
 lever (overlap) in isolation, unlike C1/C1b/C1c which measured the consume alone.
+
+## 12. C2 OVERLAP + fetch-model, and the laptop-noise wall (2026-07-11) — HONEST STOP on free levers
+Bench (bench_src 10M, release), spare-core counts:
+| test (4 partitions, cores free) | throughput |
+|---|---|
+| pipe OVERLAP (fetch thread + bounded chan + parse) | 1.189M |
+| pipe SERIAL (fetch+parse inline) | 1.149M |
+| fetch-only batch-FFI | 1.585M → 2.330M (rerun, same config) |
+| fetch-only BaseConsumer | 1.072M |
+- **Overlap = +3.5% only** ⇒ from_json compute is SMALL vs fetch; little to hide → overlap is NOT a 2× lever.
+  The source is **fetch/delivery-bound**, not compute-bound (consistent with the 3 consume gates).
+- **Fetch-model swings 50% run-to-run (1.585→2.330M)** ⇒ this laptop (loopback Kafka + ~10 cores + bg load)
+  is TOO NOISY to rank sub-2× levers or measure at-scale throughput. Matches the SDLC skill: *EKS = the
+  throughput number; laptop = correctness/mechanism only.*
+- Fetch config already aggressive (10 MiB/part fetch, 64 MiB prefetch, 16 MiB socket) — not a free under-fetch.
+**CONCLUSION:** free source-side levers (consume model, fetch/compute overlap) are within noise / small; none
+is the decisive 2×. The EKS 2.2× is real but NOT yet isolated to a stage with confidence (WM_PROF summed-CPU
+can't cleanly attribute the serial-path time). **The one AIM-right decisive experiment = a PROGRESSIVE
+per-stage throughput profile on real cores** (source→count, +from_json→count, +window→count, full→S3), Vajra
+vs Flink per-operator (Flink web UI). Build+validate the harness FREE on kind (correctness), then ONE EKS run
+pinpoints the exact 2× stage. Until then: do NOT implement a source rewrite (all free evidence says it won't
+move the 2×). Vajra's PROVEN wins stand: batch 6.2× vs Spark, memory, latency (no-GC tail), unified, EO.

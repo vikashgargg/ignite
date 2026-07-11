@@ -1813,4 +1813,186 @@ mod bench {
             total_rows as f64 / dt / 1e6
         );
     }
+
+    /// from_json proxy: parse every `value` (Binary, col 1) as `serde_json::Value` — the dominant per-row
+    /// compute the downstream from_json operator does. Used by the OVERLAP gate (C2) to give the pipeline a
+    /// realistic CPU stage to overlap the Kafka fetch against.
+    fn parse_values(batch: &datafusion::arrow::record_batch::RecordBatch) -> u64 {
+        use datafusion::arrow::array::{Array, BinaryArray};
+        let vals = batch
+            .column(1)
+            .as_any()
+            .downcast_ref::<BinaryArray>()
+            .expect("value col is Binary");
+        let mut n = 0u64;
+        for i in 0..vals.len() {
+            if vals.is_valid(i) {
+                let _v: serde_json::Value =
+                    serde_json::from_slice(vals.value(i)).unwrap_or(serde_json::Value::Null);
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// Read one partition to its high-watermark with a tuned BaseConsumer, building Arrow batches of
+    /// ~`target` rows and handing each finished batch to `on_batch`. Shared by the serial/overlap gate.
+    fn read_partition<F: FnMut(datafusion::arrow::record_batch::RecordBatch)>(
+        boot: &str,
+        topic: &str,
+        p: i32,
+        target: usize,
+        projection: &[usize],
+        full_schema: &Arc<datafusion::arrow::datatypes::Schema>,
+        mut on_batch: F,
+    ) {
+        use std::time::Duration;
+
+        use rdkafka::config::ClientConfig;
+        use rdkafka::consumer::{BaseConsumer, Consumer};
+        use rdkafka::message::Message;
+        use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
+
+        let mut cfg = ClientConfig::new();
+        cfg.set("bootstrap.servers", boot)
+            .set("group.id", format!("bench-pipe-{p}-{}", std::process::id()))
+            .set("enable.auto.commit", "false");
+        super::apply_consumer_throughput_defaults(&mut cfg);
+        let consumer: BaseConsumer = cfg.create().expect("consumer");
+        let mut tpl = TopicPartitionList::new();
+        tpl.add_partition_offset(topic, p, Offset::Beginning)
+            .expect("tpl");
+        consumer.assign(&tpl).expect("assign");
+        let (_lo, hi) = consumer
+            .fetch_watermarks(topic, p, Duration::from_secs(15))
+            .expect("wm");
+        let mut builders = KafkaArrowBuilders::with_capacity(target, projection);
+        let mut empty = 0u32;
+        loop {
+            // Blocking poll (100ms) so the first broker fetch lands; returns early once data is queued, so
+            // saturated throughput is unaffected — only the tail (past high-watermark) waits.
+            match consumer.poll(Duration::from_millis(100)) {
+                Some(Ok(m)) => {
+                    empty = 0;
+                    let (ts_ms, ts_type) = match m.timestamp() {
+                        rdkafka::message::Timestamp::CreateTime(ms) => (ms, 0i32),
+                        rdkafka::message::Timestamp::LogAppendTime(ms) => (ms, 1i32),
+                        rdkafka::message::Timestamp::NotAvailable => (-1i64, -1i32),
+                    };
+                    let off = m.offset();
+                    builders.append(m.key(), m.payload(), topic, p, off, ts_ms, ts_type);
+                    if builders.len() >= target {
+                        let b = builders.finish_projected(full_schema, projection).expect("finish");
+                        on_batch(b);
+                        builders = KafkaArrowBuilders::with_capacity(target, projection);
+                    }
+                    if off + 1 >= hi {
+                        break;
+                    }
+                }
+                Some(Err(e)) => panic!("poll err: {e}"),
+                None => {
+                    empty += 1;
+                    if empty > 50 {
+                        break;
+                    }
+                }
+            }
+        }
+        if builders.len() > 0 {
+            let b = builders.finish_projected(full_schema, projection).expect("finish");
+            on_batch(b);
+        }
+    }
+
+    /// C2 gate — SERIAL (today's model): one thread per partition does fetch → build → from_json-proxy
+    /// INLINE (no overlap). A/B partner of `kafka_pipe_bench_overlap`. Run with BENCH_PARTS < cores so the
+    /// overlap variant has spare cores (that is exactly the resource the fetch thread needs).
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn kafka_pipe_bench_serial() {
+        if std::env::var("KAFKA_BENCH").ok().as_deref() != Some("1") {
+            eprintln!("set KAFKA_BENCH=1 to run");
+            return;
+        }
+        let boot = std::env::var("BENCH_BOOTSTRAP").unwrap_or_else(|_| "localhost:9092".into());
+        let topic = std::env::var("BENCH_TOPIC").unwrap_or_else(|_| "bench_src".into());
+        let parts: usize = std::env::var("BENCH_PARTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(4);
+        let schema = Arc::new(kafka_data_schema());
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+        let t0 = Instant::now();
+        let mut handles = vec![];
+        for p in 0..parts {
+            let (boot, topic, projection, schema) =
+                (boot.clone(), topic.clone(), projection.clone(), Arc::clone(&schema));
+            handles.push(std::thread::spawn(move || {
+                let mut rows = 0u64;
+                read_partition(&boot, &topic, p as i32, 8192, &projection, &schema, |b| {
+                    rows += parse_values(&b);
+                });
+                rows
+            }));
+        }
+        let total: u64 = handles.into_iter().map(|h| h.join().expect("join")).sum();
+        let dt = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "KAFKA_PIPE_BENCH_SERIAL topic={topic} parts={parts} rows={total} wall_s={dt:.3} \
+             throughput={:.3}M_rows/s",
+            total as f64 / dt / 1e6
+        );
+    }
+
+    /// C2 gate — OVERLAP (FLIP-27 model): per partition a FETCH thread does fetch → build → send over a
+    /// BOUNDED sync_channel, while a COMPUTE thread does the from_json-proxy — so fetch overlaps compute.
+    /// If this materially beats `kafka_pipe_bench_serial`, the production dedicated-fetch-thread is justified.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn kafka_pipe_bench_overlap() {
+        if std::env::var("KAFKA_BENCH").ok().as_deref() != Some("1") {
+            eprintln!("set KAFKA_BENCH=1 to run");
+            return;
+        }
+        let boot = std::env::var("BENCH_BOOTSTRAP").unwrap_or_else(|_| "localhost:9092".into());
+        let topic = std::env::var("BENCH_TOPIC").unwrap_or_else(|_| "bench_src".into());
+        let parts: usize = std::env::var("BENCH_PARTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(4);
+        let schema = Arc::new(kafka_data_schema());
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+        let t0 = Instant::now();
+        let mut handles = vec![];
+        for p in 0..parts {
+            let (boot, topic, projection, schema) =
+                (boot.clone(), topic.clone(), projection.clone(), Arc::clone(&schema));
+            handles.push(std::thread::spawn(move || {
+                // Bounded handover = backpressure (Flink credit-flow analog); cap = a few batches.
+                let (tx, rx) =
+                    std::sync::mpsc::sync_channel::<datafusion::arrow::record_batch::RecordBatch>(4);
+                let (b2, t2, pr2, s2) =
+                    (boot.clone(), topic.clone(), projection.clone(), Arc::clone(&schema));
+                let fetch = std::thread::spawn(move || {
+                    read_partition(&b2, &t2, p as i32, 8192, &pr2, &s2, |b| {
+                        let _ = tx.send(b);
+                    });
+                });
+                let mut rows = 0u64;
+                while let Ok(b) = rx.recv() {
+                    rows += parse_values(&b);
+                }
+                fetch.join().expect("fetch join");
+                rows
+            }));
+        }
+        let total: u64 = handles.into_iter().map(|h| h.join().expect("join")).sum();
+        let dt = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "KAFKA_PIPE_BENCH_OVERLAP topic={topic} parts={parts} rows={total} wall_s={dt:.3} \
+             throughput={:.3}M_rows/s",
+            total as f64 / dt / 1e6
+        );
+    }
 }
