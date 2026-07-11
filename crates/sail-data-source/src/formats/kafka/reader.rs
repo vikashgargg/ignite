@@ -1677,4 +1677,140 @@ mod bench {
             total_rows as f64 / dt / 1e6
         );
     }
+
+    /// C1b variant: librdkafka BATCH consume (`rd_kafka_consume_batch_queue`, N messages per CALL — the
+    /// true Flink `KafkaConsumer.poll(500)` analog) via FFI, building ONE columnar Arrow batch from the
+    /// message array. Tests whether cutting the per-CALL count beats the per-message poll ceiling (~2.5M).
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn kafka_read_bench_batch() {
+        if std::env::var("KAFKA_BENCH").ok().as_deref() != Some("1") {
+            eprintln!("set KAFKA_BENCH=1 to run");
+            return;
+        }
+        let boot = std::env::var("BENCH_BOOTSTRAP").unwrap_or_else(|_| "localhost:9092".into());
+        let topic = std::env::var("BENCH_TOPIC").unwrap_or_else(|_| "repro_under".into());
+        let parts: usize = std::env::var("BENCH_PARTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(16);
+        let schema = Arc::new(kafka_data_schema());
+        let full_schema = Arc::clone(&schema);
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+
+        let t0 = Instant::now();
+        let mut handles = vec![];
+        for p in 0..parts {
+            let (boot, topic) = (boot.clone(), topic.clone());
+            let projection = projection.clone();
+            let full_schema = Arc::clone(&full_schema);
+            handles.push(std::thread::spawn(move || {
+                use std::time::Duration;
+
+                use rdkafka::bindings;
+                use rdkafka::config::ClientConfig;
+                use rdkafka::consumer::{BaseConsumer, Consumer};
+                use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
+
+                let mut cfg = ClientConfig::new();
+                cfg.set("bootstrap.servers", &boot)
+                    .set("group.id", format!("bench-batch-{p}-{}", std::process::id()))
+                    .set("enable.auto.commit", "false");
+                super::apply_consumer_throughput_defaults(&mut cfg);
+                let consumer: BaseConsumer = cfg.create().expect("consumer");
+                let mut tpl = TopicPartitionList::new();
+                tpl.add_partition_offset(&topic, p as i32, Offset::Beginning)
+                    .expect("tpl");
+                consumer.assign(&tpl).expect("assign");
+                let (_lo, hi) = consumer
+                    .fetch_watermarks(&topic, p as i32, Duration::from_secs(15))
+                    .expect("wm");
+
+                let rk = consumer.client().native_ptr();
+                // SAFETY: `rk` is a valid rd_kafka_t from the live BaseConsumer; get its consumer queue.
+                let queue = unsafe { bindings::rd_kafka_queue_get_consumer(rk) };
+                assert!(!queue.is_null(), "consumer queue");
+
+                let batch_sz = 1000usize;
+                let mut msgs: Vec<*mut bindings::rd_kafka_message_t> =
+                    vec![std::ptr::null_mut(); batch_sz];
+                let target = 8192usize;
+                let mut builders = KafkaArrowBuilders::with_capacity(target, &projection);
+                let (mut rows, mut batches, mut empty, mut last_off) = (0u64, 0u64, 0u32, -1i64);
+                loop {
+                    // SAFETY: `queue` valid; `msgs` is a `batch_sz`-length out-array for message pointers.
+                    let n = unsafe {
+                        bindings::rd_kafka_consume_batch_queue(queue, 100, msgs.as_mut_ptr(), batch_sz)
+                    };
+                    if n <= 0 {
+                        empty += 1;
+                        if empty > 30 {
+                            break;
+                        }
+                        continue;
+                    }
+                    empty = 0;
+                    for &m in msgs.iter().take(n as usize) {
+                        // SAFETY: `m` is a valid message pointer from librdkafka; read its fields (payload/
+                        // key are borrowed for the append copy) then destroy it.
+                        unsafe {
+                            let msg = &*m;
+                            if msg.err as i32 == 0 {
+                                let payload = (!msg.payload.is_null()).then(|| {
+                                    std::slice::from_raw_parts(msg.payload as *const u8, msg.len)
+                                });
+                                let key = (!msg.key.is_null()).then(|| {
+                                    std::slice::from_raw_parts(msg.key as *const u8, msg.key_len)
+                                });
+                                let mut tstype =
+                                    bindings::rd_kafka_timestamp_type_t::RD_KAFKA_TIMESTAMP_NOT_AVAILABLE;
+                                let ts = bindings::rd_kafka_message_timestamp(m, &mut tstype);
+                                let ts_type = tstype as i32 - 1; // 0->-1, 1->0(Create), 2->1(LogAppend)
+                                builders.append(
+                                    key,
+                                    payload,
+                                    &topic,
+                                    msg.partition,
+                                    msg.offset,
+                                    if ts_type < 0 { -1 } else { ts },
+                                    ts_type,
+                                );
+                                last_off = msg.offset;
+                            }
+                            bindings::rd_kafka_message_destroy(m);
+                        }
+                    }
+                    if builders.len() >= target {
+                        rows += builders.len() as u64;
+                        batches += 1;
+                        let _ = builders.finish_projected(&full_schema, &projection);
+                        builders = KafkaArrowBuilders::with_capacity(target, &projection);
+                    }
+                    if last_off + 1 >= hi {
+                        break;
+                    }
+                }
+                if builders.len() > 0 {
+                    rows += builders.len() as u64;
+                    batches += 1;
+                    let _ = builders.finish_projected(&full_schema, &projection);
+                }
+                // SAFETY: `queue` was obtained from rd_kafka_queue_get_consumer; release it.
+                unsafe { bindings::rd_kafka_queue_destroy(queue) };
+                (rows, batches)
+            }));
+        }
+        let (mut total_rows, mut total_batches) = (0u64, 0u64);
+        for h in handles {
+            let (r, b) = h.join().expect("join");
+            total_rows += r;
+            total_batches += b;
+        }
+        let dt = t0.elapsed().as_secs_f64();
+        eprintln!(
+            "KAFKA_READ_BENCH_BATCH topic={topic} parts={parts} rows={total_rows} \
+             batches={total_batches} wall_s={dt:.3} throughput={:.3}M_rows/s",
+            total_rows as f64 / dt / 1e6
+        );
+    }
 }

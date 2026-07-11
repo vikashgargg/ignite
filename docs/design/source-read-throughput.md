@@ -115,3 +115,21 @@ may need the batch FFI + is not guaranteed. **Vajra's PROVEN wins stand: memory 
 6.2× vs Spark, latency (no-GC), unified engine, correctness/EO.** DECISION POINT: (a) build the batch-FFI
 variant + measure (modest, some risk) OR (b) accept streaming-throughput as competitive-not-beating on this
 per-message-consume-bound axis and invest in the proven-win axes.
+
+## 10. C1c batch-FFI (2026-07-11, local 10M/16-part, release) — CONSUME THESIS DEFINITIVELY CLOSED
+| variant | throughput |
+|---|---|
+| batch-FFI (rd_kafka_consume_batch_queue, N/call = Flink poll(500) analog) | 2.287M rows/s |
+| BaseConsumer (per-message) | 2.279M rows/s |
+| StreamConsumer (current) | 2.250M rows/s |
+**ALL EQUAL (~1.6% noise).** Even librdkafka's TRUE batch API gives NO win ⇒ the poll model is NOT the
+lever; ~2.28M is the librdkafka-delivery + per-message payload-copy ceiling, independent of the poll API.
+Three gates (C1/C1b/C1c) prevented a big unsafe-FFI production rewrite for ~0%.
+**REVISED root-cause hypothesis (the EKS 2.2× gap is NOT the raw consume):** the local bench is CORE-
+CONTENDED (16 threads on ~10 laptop cores) so it under-measures the c7g read; and on EKS the SINGLE compute
+node runs source+window+shuffle+Flight all on 16 vCPU (contended), while **Flink's mini-batch aggregation**
+(`table.exec.mini-batch` 2s/50k) makes its WINDOW very cheap → more CPU left for the read. So the gap is
+likely **CPU CONTENTION + Flink's cheaper aggregation / operator fusion**, NOT the Kafka consume. NEXT (per
+option c): re-profile the FULL pipeline stage CPU on EKS (source vs window vs shuffle) with a MULTI-node
+cluster (uncontend the read) + measure Vajra's window/agg CPU vs Flink's mini-batch. The `kafka_read_bench_*`
+variants stay (#[ignore]) as the proof. Vajra's PROVEN wins stand (memory, batch 6.2× vs Spark, latency, EO).
