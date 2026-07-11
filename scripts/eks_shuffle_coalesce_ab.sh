@@ -8,7 +8,8 @@
 # Assumes cluster UP + image :TAG in ECR. Usage: scripts/eks_shuffle_coalesce_ab.sh [N] [TAG]
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-N="${1:-100000000}"; TAG="${2:-shufcoal}"; REGION=ap-south-1; NS=stream
+# Accept N/TAG via env OR positional (env wins) — avoids the "env ignored -> wrong default tag" foot-gun.
+N="${N:-${1:-100000000}}"; TAG="${TAG:-${2:-shufcoal3}}"; REGION=ap-south-1; NS=stream
 BUCKET="vajra-coal-$(date +%s)"
 ECR="$(aws ecr describe-repositories --region $REGION --repository-name vajra --query 'repositories[0].repositoryUri' --output text | tr -d '[:space:]')"; REG="${ECR%/vajra}"
 kk() { kubectl -n "$NS" "$@"; }
@@ -35,7 +36,10 @@ run_vajra() { # $1=shuffle_batch_rows $2=label -> prints RESULT line + per-pod s
   sed -e "s|__ECR__/vajra:bf6|$REG/vajra:$TAG|g" \
       -e "s|{\"name\":\"VAJRA_CREDIT_BACKPRESSURE\",\"value\":\"16\"}|{\"name\":\"VAJRA_CREDIT_BACKPRESSURE\",\"value\":\"16\"},{\"name\":\"VAJRA_SHUFFLE_BATCH_ROWS\",\"value\":\"$ROWS\"},{\"name\":\"VAJRA_COMPLETE_ON_END\",\"value\":\"1\"}|g" \
       k8s/stream/vajra-stream-dist.yaml | kk apply -f - >/dev/null
-  kk set env deploy/vajra-driver AWS_REGION="$REGION" VAJRA_COMPLETE_ON_END=1 VAJRA_SHUFFLE_BATCH_ROWS="$ROWS" >/dev/null
+  # cap workers to fit the compute node (16-part -> ~32 tasks; 8 slots/worker -> ~4 workers = fits the
+  # single c7g.4xlarge, still real cross-worker shuffle) — avoids the pending-worker churn.
+  kk set env deploy/vajra-driver AWS_REGION="$REGION" SAIL_CLUSTER__WORKER_TASK_SLOTS="${SLOTS:-8}" \
+     VAJRA_COMPLETE_ON_END=1 VAJRA_SHUFFLE_BATCH_ROWS="$ROWS" >/dev/null
   kk wait --for=condition=available --timeout=300s deployment/vajra-driver >/dev/null 2>&1
   until kk logs vajra-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
   kk cp scripts/stream_windowed_agg.py vajra-client:/tmp/wagg.py 2>/dev/null
