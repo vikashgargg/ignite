@@ -133,3 +133,25 @@ likely **CPU CONTENTION + Flink's cheaper aggregation / operator fusion**, NOT t
 option c): re-profile the FULL pipeline stage CPU on EKS (source vs window vs shuffle) with a MULTI-node
 cluster (uncontend the read) + measure Vajra's window/agg CPU vs Flink's mini-batch. The `kafka_read_bench_*`
 variants stay (#[ignore]) as the proof. Vajra's PROVEN wins stand (memory, batch 6.2× vs Spark, latency, EO).
+
+## 11. REFRAME (2026-07-11) — the lever is FETCH/COMPUTE OVERLAP, not the consume model
+**Stage-by-stage map vs Flink (grounded: FLIP-27 + Flink operator-chaining/mini-batch research + Vajra code):**
+- Vajra source = `async_stream::stream!` (reader.rs:681/949) that `yield`s batches, **pulled inline by the
+  downstream operator on the SAME tokio task**. No spawn/channel decouples fetch from compute ⇒ per source
+  task, **poll Kafka → build Arrow → from_json → shuffle-encode → yield are SERIALIZED on one thread**.
+- Flink FLIP-27: `KafkaPartitionSplitReader` runs in a **DEDICATED fetcher thread** feeding a handover queue;
+  the pipeline thread consumes it ⇒ **fetch OVERLAPS compute**. Flink also chains operators (one thread, no
+  handover) and mini-batches the agg — but the source/compute OVERLAP is the structural piece Vajra lacks.
+- ⇒ Vajra wall ≈ fetch + compute (serial); Flink wall ≈ max(fetch, compute) (overlapped). If fetch≈compute
+  that alone is ~2× — matching the measured 2.32M vs 5.07M. **Why the 3 consume gates showed nothing:** they
+  measured fetch ALONE (no downstream) ⇒ blind to the overlap. The lever was never the poll model.
+- Window mini-batch: Vajra ALREADY does per-batch Partial pre-agg (window_accum.rs:337) ✅ not the gap.
+  Same-node shuffle: ALREADY mpsc RecordBatch zero-copy (stream_manager/local.rs) ✅; only CROSS-node
+  serializes via Flight IPC (a separate, secondary lever — measure after overlap).
+**Prod-grade design (FLIP-27 SourceReaderBase model): dedicated fetch thread (`std::thread`, off the tokio
+runtime) runs the tight consume+build loop, hands FULL Arrow batches to the pipeline via a BOUNDED channel
+(`tokio::sync::mpsc`, cap = backpressure = credit-flow) ⇒ Kafka fetch overlaps from_json+encode+shuffle+sink.**
+**CONFIRM BEFORE IMPLEMENTING (gate C2, free/local):** micro-bench A/B — (a) inline source→from_json→encode
+on one task (serialized, today) vs (b) fetch-thread + bounded channel + from_json+encode on the main task
+(overlapped). Proceed to the production fetch-thread ONLY if (b) materially beats (a). This measures the RIGHT
+lever (overlap) in isolation, unlike C1/C1b/C1c which measured the consume alone.
