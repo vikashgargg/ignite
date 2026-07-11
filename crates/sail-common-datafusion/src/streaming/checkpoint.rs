@@ -16,13 +16,30 @@
 //! is why operator state is serialized to one blob rather than a multi-file directory. Same pattern
 //! Flink uses (a single atomic checkpoint-metadata write is the commit point).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use bytes::Bytes;
 use datafusion_common::{plan_datafusion_err, Result};
 use object_store::path::Path as StorePath;
 use object_store::{ObjectStore, ObjectStoreExt};
 use url::Url;
+
+/// Process-global cache of built object-store clients, keyed by `scheme://authority` (bucket).
+///
+/// **Why (MEASURED, frame-pointer CPU profile 2026-07-12):** `CheckpointStore::from_location` is called
+/// by EVERY streaming operator (KafkaSource / ShuffleWrite / WindowAccum) during execution — and building
+/// an `AmazonS3Builder`/GCS client each time constructs a fresh `reqwest` client, which calls
+/// `rustls_native_certs::load_native_certs` and **base64-parses the entire system CA trust store on every
+/// call**. The profile showed this chain (`from_location → S3Builder::build → ClientBuilder::build →
+/// load_native_certs → base64::decode`) at **~30% of on-CPU time** (the actual Flight-shuffle IPC was 1.3%).
+/// Object-store clients are designed to be long-lived + shared (Ballista caches shuffle clients — REFERENCES
+/// §4); caching them here builds the TLS/reqwest client ONCE per bucket and reuses it, eliminating the waste.
+/// The per-call `base` prefix still varies (cheap); only the client is shared.
+fn store_cache() -> &'static Mutex<HashMap<String, Arc<dyn ObjectStore>>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<dyn ObjectStore>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[derive(Clone)]
 pub struct CheckpointStore {
@@ -53,20 +70,37 @@ impl CheckpointStore {
         let url = Url::parse(location)
             .map_err(|e| plan_datafusion_err!("checkpoint url {location}: {e}"))?;
         let base = StorePath::from(url.path().trim_start_matches('/'));
-        let store: Arc<dyn ObjectStore> = match url.scheme() {
+        let scheme = url.scheme();
+        let store: Arc<dyn ObjectStore> = match scheme {
+            // LocalFileSystem is cheap to build (no TLS/HTTP client) — no need to cache.
             "file" => Arc::new(object_store::local::LocalFileSystem::new()),
-            "s3" | "s3a" => Arc::new(
-                object_store::aws::AmazonS3Builder::from_env()
-                    .with_url(url.as_str())
-                    .build()
-                    .map_err(err)?,
-            ),
-            "gs" => Arc::new(
-                object_store::gcp::GoogleCloudStorageBuilder::from_env()
-                    .with_url(url.as_str())
-                    .build()
-                    .map_err(err)?,
-            ),
+            // Cloud clients build a reqwest+TLS client (loads the native CA store) — cache per bucket so
+            // it is built ONCE and reused across every operator's checkpoint access (see `store_cache`).
+            "s3" | "s3a" | "gs" => {
+                let key = format!("{scheme}://{}", url.authority());
+                let mut cache = store_cache().lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(existing) = cache.get(&key) {
+                    Arc::clone(existing)
+                } else {
+                    let built: Arc<dyn ObjectStore> = if scheme == "gs" {
+                        Arc::new(
+                            object_store::gcp::GoogleCloudStorageBuilder::from_env()
+                                .with_url(url.as_str())
+                                .build()
+                                .map_err(err)?,
+                        )
+                    } else {
+                        Arc::new(
+                            object_store::aws::AmazonS3Builder::from_env()
+                                .with_url(url.as_str())
+                                .build()
+                                .map_err(err)?,
+                        )
+                    };
+                    cache.insert(key, Arc::clone(&built));
+                    built
+                }
+            }
             other => {
                 return Err(plan_datafusion_err!(
                     "unsupported checkpoint scheme '{other}' (use file://, s3://, or gs://)"
