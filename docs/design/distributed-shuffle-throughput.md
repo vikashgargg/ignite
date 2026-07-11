@@ -165,3 +165,20 @@ AZ ~0.5ms RTT) exercises the throttle.** Companion levers (REFERENCES §4b, Flig
 (up to 16 = ~10× on localhost) for the N→M shuffle; keep zero-copy (gzip/zstd verified INACTIVE — client
 never negotiates; NOT a fix). Window fix is grounded but **UNVALIDATED until one multi-node EKS A/B**
 (current vs fixed). Alternative: single-node scale-UP is already 1.15× behind Flink + wins memory/unified.
+
+## 11. REAL root cause FOUND BY CPU PROFILE (2026-07-12) — S3 client rebuild + TLS cert reload, NOT the transport
+The frame-pointer pprof profiler (VAJRA_PPROF_SECS; commit ee382309) run on a single-process local-cluster
+CONTAINER (the real Flight shuffle, fits the 8 GB laptop) gave DEFINITIVE stacks. **Hotspot (4454 samples):**
+`CheckpointStore::from_location → AmazonS3Builder::build → reqwest ClientBuilder::build →
+rustls_native_certs::load_native_certs → base64-parse the whole system CA store` = **~30% of on-CPU**
+(from_location 15% + S3Builder::build 15.7% + load_native_certs 14.5%, same stack). **The actual Flight IPC
+was 1.3%** — the "lean transport / HTTP/2 window / marker column / consume" hypotheses were ALL WRONG; the
+profile settled it in one run. CAUSE: `from_location` (checkpoint.rs) rebuilt the S3 client on EVERY call, and
+every streaming operator (KafkaSource/ShuffleWrite/WindowAccum, re-planned per micro-batch) calls it → reloads
+all TLS certs each time. **FIX (commit fdd541f3): process-global object-store client cache keyed by
+scheme://authority — build the reqwest/TLS client ONCE per bucket + reuse** (object_store clients are
+long-lived; Ballista client-cache, REFERENCES §4). **VALIDATED before/after (same container profile):
+load_native_certs 646→0 samples; from_location 680→26; S3Builder::build 697→26.** The ~30% cert-reload waste
+is ELIMINATED; top consumers are now window_accum + Flight/IPC (the real compute). Throughput NUMBER pending a
+clean EKS run (container local-cluster + MinIO returns a gRPC 400 mid-execution — environmental, present
+before+after the fix, not a regression; EKS S3 sink works, prior runs proved). LESSON: instrument first.
