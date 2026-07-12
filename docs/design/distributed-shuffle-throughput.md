@@ -197,3 +197,21 @@ write→read round-trip proven). Consistent with the CPU profile (cert-reload ch
 the local 8 GB Docker VM (reads nothing → 400; same on the pre-fix image; the image runs fine on EKS per prior
 runs) — so T1 uses the local macOS binary (the proven path); T2 kind is RAM-blocked on the 8 GB laptop. NEXT =
 T3 EKS: at-scale throughput vs Flink with the fix.
+
+## 13. T3 EKS confirm (2026-07-12) — HONEST: the cert fix does NOT move EKS-SCALE throughput (amortizes)
+Single-node c7g.4xlarge + m7g.2xlarge kafka, 100M events, S3 checkpoint (real S3, the config where the fix
+applies), WM_PROF, 2 runs each. **Before/after (same build config, only the cache differs):**
+| | run1 | run2 | avg |
+|---|---|---|---|
+| no-fix (pprof4) S3 | 4.273M | 4.547M | ~4.41M |
+| fix (certfix) S3 | 4.339M | 4.568M | ~4.45M |
+**~Identical (within noise).** The cert-reload is a ~FIXED per-micro-batch cost: it DOMINATED the laptop
+profile (5M, slow CPU → ~30%, T1 gave +20-35%) but at 100M on fast c7g it AMORTIZES to negligible (~1%). So
+**the fix is correct + eliminates real waste (good hygiene; helps constrained hardware / small batches /
+cold-start / latency) but is NOT the EKS-scale throughput lever.** Claim-only-measured: NO EKS throughput win.
+The EKS gap remains source_read-dominated (WM_PROF source_read ≫ from_json ≫ exchange), NOT the checkpoint cert
+cost — the laptop profile was real but scale/hardware-specific, a lesson in profiling AT the target scale.
+Flink this run misconfigured (REST 96s = 1.04M, 5× below its published 5.67M — missing tuned parallelism/
+mini-batch) so NO competitive claim from it. Vajra ~4.4M on S3 at 100M. Cluster torn to $0. Fix kept (correct
++ hygiene), NOT sold as a throughput win. NEXT real EKS throughput lever = source_read (Kafka read + Arrow
+build), profiled AT scale.
