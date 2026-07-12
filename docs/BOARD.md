@@ -136,3 +136,5 @@ holds the whole 8-task region AND the region is assigned before other workers re
 
 *Maintenance: update the cell + link the commit the SAME turn work lands. This board is loaded at
 orientation (CLAUDE.md). Point-in-time claims must be verified against current code before re-asserting.*
+
+- ⚙️ **[Throughput: beat Flink STRUCTURAL board](design/throughput-beat-flink-board.md)** (2026-07-12) — ROOT CAUSE (code-verified): every streaming operator DECODEs input + ENCODEs output FlowEvent (marker-col alloc + per-row scan) ~5-6x/batch; Flink CHAINS operators (zero re-encode). THE per-batch tax that eats the columnar/no-JVM edge. Tasks T-1 (kill per-operator encode/decode = P0) → T-5 (cold-start), each profile-gated.
