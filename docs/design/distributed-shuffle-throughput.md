@@ -215,3 +215,20 @@ Flink this run misconfigured (REST 96s = 1.04M, 5× below its published 5.67M �
 mini-batch) so NO competitive claim from it. Vajra ~4.4M on S3 at 100M. Cluster torn to $0. Fix kept (correct
 + hygiene), NOT sold as a throughput win. NEXT real EKS throughput lever = source_read (Kafka read + Arrow
 build), profiled AT scale.
+
+## 14. T3 EKS PROPER head-to-head (2026-07-12) — Flink ~1.4x faster (both properly run); earlier 1.04M was MY bug
+Recreated cluster, ran Flink FIRST on a free node (TM Ready + 16 slots registered BEFORE submitting — the
+sequencing I got wrong the first time: I'd left Vajra holding the node so flink-tm was Pending → job ran
+degraded → the bogus 1.04M). Same c7g.4xlarge, 100M, 10s tumbling window GROUP BY window,k COUNT.
+| engine | throughput | wall | note |
+|---|---|---|---|
+| Flink (parallelism 16, mini-batch, object-reuse, blackhole sink) | **9.37M ev/s** | 10.7s (REST) | properly sequenced |
+| Vajra certprod+fix, WARM (/data local, tiny output) | **6.74 / 6.67M ev/s** | ~15s | steady-state |
+| Vajra COLD (1st run) | 3.05M | 32.8s | JIT/connection warmup |
+**Flink ~1.4x faster than warm Vajra.** Output is tiny both (~9000 rows = windows×keys), so blackhole vs
+/data-parquet is negligible = fair. Notes: (a) BOTH engines beat their own published numbers (Vajra 6.7M >
+pub 4.92M; Flink 9.37M > pub 5.67M) — the published "1.15x behind" understated Flink (likely a sequencing/
+measurement artifact like mine). (b) Vajra COLD-START is 2x slower than warm — a real prod axis (first-batch
+latency). (c) counts 9 windows/90M (VAJRA_COMPLETE_ON_END not set here = the known last-window completeness
+gap, separate). (d) the cert fix is NOT the lever at scale (§13). **HONEST: at 100M, properly-run Flink is
+~1.4x faster; the gap is source_read-dominated (WM_PROF), the real next lever — profiled AT scale, not laptop.**
