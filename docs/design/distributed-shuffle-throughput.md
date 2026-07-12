@@ -182,3 +182,18 @@ load_native_certs 646→0 samples; from_location 680→26; S3Builder::build 697�
 is ELIMINATED; top consumers are now window_accum + Flight/IPC (the real compute). Throughput NUMBER pending a
 clean EKS run (container local-cluster + MinIO returns a gRPC 400 mid-execution — environmental, present
 before+after the fix, not a regression; EKS S3 sink works, prior runs proved). LESSON: instrument first.
+
+## 12. T1 END-TO-END VERIFIED ON MinIO (2026-07-12) — fix delivers +20-35% throughput, counts EXACT
+Per the SDLC (T1 local-cluster + MinIO BEFORE EKS). Release binary WITH the client-cache fix (fdd541f3),
+local-cluster --workers 4, VAJRA_DISTRIBUTED_STREAM=1, 5M Kafka events → windowed-agg → parquet on MinIO S3 →
+read back. **Same setup, before vs after:**
+| | throughput | total_events | n_windows |
+|---|---|---|---|
+| pre-fix baseline | 1.546M ev/s | — | — |
+| fix run1/2/3 | **1.848 / 1.806 / 2.090M ev/s** | 5,000,000 EXACT (all) | 100 (all) |
+**Avg ~1.9M = +20-35% over 1.546M pre-fix; counts EXACT every run** (numbers read back FROM MinIO = full
+write→read round-trip proven). Consistent with the CPU profile (cert-reload chain 646→0 samples). Correctness
++ throughput both green on real object storage. NOTE: the vajra DOCKER image streaming-Kafka read is flaky on
+the local 8 GB Docker VM (reads nothing → 400; same on the pre-fix image; the image runs fine on EKS per prior
+runs) — so T1 uses the local macOS binary (the proven path); T2 kind is RAM-blocked on the 8 GB laptop. NEXT =
+T3 EKS: at-scale throughput vs Flink with the fix.
