@@ -310,10 +310,39 @@ impl ExecutionPlan for WatermarkExec {
                             }
                         }
                         Some(Some(Ok(other))) => {
-                            return Some((
-                                Ok(other),
-                                (input, max_ts, per_part, last_wm, start, last_emit, pending),
-                            ));
+                            // Realtime markers (Checkpoint every ~1s, Idle) flow continuously and, being
+                            // biased-first in the select!, STARVE the idle-tick that would otherwise emit
+                            // the final watermark once data stops. And a marker itself never recomputed the
+                            // watermark — so the last data's event-time advance (e.g. a closer event that
+                            // must close the final window) was never emitted → the final window stayed open
+                            // (measured: 14 of 15 windows vs Flink). Flink/Arroyo/RisingWave advance the
+                            // watermark DATA-DRIVEN, trailing the data; mirror that here by recomputing the
+                            // watermark from `per_part` on every marker and emitting it (if advanced) BEFORE
+                            // forwarding the marker. The watermark trails the data already emitted → the
+                            // final window closes with COMPLETE counts (no synthetic drain, no marker/data
+                            // race). Idle partitions are still excluded (withIdleness) so this never stalls.
+                            let candidate = if part_idx.is_some() {
+                                active_partition_watermark(
+                                    &per_part, num_partitions, start, idle_timeout,
+                                    std::time::Instant::now(),
+                                )
+                            } else {
+                                max_ts
+                            };
+                            if let Some(m) = candidate {
+                                let wm = m - delay;
+                                if last_wm.is_none_or(|l| wm > l) {
+                                    last_wm = Some(wm);
+                                    last_emit = Some(std::time::Instant::now());
+                                    if let Some(ts) = DateTime::from_timestamp_micros(wm) {
+                                        pending.push_back(FlowEvent::Marker(FlowMarker::Watermark {
+                                            source: "watermark".to_string(),
+                                            timestamp: ts,
+                                        }));
+                                    }
+                                }
+                            }
+                            pending.push_back(other);
                         }
                     }
                 }
