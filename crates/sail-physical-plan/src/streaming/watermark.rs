@@ -309,6 +309,37 @@ impl ExecutionPlan for WatermarkExec {
                                 }
                             }
                         }
+                        // Source-signaled caught-up (Flink WatermarkStatus.IDLE, DEFINITIVE = consumed
+                        // == Kafka high-watermark, NOT a wall-clock gap): drain the watermark to the MAX
+                        // event-time seen across ALL partitions before forwarding the Idle. Nothing more
+                        // will arrive below that max, so every buffered window closes with COMPLETE data
+                        // (Flink "all sources idle" drain + bounded EndOfData finalize, on the correct
+                        // idle definition). Without this, WatermarkExec's last emitted watermark is the
+                        // stale per-partition MIN captured before partitions wall-clock-idle-out, so the
+                        // exchange's all-idle drain-to-max uses a stale value and strands the final
+                        // windows (measured: continuous emitted 3/14 of 16 windows on backlog/paced).
+                        Some(Some(Ok(FlowEvent::Marker(FlowMarker::Idle { source })))) => {
+                            let drain = if part_idx.is_some() {
+                                per_part.values().map(|(et, _)| *et).max()
+                            } else {
+                                max_ts
+                            };
+                            if let Some(m) = drain {
+                                let wm = m - delay;
+                                if last_wm.is_none_or(|l| wm > l) {
+                                    last_wm = Some(wm);
+                                    last_emit = Some(std::time::Instant::now());
+                                    if let Some(ts) = DateTime::from_timestamp_micros(wm) {
+                                        pending.push_back(FlowEvent::Marker(FlowMarker::Watermark {
+                                            source: "watermark".to_string(),
+                                            timestamp: ts,
+                                        }));
+                                    }
+                                }
+                            }
+                            // Forward the Idle so the exchange still excludes this instance from the MIN.
+                            pending.push_back(FlowEvent::Marker(FlowMarker::Idle { source }));
+                        }
                         Some(Some(Ok(other))) => {
                             return Some((
                                 Ok(other),
