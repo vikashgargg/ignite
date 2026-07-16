@@ -806,7 +806,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                 next.insert(pb.key, pb.next_off);
                                 yield Ok(FlowEvent::append_only_data(pb.batch));
                             }
-                            ReaderEvent::Idle { .. } => {} // not emitted in bounded mode (emit_idle=false)
+                            ReaderEvent::Idle => {} // not emitted in bounded mode (emit_idle=false)
                             ReaderEvent::Err(e) => { yield Err(exec_datafusion_err!("Kafka batch-reader: {e}")); return; }
                         }
                     }
@@ -1181,13 +1181,6 @@ impl ExecutionPlan for KafkaSourceExec {
                     }
                     drop(btx);
                     let idle_src = format!("kafka:{inst}");
-                    // Emit the instance-level Idle marker (= drain the watermark downstream) ONLY once
-                    // EVERY owned partition is caught up to its high-watermark. A transient single-partition
-                    // idle must not drain — that closes windows before the other partitions deliver their
-                    // rows for them (the partial-count-split). Cleared per-partition on new data.
-                    let owned: std::collections::HashSet<i32> =
-                        assignments.iter().map(|(_, p, _)| *p).collect();
-                    let mut caught_up: std::collections::HashSet<i32> = std::collections::HashSet::new();
                     let mut idle_signaled = false;
                     let mut timer = tokio::time::interval(Duration::from_millis(interval_ms.max(1)));
                     timer.tick().await; // discard the immediate first tick
@@ -1202,15 +1195,12 @@ impl ExecutionPlan for KafkaSourceExec {
                             ev = brx.recv() => {
                                 match ev {
                                     Some(ReaderEvent::Batch(pb)) => {
-                                        caught_up.remove(&pb.partition); // active again
                                         idle_signaled = false;
                                         next.insert((pb.topic, pb.partition), pb.next_off);
                                         yield Ok(FlowEvent::append_only_data(pb.batch));
                                     }
-                                    Some(ReaderEvent::Idle { partition }) => {
-                                        caught_up.insert(partition);
-                                        // Instance is idle only when ALL owned partitions are caught up.
-                                        if !idle_signaled && caught_up.len() >= owned.len() {
+                                    Some(ReaderEvent::Idle) => {
+                                        if !idle_signaled {
                                             idle_signaled = true;
                                             yield Ok(FlowEvent::Marker(FlowMarker::Idle { source: idle_src.clone() }));
                                         }
@@ -1245,12 +1235,6 @@ impl ExecutionPlan for KafkaSourceExec {
                 // and re-activate on the next data. Exact — never mis-marks a slow-but-behind partition.
                 let idle_src = format!("kafka:{inst}");
                 let mut idle_signaled = false;
-                // Instance-level Idle (= drain the watermark downstream) is emitted ONLY once EVERY owned
-                // partition has reached its high-watermark (PartitionEOF). A transient single-partition EOF
-                // must not drain — that closes windows before slower partitions deliver their rows (the
-                // partial-count-split). Cleared per-partition on new data. (Flink withIdleness all-sources.)
-                let owned: std::collections::HashSet<i32> = next.keys().map(|(_, p)| *p).collect();
-                let mut caught_up: std::collections::HashSet<i32> = std::collections::HashSet::new();
                 // Source-read CPU attribution (VAJRA_WM_PROF): the continuous path is event-driven, so
                 // we accumulate the per-record append + batch-build time and flush to SOURCE_READ_NS at
                 // each emit (the bounded path times the whole read loop; this is the streaming analog).
@@ -1309,7 +1293,6 @@ impl ExecutionPlan for KafkaSourceExec {
                                     };
                                     let topic = m.topic();
                                     let part = m.partition();
-                                    caught_up.remove(&part); // this partition is active again
                                     let off = m.offset();
                                     let key = m.key();
                                     let value = m.payload();
@@ -1335,12 +1318,11 @@ impl ExecutionPlan for KafkaSourceExec {
                                         batch_bytes = 0;
                                     }
                                 }
-                                Some(Err(rdkafka::error::KafkaError::PartitionEOF(part))) => {
-                                    // This partition caught up to its high-watermark. Flush any buffered rows
-                                    // first (never let the Idle marker overtake its data), then signal the
-                                    // instance `Idle` ONCE only when EVERY owned partition is caught up — so
-                                    // the downstream watermark drain reflects COMPLETE data (Flink
-                                    // WatermarkStatus.IDLE all-sources; a single-partition EOF must not drain).
+                                Some(Err(rdkafka::error::KafkaError::PartitionEOF(_))) => {
+                                    // Caught up to the partition high-watermark = genuinely idle. Flush any
+                                    // buffered rows first (never let the Idle marker overtake its data),
+                                    // then signal `Idle` ONCE so the downstream merge excludes this
+                                    // partition from the watermark MIN (Flink WatermarkStatus.IDLE).
                                     if builders.len() > 0 {
                                         let b = std::mem::replace(&mut builders, KafkaArrowBuilders::with_capacity(max_batch, &projection));
                                         match b.finish_projected(&full_schema, &projection) {
@@ -1349,8 +1331,7 @@ impl ExecutionPlan for KafkaSourceExec {
                                         }
                                         batch_bytes = 0;
                                     }
-                                    caught_up.insert(part);
-                                    if !idle_signaled && caught_up.len() >= owned.len() {
+                                    if !idle_signaled {
                                         idle_signaled = true;
                                         yield Ok(FlowEvent::Marker(FlowMarker::Idle { source: idle_src.clone() }));
                                     }
@@ -1631,14 +1612,12 @@ struct PartitionBatch {
     next_off: i64,
 }
 
-/// Events a reader thread sends to the async generator. `Idle{partition}` is the PER-PARTITION
-/// caught-up-to-high-watermark signal (driven here by an empty batch-queue drain rather than
-/// librdkafka PartitionEOF, since the batch FFI does not surface EOF). The generator emits the
-/// instance-level Flink `WatermarkStatus.IDLE` marker only once ALL owned partitions are caught up
-/// (a transient single-partition idle must NOT drain the watermark → partial-count-split).
+/// Events a reader thread sends to the async generator. `Idle` is the continuous-path
+/// caught-up-to-high-watermark signal (= Flink `WatermarkStatus.IDLE`, driven here by an empty
+/// batch-queue drain rather than librdkafka PartitionEOF, since the batch FFI does not surface EOF).
 enum ReaderEvent {
     Batch(PartitionBatch),
-    Idle { partition: i32 },
+    Idle,
     Err(String),
 }
 
@@ -1752,7 +1731,7 @@ fn spawn_partition_batch_reader(
                         // polling — new data clears the idle state.
                         if !idle_signaled {
                             idle_signaled = true;
-                            if tx.blocking_send(ReaderEvent::Idle { partition }).is_err() {
+                            if tx.blocking_send(ReaderEvent::Idle).is_err() {
                                 break 'outer;
                             }
                         }

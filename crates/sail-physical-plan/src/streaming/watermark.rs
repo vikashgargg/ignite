@@ -309,34 +309,6 @@ impl ExecutionPlan for WatermarkExec {
                                 }
                             }
                         }
-                        // Instance-level Idle = the source emits it ONLY when EVERY owned partition has
-                        // reached its high-watermark (reader.rs all-caught-up gate) = DEFINITIVE end of
-                        // available data. All partitions have delivered everything, so draining the
-                        // watermark to the MAX event-time seen closes every buffered window with COMPLETE
-                        // data (no partition owes more below the max → no partial-count-split). This is the
-                        // Flink withIdleness "all sources idle" drain on the correct idle definition; the
-                        // downstream exchange all-idle drain then uses the true (non-stale) per-instance wm.
-                        Some(Some(Ok(FlowEvent::Marker(FlowMarker::Idle { source })))) => {
-                            let drain = if part_idx.is_some() {
-                                per_part.values().map(|(et, _)| *et).max()
-                            } else {
-                                max_ts
-                            };
-                            if let Some(m) = drain {
-                                let wm = m - delay;
-                                if last_wm.is_none_or(|l| wm > l) {
-                                    last_wm = Some(wm);
-                                    last_emit = Some(std::time::Instant::now());
-                                    if let Some(ts) = DateTime::from_timestamp_micros(wm) {
-                                        pending.push_back(FlowEvent::Marker(FlowMarker::Watermark {
-                                            source: "watermark".to_string(),
-                                            timestamp: ts,
-                                        }));
-                                    }
-                                }
-                            }
-                            pending.push_back(FlowEvent::Marker(FlowMarker::Idle { source }));
-                        }
                         Some(Some(Ok(other))) => {
                             return Some((
                                 Ok(other),
