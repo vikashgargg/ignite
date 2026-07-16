@@ -41,7 +41,7 @@ spec:
             # across the 2 compute nodes; the 8 window tasks even-spread 2-per-worker across nodes.
             - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
               value: >-
-                {"spec":{"nodeSelector":{"role":"compute"},"containers":[{"name":"worker","resources":{"requests":{"cpu":"3","memory":"4Gi"},"limits":{"cpu":"3","memory":"10Gi"}},"env":[{"name":"VAJRA_CREDIT_BACKPRESSURE","value":"16"},{"name":"VAJRA_WM_PROF","value":"1"},{"name":"RUST_LOG","value":"warn,sail_physical_plan::streaming::window_accum=info"}]}]}}
+                {"spec":{"nodeSelector":{"role":"compute"},"containers":[{"name":"worker","resources":{"requests":{"cpu":"3","memory":"4Gi"},"limits":{"cpu":"3","memory":"10Gi"}},"env":[{"name":"VAJRA_CREDIT_BACKPRESSURE","value":"16"},{"name":"VAJRA_WM_PROF","value":"1"},{"name":"VAJRA_COMPLETE_ON_END","value":"1"},{"name":"RUST_LOG","value":"warn,sail_physical_plan::streaming::window_accum=info"}]}]}}
 ---
 apiVersion: v1
 kind: Service
