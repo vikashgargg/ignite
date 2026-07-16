@@ -241,6 +241,38 @@ arrow-rs raw JSON reader PR #3479.
   checkpoint per `maxOffsetsPerTrigger` batch, ~25× at 100M — vs Flink's ONE continuous pipeline).
   NEXT = split exchange vs micro-batch (bigger maxOffsetsPerTrigger A/B + an exchange-side timer).
   Multi-instance/Flight = continuous/multi-node, not this gap. See throughput-robustness-review.md.
+- **RisingWave 3.0 + Arroyo data-plane (2026-07-08, added on request).** Sources:
+  risingwavelabs.github.io/risingwave/design/streaming-overview · docs.risingwave.com/get-started/architecture ·
+  arroyo.dev + github.com/ArroyoSystems/arroyo · goldsky streamling.
+  - **RisingWave** = actor-model streaming; data plane is the **Stream Chunk = columnar Data Chunk +
+    visibility array + an ops column** (Insert/Delete/UpdateInsert/UpdateDelete — the built-in changelog,
+    cf. our WindowOutputMode::Update retract). Local actor→actor via channels; cross-node via an
+    **exchange service**. State = shared S3 object store; source connector **offsets persisted in
+    checkpoints → exactly-once** (== our design). Vectorized batch-at-a-time, never per-row.
+  - **Arroyo 0.10** rebuilt on **Arrow + DataFusion** (interpreted columnar exec, SIMD/cache) = +3×; its
+    **Shuffle Edge** = key-hash partitioning with **connection pooling + BATCHING to amortize per-batch
+    overhead** (directly relevant to our StreamExchange per-batch cost). Kafka msgs are batched into Arrow
+    RecordBatches on the source side. Roar/Streamling: Kafka→RecordBatch→**Arrow Flight zero-copy**.
+  - **CONCLUSION for Vajra (measured, don't re-chase parse):** our source consume loop is ALREADY
+    alloc-free + columnar (kafka/reader.rs:877 appends borrowed bytes into Arrow builders, interned topic
+    idx, batched to RecordBatch; read path already tuned 2.1×) and parse is already Rust-fast (tape, ~15%
+    of pipeline). So the columnar-source box is CHECKED. The two prod-grade levers that remain — the ones a
+    columnar streaming engine actually wins on — are: **(A) CONTINUOUS dataflow vs Spark `availableNow`
+    micro-batch re-plan/commit/checkpoint-per-trigger tax (~25× at 100M — RisingWave/Flink/Arroyo run ONE
+    long-lived pipeline; this is THE structural difference), and (B) exchange = BATCH + pool + zero-copy
+    Arrow-Flight (Arroyo Shuffle-Edge / Ballista), no per-batch IPC re-encode.** Focus here, not parse.
+  - **DISTRIBUTED A/B UN-BLINDED (2026-07-09, EKS 1× c7g.4xlarge, 100M, torn $0)** — per-pod WM_PROF_PROC +
+    Flight send/recv timing (:distprof image, commit 22aba4bc). Vajra distributed 2.09–2.27M ev/s vs Flink
+    5.77M = **Flink 2.77× faster**. Per-pod (cumulative cpu-ms): worker(source+window) source_read=44.2s
+    from_json=11.4s **exchange_cpu=0** shuffle_send=43s **shuffle_recv=598s** (24450 batches); worker(source)
+    source_read=39.6s from_json=11.3s **exchange_cpu=0 shuffle_send=143s** (24468 batches). **MEASURED
+    CONCLUSION: the lag is the FLIGHT SHUFFLE, not compute/routing.** (a) exchange_cpu=0 → keyed-route is free;
+    cost MOVED into cross-pod Flight IPC (was untimed = why prior A/B was blind). (b) **24,468 batches / 100M
+    = ~4,000 rows/batch = tiny** → per-batch IPC framing/serialize dominates (send 143s = ~5.8ms/small-batch).
+    (c) shuffle_recv=598s is mostly BLOCKED-waiting (starvation) — receiver idles behind the small-batch send.
+    **FIX = Arroyo Shuffle-Edge/Ballista: COALESCE big batches before the Flight boundary + connection-pool +
+    zero-copy (Utf8View, no re-encode) to amortize per-batch IPC.** Lever (B), evidence-backed. Runner:
+    scripts/eks_dist_instrumented_ab.sh. source_read/from_json secondary.
 - **VERSION-UPGRADE perf targets (separate upgrade repo; verify in release notes before hand-tuning):**
   (1) **arrow-rs `Utf8View`/`BinaryView` (StringView)** — fewer allocs/copies on string + JSON + shuffle
   paths (big for the value column + exchange re-encode). (2) **DataFusion grouped-`AggregateExec`** perf
@@ -416,3 +448,49 @@ distributed stage actually parallelizes across nodes or collapses onto one. Two 
   slots; Flink's algorithm) gated on distributed streaming (`VAJRA_DISTRIBUTED_STREAM`/`VAJRA_EVEN_SPREAD`),
   default fill-first so batch/scale-down behavior is unchanged. Cutting a stage boundary (T-BF2.2) is
   necessary but only *distributes* when paired with even-spread placement.
+
+## 8. Kafka source-read throughput — the FLIP-27 fetch model (fetched 2026-07-10; the source_read lever)
+Sources: rust-rdkafka docs.rs/GitHub (fede1024) · users.rust-lang.org "high performance kafka consumer" ·
+Flink FLIP-27 (cwiki) + KafkaPartitionSplitReader/SourceReaderBase · Flink DataStream Kafka connector docs.
+- **MEASURED (Vajra, WM_PROF SOURCE_POLL/BUILD split, local 5M):** source_read = poll 58% + per-message
+  bookkeeping 37% + Arrow build **5%**. The columnar build is NOT the bottleneck (as it should be); the
+  per-message CONSUME dominates.
+- **rust-rdkafka:** **`BaseConsumer` is considerably FASTER than `StreamConsumer` for small messages** —
+  StreamConsumer adds per-message channel/future overhead (the async convenience layer). High-throughput
+  path = BaseConsumer. (Our current code uses `StreamConsumer::stream()` + `.next().now_or_never()` = the
+  slow path for our small JSON events.) rust-rdkafka does NOT expose `rd_kafka_consume_batch` in the safe
+  API (batch drain needs the C FFI).
+- **Flink KafkaSource (FLIP-27):** `KafkaPartitionSplitReader` runs inside a DEDICATED fetcher thread
+  (`SourceReaderBase` spawns fetcher threads for the sync `SplitReader`); `consumer.poll()` returns
+  **MULTIPLE records per call** (plural, amortizes I/O — not single-record). One reader per split (partition).
+- **PROD-GRADE DESIGN for Vajra (synthesis — beats Flink):** per source instance (already 1/partition,
+  FLIP-27), a DEDICATED consume thread (std::thread / spawn_blocking, off the tokio runtime) runs a
+  **BaseConsumer** in a tight `poll()` loop, building **columnar Arrow batches** (our KafkaArrowBuilders,
+  alloc-free = the advantage Flink lacks — it deserializes per-record into JVM objects), handing FULL
+  batches to the async pipeline via a BOUNDED channel (backpressure = Flink credit-flow). + per-partition
+  `Vec<i64>` offsets (not HashMap) to kill the 37% bookkeeping. Net: match Flink's batched poll AND keep our
+  columnar/no-JVM edge ⇒ should EXCEED Flink's 5.07M. MEASURE via `KAFKA_BENCH` micro-bench (isolated read,
+  local/free) before wiring. CAUTION: the rewrite must preserve EO offset-commit, markers (watermark/
+  checkpoint/EndOfData), idleness, and all 3 paths (bounded/realtime/unbounded) — kafka/reader.rs.
+
+## 4b. Arrow Flight throughput — VALIDATED prod-grade columnar shuffle (research paper, fetched 2026-07-11)
+Source: **Benchmarking Apache Arrow Flight (arXiv 2204.03032 / ACM 10.1145/3527199.3527264)** + Arrow Flight
+format docs (arrow.apache.org/docs/format/Flight.html) + Ballista shuffle (§4 above). VALIDATED facts:
+- **Flight is ZERO-COPY**: Arrow RecordBatches cross process boundaries with NO ser/de (IPC = the wire format
+  = the memory format). The columnar-native exchange = Flight + IPC, no re-encode (matches Ballista §4).
+- **Throughput: ~1 GB/s SINGLE stream (localhost), up to ~10 GB/s at 16 PARALLEL streams** (parallelism is
+  THE scaling lever; >16 streams regresses). DoGet ~6 GB/s, DoPut ~4.8 GB/s over network.
+- Best practices: consistent schema client↔server; efficient Arrow types/encodings (fewer/narrower columns);
+  close streams; manage the allocator; leverage gRPC bidirectional HTTP/2.
+- **Vajra measurement (2026-07-11):** distributed streaming shuffle ≈ 1.5M ev/s × ~16 B/row ≈ **24 MB/s =
+  ~40× BELOW Flight's proven 1 GB/s single-stream** ⇒ Vajra's shuffle is transport-CONFIG-throttled, NOT
+  bandwidth/CPU-bound. ROOT CAUSE (code): the tonic CLIENT `do_get` used the DEFAULT 64 KiB HTTP/2 receive
+  window (rpc.rs) — a ~200 KiB coalesced batch exceeds the whole window ⇒ round-trip-latency-bound, INVARIANT
+  to batch size (measured: in-process exchange 3.07M vs Flight 1.55M ev/s, flat across 16k→64k batch rows).
+- **PROD-GRADE COLUMNAR SYNTHESIS (learn from ALL, not mirror one): (1)** large HTTP/2 receive window on the
+  read client (credit-based flow control — FLIP-2 / Flink network buffers as the CONCEPT, sized to Flight's
+  1 GB/s BDP, not copied); **(2)** keep the exchange ZERO-COPY = DROP gzip/zstd compression on the Flight
+  shuffle (defeats zero-copy + burns CPU; Arrow is already compact) and minimize the FlowEvent per-batch
+  re-encode (the null marker-column prepend, encoding.rs — send markers cheaply/out-of-band); **(3)** exploit
+  PARALLEL streams (Flight's 10× lever) for the N→M shuffle. Grounded in the Flight paper + Ballista + Arrow
+  IPC + credit-flow — the columnar/DataFusion-native design, per AIM.

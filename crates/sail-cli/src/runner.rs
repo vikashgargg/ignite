@@ -171,6 +171,56 @@ enum FlightCommand {
     },
 }
 
+/// Optional CPU profiler (`VAJRA_PPROF_SECS=<n>` [`VAJRA_PPROF_OUT=<path>`]): sample the whole process for
+/// `<n>`s then dump folded stacks (headless flamegraph input) to instrument the shuffle/source hotspot
+/// without a native profiler. Zero-cost when unset. Called by BOTH the server (in-process local-cluster
+/// workers) and the worker (distributed kind/EKS pods), so the actual shuffle CPU is always captured.
+fn maybe_start_pprof() {
+    let Ok(Some(secs)) = std::env::var("VAJRA_PPROF_SECS").map(|s| s.parse::<u64>().ok()) else {
+        return;
+    };
+    if secs == 0 {
+        return;
+    }
+    match pprof::ProfilerGuardBuilder::default()
+        .frequency(197)
+        .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+        .build()
+    {
+        Ok(guard) => {
+            let out =
+                std::env::var("VAJRA_PPROF_OUT").unwrap_or_else(|_| "/tmp/vajra_prof.folded".to_string());
+            std::thread::spawn(move || {
+                use std::fmt::Write as _;
+                // Dump PERIODICALLY (cumulative) every `secs`, so an ephemeral worker pod that dies mid-run
+                // still logged at least one folded-stack dump covering the shuffle (the last one is richest).
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(secs));
+                    let Ok(report) = guard.report().build() else {
+                        continue;
+                    };
+                    let mut s = String::new();
+                    for (frames, count) in report.data.iter() {
+                        let mut stack: Vec<String> = Vec::new();
+                        for frame in frames.frames.iter() {
+                            for sym in frame.iter() {
+                                stack.push(sym.to_string());
+                            }
+                        }
+                        stack.reverse();
+                        let _ = writeln!(s, "{} {count}", stack.join(";"));
+                    }
+                    let _ = std::fs::write(&out, &s);
+                    // ALSO emit to stderr so the folded stacks survive an ephemeral pod's death (captured
+                    // by `kubectl logs`) — worker pods complete before a file cp can run. Markers delimit it.
+                    eprintln!("VAJRA_PPROF_FOLD_BEGIN\n{s}VAJRA_PPROF_FOLD_END");
+                }
+            });
+        }
+        Err(e) => log::error!("VAJRA_PPROF guard: {e}"),
+    }
+}
+
 pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     if rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
@@ -184,7 +234,10 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse_from(args);
 
     match cli.command {
-        Command::Worker => run_worker(),
+        Command::Worker => {
+            maybe_start_pprof();
+            run_worker()
+        }
 
         Command::Server {
             ip,
@@ -198,6 +251,7 @@ pub fn main(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             tls_key,
             tls_ca,
         } => {
+            maybe_start_pprof();
             if let Some(dir) = directory {
                 std::env::set_current_dir(dir)?;
             }

@@ -1,0 +1,50 @@
+# Flink sql-client runner for the S3-parquet windowed-agg. Same as flink-runner-job.yaml but the
+# initContainer ALSO seeds flink-sql-parquet (the sql-client needs the parquet FORMAT FACTORY to PLAN the
+# query — client + cluster both need it, per Flink filesystem-connector docs). Blocks until the bounded
+# INSERT finishes (dml-sync=true) and prints wall time. Runs on the kafka node (client only).
+apiVersion: batch/v1
+kind: Job
+metadata: { name: flink-runner, namespace: stream }
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector: { role: kafka }
+      initContainers:
+        - name: seed-lib
+          image: flink:1.19.1-scala_2.12-java17
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              cp -a /opt/flink/lib/. /flinklib/
+              curl -fsSL -o /flinklib/flink-sql-connector-kafka-3.2.0-1.19.jar https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.2.0-1.19/flink-sql-connector-kafka-3.2.0-1.19.jar
+              curl -fsSL -o /flinklib/flink-sql-parquet-1.19.1.jar https://repo1.maven.org/maven2/org/apache/flink/flink-sql-parquet/1.19.1/flink-sql-parquet-1.19.1.jar
+              curl -fsSL -o /flinklib/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar https://repo1.maven.org/maven2/org/apache/flink/flink-shaded-hadoop-2-uber/2.8.3-10.0/flink-shaded-hadoop-2-uber-2.8.3-10.0.jar
+          volumeMounts: [ { name: flinklib, mountPath: /flinklib } ]
+      containers:
+        - name: sql
+          image: flink:1.19.1-scala_2.12-java17
+          envFrom: [ { configMapRef: { name: flink-config } } ]
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              set -e
+              CONF=/opt/flink/conf/flink-conf.yaml
+              {
+                echo "jobmanager.rpc.address: flink-jm.stream.svc.cluster.local"
+                echo "rest.address: flink-jm.stream.svc.cluster.local"
+                echo "rest.port: 8081"
+                echo "execution.target: remote"
+              } >> $CONF
+              echo "=== Flink SQL windowed-agg -> S3 parquet (bounded backlog) ==="
+              T0=$(date +%s%N)
+              /opt/flink/bin/sql-client.sh -f /sql/flink-sql.sql
+              T1=$(date +%s%N)
+              awk "BEGIN{printf \"FLINK_WAGG wall_s=%.2f\\n\", ($T1-$T0)/1000000000}"
+          volumeMounts:
+            - { name: flinklib, mountPath: /opt/flink/lib }
+            - { name: sql, mountPath: /sql }
+      volumes:
+        - { name: flinklib, emptyDir: {} }
+        - { name: sql, configMap: { name: flink-sql } }

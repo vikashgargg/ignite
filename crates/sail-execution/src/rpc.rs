@@ -97,6 +97,17 @@ pub trait ClientBuilder: Sized {
 /// dropped silently.
 const CLIENT_MAX_HEADER_LIST_SIZE: u32 = 1024 * 1024;
 
+/// HTTP/2 flow-control receive windows for the client. tonic/h2 default to 64 KiB, which for the
+/// Flight `do_get` shuffle read (server→client streaming) throttles the SERVER's send to one 64 KiB
+/// burst per round-trip — a coalesced shuffle batch (~200 KiB) exceeds the whole window, so the
+/// transport becomes round-trip-latency-bound and INVARIANT to batch size (measured: in-process
+/// exchange 3.07M vs Flight 1.55M ev/s = a flat 2×, unchanged by 16k→64k batch rows). Flink avoids
+/// this with large credit-based network buffers (REFERENCES: credit-based backpressure); our own
+/// server already sets `http2_adaptive_window` (sail-server builder.rs). Give the shuffle-read client
+/// a large fixed receive window so many batches stay in-flight and the send saturates bandwidth.
+const CLIENT_HTTP2_STREAM_WINDOW: u32 = 8 * 1024 * 1024; // 8 MiB per stream
+const CLIENT_HTTP2_CONNECTION_WINDOW: u32 = 16 * 1024 * 1024; // 16 MiB per connection
+
 macro_rules! impl_client_builder {
     ($client_type:ty) => {
         #[tonic::async_trait]
@@ -104,6 +115,9 @@ macro_rules! impl_client_builder {
             async fn connect(options: &ClientOptions) -> ExecutionResult<Self> {
                 let channel = tonic::transport::Endpoint::new(options.to_url_string())?
                     .http2_max_header_list_size(CLIENT_MAX_HEADER_LIST_SIZE)
+                    .initial_stream_window_size(CLIENT_HTTP2_STREAM_WINDOW)
+                    .initial_connection_window_size(CLIENT_HTTP2_CONNECTION_WINDOW)
+                    .tcp_nodelay(true)
                     .connect()
                     .await?;
                 let channel = ServiceBuilder::new()

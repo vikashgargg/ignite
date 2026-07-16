@@ -35,6 +35,12 @@ impl std::error::Error for TaskStreamError {
     }
 }
 
+impl From<datafusion::arrow::error::ArrowError> for TaskStreamError {
+    fn from(e: datafusion::arrow::error::ArrowError) -> Self {
+        TaskStreamError::External(Arc::new(e))
+    }
+}
+
 impl From<Status> for TaskStreamError {
     fn from(status: Status) -> Self {
         if status.code() == Code::Internal {

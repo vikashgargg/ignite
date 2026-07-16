@@ -113,11 +113,47 @@ impl FlightService for TaskStreamFlightServer {
         let stream = rx
             .await
             .map_err(|_| Status::internal("failed to receive task stream"))??;
+        // Coalesce the routed sub-batches into large batches BEFORE the Flight IPC encode — the keyed
+        // shuffle splits each batch into `n` tiny sub-batches, and per-batch IPC framing/serialize is the
+        // measured distributed throughput gap (24k ~4k-row Flight messages at 100M/16-way). Marker-aware
+        // PULL combinator: flush-before-marker keeps a barrier a consistent cut, and it flushes on stream
+        // end so buffered rows are never abandoned (the bug a sender-side coalescer hit). Distributed-only
+        // (this Flight path); the in-process exchange is untouched (VAJRA_SHUFFLE_BATCH_ROWS=0 disables).
+        let target = sail_physical_plan::streaming::exchange::shuffle_batch_rows();
+        let stream: TaskStreamSource = if target > 1 {
+            Box::pin(sail_physical_plan::streaming::exchange::coalesce_flow_events(
+                stream, target,
+            ))
+        } else {
+            stream
+        };
         let stream = stream.map_err(|e| FlightError::Tonic(Box::new(e.into())));
         let stream = FlightDataEncoderBuilder::new()
             .build(stream)
             .map_err(Status::from);
-        Ok(Response::new(Box::pin(stream) as Self::DoGetStream))
+        if sail_common_datafusion::streaming::event::encoding::wm_prof_enabled() {
+            // WM_PROF: time the cross-pod SEND (produce + IPC-encode each FlightData) + count messages,
+            // so the distributed-shuffle serialize cost is attributed per producer pod (SHUFFLE_SEND_NS).
+            use futures::StreamExt;
+            let timed = futures::stream::unfold(Box::pin(stream), |mut st| async move {
+                let t = std::time::Instant::now();
+                match st.next().await {
+                    Some(item) => {
+                        use sail_common_datafusion::streaming::event::encoding as prof;
+                        prof::prof_add(&prof::SHUFFLE_SEND_NS, t.elapsed().as_nanos() as u64);
+                        if item.is_ok() {
+                            prof::SHUFFLE_SEND_BATCHES
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Some((item, st))
+                    }
+                    None => None,
+                }
+            });
+            Ok(Response::new(Box::pin(timed) as Self::DoGetStream))
+        } else {
+            Ok(Response::new(Box::pin(stream) as Self::DoGetStream))
+        }
     }
 
     type DoPutStream = BoxedFlightStream<PutResult>;

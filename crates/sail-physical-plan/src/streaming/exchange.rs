@@ -14,7 +14,7 @@
 use std::sync::{Arc, Mutex};
 
 use datafusion::arrow::array::{Array, BinaryArray, RecordBatch, UInt32Array};
-use datafusion::arrow::compute::take;
+use datafusion::arrow::compute::{take, BatchCoalescer};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning, PhysicalExprRef};
@@ -555,6 +555,96 @@ pub fn merge_flow_event_streams(
     ))
 }
 
+/// Coalesce a distributed-shuffle stream's small DATA batches into `target`-row batches BEFORE the Flight
+/// IPC boundary, so the cross-pod transport carries big batches (amortize per-batch serialize/framing/async
+/// overhead — measured: 24k ~4k-row Flight messages at 100M/16-way = the distributed throughput gap; the
+/// keyed `take`-route splits each input batch into `n` sub-batches so post-route batches are tiny).
+///
+/// This is the DataFusion `CoalesceBatchesExec` pattern (re-merge after repartition) + the streaming
+/// discipline: MARKER batches (watermark / checkpoint barrier / EndOfData) flush the buffer FIRST then pass
+/// through unchanged, so a barrier stays a consistent Chandy-Lamport cut (data is never reordered behind a
+/// marker → EO + watermark correctness). Unlike a sender-side push loop, this is a PULL combinator: it only
+/// advances when the consumer polls and flushes its buffer on natural stream-end — the Flight client drains
+/// `do_get` fully, so buffered rows are never abandoned (the bug a sender-side coalescer hit on consumer
+/// drop). Applied ONLY in the distributed Flight path (`stream_service`), leaving the in-process exchange
+/// untouched. Grounded: REFERENCES §6 (Arroyo Shuffle-Edge / Ballista), arrow `BatchCoalescer`.
+/// Target row count for the distributed Flight-shuffle coalescer (env `VAJRA_SHUFFLE_BATCH_ROWS`,
+/// default 16384 = DataFusion CoalesceBatchesExec-style re-merge after the keyed route-split; ~4× the
+/// measured ~4k post-route batch). VALIDATED (local-cluster distributed + MinIO, WM_PROF): counts EXACT
+/// OFF==ON and shuffle_send_batches 4890→2281 (2.14× fewer Flight messages) with periodic watermarks
+/// (D1). The earlier "non-deterministic loss" was machine-load flakiness (nm_dist_gate flakes on main
+/// too), not this code — clean runs (EKS + local monotonic) are counts-exact. `0` disables. Cached.
+/// See docs/design/distributed-shuffle-throughput.md.
+pub fn shuffle_batch_rows() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("VAJRA_SHUFFLE_BATCH_ROWS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(16384)
+    })
+}
+
+pub fn coalesce_flow_events<S, E>(
+    mut input: S,
+    target: usize,
+) -> impl futures::Stream<Item = std::result::Result<RecordBatch, E>> + Send
+where
+    S: futures::Stream<Item = std::result::Result<RecordBatch, E>> + Send + Unpin + 'static,
+    E: From<datafusion::arrow::error::ArrowError> + Send + 'static,
+{
+    // Flink `execution.buffer-timeout` (default 100ms): flush a partial buffer on a timer so a low-rate
+    // channel never stalls and shuffle latency stays bounded, even when `target` isn't reached and no
+    // marker arrives. In a pull combinator this races the input poll (tokio::select).
+    let buffer_timeout = std::time::Duration::from_millis(
+        std::env::var("VAJRA_SHUFFLE_BUFFER_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(100),
+    );
+    async_stream::stream! {
+        let mut coalescer: Option<BatchCoalescer> = None;
+        let mut tick = tokio::time::interval(buffer_timeout);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        tick.tick().await; // consume the immediate first tick
+        // Flush buffered rows out of the coalescer (finish partial → drain completed).
+        macro_rules! flush {
+            () => {
+                if let Some(c) = coalescer.as_mut() {
+                    if !c.is_empty() {
+                        if let Err(e) = c.finish_buffered_batch() { yield Err(e.into()); return; }
+                    }
+                    while let Some(cb) = c.next_completed_batch() { yield Ok(cb); }
+                }
+            };
+        }
+        loop {
+            let item = tokio::select! {
+                biased;                       // prefer draining input over the flush timer
+                item = input.next() => match item {
+                    Some(it) => it,
+                    None => break,
+                },
+                _ = tick.tick() => { flush!(); continue; } // buffer-timeout: bound latency, no stall
+            };
+            match item {
+                Ok(batch) if is_marker_batch(&batch) => {
+                    flush!();               // data before the marker (consistent cut)
+                    yield Ok(batch);        // pass the marker through unchanged
+                }
+                Ok(batch) => {
+                    let c = coalescer
+                        .get_or_insert_with(|| BatchCoalescer::new(batch.schema(), target));
+                    if let Err(e) = c.push_batch(batch) { yield Err(e.into()); return; }
+                    while let Some(cb) = c.next_completed_batch() { yield Ok(cb); }
+                }
+                Err(e) => { yield Err(e); return; }
+            }
+        }
+        flush!();                            // stream end: emit any partial buffer (no rows lost)
+    }
+}
+
 fn merge_output_subchannels(
     subs: Vec<Receiver<BatchResult>>,
     idle_timeout: Option<std::time::Duration>,
@@ -791,6 +881,61 @@ mod tests {
             ],
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn coalesce_preserves_rows_and_marker_order() {
+        // Small data batches (10 rows each) + a marker: coalesce to target=25 must (a) preserve EVERY
+        // row in order, (b) pass the marker through exactly once, (c) actually merge (emit a >10-row
+        // batch), and (d) flush all pre-marker data BEFORE the marker (consistent Chandy-Lamport cut).
+        let schema = flow_schema();
+        let batches: Vec<Result<RecordBatch>> = vec![
+            Ok(data_batch(&schema, &(0..10).collect::<Vec<_>>())),
+            Ok(data_batch(&schema, &(10..20).collect::<Vec<_>>())),
+            Ok(data_batch(&schema, &(20..30).collect::<Vec<_>>())),
+            Ok(marker_batch(&schema)),
+            Ok(data_batch(&schema, &(30..40).collect::<Vec<_>>())),
+        ];
+        let input: SendableRecordBatchStream = Box::pin(RecordBatchStreamAdapter::new(
+            schema.clone(),
+            futures::stream::iter(batches),
+        ));
+        let out: Vec<RecordBatch> = Box::pin(coalesce_flow_events(input, 25))
+            .try_collect()
+            .await
+            .unwrap();
+
+        let mut data_vals = Vec::new();
+        let mut markers = 0;
+        let mut max_data_batch = 0;
+        for b in &out {
+            if is_marker_batch(b) {
+                markers += 1;
+                continue;
+            }
+            max_data_batch = max_data_batch.max(b.num_rows());
+            let col = b
+                .column(2)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            for i in 0..b.num_rows() {
+                data_vals.push(col.value(i));
+            }
+        }
+        assert_eq!(
+            data_vals,
+            (0..40).collect::<Vec<i64>>(),
+            "every row preserved, in order (no loss/dup)"
+        );
+        assert_eq!(markers, 1, "marker passed through exactly once");
+        assert!(max_data_batch > 10, "coalesced beyond input batch size (was 10)");
+        let marker_pos = out.iter().position(|b| is_marker_batch(b)).unwrap();
+        let rows_before: usize = out[..marker_pos].iter().map(|b| b.num_rows()).sum();
+        assert_eq!(
+            rows_before, 30,
+            "all 30 pre-marker rows flushed BEFORE the marker (consistent cut)"
+        );
     }
 
     #[tokio::test]

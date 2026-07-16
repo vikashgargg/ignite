@@ -35,19 +35,87 @@ pub static FROM_JSON_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// Cumulative ns in the Kafka source read+batch-build loop (across source instances). Written by
 /// kafka/reader.rs, read by the window prof dump — the COMPLETE per-stage breakdown for EKS pinpointing.
 pub static SOURCE_READ_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// SOURCE_READ split (VAJRA_WM_PROF): time in the rdkafka message drain (`msg_stream.next`) vs the Arrow
+/// batch build (`builders.append`) — pinpoints whether source_read is CONSUME-bound or BUILD-bound.
+pub static SOURCE_POLL_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static SOURCE_BUILD_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Cumulative ns in the keyed shuffle distribute/route+send (across instances). Written by
 /// streaming/exchange.rs, read by the window prof dump.
 pub static EXCHANGE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Exchange time SPENT BLOCKED on the bounded send channel (backpressure-wait, NOT route CPU).
 pub static EXCHANGE_WAIT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// DISTRIBUTED shuffle SEND side: cumulative ns the Flight server (stream_service) spends producing +
+/// IPC-encoding FlightData batches in `do_get` (serialize + per-batch stream poll). The cross-pod
+/// exchange cost that single-node profiling never sees — prime suspect for the distributed throughput gap.
+pub static SHUFFLE_SEND_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// DISTRIBUTED shuffle RECV side: cumulative ns the Flight client spends pulling + IPC-decoding each
+/// RecordBatch off the wire (network + deserialize) in `fetch_task_stream`.
+pub static SHUFFLE_RECV_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// DISTRIBUTED shuffle byte + batch volume across the stage boundary (throughput/serialize denominator).
+pub static SHUFFLE_SEND_BATCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static SHUFFLE_RECV_BATCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Convenience: add `nanos` to a profiling counter only when profiling is enabled (cheap guard).
 pub fn prof_add(counter: &std::sync::atomic::AtomicU64, nanos: u64) {
     counter.fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);
+    ensure_process_dumper();
 }
 /// Shared throughput-profiling gate (env `VAJRA_WM_PROF`), cached. Used across crates.
 pub fn wm_prof_enabled() -> bool {
     static E: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *E.get_or_init(|| std::env::var("VAJRA_WM_PROF").is_ok())
+}
+
+/// DISTRIBUTED per-process WM_PROF dump. In distributed mode the source / from_json / exchange / window
+/// stages run on DIFFERENT worker pods, each with its OWN per-process counters — but only the WindowAccum
+/// pod ever dumped (window_accum.rs), so a source or exchange pod's stage time was INVISIBLE (why the last
+/// EKS distributed A/B was blind). This spawns ONE background thread per process (first time any counter is
+/// touched, gated by VAJRA_WM_PROF) that logs every non-zero counter every 10s + at process end — so
+/// `kubectl logs` across ALL pods gives the complete Flink-class per-operator/per-node breakdown.
+fn ensure_process_dumper() {
+    use std::sync::atomic::Ordering::Relaxed;
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    if !wm_prof_enabled() {
+        return;
+    }
+    STARTED.call_once(|| {
+        std::thread::Builder::new()
+            .name("wm-prof-dumper".to_string())
+            .spawn(|| {
+                let pid = std::process::id();
+                let host = std::env::var("HOSTNAME").unwrap_or_else(|_| "?".to_string());
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                    let vals = [
+                        ("source_read", SOURCE_READ_NS.load(Relaxed)),
+                        ("source_poll", SOURCE_POLL_NS.load(Relaxed)),
+                        ("source_build", SOURCE_BUILD_NS.load(Relaxed)),
+                        ("from_json", FROM_JSON_NS.load(Relaxed)),
+                        ("exchange_cpu", EXCHANGE_NS.load(Relaxed)),
+                        ("exchange_wait", EXCHANGE_WAIT_NS.load(Relaxed)),
+                        ("encode", ENCODE_NS.load(Relaxed)),
+                        ("shuffle_send", SHUFFLE_SEND_NS.load(Relaxed)),
+                        ("shuffle_recv", SHUFFLE_RECV_NS.load(Relaxed)),
+                    ];
+                    if vals.iter().all(|(_, v)| *v == 0) {
+                        continue; // nothing happened on this process yet
+                    }
+                    let stages = vals
+                        .iter()
+                        .map(|(k, v)| format!("{k}={}", v / 1_000_000))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let sb = SHUFFLE_SEND_BATCHES.load(Relaxed);
+                    let rb = SHUFFLE_RECV_BATCHES.load(Relaxed);
+                    // stderr (not log::) so it is captured by `kubectl logs` on EVERY pod regardless of
+                    // that pod's RUST_LOG — this diagnostic is gated solely by VAJRA_WM_PROF.
+                    eprintln!(
+                        "WM_PROF_PROC[pid={pid} host={host}] STAGES(cpu-ms): {stages} \
+                         | shuffle_send_batches={sb} shuffle_recv_batches={rb}"
+                    );
+                }
+            })
+            .ok();
+    });
 }
 fn encode_prof_enabled() -> bool {
     wm_prof_enabled()

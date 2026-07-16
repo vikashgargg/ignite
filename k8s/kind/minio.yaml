@@ -1,0 +1,49 @@
+# MinIO (S3-compatible) for the kind T2 distributed test — the distributed streaming sink requires a
+# shared object store (EKS uses S3; kind uses this). Vajra reaches it via object_store from_env
+# (AWS_ENDPOINT + AWS_ALLOW_HTTP, injected into the driver + worker pods by the test script).
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: minio, namespace: stream, labels: { app: minio } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: minio } }
+  template:
+    metadata: { labels: { app: minio } }
+    spec:
+      nodeSelector: { role: kafka }   # co-locate with kafka (off the compute node where vajra runs)
+      containers:
+        - name: minio
+          image: minio/minio
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - { name: MINIO_ROOT_USER, value: "minioadmin" }
+            - { name: MINIO_ROOT_PASSWORD, value: "minioadmin" }
+          ports: [ { containerPort: 9000 }, { containerPort: 9001 } ]
+          resources: { requests: { cpu: "250m", memory: "512Mi" }, limits: { cpu: "1", memory: "1Gi" } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: minio, namespace: stream }
+spec:
+  selector: { app: minio }
+  ports: [ { name: s3, port: 9000, targetPort: 9000 } ]
+---
+# One-shot: create the `vajra` bucket (object_store does not create buckets).
+apiVersion: batch/v1
+kind: Job
+metadata: { name: minio-mkbucket, namespace: stream }
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      nodeSelector: { role: kafka }
+      containers:
+        - name: mc
+          image: minio/mc
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until mc alias set l http://minio.stream.svc.cluster.local:9000 minioadmin minioadmin; do sleep 3; done
+              mc mb -p l/vajra || true
+              echo BUCKET_READY
