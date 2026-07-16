@@ -8,6 +8,7 @@
 > - Distribution / repo GA: [public-ga-readiness-board.md](design/public-ga-readiness-board.md)
 > - Streaming spec + gap register: [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md)
 > - Active epic: [EPIC-beat-flink-streaming.md](design/EPIC-beat-flink-streaming.md) · [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.md)
+> - ⭐ **Per-pillar grounded map** (Vajra vs Flink/RisingWave 3.0/Arroyo 0.15/Polars/Spark 4.1 RTM, source-cited, answers "no-JVM yet slow"): [vajra-per-pillar-grounded-map.md](design/vajra-per-pillar-grounded-map.md)
 >
 > **SDLC law (per charter):** every ticket (a) cites the axis it advances + a named OSS design ref,
 > (b) is architect-first (design before code), (c) is DONE only when **T1 local → T2 kind → T3 EKS**

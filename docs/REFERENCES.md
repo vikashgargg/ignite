@@ -494,3 +494,32 @@ format docs (arrow.apache.org/docs/format/Flight.html) + Ballista shuffle (§4 a
   re-encode (the null marker-column prepend, encoding.rs — send markers cheaply/out-of-band); **(3)** exploit
   PARALLEL streams (Flight's 10× lever) for the N→M shuffle. Grounded in the Flight paper + Ballista + Arrow
   IPC + credit-flow — the columnar/DataFusion-native design, per AIM.
+
+## 9. Frontier fetch 2026-07-16 (per-pillar grounding — Polars / Arroyo 0.15 / RisingWave 3.0)
+Fetched to ground the per-pillar map (docs/design/vajra-per-pillar-grounded-map.md) + answer
+"no-JVM/no-serde yet slow": the distributed lag is EXECUTION-MODEL, and every fast engine engineers the
+same three things Vajra must — batched source poll, morsel/credit backpressure, specialized state.
+
+- **Polars new streaming engine (1.31.1+, becoming default)** — sources: pola.rs / DeepWiki `5.2-streaming-engine`,
+  GH issue #20947. **Morsel-driven parallelism (TUM paper, same lineage as DuckDB/HyPer), 128k-row morsels.**
+  Hybrid **push/pull**: workers PULL morsels from a scheduler; **each operator compiles to an async state
+  machine**; a **WaitToken / SemaphorePermit per morsel = EXACT backpressure** (bounded in-flight). Spillable
+  sinks: out-of-core group-by / equi-join / sort on a **lock-free memory manager + spill-to-disk + OOC
+  multiplexer** ⇒ "usually faster AND uses less memory." **Vajra implication:** the per-morsel semaphore is
+  the memory-bound discipline (mirrors Flink credit-flow) — our bounded mpsc is the analog; make the shuffle
+  edge credit/permit-based + finish F5 spill for OOC. Backpressure is a MEMORY pillar lever, not just flow.
+- **Arroyo 0.15 (Rust + Arrow, our exact stack)** — sources: arroyo.dev blog `why-arrow-and-datafusion`,
+  `how-arroyo-beats-flink-at-sliding-windows`, GH ArroyoSystems/arroyo. Beats Flink **5×+ (10× sliding
+  windows)** with **near-constant throughput across slide/window sizes**. Key architectural lever: **operators
+  store state in worker memory using SPECIALIZED data structures optimized per access pattern**, vs Flink's
+  **generic abstracted state backends (Map/List)** — enabling deeper per-op optimization (e.g. time-based
+  window eviction). Arrow columnar + SIMD. 0.15.0 adds Iceberg. **Vajra implication:** our windowed-agg on
+  DataFusion grouped-hash is generic; a specialized time-eviction window structure is the sliding-window lever
+  (matches Arroyo's win). Confirms Rust+Arrow CAN beat Flink 5× — so our gap is mechanism, not language.
+- **RisingWave 3.0** — sources: risingwave.com backpressure glossary/blog, risingwavelabs streaming-overview,
+  dataengineerthings sub-100ms-S3. **Decoupled compute+storage**, long-running **actors**, shared **S3 state
+  storage** (like Flink 2.0 ForSt). **Backpressure = network-buffer management: a slow downstream signals
+  upstream to slow transmission, bounding in-flight data → prevents OOM** (credit-flow analog). Streaming
+  connectors detect backpressure for decentralized ingest. Sub-100ms latency on S3-decoupled state.
+  **Vajra implication:** the network-buffer backpressure between operators is exactly the shuffle-edge credit
+  lever (VAJ-BF2.4); S3-decoupled state validates our F5/inc-ckpt object-store direction.
