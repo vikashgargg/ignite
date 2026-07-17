@@ -34,7 +34,8 @@ test = [
     # The dependencies for testing the installed package.
     # PySpark 4.1.0 does not work on Windows.
     #   https://issues.apache.org/jira/browse/SPARK-54745
-    "pyspark-client>=4.0,<4.2,!=4.1.0",
+    # 4.2 extends Real-Time Mode to PySpark (stateless); Vajra's stateful continuous path predates it.
+    "pyspark-client>=4.0,<4.3,!=4.1.0",
     "pandas<3",
     "duckdb>=1.0,<2",
     "pytest>=8.4,<9",

@@ -843,6 +843,20 @@ impl ExecutionPlan for WindowAccumExec {
                                 if output_mode == WindowOutputMode::Append {
                                     let newly = std::mem::take(&mut acc.merge_newly_emitted);
                                     acc.emitted_ends.extend(newly);
+                                    // Advance the live "already-fired" floor to this emit's watermark
+                                    // (all windows with end ≤ it are now emitted). A subsequent far-ahead
+                                    // watermark JUMP prunes `emitted_ends` below the new watermark (P1
+                                    // prune), removing the per-window dedup markers — the floor is what
+                                    // then keeps those already-fired windows from RE-firing (measured:
+                                    // a far-ahead closer re-emitted one window → +1 window over-count).
+                                    // This is the same guarantee the crash-restore floor gives, applied
+                                    // live. Set AFTER the emit so it never suppresses a window still being
+                                    // fired this step. Append/lateness=0 only (Update keeps state open).
+                                    if let Some(w) = acc.merge_emit_wm {
+                                        acc.restore_wm_floor = acc
+                                            .restore_wm_floor
+                                            .max(w.saturating_sub(allowed_lateness));
+                                    }
                                 }
                                 let retain_wm = match output_mode {
                                     WindowOutputMode::Append => acc.merge_emit_wm,
