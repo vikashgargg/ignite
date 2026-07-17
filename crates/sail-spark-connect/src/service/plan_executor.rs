@@ -350,10 +350,14 @@ pub(crate) async fn handle_execute_write_stream_operation_start(
         }
         _ => None,
     };
-    // `Trigger.Continuous` → Vajra realtime mode: one long-lived unbounded pipeline (low latency)
-    // with per-epoch offset commits. See docs/design/streaming-realtime-mode.md.
+    // `Trigger.Continuous` (pre-4.2) AND `Trigger.RealTime(...)` (Spark 4.2 Real-Time Mode) →
+    // Vajra realtime mode: one long-lived unbounded pipeline (low latency) with per-epoch offset
+    // commits. For RealTime the duration is the checkpoint/commit interval (4.2 semantics), same
+    // knob as the continuous checkpoint interval. Vajra's realtime path is STATEFUL/windowed — a
+    // superset of 4.2's stateless-only RTM. See docs/design/streaming-realtime-mode.md.
     let realtime_interval = match &start.trigger {
-        Some(write_stream_operation_start::Trigger::ContinuousCheckpointInterval(s)) => {
+        Some(write_stream_operation_start::Trigger::ContinuousCheckpointInterval(s))
+        | Some(write_stream_operation_start::Trigger::RealTimeBatchDuration(s)) => {
             Some(parse_processing_interval(s))
         }
         _ => None,

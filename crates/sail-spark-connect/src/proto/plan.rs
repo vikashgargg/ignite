@@ -2043,6 +2043,9 @@ impl TryFrom<WriteStreamOperationStart> for spec::CommandNode {
                     checkpoint_interval,
                 })
             }
+            Some(Trigger::RealTimeBatchDuration(batch_duration)) => {
+                Some(spec::StreamTrigger::RealTime { batch_duration })
+            }
             None => None,
         };
         Ok(spec::CommandNode::WriteStream(spec::WriteStream {
@@ -2128,6 +2131,45 @@ mod tests {
 
         let write: spec::Write = write.try_into()?;
         assert!(matches!(write.save_type, spec::SaveType::Sink));
+        Ok(())
+    }
+
+    #[test]
+    fn test_realtime_trigger_decodes_to_realtime() -> SparkResult<()> {
+        // Spark 4.2 `.trigger(realTime="5 seconds")` sends real_time_batch_duration (field 100).
+        // It must decode to spec::StreamTrigger::RealTime (routed to Vajra's realtime engine),
+        // not fall through to the default micro-batch path.
+        use sc::relation;
+        use sc::write_stream_operation_start::Trigger;
+
+        let input = sc::Relation {
+            common: None,
+            rel_type: Some(relation::RelType::Sql({
+                #[expect(deprecated)]
+                sc::Sql {
+                    query: "select 1".to_string(),
+                    args: Default::default(),
+                    pos_args: vec![],
+                    named_arguments: Default::default(),
+                    pos_arguments: vec![],
+                }
+            })),
+        };
+        let start = sc::WriteStreamOperationStart {
+            input: Some(input),
+            trigger: Some(Trigger::RealTimeBatchDuration("5 seconds".to_string())),
+            ..Default::default()
+        };
+        let node: spec::CommandNode = start.try_into()?;
+        let spec::CommandNode::WriteStream(ws) = node else {
+            return Err(SparkError::internal("expected WriteStream command"));
+        };
+        assert_eq!(
+            ws.trigger,
+            Some(spec::StreamTrigger::RealTime {
+                batch_duration: "5 seconds".to_string()
+            })
+        );
         Ok(())
     }
 

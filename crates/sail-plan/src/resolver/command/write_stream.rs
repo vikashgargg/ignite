@@ -50,7 +50,8 @@ impl PlanResolver<'_> {
                 );
             }
             Some(spec::StreamTrigger::ProcessingTime { .. })
-            | Some(spec::StreamTrigger::Continuous { .. }) => {
+            | Some(spec::StreamTrigger::Continuous { .. })
+            | Some(spec::StreamTrigger::RealTime { .. }) => {
                 log::info!(
                     "streaming trigger {trigger:?}: interval/pacing is not yet honored; \
                      processing is source-driven (see docs/STREAMING.md)"
@@ -166,6 +167,8 @@ impl PlanResolver<'_> {
             Some(spec::StreamTrigger::Continuous { checkpoint_interval }) => {
                 Some(checkpoint_interval.clone())
             }
+            // Spark 4.2 RealTime: batch_duration = per-epoch commit interval (same durable-sink path).
+            Some(spec::StreamTrigger::RealTime { batch_duration }) => Some(batch_duration.clone()),
             _ => None,
         };
         let enable_commit_log = |builder: WritePlanBuilder| {

@@ -232,6 +232,11 @@ message WriteStreamOperationStart {
     bool available_now = 6;
     bool once = 7;
     string continuous_checkpoint_interval = 8;
+    // Spark 4.2 Real-Time Mode: `Trigger.RealTime("<duration>")` /
+    // `.trigger(realTime=...)`. The duration is a CHECKPOINT/commit interval
+    // (Spark default 5min, min 5s), NOT a latency target. Field number matches
+    // upstream Spark 4.2 (v4.2.0-rc1) commands.proto.
+    string real_time_batch_duration = 100;
   }
 
   string output_mode = 9;
