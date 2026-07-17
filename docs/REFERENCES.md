@@ -526,12 +526,28 @@ same three things Vajra must — batched source poll, morsel/credit backpressure
 
 ## 10. Spark 4.2 Real-Time Mode (fetched 2026-07-17, for the PySpark upgrade)
 Sources: databricks.com/blog/introducing-apache-spark-42 · PySpark 4.2 DataStreamWriter.trigger docs.
-- Spark 4.2 extends **Real-Time Mode to PySpark but STATELESS-only** (no Python UDFs); stateful RTM is
-  "already underway" for the next 4.x (SPARK-57237). Not yet for stateful/windowed Python workloads.
-- **No dedicated RTM trigger param** in 4.2 — triggers stay `processingTime`/`once`/`continuous`/
-  `availableNow`. RTM is enabled by config; `.trigger(continuous=...)` is the realtime path.
-- **Vajra implication:** Vajra's STATEFUL windowed continuous path (`.trigger(continuous="1 second")`)
-  already predates 4.2's stateless-only native RTM ⇒ Vajra is AHEAD on stateful realtime. The 4.2 upgrade
-  for Vajra = a bounded VERSION BUMP + Connect-protocol compat + retest, NOT an RTM re-architecture:
-  (1) test harness smoke venv 3.5.3 → 4.2 (the "old 3.5.3"); (2) relax pin `pyspark-client>=4.0,<4.2` →
-  allow 4.2; (3) confirm the Connect server handles the 4.2 client wire protocol; (4) align trigger surface.
+- Spark 4.2 extends **Real-Time Mode to PySpark but STATELESS-only** (no Python UDFs); **stateful RTM
+  (aggregations / stream-stream joins / dedup) is deferred to Spark 4.3**. Update output mode ONLY.
+- **CORRECTION (2026-07-17, web-verified — my earlier "no dedicated RTM trigger param" was WRONG):** RTM
+  is a **NEW dedicated trigger type**, NOT a config: `df.writeStream.trigger(realTime='5 seconds')` /
+  `Trigger.RealTime("<duration>")`, first in PySpark at `4.2.0.dev5`. The duration is a **CHECKPOINT
+  interval (min 5s, default 5min), NOT a latency target**. RTM = long-running task per input partition,
+  record flows source→transform→sink on arrival (introduced Scala 4.1.0, PySpark-native 4.2). Sources:
+  databricks.com/blog/introducing-real-time-mode-apache-sparktm-structured-streaming ·
+  medium @neuw84 "Spark RTM mode" · docs.databricks.com/.../structured-streaming/real-time/setup.
+- **Vajra implication:** Vajra's `StreamDriver::Realtime` engine (streaming.rs:63) is STATEFUL windowed
+  and per-epoch-committed ⇒ **ahead of 4.2's stateless-only RTM** (it does what Spark defers to 4.3). BUT
+  it is entered ONLY via the pre-4.2 `.trigger(continuous=...)` (`ContinuousCheckpointInterval` proto
+  field 8); Vajra's vendored `commands.proto` trigger oneof has **NO `real_time` field**, so a 4.2 client
+  calling `.trigger(realTime=...)` is NOT routed to Vajra's realtime engine (falls through to micro-batch).
+  PRODGRADE WIRING (not done): (1) add `real_time` to commands.proto trigger oneof (match 4.2 field #);
+  (2) `spec::StreamTrigger::RealTime{checkpoint_interval}` + decode in proto/plan.rs; (3) route
+  `Trigger::RealTime(dur)`→`StreamDriver::Realtime` (dur = commit/checkpoint interval, min 5s, per 4.2),
+  enforce update mode; (4) accept realTime for stateful/windowed too = documented SUPERSET (our advantage,
+  = Spark 4.3 preview); (5) test `.trigger(realTime='5s')` from 4.2 client → same 15/150000.
+- 4.2 client compat (batch + continuous via old triggers) + version bump done + merged (8fac299e). The NEW
+  `realTime` trigger surface is now WIRED + kind-validated (commit e183cb22): proto field
+  `real_time_batch_duration=100` (verified vs apache/spark v4.2.0-rc1) → `spec::StreamTrigger::RealTime` →
+  Vajra realtime engine. Client check: pyspark 4.2.0 `.trigger(realTime=...)` emits exactly that field.
+  Kind (rt42 image): `.trigger(realTime="5 seconds")` paced no-closer = 15 windows / 150000 / group=10 /
+  OVER_EMIT=NO == Flink. Vajra realtime = STATEFUL windowed ⇒ SUPERSET of 4.2's stateless-only RTM.

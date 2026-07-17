@@ -1069,6 +1069,11 @@ pub enum StreamTrigger {
     Once,
     /// Continuous processing with the given checkpoint interval (string duration).
     Continuous { checkpoint_interval: String },
+    /// Spark 4.2 Real-Time Mode (`Trigger.RealTime("<duration>")`). The duration is a
+    /// checkpoint/commit interval (Spark default 5min, min 5s), NOT a latency target.
+    /// Routes to Vajra's realtime engine (long-lived unbounded pipeline, per-epoch commit);
+    /// Vajra's realtime path is STATEFUL/windowed — a superset of 4.2's stateless-only RTM.
+    RealTime { batch_duration: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
