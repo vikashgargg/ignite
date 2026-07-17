@@ -310,10 +310,49 @@ impl ExecutionPlan for WatermarkExec {
                             }
                         }
                         Some(Some(Ok(other))) => {
-                            return Some((
-                                Ok(other),
-                                (input, max_ts, per_part, last_wm, start, last_emit, pending),
-                            ));
+                            // FLUSH-BEFORE-TRANSITION (canonical Flink): a watermark-status change —
+                            // a source going `Idle` (WatermarkStatus.IDLE) or reaching `EndOfData`
+                            // (end-of-input, which Flink flushes with MAX_WATERMARK) — must emit the
+                            // generator's CURRENT max watermark first. The 200ms interval gate above is
+                            // a steady-state throughput optimization ONLY; it must never defer a
+                            // watermark across a status transition. Without this, a fast backlog whose
+                            // final records (e.g. a closer advancing past the last window) are consumed
+                            // and then immediately followed by `Idle` — all within one 200ms interval —
+                            // strands that final watermark: the channel goes idle carrying a stale
+                            // pre-final watermark, so the exchange's all-idle drain never closes the
+                            // last window. (Paced streams hid this: the gate always fired between
+                            // batches.) Flush is monotonic (only if it advances last_wm), so it is a
+                            // no-op when the interval gate already emitted the current max.
+                            let is_status_transition = matches!(
+                                &other,
+                                FlowEvent::Marker(FlowMarker::Idle { .. })
+                                    | FlowEvent::Marker(FlowMarker::EndOfData)
+                            );
+                            if is_status_transition {
+                                let flush = if part_idx.is_some() {
+                                    per_part.values().map(|(et, _)| *et).max()
+                                } else {
+                                    max_ts
+                                };
+                                if let Some(m) = flush {
+                                    let wm = m - delay;
+                                    if last_wm.is_none_or(|l| wm > l) {
+                                        last_wm = Some(wm);
+                                        last_emit = Some(std::time::Instant::now());
+                                        if let Some(ts) = DateTime::from_timestamp_micros(wm) {
+                                            pending.push_back(FlowEvent::Marker(
+                                                FlowMarker::Watermark {
+                                                    source: "watermark".to_string(),
+                                                    timestamp: ts,
+                                                },
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                            // Enqueue the marker AFTER the (optional) flush watermark; the loop head
+                            // drains `pending` in order → watermark first, then the marker.
+                            pending.push_back(other);
                         }
                     }
                 }
@@ -526,6 +565,48 @@ mod tests {
         assert!(
             wms.iter().all(|w| *w <= 100),
             "per-partition wm must never leak past the lagging min; got {wms:?}"
+        );
+    }
+
+    // Regression for the EKS fast-backlog stall: the last data before an `Idle` (e.g. a closer that
+    // advances the watermark past the final window) is interval-gated — but the source goes `Idle`
+    // within the same 200ms window, so the deferred watermark would be stranded and the final window
+    // never closes. WatermarkExec must FLUSH the current max watermark BEFORE forwarding the `Idle`
+    // (canonical Flink: a status transition flushes the generator). Global (max_ts) path.
+    #[tokio::test]
+    async fn flushes_pending_watermark_before_idle() {
+        let s = schema();
+        let sec = 1_000_000i64;
+        // row(100s) -> emits wm=100 (first batch, gate open). row(200s) -> max_ts=200 but interval-
+        // gated (same <200ms tick) so NO wm emitted. Idle -> must flush wm=200 BEFORE the Idle marker.
+        let events = vec![
+            row(&s, 100 * sec, 0),
+            row(&s, 200 * sec, 0),
+            FlowEvent::Marker(FlowMarker::Idle { source: "src".to_string() }),
+        ];
+        let exec = Arc::new(
+            WatermarkExec::try_new(Arc::new(Src::new(events, s.clone())), "et".to_string(), 0, s)
+                .unwrap(),
+        );
+        let mut dec = DecodedFlowEventStream::try_new(
+            exec.execute(0, Arc::new(TaskContext::default())).unwrap(),
+        )
+        .unwrap();
+        let mut out = vec![];
+        while let Some(ev) = dec.next().await {
+            out.push(ev.unwrap());
+        }
+        // Position of the 200s watermark and of the Idle marker in the emitted order.
+        let wm200_pos = out.iter().position(|e| matches!(e,
+            FlowEvent::Marker(FlowMarker::Watermark { timestamp, .. })
+                if timestamp.timestamp_micros() / sec == 200));
+        let idle_pos = out.iter().position(|e|
+            matches!(e, FlowEvent::Marker(FlowMarker::Idle { .. })));
+        assert!(wm200_pos.is_some(), "final watermark (200s) must be flushed; got {out:?}");
+        assert!(idle_pos.is_some(), "Idle marker must pass through");
+        assert!(
+            wm200_pos < idle_pos,
+            "the flushed 200s watermark must precede the Idle (else the last window strands); got {out:?}"
         );
     }
 }
