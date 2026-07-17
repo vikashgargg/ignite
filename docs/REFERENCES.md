@@ -545,5 +545,9 @@ Sources: databricks.com/blog/introducing-apache-spark-42 · PySpark 4.2 DataStre
   `Trigger::RealTime(dur)`→`StreamDriver::Realtime` (dur = commit/checkpoint interval, min 5s, per 4.2),
   enforce update mode; (4) accept realTime for stateful/windowed too = documented SUPERSET (our advantage,
   = Spark 4.3 preview); (5) test `.trigger(realTime='5s')` from 4.2 client → same 15/150000.
-- 4.2 client compat (batch + continuous via old triggers) + version bump ALREADY done + merged (8fac299e);
-  the NEW `realTime` trigger surface is the remaining, distinct workstream.
+- 4.2 client compat (batch + continuous via old triggers) + version bump done + merged (8fac299e). The NEW
+  `realTime` trigger surface is now WIRED + kind-validated (commit e183cb22): proto field
+  `real_time_batch_duration=100` (verified vs apache/spark v4.2.0-rc1) → `spec::StreamTrigger::RealTime` →
+  Vajra realtime engine. Client check: pyspark 4.2.0 `.trigger(realTime=...)` emits exactly that field.
+  Kind (rt42 image): `.trigger(realTime="5 seconds")` paced no-closer = 15 windows / 150000 / group=10 /
+  OVER_EMIT=NO == Flink. Vajra realtime = STATEFUL windowed ⇒ SUPERSET of 4.2's stateless-only RTM.

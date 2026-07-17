@@ -930,7 +930,7 @@ mod tests {
         );
         assert_eq!(markers, 1, "marker passed through exactly once");
         assert!(max_data_batch > 10, "coalesced beyond input batch size (was 10)");
-        let marker_pos = out.iter().position(|b| is_marker_batch(b)).unwrap();
+        let marker_pos = out.iter().position(is_marker_batch).unwrap();
         let rows_before: usize = out[..marker_pos].iter().map(|b| b.num_rows()).sum();
         assert_eq!(
             rows_before, 30,
