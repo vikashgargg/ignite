@@ -523,3 +523,15 @@ same three things Vajra must — batched source poll, morsel/credit backpressure
   connectors detect backpressure for decentralized ingest. Sub-100ms latency on S3-decoupled state.
   **Vajra implication:** the network-buffer backpressure between operators is exactly the shuffle-edge credit
   lever (VAJ-BF2.4); S3-decoupled state validates our F5/inc-ckpt object-store direction.
+
+## 10. Spark 4.2 Real-Time Mode (fetched 2026-07-17, for the PySpark upgrade)
+Sources: databricks.com/blog/introducing-apache-spark-42 · PySpark 4.2 DataStreamWriter.trigger docs.
+- Spark 4.2 extends **Real-Time Mode to PySpark but STATELESS-only** (no Python UDFs); stateful RTM is
+  "already underway" for the next 4.x (SPARK-57237). Not yet for stateful/windowed Python workloads.
+- **No dedicated RTM trigger param** in 4.2 — triggers stay `processingTime`/`once`/`continuous`/
+  `availableNow`. RTM is enabled by config; `.trigger(continuous=...)` is the realtime path.
+- **Vajra implication:** Vajra's STATEFUL windowed continuous path (`.trigger(continuous="1 second")`)
+  already predates 4.2's stateless-only native RTM ⇒ Vajra is AHEAD on stateful realtime. The 4.2 upgrade
+  for Vajra = a bounded VERSION BUMP + Connect-protocol compat + retest, NOT an RTM re-architecture:
+  (1) test harness smoke venv 3.5.3 → 4.2 (the "old 3.5.3"); (2) relax pin `pyspark-client>=4.0,<4.2` →
+  allow 4.2; (3) confirm the Connect server handles the 4.2 client wire protocol; (4) align trigger surface.
