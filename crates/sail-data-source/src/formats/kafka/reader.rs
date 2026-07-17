@@ -1705,6 +1705,13 @@ fn spawn_partition_batch_reader(
         let mut next_off = start;
         let mut empty_polls: u32 = 0;
         let mut idle_signaled = false;
+        // Cached partition high-watermark (offset of the head). `Idle` = genuinely caught up to it (a
+        // TRANSIENT empty drain mid-backlog must NOT signal Idle — that wrongly excludes an active
+        // channel from the downstream watermark MIN-merge = the Flink WatermarkStatus.IDLE contract).
+        let mut cached_hi = consumer
+            .fetch_watermarks(&topic, partition, std::time::Duration::from_millis(2000))
+            .map(|(_, h)| h)
+            .unwrap_or(i64::MAX);
 
         // Emit one row/byte-capped Arrow batch per iteration. Bounded stops at `end`; continuous
         // (`end == i64::MAX`) runs until the receiver drops.
@@ -1726,16 +1733,24 @@ fn spawn_partition_batch_reader(
                         break; // buffer momentarily empty: flush what we have
                     }
                     if emit_idle {
-                        // Continuous: caught up to the head. Signal Idle ONCE so the downstream
-                        // merge drops this partition from the watermark MIN (Flink IDLE), then keep
-                        // polling — new data clears the idle state.
-                        if !idle_signaled {
+                        // Continuous: signal Idle ONLY when genuinely caught up to the partition
+                        // high-watermark (Flink WatermarkStatus.IDLE). A transient empty drain while
+                        // `next_off < hi` (more data buffered/coming) must NOT signal Idle. Re-fetch the
+                        // head when we think we've reached it (the head advances for a live topic).
+                        if next_off >= cached_hi {
+                            if let Ok((_, h)) = consumer.fetch_watermarks(
+                                &topic, partition, std::time::Duration::from_millis(1000),
+                            ) {
+                                cached_hi = h;
+                            }
+                        }
+                        if next_off >= cached_hi && !idle_signaled {
                             idle_signaled = true;
                             if tx.blocking_send(ReaderEvent::Idle).is_err() {
                                 break 'outer;
                             }
                         }
-                        continue;
+                        continue; // still below head = transient empty; keep polling, stay ACTIVE
                     }
                     empty_polls += 1;
                     if empty_polls >= max_empty_polls {
@@ -2229,6 +2244,80 @@ mod bench {
             rows == expected
         );
         assert_eq!(rows, expected, "prod batch-queue reader must deliver EXACTLY the snapshot rows");
+    }
+
+    /// GROUNDED-FIX gate (Flink WatermarkStatus.IDLE = genuinely caught up, not a wall-clock/transient
+    /// gap): the continuous batch-queue reader (`emit_idle=true`) must emit `Idle` ONLY after it has
+    /// consumed every message up to the partition high-watermark — NEVER on a transient empty drain
+    /// mid-backlog (which would wrongly exclude an active channel from the downstream watermark MIN-merge,
+    /// freezing/corrupting the watermark = the measured continuous-completeness bug). Asserts: rows
+    /// received BEFORE the first `Idle` == the full topic count. `KAFKA_BENCH=1`, topic `idle_test`.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn kafka_idle_only_on_high_watermark() {
+        if std::env::var("KAFKA_BENCH").ok().as_deref() != Some("1") {
+            eprintln!("set KAFKA_BENCH=1 to run");
+            return;
+        }
+        use rdkafka::config::ClientConfig;
+        use rdkafka::consumer::{BaseConsumer, Consumer};
+
+        use super::{spawn_partition_batch_reader, PartitionReaderJob, ReaderEvent};
+        let boot = std::env::var("BENCH_BOOTSTRAP").unwrap_or_else(|_| "localhost:9092".into());
+        let topic = std::env::var("BENCH_TOPIC").unwrap_or_else(|_| "idle_test".into());
+        let schema = Arc::new(kafka_data_schema());
+        let projection: Vec<usize> = (0..schema.fields().len()).collect();
+        let mut wm = ClientConfig::new();
+        wm.set("bootstrap.servers", &boot).set("group.id", "idle-probe");
+        let probe: BaseConsumer = wm.create().expect("probe");
+        let (low, high) = probe
+            .fetch_watermarks(&topic, 0, std::time::Duration::from_secs(15))
+            .expect("wm");
+        let expected = (high - low).max(0);
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<ReaderEvent>(8);
+        let mut cfg = ClientConfig::new();
+        cfg.set("bootstrap.servers", &boot)
+            .set("group.id", format!("idle-{}", std::process::id()))
+            .set("enable.auto.commit", "false");
+        super::apply_consumer_throughput_defaults(&mut cfg);
+        spawn_partition_batch_reader(
+            PartitionReaderJob {
+                cfg,
+                topic: topic.clone(),
+                partition: 0,
+                start: low,
+                end: i64::MAX, // continuous
+                key: 0,
+                target_batch: 8192,
+                max_bytes: 128 * 1024 * 1024,
+                full_schema: Arc::clone(&schema),
+                projection: projection.clone(),
+                timeout_ms: 50,
+                max_empty_polls: 0,
+                emit_idle: true,
+            },
+            tx,
+        );
+        let mut rows = 0i64;
+        let mut rows_at_first_idle: Option<i64> = None;
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                ReaderEvent::Batch(pb) => rows += pb.batch.num_rows() as i64,
+                ReaderEvent::Idle => { rows_at_first_idle = Some(rows); break; }
+                ReaderEvent::Err(e) => { eprintln!("reader err: {e}"); break; }
+            }
+        }
+        eprintln!(
+            "KAFKA_IDLE_GATE rows_at_first_idle={rows_at_first_idle:?} expected={expected} \
+             GENUINE_ONLY={}",
+            rows_at_first_idle == Some(expected)
+        );
+        assert_eq!(
+            rows_at_first_idle,
+            Some(expected),
+            "Idle must fire ONLY at the high-watermark (all {expected} consumed), never transiently"
+        );
     }
 
     /// from_json proxy: parse every `value` (Binary, col 1) as `serde_json::Value` — the dominant per-row
