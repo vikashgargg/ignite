@@ -60,6 +60,26 @@ pub static SHUFFLE_RECV_BATCHES: std::sync::atomic::AtomicU64 = std::sync::atomi
 /// is the high-water mark, dumped with the stage report.
 pub static EXCHANGE_INFLIGHT_BYTES: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 pub static EXCHANGE_PEAK_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// RFC-observability (MEMORY truth, part 2): live Arrow bytes buffered in the batch-queue READER
+/// channels (reader-thread → async generator, depth 8 × N readers). Prime suspect for the 12 GiB:
+/// MAX_BATCH_BYTES=128 MiB × depth-8 × 16 readers = up to 16 GiB. `READER_PEAK_BYTES` = high-water.
+pub static READER_INFLIGHT_BYTES: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+pub static READER_PEAK_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Account `signed` bytes into the reader-channel in-flight gauge, tracking the peak (see `inflight_account`).
+pub fn reader_inflight_account(signed: i64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let cur = READER_INFLIGHT_BYTES.fetch_add(signed, Relaxed) + signed;
+    if signed > 0 && cur > 0 {
+        let cur_u = cur as u64;
+        let mut peak = READER_PEAK_BYTES.load(Relaxed);
+        while cur_u > peak {
+            match READER_PEAK_BYTES.compare_exchange_weak(peak, cur_u, Relaxed, Relaxed) {
+                Ok(_) => break,
+                Err(p) => peak = p,
+            }
+        }
+    }
+}
 /// Account `bytes` entering (+) / leaving (−) the exchange in-flight buffer, tracking the peak. Cheap
 /// (relaxed atomics); gated by the caller to the prof path. `signed` = +bytes on send, −bytes on recv.
 pub fn inflight_account(signed: i64) {

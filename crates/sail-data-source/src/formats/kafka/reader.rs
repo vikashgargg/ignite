@@ -803,6 +803,11 @@ impl ExecutionPlan for KafkaSourceExec {
                     while let Some(item) = brx.recv().await {
                         match item {
                             ReaderEvent::Batch(pb) => {
+                                if sail_common_datafusion::streaming::event::encoding::wm_prof_enabled() {
+                                    sail_common_datafusion::streaming::event::encoding::reader_inflight_account(
+                                        -(pb.batch.get_array_memory_size() as i64),
+                                    );
+                                }
                                 next.insert(pb.key, pb.next_off);
                                 yield Ok(FlowEvent::append_only_data(pb.batch));
                             }
@@ -1196,6 +1201,11 @@ impl ExecutionPlan for KafkaSourceExec {
                                 match ev {
                                     Some(ReaderEvent::Batch(pb)) => {
                                         idle_signaled = false;
+                                        if sail_common_datafusion::streaming::event::encoding::wm_prof_enabled() {
+                                            sail_common_datafusion::streaming::event::encoding::reader_inflight_account(
+                                                -(pb.batch.get_array_memory_size() as i64),
+                                            );
+                                        }
                                         next.insert((pb.topic, pb.partition), pb.next_off);
                                         yield Ok(FlowEvent::append_only_data(pb.batch));
                                     }
@@ -1807,6 +1817,13 @@ fn spawn_partition_batch_reader(
                             partition,
                             next_off,
                         });
+                        if let ReaderEvent::Batch(ref pb) = ev {
+                            if sail_common_datafusion::streaming::event::encoding::wm_prof_enabled() {
+                                sail_common_datafusion::streaming::event::encoding::reader_inflight_account(
+                                    pb.batch.get_array_memory_size() as i64,
+                                );
+                            }
+                        }
                         if tx.blocking_send(ev).is_err() {
                             break; // receiver dropped: stop reading
                         }
