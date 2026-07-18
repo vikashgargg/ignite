@@ -1,77 +1,95 @@
-# Vajra per-pillar grounded map — where we stand vs Flink & the streaming frontier
+# Vajra per-pillar grounded map — where we ACTUALLY stand vs Flink (measured, honest)
 
-> **Purpose.** Answer, with measurement + named sources, the standing question:
-> *"Vajra is a single binary, no-JVM, no serialize/deserialize — why is it still slower than Flink?"*
-> One row per production pillar: what each credible engine does, where Vajra **measurably** stands,
-> the exact mechanism where we lag, and the grounded prod-grade fix. No claim here is un-measured
-> unless labelled UNMEASURED. Sources are cited to [REFERENCES.md](../REFERENCES.md); every fetched
-> fact is appended there the same turn (AIM standing rule).
+> **The standing question:** *"Vajra is a single binary, no-JVM, no serialize/deserialize — why is it
+> still slower than Flink?"* This doc answers it per pillar with **measured EKS 100M numbers**, the
+> **exact mechanism** where Vajra diverges from the credible engines, and the **prod-grade design** to
+> close it (built on their proven work, cited). No claim here is un-measured unless labelled UNMEASURED.
 
-## The thesis (the honest answer)
+## The measured truth (EKS 100M realtime, 2026-07-18, fresh cluster, same c7g.4xlarge node, sequential)
 
-The no-JVM / columnar / no-serde edge is a **node-local** property, and it **is won** — by measurement.
-The distributed streaming gap is **not** a JVM or serialization tax (the shuffle IPC encode measures
-2–5 ms = negligible). It is a **dataflow / execution-model** property. Every fast engine — Flink,
-RisingWave 3.0, Arroyo (Rust+Arrow, our exact stack, beats Flink 5×), Polars, Spark 4.1 RTM —
-engineers the same handful of mechanisms at the source and the shuffle boundary. Naming the exact
-mechanism is what turns "still slow" into a fix.
+Vajra `.trigger(realTime=…)` (rt43, batch-queue ON) vs Flink 1.19 unbounded streaming, both 100M+16 closers,
+identical 10s tumbling keyed COUNT, both output-completeness-timed to the sink:
 
-**Proof the language is not the problem:** Arroyo is Rust + Arrow + DataFusion — our exact stack — and
-beats Flink 5×+ (10× on sliding windows) [REFERENCES §9]. So a Rust/Arrow engine *can* beat Flink; our
-remaining gap is mechanism, not language.
+| Pillar | Vajra | Flink | Verdict |
+|---|---|---|---|
+| **Correctness / completeness** | 10 win / 100M / per_group=10000 | 10 win / 100M / per_group=10000 | **TIE — byte-identical output, 0 mismatch** |
+| **Throughput** (backlog drain→output-complete) | 24.9s = **4.0M ev/s** | 10s = **10.0M ev/s** | **LOSE ~2.5×** |
+| **Peak RSS** (windowed agg) | **12.17 GiB** | 9.03 GiB | **LOSE 1.35×** |
+| **Peak RSS** (Kafka→Kafka passthrough) | **13.07 GiB** | 3.88 GiB | **LOSE 3.4×** |
+| **Latency** Kafka→Kafka p50 / p99 / max | 101 / 131 / 136 ms | 95 / 127 / 136 ms | **LOSE (slight); tail ties** |
 
-| | Measured |
-|---|---|
-| **Node-local — WON** | Batch 6.2× vs Spark · single-node consume ~8M/s · latency p50 30 vs 42 ms (tail 4.6–6× tighter, no GC) · per-node mem 3.7 vs 9.3 GiB |
-| **Distributed — the gap = execution model** | Source consume `StreamConsumer` 4M/s vs Flink poll-batch 10M/s · shuffle small-batch Flight IPC (receiver starves) · `availableNow` micro-batch re-plan tax |
+**The honest verdict: on this apples-to-apples realtime path Vajra TIES correctness and LOSES every
+performance pillar.** The no-JVM/columnar edge is NOT translating into streaming wins. Prior "latency win /
+memory win" claims were from *different configs* (kind, low parallelism) and DO NOT hold here — they are
+retracted. This is a **dataflow/execution-model** deficit, not a language one — proven by Arroyo (Rust +
+Arrow + DataFusion, our exact stack) beating Flink 3–5× [Arroyo blog]. Language is not the excuse.
 
-## Per-pillar scorecard
+## Per-pillar: credible design → Vajra's measured lag → exact mechanism → prod-grade fix
 
-Status: **WON** measured beat · **PARITY** measured equal · **LAG** root-caused + fix implemented, EKS
-number pending · **UNMEASURED** honest gap.
+### 1. Throughput — LOSE 4.0M vs 10.0M (~2.5×)
+- **Credible:** **Arroyo** (Rust/Arrow/DataFusion) beats Flink 3–5× (10× sliding) via interpreted Arrow
+  columnar + SIMD, specialized window operators, and async (off-path) checkpointing [arroyo.dev/blog:
+  why-arrow-and-datafusion, how-arroyo-beats-flink-at-sliding-windows]. **Flink** pipelined operators +
+  credit flow + mini-batch. **DataFusion** morsel-driven vectorized exec.
+- **Vajra mechanism (measured/traced):** batch-queue fixed the SOURCE (2.8×), but the **single-node
+  `StreamExchange` is on the critical path**: every batch is hash-routed to N sub-channels, markers
+  broadcast N×, coalesced, then MIN-merged (`merge_output_subchannels`) — even single-node. Prior EKS
+  profiling: `shuffle_recv` blocked-wait dominates. The S3 sink also commits per 5s epoch, inflating the
+  output-complete wall (consumption alone ≈ 5M/s).
+- **Prod-grade fix (grounded, not yet done):** (a) **specialized tumbling-window operator** that avoids
+  the full keyed re-shuffle when parallelism fits one node (Arroyo-style); (b) coalesce + `Utf8View`
+  zero-copy on the shuffle edge; (c) async/off-path epoch commit (Arroyo checkpoint model) so S3 latency
+  leaves the throughput path; (d) parallel Flight streams for the true cross-node case.
+- **Status: LOSE — root-caused, fix designed, NOT implemented.**
 
-| Pillar | Vajra standing (measured) | Credible source & technique | Lagging mechanism → grounded fix | Status |
-|---|---|---|---|---|
-| **Batch throughput** | 6.2× vs Spark; TPC-H SF1 1.78 vs 63.46 s | **DataFusion** morsel-driven vectorized exec; **Arrow** columnar [§7] | — | **WON** vs Spark |
-| **Streaming throughput** | ~2–2.5× behind Flink; consume ~4M/s vs ~10M/s | **Flink FLIP-27** `poll(timeout)` = N records/call; **Arroyo** Kafka→RecordBatch zero-copy [§2d, §9] | `StreamConsumer` reads 1 msg/poll → **`rd_kafka_consume_batch_queue`** batch-queue (1000/call). Measured **2.8×** (1.38→3.89 M/s), EXACT 10M/10M; kind A/B 2.33× faster wall, both arms EXACT | **LAG** — fix impl, EKS ⧗ |
-| **Realtime windowed completeness** | Vajra continuous **== Flink** (kind, both→MinIO parquet): 15 windows / 150000, group=10, no partial-split/over-emit/dup | **Flink** `WatermarkStatus.IDLE` + in-band-FIFO watermark + MIN over inputs [§2d] | Bug (traced w/ instrumentation): batch-queue source Idle on a TRANSIENT empty drain → exchange excluded an active channel → frozen watermark. Fixed: source Idle only at genuine high-watermark + live emitted-ends floor for far-ahead jumps. One grounded fix, not a patch | **WON** (== Flink) |
-| **Spark 4.2 RTM API surface** | `.trigger(realTime="5 seconds")` (4.2.0 client) routes into Vajra's realtime engine; kind-verified 15 windows / 150000 / group=10 == Flink. Vajra realtime is STATEFUL/windowed — a **superset of 4.2's stateless-only RTM** (Spark defers stateful RTM to 4.3) | **Spark 4.2** `Trigger.RealTime("<dur>")` = new trigger, wire field `real_time_batch_duration=100`; dur is a checkpoint interval (min 5s), not latency [§1, §10] | Was: Vajra's realtime engine reachable only via pre-4.2 `.trigger(continuous=...)`; the new `realTime` proto field (100) wasn't decoded → 4.2 clients fell through to micro-batch. Wired: proto + `spec::StreamTrigger::RealTime` + route → realtime engine (e183cb22) | **WON** (superset of 4.2) |
-| **Latency (Kafka→Kafka)** | p50 30 / p99 125 / max 128 ms vs 42 / 580 / 767 | **Spark 4.1 RTM** concurrent-stage + in-mem shuffle validates model [§1, §3c]; **no-JVM** no-GC tail | — | **WON** vs Flink |
-| **Memory / RSS** | Continuous 7.06 vs 8.58 GiB (win); bounded 10.4 vs 8.6 (lose) — path-dependent | **Flink 2.0 ForSt**: RAM bounded by off-heap state + credit backpressure, not GC [§3]; **Polars** per-morsel SemaphorePermit = exact backpressure + spillable OOC sinks [§9]; **RisingWave** network-buffer backpressure prevents OOM [§9] | No-JVM ≠ free RSS (measured 1.12× bounded). Fix = **F5 spill** (OOC sinks, per Polars) + **credit/permit backpressure** on the shuffle edge (per Flink FLIP-2 / RisingWave) — memory is a *discipline*, not a GC win | **PARITY** |
-| **CPU / per-stage** | ~parity; source-read bound (same lever as throughput) | **arrow-rs** `Utf8View` zero-copy; **Arroyo** columnar JSON decode + SIMD [§7, §9] | Source read + Arrow decode dominate → batch-queue consume + `Utf8View` on value/shuffle cols | **PARITY** |
-| **Network / shuffle** | Small-batch Flight IPC; 2.14× fewer msgs after coalesce (counts EXACT) | **Arroyo Shuffle-Edge**; **Ballista** Flight zero-copy; **RisingWave** exchange + network-buffer backpressure [§4, §8, §9] | Per-batch IPC re-encode + receiver starves → **coalesce before Flight** + `Utf8View` zero-copy + **credit-flow** (parallel streams). T1/T2 done; EKS number pending | **LAG** — fix impl, EKS ⧗ |
-| **State management** | Spillable windowed-agg + join, out==N exact @5M | **Flink** Key-Groups; **DataFusion** grouped-hash spill; **Arroyo** specialized per-op state structs [§2d, §7, §9] | Generic grouped-hash vs Arroyo's specialized time-eviction window = the *sliding-window* lever (future) | **PARITY** |
-| **Fault tolerance / EO** | dup=0 across kill-9 on EKS (aligned barriers + exact idle + emit floor) | **Chandy-Lamport** aligned barriers; **Flink** checkpoint [§2] | — | **PARITY** |
-| **Incremental checkpoint** | O(delta) on one Arrow substrate; manifest refs immutable F5 chunks | **Flink ForSt / RocksDB** SST refcount — Vajra F5 chunks = SST-analog [§3, §5] | — (structurally cleaner: one Arrow format, no RocksDB lineage) | **WON** vs ForSt |
-| **Rescale / elasticity** | Key-group rescale on Arrow chunks, crash-gated | **Flink FLIP-8** Key-Groups = atomic redistribution unit [§2] | Bit-exact gated by EO residual (documented) | **PARITY** |
-| **Recovery time** | Correctness proven; wall-time **not measured** | **Flink 2.0 ForSt**: 49× faster recovery, 94% less ckpt duration [§3] | Measure recovery wall-time head-to-head | **UNMEASURED** |
-| **Backpressure / credit** | Bounded mpsc channels exist; not measured under slow sink | **Flink FLIP-2** credit flow; **Polars** per-morsel permit; **RisingWave** network-buffer backpressure [§9] | Add credit/permit flow on the shuffle edge (VAJ-BF2.4) + measure under slow sink | **UNMEASURED** |
+### 2. Memory — LOSE 12–13 GiB vs 3.9–9 GiB (up to 3.4×)  ← the most damning, most actionable
+- **Credible:** **Flink FLIP-2 credit-based flow control** — the *receiver* grants the sender exact buffer
+  credits; network memory is bounded and backpressure is exact, never OOM. **Flink 2.0 ForSt**: state
+  off-heap/disaggregated. **Polars** streaming: per-morsel `SemaphorePermit` + spillable out-of-core
+  sinks. **RisingWave 3.0**: network-buffer backpressure. [REFERENCES §3, §9]
+- **Vajra mechanism (from code, self-admitted):** memory = **live in-flight buffering across N×M
+  sub-channels** with a *fixed* mpsc cap of 16 batches/channel ([exchange.rs:30-45] comment) — a COARSE
+  analog of credit flow, not real credit flow. Plus **Kafka prefetch 64 MiB × 16 partitions ≈ 1 GiB**
+  ([reader.rs:260]). No per-morsel permit; buffers sized by count, not bytes/credits → 13 GiB for a
+  passthrough that Flink does in 3.9.
+- **Prod-grade fix (grounded):** implement **real credit-based flow control** on the shuffle edge
+  (FLIP-2 / RisingWave network-buffer): receiver-granted byte-credits, not a fixed batch cap; **per-morsel
+  permits** (Polars) bounding total in-flight bytes; cut default prefetch. This is a **memory-DISCIPLINE**
+  build, not a GC win — "no-JVM" never bounded RSS by itself.
+- **Status: LOSE — mechanism known, real credit-flow NOT implemented (only the coarse cap exists).**
 
-## What "grounded prod-grade" looks like here (the throughput pillar, worked end to end)
+### 3. Latency — LOSE p50 101 vs 95 ms (slight; tail ties at 136)
+- **Credible:** **Spark 4.1/4.2 RTM** concurrent-stage + in-memory shuffle; **Flink** continuous; no-JVM
+  no-GC should win the tail. [REFERENCES §1, §3c]
+- **Vajra mechanism:** the ~100ms floor on BOTH engines = Kafka sink `linger`/batching dominates at
+  20k/s, masking engine latency. Vajra slightly worse — the realtime per-epoch commit cadence + passthrough
+  path add a few ms. The prior kind win (30 vs 42) was a lower-rate/parallelism config, not this one.
+- **Prod-grade fix:** measure at the engine boundary (not Kafka-linger-bound); shrink the realtime commit
+  interval off the record path; confirm the no-GC tail advantage on a linger-controlled harness.
+- **Status: LOSE (slight) — needs a linger-isolated measure to expose the real engine latency.**
 
-1. **GROUND** — the source consume lever is REFERENCES §2d/§9: Flink `KafkaSource` polls N records per
-   call (FLIP-27); rust-rdkafka `StreamConsumer` yields one message per async poll.
-2. **MEASURE before building** — fair local A/B on 10M/4-part, identical Arrow build:
-   `StreamConsumer` 1.38 M/s → poll-`BaseConsumer` 1.87 → **`rd_kafka_consume_batch_queue` 3.89 M/s (2.8×)**.
-   The winner is chosen by number, not by guess (the poll-BaseConsumer "hint" was wrong).
-3. **BUILD prod-grade, gated** — dedicated reader thread per split → bounded channel → async generator,
-   preserving the exact EO offset-staging / watermark / epoch / idle contract. Gated
-   `VAJRA_KAFKA_BATCH_QUEUE` (default OFF) for a clean A/B. Clippy + 67 unit tests green.
-4. **VERIFY free on kind, EKS confirms** — kind A/B (cross-pod + real MinIO): both arms EXACT 1M
-   (sum(count)=1,000,000 / 5 windows), batch-queue **2.33× faster wall** (4.39→1.88 s), no OOM. Continuous
-   (realtime) path extended the same way; EKS is the at-scale number only — never where bugs are found.
+### 4. Reliability / correctness — TIE (WON the completeness bug)
+- Byte-identical windowed output to Flink (0 mismatch), crash-EO dup=0 (prior), aligned barriers
+  (Chandy-Lamport), inc-checkpoint O(delta). The watermark flush-before-idle fix (commit 9ae02e7e) closed
+  the last completeness gap. **This pillar is genuinely at parity.**
 
-Unproven experiments were **removed** after measuring them marginal (G1 shuffle prefetch +4%; G2 raw-TCP
-= reinventing HTTP/2). Prod-grade means: measured, gated, EO-preserving, source-cited — or deleted.
+## Unproven / unwanted code to REMOVE (prod-grade cleanup, user-requested)
+Measure-or-delete. Candidates (verify each is off the proven path before removing):
+- `coalesce_flow_events` combinator — OFF by default, never proven (needs drain guarantee).
+- **Dual idle mechanisms** — wall-clock `active_partition_watermark` vs source-signaled `Idle` (E4).
+  Target = **E4-only** (see streaming-watermark.md consolidation debt).
+- Gated experiments with no proven win: `VAJRA_T7_FUSE` (source fusion), `VAJRA_KAFKA_LEGACY_POLL`,
+  `VAJRA_RT_SINGLE`, `VAJRA_KAFKA_PREFETCH_*` sweep knobs, `VAJRA_SHUFFLE_*` sweep knobs,
+  `VAJRA_SOURCE_MAX_BATCH_BYTES` if unused.
+- Any `G1/G2` prefetch/raw-TCP remnants (were measured marginal).
 
-## Honest open items (no overclaim)
-
-- **Streaming throughput / shuffle**: fixes implemented + kind-validated for correctness; the *at-scale
-  throughput number* vs Flink is the one remaining EKS confirm.
-- **Recovery time** and **backpressure under slow sink**: UNMEASURED axes — named, not hidden.
-- **Sliding-window** specialized state (Arroyo's 10× lever) is a future pillar, not yet built.
+## Execution sequence (AIM way — design-first, then build, then measure)
+1. **Remove** the unproven code above → smaller, prod-grade surface.
+2. **Build the two real levers, grounded:** (a) credit-based flow control on the shuffle edge (memory);
+   (b) off-path async epoch commit + shuffle coalesce/Utf8View (throughput).
+3. **End-to-end retest** batch (vs Spark) + realtime (vs Flink) + latency, with the identical-output check.
+4. **Merge + docs** with the new measured numbers.
+5. **ONE final EKS** to confirm the pillars moved.
 
 ---
-*Sources: [REFERENCES.md](../REFERENCES.md) §1 Spark 4.1 RTM · §2/§2d Flink FLIP-27/checkpoint · §3 Flink 2.0
-ForSt · §3c Databricks RTM · §4/§5 Ballista/DataFusion · §7 Arrow/arrow-rs · §8 Flight shuffle · §9 Polars /
-Arroyo 0.15 / RisingWave 3.0 (fetched 2026-07-16). Indexed from [BOARD.md](../BOARD.md).*
+*Sources: [Arroyo blog](https://www.arroyo.dev/blog/) (why-arrow-and-datafusion; how-arroyo-beats-flink-at-sliding-windows) · [REFERENCES.md](../REFERENCES.md) §1 Spark RTM · §2/§2d Flink FLIP-27/checkpoint · §3 Flink 2.0 ForSt · §8 Flight shuffle · §9 Polars/Arroyo 0.15/RisingWave 3.0. Measured EKS 100M 2026-07-18.*

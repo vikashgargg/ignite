@@ -470,6 +470,12 @@ impl StreamingQuery {
                 let t0 = std::time::Instant::now();
                 let mut commit_timer = tokio::time::interval(commit_interval);
                 commit_timer.tick().await; // discard the immediate first tick
+                // EPIC-T/T2 (Arroyo async-checkpoint): the epoch commit runs OFF the record path in a
+                // spawned task so `stream.next()` keeps draining during the S3 puts (previously the
+                // commit ran inline in the select! → the pipeline stalled ~200-600ms EVERY epoch). One
+                // commit in flight at a time (await the prior at each tick) preserves ordering + bounds
+                // staged growth; committed state = staged-as-of-this-tick, so crash-EO is unchanged.
+                let mut commit_handle: Option<tokio::task::JoinHandle<()>> = None;
                 loop {
                     tokio::select! {
                         _ = &mut signal => break,
@@ -485,22 +491,31 @@ impl StreamingQuery {
                             }
                         }
                         _ = commit_timer.tick() => {
-                            // Epoch boundary: durably commit progress, off the data path.
+                            // Epoch boundary: commit progress OFF the record path (spawned). The loop
+                            // resumes polling `stream.next()` immediately — the S3 puts no longer stall
+                            // the pipeline. Await the prior commit first (one in flight, ordered).
                             if let Some(ck) = &ck {
-                                let payload = format!(
-                                    "v1\n{{\"batchId\":{batch_id},\"timestamp\":{}}}\n",
-                                    std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .map(|d| d.as_millis())
-                                        .unwrap_or(0)
-                                );
-                                if let Err(e) = ck
-                                    .put(&format!("offsets/{batch_id}"), bytes::Bytes::from(payload))
-                                    .await
-                                {
-                                    warn!("realtime epoch {batch_id} marker write failed: {e}");
+                                if let Some(h) = commit_handle.take() {
+                                    let _ = h.await;
                                 }
-                                commit_source_offsets(ck).await;
+                                let ck2 = ck.clone();
+                                let bid = batch_id;
+                                commit_handle = Some(tokio::spawn(async move {
+                                    let payload = format!(
+                                        "v1\n{{\"batchId\":{bid},\"timestamp\":{}}}\n",
+                                        std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|d| d.as_millis())
+                                            .unwrap_or(0)
+                                    );
+                                    if let Err(e) = ck2
+                                        .put(&format!("offsets/{bid}"), bytes::Bytes::from(payload))
+                                        .await
+                                    {
+                                        warn!("realtime epoch {bid} marker write failed: {e}");
+                                    }
+                                    commit_source_offsets(&ck2).await;
+                                }));
                             }
                             record(&plan, mb_id, t0.elapsed().as_millis());
                             batch_id += 1;
@@ -508,7 +523,11 @@ impl StreamingQuery {
                         }
                     }
                 }
-                // Final commit on stop.
+                // Final commit on stop: drain the in-flight off-path commit, then a final sync commit
+                // so the last epoch's staged offsets/state land committed at a consistent boundary.
+                if let Some(h) = commit_handle.take() {
+                    let _ = h.await;
+                }
                 if let Some(ck) = &ck {
                     commit_source_offsets(ck).await;
                 }
