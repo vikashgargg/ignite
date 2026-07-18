@@ -263,7 +263,13 @@ impl ExecutionPlan for KafkaSinkExec {
             let mut cfg = ClientConfig::new();
             cfg.set("bootstrap.servers", &bootstrap);
             cfg.set("linger.ms", "5");
-            cfg.set("queue.buffering.max.messages", "2000000");
+            cfg.set("queue.buffering.max.messages", "1000000");
+            // EPIC-M (memory): BOUND the per-producer send buffer. librdkafka defaults
+            // queue.buffering.max.kbytes to 1 GiB; with one producer per sink task (up to 16) that is
+            // up to 16 GiB of in-flight buffer — the realtime passthrough RSS blow-up vs Flink (13 vs
+            // 3.9 GiB). 128 MiB/producer keeps lz4-batched throughput while bounding total memory,
+            // and the QueueFull await still applies exact backpressure (Flink bounded network buffers).
+            cfg.set("queue.buffering.max.kbytes", "131072");
             cfg.set("compression.type", "lz4");
             if exactly_once {
                 // Transactional producer (Flink KafkaSink EXACTLY_ONCE). Stable transactional.id

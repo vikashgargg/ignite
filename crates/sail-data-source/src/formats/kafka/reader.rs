@@ -355,14 +355,14 @@ impl StreamSource for KafkaStreamSource {
         // (no-dup + complete, 1800 rows / 6 windows, 3/3) + C7 (EO across hard kill -9, 2/2). See
         // docs/design/continuous-stateful-eo-fix.md. `VAJRA_RT_SINGLE` opts out to the legacy
         // single-instance realtime reader (NOT EO-complete for multi-partition) as a safety escape.
-        let parallelism = if !bounded && std::env::var("VAJRA_RT_SINGLE").is_ok() {
-            1
-        } else {
-            count_kafka_partitions(&self.options)
-                .await
-                .unwrap_or_else(|| state.config().target_partitions())
-                .max(1)
-        };
+        // EPIC-C: the parallel N-reader path (one reader per Kafka partition) is the proven realtime
+        // path (EO-complete, correctness_gate C6/C7). The `VAJRA_RT_SINGLE` opt-out to the legacy
+        // single-instance reader (NOT EO-complete for multi-partition) was an unproven escape hatch —
+        // removed. Always partition-count parallelism.
+        let parallelism = count_kafka_partitions(&self.options)
+            .await
+            .unwrap_or_else(|| state.config().target_partitions())
+            .max(1);
         Ok(Arc::new(KafkaSourceExec::try_new(
             self.options.clone(),
             Arc::clone(&self.schema),
