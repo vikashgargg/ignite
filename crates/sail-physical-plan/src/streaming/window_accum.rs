@@ -77,14 +77,19 @@ mod prof {
             .load(Ordering::Relaxed);
         let exw = sail_common_datafusion::streaming::event::encoding::EXCHANGE_WAIT_NS
             .load(Ordering::Relaxed);
+        // RFC-observability (MEMORY truth): peak live bytes buffered in the exchange sub-channels — the
+        // direct attribution of the realtime RSS to the shuffle edge (gap = live buffering, not allocator).
+        let peak_mib = sail_common_datafusion::streaming::event::encoding::EXCHANGE_PEAK_BYTES
+            .load(Ordering::Relaxed)
+            / 1048576;
         let pct = |x: u64| x.saturating_mul(100).checked_div(wall).unwrap_or(0);
         // COMPLETE per-stage breakdown (all summed across instances) for EKS pinpointing. The summed
         // ns are CPU across parallel instances — rank the stages by share to find the dominant one.
         log::info!(
-            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) | STAGES(summed-cpu-ms): source_read={} from_json={} exchange_cpu={} exchange_wait={} encode={} finalize={} | rows={} => {} \
+            "WM_PROF[{tag}] wall={}ms input_wait={}ms({}%) | STAGES(summed-cpu-ms): source_read={} from_json={} exchange_cpu={} exchange_wait={} encode={} finalize={} | rows={} | exchange_peak_inflight_MiB={} => {} \
              (rank the largest STAGE = the throughput bottleneck to fix)",
             wall / 1_000_000, iw / 1_000_000, pct(iw),
-            rd / 1_000_000, fj / 1_000_000, ex / 1_000_000, exw / 1_000_000, enc / 1_000_000, fz / 1_000_000, rows,
+            rd / 1_000_000, fj / 1_000_000, ex / 1_000_000, exw / 1_000_000, enc / 1_000_000, fz / 1_000_000, rows, peak_mib,
             if pct(iw) >= 60 { "STARVED(upstream)" } else { "BUSY(window)" },
         );
     }
