@@ -124,6 +124,11 @@ fn encode_prof_enabled() -> bool {
 pub struct EncodedFlowEventStream {
     inner: SendableFlowEventStream,
     schema: SchemaRef,
+    /// Cached all-null Binary marker array, grown on demand and sliced per data batch (EPIC-T/T3
+    /// structural throughput). `new_null_array(Binary, n)` allocates an (n+1)-element offsets buffer
+    /// EVERY data batch at EVERY operator boundary (~6/batch); a cached array sliced to `n` shares
+    /// buffers (O(1)) — the alloc happens only when the batch grows past the cache.
+    null_marker: Option<ArrayRef>,
 }
 
 impl EncodedFlowEventStream {
@@ -132,10 +137,11 @@ impl EncodedFlowEventStream {
         Self {
             inner: stream,
             schema: Arc::new(schema),
+            null_marker: None,
         }
     }
 
-    pub fn encode(&self, event: FlowEvent) -> Result<RecordBatch> {
+    pub fn encode(&mut self, event: FlowEvent) -> Result<RecordBatch> {
         let _t = encode_prof_enabled().then(std::time::Instant::now);
         let out = self.encode_inner(event);
         if let Some(t) = _t {
@@ -147,13 +153,20 @@ impl EncodedFlowEventStream {
         out
     }
 
-    fn encode_inner(&self, event: FlowEvent) -> Result<RecordBatch> {
+    fn encode_inner(&mut self, event: FlowEvent) -> Result<RecordBatch> {
         let columns = match event {
             FlowEvent::Data { batch, retracted } => {
-                let mut columns: Vec<ArrayRef> = vec![
-                    new_null_array(&DataType::Binary, batch.num_rows()),
-                    Arc::new(retracted),
-                ];
+                let n = batch.num_rows();
+                // Reuse a cached all-null marker array, sliced to `n` (O(1), shares buffers) instead of
+                // allocating a fresh (n+1) offsets buffer per batch. Grow (rounded to ≥8Ki) on demand.
+                if self.null_marker.as_ref().is_none_or(|a| a.len() < n) {
+                    self.null_marker = Some(new_null_array(&DataType::Binary, n.max(8192)));
+                }
+                let marker = match &self.null_marker {
+                    Some(a) => a.slice(0, n),
+                    None => new_null_array(&DataType::Binary, n),
+                };
+                let mut columns: Vec<ArrayRef> = vec![marker, Arc::new(retracted)];
                 columns.extend(batch.columns().iter().cloned());
                 columns
             }
@@ -251,6 +264,16 @@ impl DecodedMultiFlowEventStream {
         // or continuous non-marker rows (data rows).
         let mut events = vec![];
         let (marker, retracted, data) = self.get_special_columns_and_data(&batch)?;
+        // FAST PATH (EPIC-T/T3, Flink-chaining analog): an all-data batch (no marker rows — the
+        // overwhelmingly common case, markers are rare) is exactly ONE Data event. Skip the
+        // O(num_rows) per-row marker-validity scan below — pure structural overhead paid at every
+        // one of ~6 operator boundaries per batch.
+        if batch.num_rows() > 0 && marker.null_count() == batch.num_rows() {
+            return Ok(vec![FlowEvent::Data {
+                batch: data,
+                retracted: retracted.clone(),
+            }]);
+        }
         let mut start_data_index = None;
         for i in 0..batch.num_rows() {
             if marker.is_valid(i) {
