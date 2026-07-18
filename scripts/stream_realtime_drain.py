@@ -60,12 +60,26 @@ q = (agg.writeStream.format("parquet").option("path", OUT).option("checkpointLoc
      .outputMode("append").trigger(realTime=RT_DUR).start())
 print(f"RT_STARTED trigger=realTime dur='{RT_DUR}' -> {OUT}", flush=True)
 
-drain_s = None
+drain_s = None       # OUTPUT-completeness (cadence-gated — kept for completeness, NOT throughput)
+consume_s = None     # CONSUMPTION-rate (RFC-observability: the REAL throughput — how fast N is read)
+seen_batches = {}    # batchId -> numInputRows (dedup; sum = rows consumed)
 while time.time() - t0 < MAX_SECS:
     time.sleep(4)
-    w, tot, mn, mx = s3_sum()
     el = time.time() - t0
-    print(f"RT_DRAIN_PROGRESS windows={w} sum={tot} t={el:.1f}s", flush=True)
+    # Consumption metric: accumulate the query's own numInputRows per epoch (StreamingQueryProgress).
+    # This measures read/compute rate, unaffected by the commit cadence that gates the S3 output.
+    try:
+        for p in (q.recentProgress or []):
+            bid = p.get("batchId")
+            if bid is not None:
+                seen_batches[bid] = max(seen_batches.get(bid, 0), int(p.get("numInputRows", 0) or 0))
+    except Exception:
+        pass
+    consumed = sum(seen_batches.values())
+    if consume_s is None and consumed >= N:
+        consume_s = el
+    w, tot, mn, mx = s3_sum()
+    print(f"RT_DRAIN_PROGRESS consumed={consumed} windows={w} sum={tot} t={el:.1f}s", flush=True)
     if tot >= N:
         drain_s = el
         break
@@ -77,7 +91,13 @@ time.sleep(3)
 w, tot, mn, mx = s3_sum()
 if drain_s is None:
     drain_s = time.time() - t0
+consumed = sum(seen_batches.values())
+if consume_s is None and consumed >= N:
+    consume_s = drain_s
 thr = N / drain_s / 1e6 if drain_s > 0 else 0.0
+if consume_s and consume_s > 0:
+    print(f"VAJRA_CONSUME_RATE consumed={consumed} consume_s={consume_s:.1f} "
+          f"throughput={N/consume_s/1e6:.3f}M_ev/s (REAL read/compute rate, cadence-independent)", flush=True)
 print(f"VAJRA_REALTIME_DRAIN events={N} drain_s={drain_s:.1f} throughput={thr:.3f}M_ev/s trigger=realTime", flush=True)
 print(f"VAJRA_COMPLETENESS windows={w} sum={tot} per_group[min={mn} max={mx}] "
       f"EXACT={'YES' if (w==10 and tot==N and mn==mx==10000) else 'NO'}", flush=True)

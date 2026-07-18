@@ -54,6 +54,29 @@ pub static SHUFFLE_RECV_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::At
 /// DISTRIBUTED shuffle byte + batch volume across the stage boundary (throughput/serialize denominator).
 pub static SHUFFLE_SEND_BATCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static SHUFFLE_RECV_BATCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// RFC-observability (MEMORY truth): live in-flight Arrow bytes buffered in the exchange sub-channels
+/// (sent − received). The 2026-07-01 A/B proved the streaming RSS gap is LIVE BUFFERING not the allocator,
+/// so this PEAK gauge directly attributes the realtime memory to the shuffle edge. `EXCHANGE_PEAK_BYTES`
+/// is the high-water mark, dumped with the stage report.
+pub static EXCHANGE_INFLIGHT_BYTES: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+pub static EXCHANGE_PEAK_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Account `bytes` entering (+) / leaving (−) the exchange in-flight buffer, tracking the peak. Cheap
+/// (relaxed atomics); gated by the caller to the prof path. `signed` = +bytes on send, −bytes on recv.
+pub fn inflight_account(signed: i64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let cur = EXCHANGE_INFLIGHT_BYTES.fetch_add(signed, Relaxed) + signed;
+    if signed > 0 && cur > 0 {
+        let cur_u = cur as u64;
+        // monotonic peak update (compare-and-set loop, only grows)
+        let mut peak = EXCHANGE_PEAK_BYTES.load(Relaxed);
+        while cur_u > peak {
+            match EXCHANGE_PEAK_BYTES.compare_exchange_weak(peak, cur_u, Relaxed, Relaxed) {
+                Ok(_) => break,
+                Err(p) => peak = p,
+            }
+        }
+    }
+}
 /// Convenience: add `nanos` to a profiling counter only when profiling is enabled (cheap guard).
 pub fn prof_add(counter: &std::sync::atomic::AtomicU64, nanos: u64) {
     counter.fetch_add(nanos, std::sync::atomic::Ordering::Relaxed);
@@ -106,11 +129,13 @@ fn ensure_process_dumper() {
                         .join(" ");
                     let sb = SHUFFLE_SEND_BATCHES.load(Relaxed);
                     let rb = SHUFFLE_RECV_BATCHES.load(Relaxed);
+                    let peak_mib = EXCHANGE_PEAK_BYTES.load(Relaxed) / 1048576;
                     // stderr (not log::) so it is captured by `kubectl logs` on EVERY pod regardless of
                     // that pod's RUST_LOG — this diagnostic is gated solely by VAJRA_WM_PROF.
                     eprintln!(
                         "WM_PROF_PROC[pid={pid} host={host}] STAGES(cpu-ms): {stages} \
-                         | shuffle_send_batches={sb} shuffle_recv_batches={rb}"
+                         | shuffle_send_batches={sb} shuffle_recv_batches={rb} \
+                         | exchange_peak_inflight_MiB={peak_mib}"
                     );
                 }
             })

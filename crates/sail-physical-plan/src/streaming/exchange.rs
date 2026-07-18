@@ -428,6 +428,12 @@ async fn distribute(
                         }
                     };
                     let _w = _ex.map(|_| std::time::Instant::now());
+                    // RFC-observability (memory truth): account bytes ENTERING the exchange in-flight.
+                    if sail_common_datafusion::streaming::event::encoding::wm_prof_enabled() {
+                        sail_common_datafusion::streaming::event::encoding::inflight_account(
+                            b.get_array_memory_size() as i64,
+                        );
+                    }
                     if senders[owner].send(Ok(b)).await.is_err() {
                         return;
                     }
@@ -708,7 +714,16 @@ fn merge_output_subchannels(
                     Some(Err(e)) => { yield Err(e); return; }
                     Some(Ok(batch)) => {
                         match classify_mk(&batch) {
-                            Mk::Data => { idle_marked[j] = false; yield Ok(batch); }
+                            Mk::Data => {
+                                idle_marked[j] = false;
+                                // RFC-observability: account bytes LEAVING the exchange in-flight.
+                                if sail_common_datafusion::streaming::event::encoding::wm_prof_enabled() {
+                                    sail_common_datafusion::streaming::event::encoding::inflight_account(
+                                        -(batch.get_array_memory_size() as i64),
+                                    );
+                                }
+                                yield Ok(batch);
+                            }
                             Mk::Watermark(ts) => {
                                 idle_marked[j] = false; // active again
                                 wm[j] = Some(wm[j].map_or(ts, |c| c.max(ts)));
