@@ -16,7 +16,7 @@ spec:
       nodeSelector: { role: compute }
       containers:
         - name: server
-          image: __ECR__/vajra:eo-multipart
+          image: __ECR__/vajra:t7jp
           args: ["server", "--ip", "0.0.0.0", "--port", "50051", "--mode", "local-cluster", "--workers", "4"]
           ports: [ { containerPort: 50051 } ]
           resources:
@@ -25,6 +25,14 @@ spec:
           env:
             - { name: RUST_LOG, value: warn }
             - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
+            # Object-store region (the ap-south-1 bucket 301-redirects if the client defaults us-east-1).
+            - { name: AWS_REGION, value: ap-south-1 }
+            - { name: AWS_DEFAULT_REGION, value: ap-south-1 }
+            # jemalloc decay: return freed pages to the OS (bound RSS like Flink/RocksDB). Prof is OFF
+            # here (clean throughput run); flip ON for the memory run via `kubectl set env` with
+            # _RJEM_MALLOC_CONF=prof:true,prof_active:true,lg_prof_sample:19,lg_prof_interval:32,prof_prefix:/tmp/jeprof,...
+            - { name: _RJEM_MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
+            - { name: MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
             # Streaming-memory fix = bound librdkafka's prefetch queue (the C-side driver of the EKS
             # 1.20x-vs-Flink RSS gap). VAJRA_KAFKA_PREFETCH_KBYTES is set per-run by the prefetch sweep;
             # code default 256 MiB/partition. docs/design/streaming-memory-boundedness.md
