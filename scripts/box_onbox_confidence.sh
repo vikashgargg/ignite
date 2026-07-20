@@ -15,9 +15,12 @@ kind get clusters 2>/dev/null | grep -qx "$CL" || kind create cluster --name "$C
 kind load docker-image vajra:prof --name "$CL"
 kubectl --context "$CTX" create ns "$NS" 2>/dev/null || true
 
-echo "############ PHASE 0c: deploy Kafka + MinIO (full-res for 100M) ############"
-kk apply -f k8s/stream/kafka.yaml >/dev/null
-kk set resources deploy/kafka --requests=cpu=2,memory=3Gi --limits=cpu=4,memory=6Gi
+echo "############ PHASE 0c: deploy Kafka + MinIO (single apply, no double-rollout; 8-vCPU-safe) ############"
+# Apply ONCE with scaled resources baked in (a second `set resources` caused a rollout that raced the
+# produce and lost the topic last time). CPU fits 8 vCPU (kafka 2 + vajra 4). Kafka mem limit 14Gi so
+# 100M (~10 GB) page-cache doesn't trip the cgroup.
+sed -E 's/cpu: "[0-9]+"/cpu: "2"/g; s/memory: "16Gi"/memory: "4Gi"/g; s/memory: "26Gi"/memory: "14Gi"/g' \
+  k8s/stream/kafka.yaml | kk apply -f - >/dev/null
 kk apply -f k8s/kind/minio.yaml >/dev/null
 kk rollout status deploy/kafka --timeout=200s; kk rollout status deploy/minio --timeout=120s
 KPOD=$(kk get pod -l app=kafka -o jsonpath='{.items[0].metadata.name}')
@@ -41,7 +44,7 @@ spec:
           imagePullPolicy: Never
           args: ["server","--ip","0.0.0.0","--port","50051","--mode","local-cluster","--workers","4"]
           ports: [ { containerPort: 50051 } ]
-          resources: { requests: { cpu: "6", memory: "16Gi" }, limits: { cpu: "12", memory: "22Gi" } }
+          resources: { requests: { cpu: "4", memory: "10Gi" }, limits: { cpu: "5", memory: "24Gi" } }
           env:
             - { name: RUST_LOG, value: warn }
             - { name: SAIL_RUNTIME__STACK_SIZE, value: "16777216" }
@@ -72,7 +75,11 @@ kk cp scripts/stream_realtime_drain.py vajra-client:/tmp/rt_drain.py
 echo "############ PHASE 1: produce $N + Vajra realtime -> MinIO ############"
 BOOT=kafka.stream.svc.cluster.local:9092
 kk exec vajra-client -- sh -c "BOOT=$BOOT TOPIC=events N=$N K=1000 EPMS=1000 NP=8 python3 /tmp/scale_producer.py 2>&1 | tail -2" || true
-kk exec "$KPOD" -- bash -c "/opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic events 2>/dev/null | awk -F: '{s+=\$3} END{print \"kafka total offset =\",s}'"
+# Re-resolve kafka pod (guard against a mid-run restart) and ASSERT the topic actually holds N.
+KPOD=$(kk get pod -l app=kafka -o jsonpath='{.items[0].metadata.name}')
+OFF=$(kk exec "$KPOD" -- bash -c "/opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic events 2>/dev/null" | awk -F: '{s+=$3} END{print s+0}')
+echo "kafka total offset = $OFF (expected $N)"
+if [ "$OFF" -lt "$N" ]; then echo "FATAL: kafka has $OFF < $N — produce/topic lost, aborting drain (fix infra, do not trust downstream numbers)"; kk get pods; exit 3; fi
 SR="sc://vajra-stream.stream.svc.cluster.local:50051"
 kk exec vajra-client -- sh -c \
  "AWS_ENDPOINT=$EP AWS_ENDPOINT_URL=$EP AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_ALLOW_HTTP=true AWS_REGION=us-east-1 \

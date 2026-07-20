@@ -7,13 +7,21 @@
 # Usage: N=100000000 scripts/box_confidence_100m.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-N="${N:-100000000}"; REGION="${REGION:-ap-south-1}"; ITYPE="${INSTANCE_TYPE:-c7g.4xlarge}"
+N="${N:-100000000}"; REGION="${REGION:-ap-south-1}"; ITYPE="${INSTANCE_TYPE:-r7g.2xlarge}"  # 8 vCPU / 64 GiB — Kafka+Vajra headroom for 100M
 PROFILE="${PROFILE:-vajra-bench-ec2}"; SG="${SG:-sg-043445d6492980581}"; SUBNET="${SUBNET:-subnet-07d37405bf8df92fa}"
 AMI="$(aws ssm get-parameter --region "$REGION" --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --query Parameter.Value --output text)"
 KEY=/tmp/zelox-conf-key.pem; KN="zelox-conf-$$"
 mask(){ sed -E 's/[0-9]{12}/<ACCT>/g'; }
 KEEP="${KEEP:-0}"   # KEEP=1 leaves the box up for inspection
-cleanup(){ set +e; if [ "$KEEP" = "0" ]; then [ -n "${IID:-}" ] && aws ec2 terminate-instances --region "$REGION" --instance-ids "$IID" >/dev/null 2>&1; fi; aws ec2 delete-key-pair --region "$REGION" --key-name "$KN" >/dev/null 2>&1; rm -f "$KEY"; echo "cleanup done (KEEP=$KEEP)"; }
+cleanup(){ set +e;
+  if [ "$KEEP" = "0" ]; then
+    [ -n "${IID:-}" ] && aws ec2 terminate-instances --region "$REGION" --instance-ids "$IID" >/dev/null 2>&1
+    aws ec2 delete-key-pair --region "$REGION" --key-name "$KN" >/dev/null 2>&1; rm -f "$KEY"
+    echo "cleanup done (terminated + key removed)"
+  else
+    # KEEP=1: leave the box AND the key so it stays reachable for inspection/re-run.
+    echo "KEEP=1 — box $IID LEFT UP, key at $KEY (ssh -i $KEY ec2-user@${IP:-<ip>}); terminate manually when done"
+  fi; }
 trap cleanup EXIT
 
 MYIP4="$(curl -4 -s ifconfig.me)"; aws ec2 authorize-security-group-ingress --region "$REGION" --group-id "$SG" --protocol tcp --port 22 --cidr "$MYIP4/32" >/dev/null 2>&1 || true
