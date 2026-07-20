@@ -74,7 +74,10 @@ kk cp scripts/stream_realtime_drain.py vajra-client:/tmp/rt_drain.py
 
 echo "############ PHASE 1: produce $N + Vajra realtime -> MinIO ############"
 BOOT=kafka.stream.svc.cluster.local:9092
-kk exec vajra-client -- sh -c "BOOT=$BOOT TOPIC=events N=$N K=1000 EPMS=1000 NP=8 python3 /tmp/scale_producer.py 2>&1 | tail -2" || true
+# CLOSER_TS: high-ts sentinel per partition so the watermark advances past the last window (10s windows
+# over 100s of data at EPMS=1000; closer at base+200s) — else the final window never closes and the drain
+# times out looking incomplete (that made the prior box run read 9/10 windows — a harness omission, not a bug).
+kk exec vajra-client -- sh -c "BOOT=$BOOT TOPIC=events N=$N K=1000 EPMS=1000 NP=8 CLOSER_TS=1700000200000 python3 /tmp/scale_producer.py 2>&1 | tail -2" || true
 # Re-resolve kafka pod (guard against a mid-run restart) and ASSERT the topic actually holds N.
 KPOD=$(kk get pod -l app=kafka -o jsonpath='{.items[0].metadata.name}')
 OFF=$(kk exec "$KPOD" -- bash -c "/opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic events 2>/dev/null" | awk -F: '{s+=$3} END{print s+0}')

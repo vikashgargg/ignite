@@ -29,10 +29,19 @@ REGION = os.environ.get("AWS_REGION", "ap-south-1")
 BUCKET = OUT.replace("s3://", "").split("/", 1)[0]
 PREFIX = OUT.replace("s3://", "").split("/", 1)[1]
 
+# MinIO (box/kind) sets AWS_ENDPOINT; real S3 (EKS) does not. The readback MUST honour the endpoint or it
+# silently queries real AWS S3 and reads 0 (this made a valid 90M box run look like 0 — a harness bug).
+_ENDPOINT = os.environ.get("AWS_ENDPOINT") or os.environ.get("AWS_ENDPOINT_URL")
+def _s3fs():
+    if _ENDPOINT:
+        return pafs.S3FileSystem(endpoint_override=_ENDPOINT, allow_bucket_creation=False,
+                                 scheme="http" if _ENDPOINT.startswith("http://") else "https")
+    return pafs.S3FileSystem(region=REGION)
+
 def s3_sum():
     """Read the S3 output committed so far: (n_windows, sum_count, min_cnt, max_cnt). 0s if nothing yet."""
     try:
-        s3 = pafs.S3FileSystem(region=REGION)
+        s3 = _s3fs()
         sel = pafs.FileSelector(f"{BUCKET}/{PREFIX}", recursive=True)
         files = [f.path for f in s3.get_file_info(sel)
                  if f.path.endswith(".parquet") and "_spark_metadata" not in f.path]
