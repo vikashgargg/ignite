@@ -165,7 +165,13 @@ impl TaskRunner {
     fn rewrite_source_fusion(
         plan: Arc<dyn ExecutionPlan>,
     ) -> ExecutionResult<Arc<dyn ExecutionPlan>> {
-        if std::env::var_os("VAJRA_T7_FUSE").is_none() {
+        // Default-ON (prod-grade): source-fusion drops the raw `value:Binary` materialization, the
+        // grounded memory+throughput lever. Conservative (bails byte-identical on any unrecognized
+        // shape), so it is safe as a default. Opt OUT with `VAJRA_T7_FUSE=0` for A/B or debugging.
+        if matches!(
+            std::env::var("VAJRA_T7_FUSE").as_deref(),
+            Ok("0") | Ok("false") | Ok("off")
+        ) {
             return Ok(plan);
         }
         let result = plan.transform(|node| {

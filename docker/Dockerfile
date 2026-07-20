@@ -53,9 +53,15 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 RUN cargo fetch --locked
 
+# CARGO_FEATURES: jemalloc = prod allocator (returns freed pages via decay, bounds RSS the way
+# Flink/RocksDB/ForSt do) + heap-profiler (prof:true via MALLOC_CONF names live-heap call-stacks).
+ARG CARGO_FEATURES=jemalloc
+# RELEASE_DEBUG=1 keeps line-table symbols so jeprof can attribute heap call-stacks to source.
+ARG RELEASE_DEBUG=1
 RUN CARGO_BUILD_JOBS=${CARGO_JOBS:-$(nproc)} \
     CARGO_PROFILE_RELEASE_LTO=off \
-    cargo build --release -p sail-cli --bins \
+    CARGO_PROFILE_RELEASE_DEBUG=${RELEASE_DEBUG} \
+    cargo build --release -p sail-cli --bins ${CARGO_FEATURES:+--features ${CARGO_FEATURES}} \
     && cp /app/target/release/vajra /usr/local/bin/vajra
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
