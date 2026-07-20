@@ -6,9 +6,17 @@ set -uo pipefail
 ROOT="$HOME/zelox"; cd "$ROOT"
 N="${N:-100000000}"; NS=stream; CL=zelox-conf; CTX="kind-$CL"
 kk(){ kubectl --context "$CTX" -n "$NS" "$@"; }
-echo "############ PHASE 0: build strip=false jemalloc-prof image ############"
-docker build -f docker/Dockerfile --build-arg CARGO_FEATURES=jemalloc --build-arg RELEASE_STRIP=false \
-  -t vajra:prof . 2>&1 | tail -3
+echo "############ PHASE 0: get strip=false jemalloc-prof image (pull from ECR else build+push) ############"
+REGION="${REGION:-ap-south-1}"
+ECR="$(aws ecr describe-repositories --region "$REGION" --repository-name vajra --query 'repositories[0].repositoryUri' --output text 2>/dev/null)"
+aws ecr get-login-password --region "$REGION" 2>/dev/null | docker login --username AWS --password-stdin "${ECR%/vajra}" >/dev/null 2>&1 || true
+if [ -n "$ECR" ] && docker pull "${ECR}:prof" 2>/dev/null; then
+  docker tag "${ECR}:prof" vajra:prof; echo "pulled ${ECR##*/}:prof (skip build)"
+else
+  docker build -f docker/Dockerfile --build-arg CARGO_FEATURES=jemalloc --build-arg RELEASE_STRIP=false \
+    -t vajra:prof . 2>&1 | tail -3
+  [ -n "$ECR" ] && { docker tag vajra:prof "${ECR}:prof" && docker push "${ECR}:prof" >/dev/null 2>&1 && echo "pushed ${ECR##*/}:prof for reuse"; }
+fi
 
 echo "############ PHASE 0b: kind up + load ############"
 kind get clusters 2>/dev/null | grep -qx "$CL" || kind create cluster --name "$CL" --config k8s/kind/kind-cluster.yaml
@@ -103,12 +111,38 @@ if [ -n "$LH" ]; then
     'apt-get update -q >/dev/null 2>&1; apt-get install -y -q libjemalloc-dev binutils >/dev/null 2>&1; echo "=== JEPROF TOP (inuse_space) ==="; jeprof --text --inuse_space /w/vajra-bin /w/vajra.heap 2>/dev/null | head -20'
 else echo "no jeprof heap (alloc < interval)"; fi
 
-echo "############ PHASE 2: Flink realtime 100M apples-to-apples ############"
-if [ -f k8s/stream/flink-session.yaml ] && [ -f scripts/eks_flink_wagg_complete.sh ]; then
-  echo "Flink phase: deploy + realtime drain (best-effort; memory answer already captured above)"
-  # Reuse the flink manifests; scale for the box. (Kept best-effort so a Flink hiccup can't lose Phase-1.)
-  kk apply -f k8s/stream/flink-session.yaml >/dev/null 2>&1 || true
-else echo "Flink scaffolding not found in tree — skip (Phase-1 memory/throughput is the priority)"; fi
+echo "############ PHASE 2: Flink realtime 100M apples-to-apples (same events topic + query) ############"
+# Sequential: free RAM by removing Vajra first so Flink TM gets the box to itself (fair — Vajra also had
+# it to itself in Phase 1). Same 100M events topic, same 10s tumble COUNT, same Kafka-lag/sink completeness.
+kk delete deploy/vajra-stream --ignore-not-found >/dev/null 2>&1; sleep 5
+KPOD=$(kk get pod -l app=kafka -o jsonpath='{.items[0].metadata.name}')
+kk exec "$KPOD" -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --if-not-exists --topic wagg_out --partitions 8 --replication-factor 1 >/dev/null 2>&1 || true
+# Scale flink-session for the box: TM 12Gi/8 slots (Vajra used 4 workers; 8 slots is a fair-to-generous
+# match on 8 vCPU), JM small. parallelism 16->8 in the SQL.
+sed -E 's/taskmanager.numberOfTaskSlots: 16/taskmanager.numberOfTaskSlots: 8/; s/taskmanager.memory.process.size: 24576m/taskmanager.memory.process.size: 12288m/; s/cpu: "1[0-9]"/cpu: "6"/g; s/memory: "2[0-9]Gi"/memory: "13Gi"/g; /nodeSelector/d; /role: compute/d; /role: kafka/d' \
+  k8s/stream/flink-session.yaml | kk apply -f - >/dev/null
+kk wait --for=condition=available --timeout=300s deployment/flink-jm >/dev/null 2>&1 || echo "WARN jm"
+kk wait --for=condition=available --timeout=300s deployment/flink-tm >/dev/null 2>&1 || echo "WARN tm"
+JM=$(kk get pod -l app=flink,component=jm -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+for i in $(seq 1 40); do kk exec "$JM" -- sh -c 'curl -sf localhost:8081/overview >/dev/null' 2>/dev/null && break; sleep 5; done
+sed 's/parallelism.default. = .16./parallelism.default'"'"' = '"'"'8/' k8s/stream/flink-sql-realtime.sql > /tmp/flink-sql-box.sql
+kk create configmap flink-sql-rt --from-file=flink-sql.sql=/tmp/flink-sql-box.sql --dry-run=client -o yaml | kk apply -f - >/dev/null
+kk delete job flink-rt --ignore-not-found >/dev/null 2>&1
+sed -e 's/name: flink-runner/name: flink-rt/' -e 's/name: flink-sql }/name: flink-sql-rt }/' k8s/stream/flink-runner-job.yaml | kk apply -f - >/dev/null
+kk wait --for=condition=complete --timeout=300s job/flink-rt >/dev/null 2>&1 || echo "WARN submit"
+t0=$(date +%s); FLINK_DRAIN=""
+echo "--- poll wagg_out until 10 windows x 1000 keys = 10000 rows ---"
+for i in $(seq 1 200); do
+  sleep 3
+  MSGS=$(kk exec "$KPOD" -- /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server localhost:9092 --topic wagg_out 2>/dev/null | awk -F: '{s+=$3} END{print s+0}')
+  el=$(( $(date +%s) - t0 ))
+  [ $((i % 10)) -eq 0 ] && echo "  t=${el}s wagg_out_rows=${MSGS:-?}"
+  [ -n "$MSGS" ] && [ "$MSGS" -ge 10000 ] 2>/dev/null && { FLINK_DRAIN=$el; break; }
+done
+TM=$(kk get pod -l app=flink,component=tm -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+FMEM=$(kk exec "$TM" -- sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null' 2>/dev/null)
+[ -z "$FLINK_DRAIN" ] && FLINK_DRAIN=$(( $(date +%s) - t0 ))
+awk -v d="$FLINK_DRAIN" -v n="$N" -v m="${FMEM:-0}" 'BEGIN{printf "FLINK_WAGG_COMPLETE drain_s=%d throughput=%.3fM_ev/s peakTM_RSS=%.2f GiB\n", d, n/d/1e6, m/1073741824}'
 
 echo "############ RESULTS SUMMARY ############"
 echo "See VAJRA_PEAK_RSS / VAJRA_ANON / VAJRA_REALTIME_DRAIN / JEPROF TOP / WM_PROF above."
