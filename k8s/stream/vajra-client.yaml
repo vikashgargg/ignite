@@ -17,7 +17,7 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
-          pip install --quiet "setuptools<81" pyspark==3.5.3 grpcio grpcio-status protobuf googleapis-common-protos pandas pyarrow confluent-kafka
+          pip install --quiet "setuptools<81" pyspark-client==4.2.0 grpcio grpcio-status protobuf googleapis-common-protos pandas pyarrow confluent-kafka boto3
           echo CLIENT_READY
           sleep infinity
       resources:
