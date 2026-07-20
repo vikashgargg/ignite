@@ -56,10 +56,10 @@ RUN cargo fetch --locked
 # CARGO_FEATURES: jemalloc = prod allocator (returns freed pages via decay, bounds RSS the way
 # Flink/RocksDB/ForSt do) + heap-profiler (prof:true via MALLOC_CONF names live-heap call-stacks).
 ARG CARGO_FEATURES=jemalloc
-# RELEASE_DEBUG=1 keeps line-table symbols AND RELEASE_STRIP=false prevents [profile.release] strip=true
-# from removing them — both are required for jeprof to attribute heap call-stacks to source.
-ARG RELEASE_DEBUG=1
-ARG RELEASE_STRIP=false
+# Prod default: stripped (small image). Profiling builds pass RELEASE_DEBUG=1 + RELEASE_STRIP=false so
+# jeprof can attribute heap call-stacks to source (box_onbox_confidence.sh does this).
+ARG RELEASE_DEBUG=0
+ARG RELEASE_STRIP=true
 RUN CARGO_BUILD_JOBS=${CARGO_JOBS:-$(nproc)} \
     CARGO_PROFILE_RELEASE_LTO=off \
     CARGO_PROFILE_RELEASE_DEBUG=${RELEASE_DEBUG} \
