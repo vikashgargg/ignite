@@ -120,7 +120,13 @@ impl ExecutionPlan for FlowEventToDataExec {
                     }
                 }
                 match batch.project(&keep) {
-                    Ok(data) if data.num_rows() > 0 => yield Ok(data),
+                    Ok(data) if data.num_rows() > 0 => {
+                        // KEY_TRACE: census the EXACT rows handed to the file writer (post flow-event
+                        // decode). If distinct-k here < the window emit, corruption is in the emit→sink
+                        // path (encode/coalesce); if here == window but the file < here, it's the writer.
+                        sail_common_datafusion::streaming::event::encoding::key_trace("sink_in", &data);
+                        yield Ok(data)
+                    }
                     Ok(_) => {}
                     Err(e) => { yield Err(e.into()); return; }
                 }

@@ -151,14 +151,33 @@ pub fn key_trace(tag: &str, batch: &datafusion::arrow::record_batch::RecordBatch
                 }
             }
         };
+        // Per-BATCH distinct for LARGE batches (>2000 rows): the cumulative set masks the final big
+        // emit (all windows closing at once). This isolates whether THAT batch is already corrupt.
+        let mut batch_distinct: std::collections::HashSet<i64> = std::collections::HashSet::new();
         if let Some(a) = col.as_any().downcast_ref::<Int32Array>() {
             for r in 0..a.len() {
-                push((!a.is_null(r)).then(|| a.value(r) as i64));
+                let v = (!a.is_null(r)).then(|| a.value(r) as i64);
+                push(v);
+                if let Some(k) = v {
+                    batch_distinct.insert(k);
+                }
             }
         } else if let Some(a) = col.as_any().downcast_ref::<Int64Array>() {
             for r in 0..a.len() {
-                push((!a.is_null(r)).then(|| a.value(r)));
+                let v = (!a.is_null(r)).then(|| a.value(r));
+                push(v);
+                if let Some(k) = v {
+                    batch_distinct.insert(k);
+                }
             }
+        }
+        if col.len() > 2000 {
+            eprintln!(
+                "KEY_TRACE_BATCH[{tag}.{}] batch_rows={} batch_distinct={}",
+                field.name(),
+                col.len(),
+                batch_distinct.len()
+            );
         }
     }
 }
