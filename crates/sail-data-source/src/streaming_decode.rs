@@ -892,6 +892,10 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                     Ok(FlowEvent::Data { batch, .. }) => {
                         // Append-only realtime (stateless): retractions don't occur. Buffer rows.
                         if batch.num_rows() > 0 {
+                            // KEY_TRACE: census the EXACT decoded rows the sink buffers → parquet. If
+                            // distinct-k here == window emit but the FILE < here, the parquet writer is
+                            // the culprit; if < window emit, the window→sink path (projection) is.
+                            sail_common_datafusion::streaming::event::encoding::key_trace("sink_buffer", &batch);
                             buffer.push(batch);
                         }
                     }
