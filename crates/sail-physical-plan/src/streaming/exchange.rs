@@ -378,8 +378,6 @@ async fn distribute(
                 let mut wait_ns: u64 = 0; // time BLOCKED on send (backpressure) — separated from route CPU
                 let sch = batch.schema();
                 let nrows = batch.num_rows();
-                // KEY_TRACE: census the batch ENTERING the exchange (pre-route) — the upstream key cardinality.
-                sail_common_datafusion::streaming::event::encoding::key_trace("exch_in", &batch);
                 // Per-row key-group (matches BatchPartitioner) -> owning instance, then ONE take per
                 // owner = a single copy pass (was 128-way take + concat re-merge = two passes).
                 let arrays = match hash_keys
@@ -436,8 +434,6 @@ async fn distribute(
                             b.get_array_memory_size() as i64,
                         );
                     }
-                    // KEY_TRACE: census the routed (post-take) batch so a key take/route mislabel shows here.
-                    sail_common_datafusion::streaming::event::encoding::key_trace("exch_out", &b);
                     if senders[owner].send(Ok(b)).await.is_err() {
                         return;
                     }
