@@ -38,6 +38,35 @@ def _s3fs():
                                  scheme="http" if _ENDPOINT.startswith("http://") else "https")
     return pafs.S3FileSystem(region=REGION)
 
+def assert_reader_integrity(files, s3):
+    """Fail LOUDLY if the parquet decoder is broken, rather than report phantom data corruption.
+    pyarrow 25.0.0 on linux-arm64 mis-decodes arrow-rs `RLE_DICTIONARY` int columns (indices collapse
+    toward one dict slot), which for 22 days looked like a Vajra realtime key-corruption bug — it was
+    the READER. A pyarrow write→read self-test does NOT catch it (the bug is specific to arrow-rs's dict
+    page layout), so we CROSS-CHECK an independent reader (duckdb) on the real files and abort on
+    disagreement. See project_realtime_key_corruption_bug (RESOLVED 2026-07-21) +
+    feedback_verify_measurement_not_imagine. Prefer duckdb / Vajra-readback over pyarrow on arm64."""
+    import platform, pyarrow as pa
+    try:
+        import duckdb  # independent C++ parquet impl; disagreement ⇒ one reader is broken
+    except Exception:
+        if pa.__version__ == "25.0.0" and platform.machine() in ("aarch64", "arm64"):
+            raise SystemExit("FATAL: pyarrow 25.0.0 on arm64 mis-decodes arrow-rs RLE_DICTIONARY parquet "
+                             "(phantom key corruption). Pin pyarrow<=21 or install duckdb. Aborting so "
+                             "verification does not report FALSE corruption.")
+        return
+    f0 = files[0]
+    t = ds.dataset([f0], filesystem=s3, format="parquet").to_table()
+    pa_dk = pc.count_distinct(t.filter(pc.greater_equal(t.column("k"), 0)).column("k")).as_py()
+    raw = s3.open_input_stream(f0).readall() if hasattr(s3, "open_input_stream") else None
+    if raw is not None:
+        open("/tmp/_ri.parquet", "wb").write(raw)
+        du_dk = duckdb.sql("select count(distinct k) from read_parquet('/tmp/_ri.parquet') where k>=0").fetchone()[0]
+        if pa_dk != du_dk:
+            raise SystemExit(f"FATAL: parquet readers DISAGREE on distinct k (pyarrow {pa.__version__}="
+                             f"{pa_dk}, duckdb={du_dk}). One decoder is broken — refusing to report a "
+                             f"result. Use the reader that matches Vajra's own readback.")
+
 def s3_sum():
     """Read the S3 output committed so far: (n_windows, sum_count, min_cnt, max_cnt). 0s if nothing yet."""
     try:
@@ -47,11 +76,14 @@ def s3_sum():
                  if f.path.endswith(".parquet") and "_spark_metadata" not in f.path]
         if not files:
             return (0, 0, 0, 0)
+        assert_reader_integrity(files, s3)
         t = ds.dataset(files, filesystem=s3, format="parquet").to_table()
         t = t.filter(pc.greater_equal(t.column("k"), 0))
         ws = pc.struct_field(t.column("window"), "start")
         return (pc.count_distinct(ws).as_py(), pc.sum(t.column("count")).as_py(),
                 pc.min(t.column("count")).as_py(), pc.max(t.column("count")).as_py())
+    except SystemExit:
+        raise
     except Exception:
         return (0, 0, 0, 0)
 

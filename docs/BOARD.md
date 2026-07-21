@@ -53,6 +53,12 @@ correctness/EO/state/completeness, path-dependent on memory/throughput, behind o
 passthrough latency + still-unmeasured on e2e latency/cold-start/recovery-time. The active epic
 (VAJ-BF2) targets the one structurally-beatable stage: the distributed exchange.
 
+> **Realtime per-key correctness — TIE CONFIRMED (2026-07-21).** The 2026-07-20 "realtime key-corruption
+> bug" was a **measurement artifact**: pyarrow 25.0.0 on linux-arm64 mis-decodes arrow-rs `RLE_DICTIONARY`
+> int columns. The same file bytes read 1000 distinct keys (uniform 10×/key) via arrow-rs, duckdb, and
+> pyarrow 16.1/18.1/21.0; only pyarrow 25.0.0 gives 944. Vajra realtime windowed-agg output is correct
+> per-key end-to-end. Harness hardened with a reader-integrity guard (duckdb cross-check / pin pyarrow≤21).
+
 ---
 
 ## 2. Active sprint — EPIC VAJ-BF2 (distributed streaming + Arrow-Flight exchange)
