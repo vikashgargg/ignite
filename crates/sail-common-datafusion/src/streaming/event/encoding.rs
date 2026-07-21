@@ -124,35 +124,41 @@ pub fn key_trace(tag: &str, batch: &datafusion::arrow::record_batch::RecordBatch
         return;
     }
     ensure_key_trace_dumper();
-    let Some(col) = batch.column_by_name("k") else {
-        return;
-    };
     use datafusion::arrow::array::{Array, Int32Array, Int64Array};
-    let push = |g: &mut std::collections::BTreeMap<String, KeyStat>, v: Option<i64>| {
-        let s = g.entry(tag.to_string()).or_default();
-        s.rows += 1;
-        match v {
-            None => s.nulls += 1,
-            Some(k) => {
-                if !s.seen {
-                    s.min = k;
-                    s.max = k;
-                    s.seen = true;
-                }
-                s.min = s.min.min(k);
-                s.max = s.max.max(k);
-                s.distinct.insert(k);
-            }
-        }
-    };
     let mut g = key_stats().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(a) = col.as_any().downcast_ref::<Int32Array>() {
-        for i in 0..a.len() {
-            push(&mut g, (!a.is_null(i)).then(|| a.value(i) as i64));
-        }
-    } else if let Some(a) = col.as_any().downcast_ref::<Int64Array>() {
-        for i in 0..a.len() {
-            push(&mut g, (!a.is_null(i)).then(|| a.value(i)));
+    // Census EVERY Int32/Int64 column (robust to whatever the group-key column is named at this stage).
+    // Tag = "stage.colname"; the key column is the one with ~1000 distinct that DROPS at the bad stage.
+    for (i, field) in batch.schema().fields().iter().enumerate() {
+        let col = batch.column(i);
+        let key = format!("{tag}.{}", field.name());
+        let mut push = |v: Option<i64>| {
+            let s = g.entry(key.clone()).or_default();
+            s.rows += 1;
+            match v {
+                None => s.nulls += 1,
+                Some(k) => {
+                    if !s.seen {
+                        s.min = k;
+                        s.max = k;
+                        s.seen = true;
+                    }
+                    s.min = s.min.min(k);
+                    s.max = s.max.max(k);
+                    // cap the set so a genuinely high-cardinality column can't blow memory
+                    if s.distinct.len() < 5000 {
+                        s.distinct.insert(k);
+                    }
+                }
+            }
+        };
+        if let Some(a) = col.as_any().downcast_ref::<Int32Array>() {
+            for r in 0..a.len() {
+                push((!a.is_null(r)).then(|| a.value(r) as i64));
+            }
+        } else if let Some(a) = col.as_any().downcast_ref::<Int64Array>() {
+            for r in 0..a.len() {
+                push((!a.is_null(r)).then(|| a.value(r)));
+            }
         }
     }
 }
