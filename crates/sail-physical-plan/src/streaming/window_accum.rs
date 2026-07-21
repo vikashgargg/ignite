@@ -930,6 +930,11 @@ impl ExecutionPlan for WindowAccumExec {
                                     Ok(mut partials) => {
                                         for b in &partials {
                                             acc.pending_bytes += b.get_array_memory_size();
+                                            // KEY_TRACE: census the per-batch PARTIAL agg output (post-exchange,
+                                            // pre-finalize) — isolates whether the partial pre-agg preserves keys.
+                                            sail_common_datafusion::streaming::event::encoding::key_trace(
+                                                "win_partial", b,
+                                            );
                                         }
                                         acc.pending_rows.append(&mut partials);
                                         // F5.4: capture the resident-state high-water BEFORE
@@ -1052,6 +1057,9 @@ impl ExecutionPlan for WindowAccumExec {
                             if prof::enabled() {
                                 prof::dump(&format!("p{partition}"));
                             }
+                            // KEY_TRACE dump (VAJRA_KEY_TRACE): per-stage distinct-k census to localize the
+                            // key-corruption stage (exch_in → exch_out → win_partial → win_emit).
+                            sail_common_datafusion::streaming::event::encoding::key_trace_dump();
                             // `F5_PEAK` is the bounded-memory PROOF metric consumed by
                             // scripts/f5_validate.sh (peak_pending_bytes=…); stable token at info.
                             log::info!(
@@ -1324,6 +1332,9 @@ fn consume_merge_batch(
     num_group_cols: usize,
     buf: &mut VecDeque<FlowEvent>,
 ) -> Result<()> {
+    // KEY_TRACE: census the FINAL merge output (the emitted windowed rows). If distinct_k drops here vs
+    // win_partial, the Final aggregate / spill-merge is the corrupting stage.
+    sail_common_datafusion::streaming::event::encoding::key_trace("win_emit", agg_batch);
     match output_mode {
         WindowOutputMode::Append => {
             if let Some(mask) = window_emit_mask(agg_batch, acc.merge_emit_wm, &acc.emitted_ends, acc.restore_wm_floor) {

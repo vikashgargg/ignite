@@ -80,6 +80,87 @@ pub fn reader_inflight_account(signed: i64) {
         }
     }
 }
+/// KEY-TRACE (env `VAJRA_KEY_TRACE=1`): per-stage cumulative census of the group-key column ("k") to
+/// LOCALIZE + CHARACTERIZE the realtime windowed-agg key-corruption bug (keys mis-labelled/dropped while
+/// counts stay correct — invisible to aggregate checks). At each pipeline stage we record distinct k,
+/// rows, min, max, nulls. The FIRST stage whose distinct_k drops below the source's cardinality is the
+/// corrupting operator. `min<0 || max` beyond the key domain ⇒ uninit/OOB garbage; in-domain with
+/// distinct<expected ⇒ a take/hash/gather MISLABEL. Zero cost when unset (single OnceLock bool check).
+pub fn key_trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("VAJRA_KEY_TRACE").as_deref() == Ok("1"))
+}
+#[derive(Default)]
+struct KeyStat {
+    distinct: std::collections::HashSet<i64>,
+    rows: u64,
+    min: i64,
+    max: i64,
+    nulls: u64,
+    seen: bool,
+}
+fn key_stats() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, KeyStat>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<String, KeyStat>>> =
+        std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+/// Census the "k" group-key column of `batch` into the cumulative stats for `tag`. No-op if unset or the
+/// batch carries no "k" column (e.g. marker batches). Accepts Int32/Int64.
+pub fn key_trace(tag: &str, batch: &datafusion::arrow::record_batch::RecordBatch) {
+    if !key_trace_enabled() {
+        return;
+    }
+    let Some(col) = batch.column_by_name("k") else {
+        return;
+    };
+    use datafusion::arrow::array::{Array, Int32Array, Int64Array};
+    let push = |g: &mut std::collections::BTreeMap<String, KeyStat>, v: Option<i64>| {
+        let s = g.entry(tag.to_string()).or_default();
+        s.rows += 1;
+        match v {
+            None => s.nulls += 1,
+            Some(k) => {
+                if !s.seen {
+                    s.min = k;
+                    s.max = k;
+                    s.seen = true;
+                }
+                s.min = s.min.min(k);
+                s.max = s.max.max(k);
+                s.distinct.insert(k);
+            }
+        }
+    };
+    let mut g = key_stats().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(a) = col.as_any().downcast_ref::<Int32Array>() {
+        for i in 0..a.len() {
+            push(&mut g, (!a.is_null(i)).then(|| a.value(i) as i64));
+        }
+    } else if let Some(a) = col.as_any().downcast_ref::<Int64Array>() {
+        for i in 0..a.len() {
+            push(&mut g, (!a.is_null(i)).then(|| a.value(i)));
+        }
+    }
+}
+/// Dump the per-stage census (call at EndOfData). Compare `distinct_k` across stages to pinpoint the
+/// corrupting operator; `min`/`max`/`nulls` classify the mechanism (garbage vs in-range mislabel).
+pub fn key_trace_dump() {
+    if !key_trace_enabled() {
+        return;
+    }
+    let g = key_stats().lock().unwrap_or_else(|e| e.into_inner());
+    for (tag, s) in g.iter() {
+        eprintln!(
+            "KEY_TRACE[{tag}] distinct_k={} rows={} min={} max={} nulls={}",
+            s.distinct.len(),
+            s.rows,
+            s.min,
+            s.max,
+            s.nulls
+        );
+    }
+}
+
 /// Account `bytes` entering (+) / leaving (−) the exchange in-flight buffer, tracking the peak. Cheap
 /// (relaxed atomics); gated by the caller to the prof path. `signed` = +bytes on send, −bytes on recv.
 pub fn inflight_account(signed: i64) {
