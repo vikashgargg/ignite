@@ -25,7 +25,7 @@ struct PyDiscovery;
 
 impl PyDiscovery {
     /// The group in which the entry points are registered.
-    const ENTRY_POINT_GROUP: &'static str = "pysail.datasources";
+    const ENTRY_POINT_GROUP: &'static str = "pyzelox.datasources";
 
     fn module(py: Python) -> PyResult<Bound<PyModule>> {
         static MODULE: PyOnceLock<Py<PyModule>> = PyOnceLock::new();

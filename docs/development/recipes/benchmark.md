@@ -12,7 +12,7 @@ This is an experimental process. The script used in this page may be removed in 
 You can use the following command to run individual queries from the derived TPC-H benchmark.
 
 ```shell
-python -m pysail.examples.spark.tpch \
+python -m pyzelox.examples.spark.tpch \
   --data-path "$BENCHMARK_PATH"/tpch/data \
   --query-path "$BENCHMARK_PATH"/tpch/queries \
   --query 1
@@ -37,7 +37,7 @@ Please follow the README in that repository to generate the TPC-H data.
 To benchmark with Delta Lake format, first convert the Parquet data using the provided utility:
 
 ```shell
-python -m pysail.examples.spark.convert_to_delta \
+python -m pyzelox.examples.spark.convert_to_delta \
   --input-path "$BENCHMARK_PATH"/tpch/data \
   --output-path "$BENCHMARK_PATH"/tpch/data_delta
 ```

@@ -156,7 +156,7 @@ custom pod template (such as the `k8s/test-volume-patch.yaml` file shown above) 
 Once the pod template is in place, you can run pytest locally against the cluster with the following command.
 
 ```bash
-env SPARK_REMOTE="sc://localhost:50051" PYTEST_DEBUG_TEMPROOT="/tmp/sail" pytest --pyargs pysail
+env SPARK_REMOTE="sc://localhost:50051" PYTEST_DEBUG_TEMPROOT="/tmp/sail" pytest --pyargs pyzelox
 ```
 
 ## Cleaning Up

@@ -724,7 +724,7 @@ Here is a summary of the new features and improvements in this release.
 
 ### Breaking Changes
 
-The `spark` "extra" has been removed from the `pysail` package. As a result, you can no longer use commands like `pip install pysail[spark]` to install Sail along with Spark. Instead, you must install the PySpark package separately in your Python environment.
+The `spark` "extra" has been removed from the `pyzelox` package. As a result, you can no longer use commands like `pip install pyzelox[spark]` to install Sail along with Spark. Instead, you must install the PySpark package separately in your Python environment.
 
 This change allows you to freely choose the PySpark version when using Sail. Depending on your requirements, you can opt for either the `pyspark` package (Spark 3.5 or later) or the `pyspark-client` package (introduced in Spark 4.0).
 

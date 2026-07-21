@@ -24,7 +24,7 @@ env ZELOX_UPDATE_GOLD_DATA=1 cargo nextest run
 
 - **Formatting**: `hatch fmt`
 - **Test**:
-  1. Build the native extension and install the `pysail` package in editable mode for the `default` Hatch environment: `hatch run maturin develop`. Re-run this command if you modify Rust code. Python code changes are reflected immediately.
+  1. Build the native extension and install the `pyzelox` package in editable mode for the `default` Hatch environment: `hatch run maturin develop`. Re-run this command if you modify Rust code. Python code changes are reflected immediately.
   2. Run tests using `pytest` via Hatch: `hatch run pytest`. You can pass additional arguments to `pytest` if needed. For example, use the `-k` flag to filter tests by keywords. The keywords can match tests by function names or file names and allow predicates with `and`, `or`, and `not`. In this way you do not need to select tests by the full path.
 
 You must run `pytest` to ensure the relevant tests pass when making changes to Rust or Python code.
@@ -40,7 +40,7 @@ pnpm install
 - **Formatting**: `pnpm run format`
 - **Linting**: `pnpm run lint`
 - **Build**:
-  1. Build the `pysail` package to prepare for API documentation generation: `hatch run docs:maturin develop`
+  1. Build the `pyzelox` package to prepare for API documentation generation: `hatch run docs:maturin develop`
   2. Build the API documentation using Sphinx: `hatch run docs:build`
   3. Build the documentation site using VitePress: `pnpm run docs:build`
 
@@ -62,9 +62,9 @@ We describe scenarios with `Given`, `When`, and `Then`. We assert user-facing ou
 
 The BDD tests are structured as follows:
 
-- `python/pysail/tests/**/*.feature` (test case definitions)
-- `python/pysail/tests/**/test*_features.py` (test loaders)
-- `python/pysail/testing/**/steps/*.py` (step implementations)
+- `python/pyzelox/tests/**/*.feature` (test case definitions)
+- `python/pyzelox/tests/**/test*_features.py` (test loaders)
+- `python/pyzelox/testing/**/steps/*.py` (step implementations)
 
 Python tests are suitable for Spark DataFrame APIs. The BDD tests should already cover Spark SQL features comprehensively, and Python unit tests additionally ensure that the _interface_ is working properly.
 

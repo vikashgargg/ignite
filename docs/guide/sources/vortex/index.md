@@ -16,11 +16,11 @@ with adaptive encoding and efficient compression.
 
 ## Installation
 
-You need to install the `pysail` package with the `vortex` extra to use the Vortex data source.
+You need to install the `pyzelox` package with the `vortex` extra to use the Vortex data source.
 The `vortex` extra installs the `vortex-data` Python library as a dependency.
 
 ```bash
-pip install pysail[vortex]
+pip install pyzelox[vortex]
 ```
 
 ::: warning
@@ -36,7 +36,7 @@ The Vortex data source requires PySpark 4.1+ for filter pushdown support.
 Register the data source once per Spark session.
 
 ```python
-from pysail.spark.datasource.vortex import VortexDataSource
+from pyzelox.spark.datasource.vortex import VortexDataSource
 
 spark.dataSource.register(VortexDataSource)
 ```
@@ -82,7 +82,7 @@ Filters that cannot be pushed down (such as `IS NULL`, `IS NOT NULL`, `startswit
 ### Basic Read
 
 ```python
-from pysail.spark.datasource.vortex import VortexDataSource
+from pyzelox.spark.datasource.vortex import VortexDataSource
 
 spark.dataSource.register(VortexDataSource)
 

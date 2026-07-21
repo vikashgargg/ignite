@@ -307,7 +307,7 @@ fn spark_divide(input: ScalarFunctionInput) -> PlanResult<Expr> {
         // TODO: Casting DataType::Interval(_) to DataType::Int64 is not supported yet.
         //  Seems to be a bug in DataFusion.
         // TODO: Cast the precision and scale that matches the Spark's behavior after the division.
-        //  See `test_divide` in python/pysail/tests/spark/test_math.py
+        //  See `test_divide` in python/pyzelox/tests/spark/test_math.py
         (Ok(DataType::Decimal128(_, _)), Ok(_))
         | (Ok(_), Ok(DataType::Decimal128(_, _)))
         | (Ok(DataType::Decimal256(_, _)), Ok(_))

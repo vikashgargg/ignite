@@ -39,7 +39,7 @@ Your PySpark code runs **unchanged** — Zelox implements the Spark Connect gRPC
 | TPC-H SF-1 (22q, warm) | 63.46 s | ~15 s | **1.78 s (~36×)** |
 | TPC-H SF-100 (22q, 100 GB, same node) | 1099 s / 115 GiB | not run | **347 s / 51.7 GiB (~3.2× faster, ~2.2× less RAM)** |
 | ClickBench 100M (distributed on EKS) | — | — | **377.9 s, 43/43** |
-| pip install | `pyspark` (JVM needed) | `pysail` | **`zelox-pyspark`** |
+| pip install | `pyspark` (JVM needed) | `pyzelox` | **`zelox-pyspark`** |
 | **Spark SQL compat (105-test scorecard, all modes)** | ✅ reference | ~95% | **✅ 105/105 (100%)** |
 | Python UDFs — scalar / Pandas / Arrow | ✅ | ✅ | **✅** |
 | **Python-version-agnostic UDFs (any 3.10+)** | ✅ | ✅ abi3 | **✅ abi3 + subprocess** |

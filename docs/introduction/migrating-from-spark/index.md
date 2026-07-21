@@ -25,7 +25,7 @@ To use it, simply run the following command in your terminal after installing Sa
 
 <SyntaxBlock>
   <SyntaxText
-    raw="'python -m pysail.examples.spark.compatibility_check '<directory>"
+    raw="'python -m pyzelox.examples.spark.compatibility_check '<directory>"
   />
 </SyntaxBlock>
 

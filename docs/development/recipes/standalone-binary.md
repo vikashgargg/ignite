@@ -5,7 +5,7 @@ rank: 80
 
 # Standalone Binary
 
-By default, you can run the Sail CLI (the `sail` command) by installing the `pysail` Python library.
+By default, you can run the Sail CLI (the `sail` command) by installing the `pyzelox` Python library.
 In some situations, however, you may want to build and run the CLI as a standalone binary.
 
 You can build the CLI with the `release` profile in Cargo.

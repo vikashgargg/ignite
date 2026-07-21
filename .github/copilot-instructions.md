@@ -26,7 +26,7 @@ It is written in Rust and Python, and is built using technologies such as Apache
   - `sail-physical-optimizer`: Custom physical optimization rules.
   - `sail-physical-plan`: Custom physical plan nodes.
   - `sail-plan`: Logical plan resolver.
-  - `sail-python`: Native module for the `pysail` Python package.
+  - `sail-python`: Native module for the `pyzelox` Python package.
   - `sail-python-udf`: Python UDF support.
   - `sail-server`: gRPC server utilities and actor implementation.
   - `sail-session`: Session management.
@@ -34,5 +34,5 @@ It is written in Rust and Python, and is built using technologies such as Apache
   - `sail-sql-*`: Sail SQL parser and analyzer.
   - `sail-telemetry`: OpenTelemetry integration.
 - `docs/`: Documentation site built with VitePress.
-- `python/`: Source code for the `pysail` Python package.
+- `python/`: Source code for the `pyzelox` Python package.
 - `scripts/`: Various scripts for development and testing purposes.

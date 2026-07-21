@@ -3,7 +3,7 @@ import path from "path";
 
 export const FUNCTION_SUPPORT_DATA_PATH = path.join(
   __dirname,
-  "../../../../python/pysail/data/compatibility/functions",
+  "../../../../python/pyzelox/data/compatibility/functions",
 );
 
 export interface FunctionInfo {

@@ -37,6 +37,6 @@ Sail treats compatibility with Spark seriously. If there is a behavior mismatch 
 
 ## Simplicity
 
-The `sail` command-line interface (CLI) is the single entry point for all Sail commands. The CLI is available either by installing the `pysail` Python library or building the standalone binary from source. You can also use the Python API to start the Sail server within your PySpark code.
+The `sail` command-line interface (CLI) is the single entry point for all Sail commands. The CLI is available either by installing the `pyzelox` Python library or building the standalone binary from source. You can also use the Python API to start the Sail server within your PySpark code.
 
 As a unified engine, Sail enables you to run ad-hoc SQL queries, execute distributed batch jobs, or preprocess data for AI models within a single environment, eliminating the need to switch runtimes or move data between systems. We strive for a smooth developer experience as you scale your workloads from your laptop to a production cluster.

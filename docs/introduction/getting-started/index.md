@@ -17,17 +17,17 @@ See the [Installation](/introduction/installation/) page for full installation i
 ::: code-group
 
 ```bash-vue [Spark 4.1 (Client) ]
-pip install "pysail=={{ libVersion }}"
+pip install "pyzelox=={{ libVersion }}"
 pip install "pyspark-client==4.1.1"
 ```
 
 ```bash-vue [Spark 4.1]
-pip install "pysail=={{ libVersion }}"
+pip install "pyzelox=={{ libVersion }}"
 pip install "pyspark[connect]==4.1.1"
 ```
 
 ```bash-vue [Spark 3.5]
-pip install "pysail=={{ libVersion }}"
+pip install "pyzelox=={{ libVersion }}"
 pip install "pyspark[connect]==3.5.7
 ```
 
@@ -44,7 +44,7 @@ pip install "pyspark[connect]==3.5.7
 ::: details Migrating from Earlier Versions of Sail
 
 - Since Sail 0.2, the `sail` command-line interface (CLI) became the new way to interact with Sail.
-- Since Sail 0.3, you can no longer run `pip install pysail[spark]` to install PySail along with PySpark (the `spark` "extra"). You must explicitly install PySpark and choose the version you want to use.
+- Since Sail 0.3, you can no longer run `pip install pyzelox[spark]` to install PySail along with PySpark (the `spark` "extra"). You must explicitly install PySpark and choose the version you want to use.
   :::
 
 ## Using the Sail PySpark Shell
@@ -61,7 +61,7 @@ You can run Spark SQL queries or use the DataFrame API in the shell.
 The `SparkSession` instance communicates with the Sail server started in the same Python interpreter process. The Sail server runs in the background.
 
 ::: info
-The `sail` command is installed as an executable script as part of the `pysail` Python package. You can also invoke the Sail CLI via `python -m pysail`.
+The `sail` command is installed as an executable script as part of the `pyzelox` Python package. You can also invoke the Sail CLI via `python -m pyzelox`.
 :::
 
 ## Using the Sail Library
@@ -70,7 +70,7 @@ Alternatively, you can use the Sail library to start a Spark Connect server and 
 Here is an example Python script.
 
 ```python
-from pysail.spark import SparkConnectServer
+from pyzelox.spark import SparkConnectServer
 from pyspark.sql import SparkSession
 
 server = SparkConnectServer()

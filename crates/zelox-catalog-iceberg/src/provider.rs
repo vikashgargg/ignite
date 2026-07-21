@@ -79,7 +79,7 @@ impl IcebergRestCatalogProvider {
 
     fn init_client(&self, catalog_config: &RestCatalogConfig) -> CatalogResult<ApiClient> {
         let mut client_config = Configuration::new();
-        client_config.user_agent = Some("Sail".to_string());
+        client_config.user_agent = Some("Zelox".to_string());
         client_config.base_path = catalog_config.uri.to_string();
         for (key, value) in &catalog_config.props {
             // TODO: `basic_auth` and `api_key` are not used anything in the API yet.

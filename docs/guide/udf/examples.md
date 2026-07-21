@@ -20,11 +20,11 @@ For more information about the API, please refer to the Spark documentation and 
 You can define a Python scalar UDF by wrapping a Python lambda function with `udf()`,
 or using the `@udf` decorator.
 
-<<< @/../python/pysail/tests/spark/udf/test_scalar_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_scalar_udf.txt{python-console}
 
 The UDF can be registered and used in SQL queries.
 
-<<< @/../python/pysail/tests/spark/udf/test_register_scalar_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_register_scalar_udf.txt{python-console}
 
 ## Pandas UDFs
 
@@ -34,13 +34,13 @@ You can define a Pandas scalar UDF via the `@pandas_udf` decorator.
 The UDF takes a batch of data as a Pandas object, and must return a Pandas object of the same length as the input.
 The UDF can also take an iterator of Pandas objects and returns an iterator of Pandas objects, one for each input batch.
 
-<<< @/../python/pysail/tests/spark/udf/test_pandas_scalar_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_pandas_scalar_udf.txt{python-console}
 
 ### Pandas Aggregate UDFs
 
 You can define a Pandas UDF for aggregation. The UDF returns a single value for the input group.
 
-<<< @/../python/pysail/tests/spark/udf/test_pandas_agg_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_pandas_agg_udf.txt{python-console}
 
 The Pandas UDF can be registered for use in SQL queries, in the same way as the Python scalar UDF.
 
@@ -48,15 +48,15 @@ The Pandas UDF can be registered for use in SQL queries, in the same way as the 
 
 You can define a Pandas UDF to transform data partitions using `mapInPandas()`.
 
-<<< @/../python/pysail/tests/spark/udf/test_pandas_map_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_pandas_map_udf.txt{python-console}
 
 ### Pandas Grouped or Co-grouped Map UDFs
 
 You can define a Pandas UDF to transform grouped data or co-grouped data using `applyInPandas()`.
 
-<<< @/../python/pysail/tests/spark/udf/test_pandas_grouped_map_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_pandas_grouped_map_udf.txt{python-console}
 
-<<< @/../python/pysail/tests/spark/udf/test_pandas_cogrouped_map_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_pandas_cogrouped_map_udf.txt{python-console}
 
 ## Arrow UDFs
 
@@ -66,42 +66,42 @@ You can define an Arrow scalar UDF via the `@arrow_udf` decorator.
 The UDF takes a batch of data as a `pyarrow.Array` object, and must return a `pyarrow.Array` object of the same length as the input.
 The UDF can also take an iterator of `pyarrow.Array` objects and returns an iterator of `pyarrow.Array` objects, one for each input batch.
 
-<<< @/../python/pysail/tests/spark/udf/test_arrow_scalar_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_arrow_scalar_udf.txt{python-console}
 
 ### Arrow Aggregate UDFs
 
 You can define an Arrow UDF for aggregation. The UDF returns a single value for the input group.
 
-<<< @/../python/pysail/tests/spark/udf/test_arrow_agg_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_arrow_agg_udf.txt{python-console}
 
 ### Arrow Map UDFs
 
 You can define an Arrow UDF to transform data partitions using `mapInArrow()`.
 This is similar to `mapInPandas()` but the input and output are Arrow record batches.
 
-<<< @/../python/pysail/tests/spark/udf/test_arrow_map_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_arrow_map_udf.txt{python-console}
 
 ### Arrow Grouped or Co-grouped Map UDFs
 
 You can define an Arrow UDF to transform grouped data or co-grouped data using `applyInArrow()`.
 This is similar to `applyInPandas()` but the input and output are Arrow record batches.
 
-<<< @/../python/pysail/tests/spark/udf/test_arrow_grouped_map_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_arrow_grouped_map_udf.txt{python-console}
 
-<<< @/../python/pysail/tests/spark/udf/test_arrow_cogrouped_map_udf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_arrow_cogrouped_map_udf.txt{python-console}
 
 ## Python UDTFs
 
 You can define a Python UDTF class that produces multiple rows for each input row.
 
-<<< @/../python/pysail/tests/spark/udf/test_udtf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_udtf.txt{python-console}
 
 The UDTF can be registered and used in SQL queries.
 
-<<< @/../python/pysail/tests/spark/udf/test_register_udtf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_register_udtf.txt{python-console}
 
 ## Arrow UDTFs
 
 You can define an Arrow UDTF class that produces multiple rows for each input row.
 
-<<< @/../python/pysail/tests/spark/udf/test_arrow_udtf.txt{python-console}
+<<< @/../python/pyzelox/tests/spark/udf/test_arrow_udtf.txt{python-console}

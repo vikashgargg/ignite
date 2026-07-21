@@ -1,5 +1,5 @@
 [project]
-name = "pysail"
+name = "pyzelox"
 version = "0.6.2"
 description = "Sail Python library"
 authors = [
@@ -75,7 +75,7 @@ Repository = "https://github.com/lakehq/sail"
 Issues = "https://github.com/lakehq/sail/issues"
 
 [project.scripts]
-sail = "pysail.cli:main"
+sail = "pyzelox.cli:main"
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
@@ -127,7 +127,7 @@ env.CI.installer = "uv"
 
 [tool.hatch.envs.default.scripts]
 # The scripts can be inherited by other environments.
-install-pysail = "\"{env:HATCH_UV}\" pip install pysail --no-index -f target/wheels --force-reinstall"
+install-pyzelox = "\"{env:HATCH_UV}\" pip install pyzelox --no-index -f target/wheels --force-reinstall"
 
 [tool.hatch.envs.coverage]
 template = "default"
@@ -143,7 +143,7 @@ dependencies = [
 path = ".venvs/docs"
 
 [tool.hatch.envs.docs.extra-scripts]
-build = "sphinx-build python/pysail/docs python/pysail/docs/_build -b json"
+build = "sphinx-build python/pyzelox/docs python/pyzelox/docs/_build -b json"
 
 [tool.hatch.envs.docs.overrides]
 env.CI.installer = "uv"
@@ -255,20 +255,20 @@ path = ".venvs/test-ibis"
 env.CI.installer = "uv"
 
 [tool.hatch.build.targets.sdist]
-packages = ["python/pysail"]
+packages = ["python/pyzelox"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["python/pysail"]
+packages = ["python/pyzelox"]
 
 [tool.ruff]
 line-length = 120
 
 [tool.ruff.lint.per-file-ignores]
 "crates/**/*.py" = ["INP001", "PLC0415"]
-"python/pysail/docs/conf.py" = ["INP001"]
-"python/pysail/examples/**/*.py" = ["T201", "PLC0415"]
-"python/pysail/testing/**/*.py" = ["S101"]
-"python/pysail/tests/**/*.py" = ["S101", "PLC0415"]
+"python/pyzelox/docs/conf.py" = ["INP001"]
+"python/pyzelox/examples/**/*.py" = ["T201", "PLC0415"]
+"python/pyzelox/testing/**/*.py" = ["S101"]
+"python/pyzelox/tests/**/*.py" = ["S101", "PLC0415"]
 "scripts/**/*.py" = ["SLF001", "PLC0415"]
 
 [tool.pytest.ini_options]
@@ -277,11 +277,11 @@ testpaths = ["python"]
 # Instead, add the configuration using a hook in `conftest.py`.
 # The `pyproject.toml` file is not part of the installed package,
 # so the configuration here will not be available when testing the
-# installed package via `pytest --pyargs pysail`.
+# installed package via `pytest --pyargs pyzelox`.
 
 [tool.maturin]
 python-source = "python"
-module-name = "pysail._native"
+module-name = "pyzelox._native"
 manifest-path = "crates/zelox-python/Cargo.toml"
 features = [
     "pyo3/extension-module",

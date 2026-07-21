@@ -62,7 +62,7 @@ jobs:
       - name: Build Python Documentation
         run: |
           hatch env create docs
-          hatch run docs:install-pysail
+          hatch run docs:install-pyzelox
           hatch run docs:build
 
       - name: Build VitePress Site

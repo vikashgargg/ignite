@@ -40,7 +40,7 @@ hatch run maturin build
 You can install the built package in the `default` environment using the following command.
 
 ```bash
-hatch run install-pysail
+hatch run install-pyzelox
 ```
 
 ## Running Tests
@@ -56,7 +56,7 @@ You can pass additional `pytest` arguments as needed.
 For example, to run tests from the **installed package**, use the following command.
 
 ```bash
-hatch run pytest --pyargs pysail
+hatch run pytest --pyargs pyzelox
 ```
 
 ### Testing with an External Spark Connect Server
@@ -88,27 +88,27 @@ Suppose the package is available in the `target/wheels` directory,
 you can install the package in all `test` environments using the following command.
 
 ```bash
-hatch run test:install-pysail
+hatch run test:install-pyzelox
 ```
 
 Then you can run the tests against multiple Spark versions.
 The tests are discovered from the installed package.
 
 ```bash
-hatch run test:pytest --pyargs pysail
+hatch run test:pytest --pyargs pyzelox
 ```
 
 Alternatively, you can run the tests against a specific Spark version.
 For example, you can use the following command to install the package in a specific `test` environment.
 
 ```bash
-hatch run test.spark-3.5.7:install-pysail
+hatch run test.spark-3.5.7:install-pyzelox
 ```
 
 Then you can run the tests against the specific Spark version.
 
 ```bash
-hatch run test.spark-3.5.7:pytest --pyargs pysail
+hatch run test.spark-3.5.7:pytest --pyargs pyzelox
 ```
 
 ### Testing with JVM Spark
@@ -121,14 +121,14 @@ Note that tests written for extended features of Sail will be skipped in this ca
 ```bash
 env SPARK_REMOTE="local" \
   PYSPARK_SUBMIT_ARGS="--packages org.apache.spark:spark-connect_2.12:3.5.7 pyspark-shell" \
-  hatch run test.spark-3.5.7:pytest --pyargs pysail
+  hatch run test.spark-3.5.7:pytest --pyargs pyzelox
 ```
 
 The `PYSPARK_SUBMIT_ARGS` environment variable is no longer needed since Spark 4.0.
 
 ```bash
 env SPARK_REMOTE="local" \
-  hatch run test.spark-4.1.1:pytest --pyargs pysail
+  hatch run test.spark-4.1.1:pytest --pyargs pyzelox
 ```
 
 ::: info

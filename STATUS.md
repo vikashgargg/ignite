@@ -374,7 +374,7 @@ LakeSail is at v0.6.3 (released 2026-05-21). As of Phase 4 Sprint 4.1, Zelox **l
 | **K8s Helm chart + HPA** | ❌ | **✅** | **✅ unique** |
 | **Scheduler HA** | ❌ | **✅** | **✅ unique** |
 | **Web UI :4040** | ❌ | **✅** | **✅ unique** |
-| pip install | `pysail` | **`zelox-pyspark`** | — |
+| pip install | `pyzelox` | **`zelox-pyspark`** | — |
 
 **Summary: Zelox now leads LakeSail on ALL streaming features, ALL infrastructure features, and ALL new Sprint 4–6 catch-up items. The gap is fully closed.**
 

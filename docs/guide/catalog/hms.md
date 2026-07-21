@@ -68,7 +68,7 @@ Authenticate with Kerberos before starting the Sail server.
 
 ```python
 import subprocess
-from pysail.spark import SparkConnectServer
+from pyzelox.spark import SparkConnectServer
 
 # authenticate with Kerberos
 subprocess.run([

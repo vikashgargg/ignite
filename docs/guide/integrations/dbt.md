@@ -16,7 +16,7 @@ profile change.
 pip install dbt-sail
 ```
 
-`dbt-sail` pulls in `dbt-spark[session]` and `pysail` as dependencies. You do
+`dbt-sail` pulls in `dbt-spark[session]` and `pyzelox` as dependencies. You do
 not need to install Sail separately.
 
 ## Configuration

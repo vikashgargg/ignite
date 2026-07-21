@@ -87,9 +87,9 @@ Once the environment is created, the Ibis test source code is available in the `
 
 The earlier section explained how to access test logs from GitHub Actions workflows. This section explains how to reproduce test results locally for root cause analysis and fix verification.
 
-### Building and Installing the `pysail` Package
+### Building and Installing the `pyzelox` Package
 
-Use the following command to build and install the `pysail` package in editable mode in the corresponding Hatch environment.
+Use the following command to build and install the `pyzelox` package in editable mode in the corresponding Hatch environment.
 
 ```bash
 hatch run "${hatch_env}:maturin" develop

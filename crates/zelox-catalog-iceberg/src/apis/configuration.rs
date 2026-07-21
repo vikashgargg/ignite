@@ -49,7 +49,7 @@ impl Default for Configuration {
     fn default() -> Self {
         Configuration {
             base_path: "https://localhost".to_owned(),
-            user_agent: Some("Sail".to_owned()),
+            user_agent: Some("Zelox".to_owned()),
             client: reqwest::Client::new(),
             basic_auth: None,
             oauth_access_token: None,

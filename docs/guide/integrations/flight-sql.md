@@ -24,7 +24,7 @@ sail flight server --ip 127.0.0.1 --port 32010
 You can also start the server programmatically using the Sail Python API.
 
 ```python
-from pysail.flight import FlightSqlServer
+from pyzelox.flight import FlightSqlServer
 
 server = FlightSqlServer(ip="127.0.0.1", port=32010)
 server.start(background=False)

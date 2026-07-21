@@ -351,7 +351,7 @@ All Sprint 4–6 items are done. The "catch-up" phase is complete.
 | Theta sketch aggregates | ✅ | ✅ | PR only | **✅ Sprint 6 (ahead)** |
 | HMS table metadata | ✅ | ✅ | ✅ v0.6.3 | **✅ Sprint 5** |
 | Vortex data source | ✅ | ✅ | ✅ v0.6.0 | **✅ skeleton** |
-| pip install | pyspark (JVM) | databricks-connect | pysail | **zelox-pyspark** |
+| pip install | pyspark (JVM) | databricks-connect | pyzelox | **zelox-pyspark** |
 | Open source | ✅ | ❌ | ✅ | **✅** |
 
 ---

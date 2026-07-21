@@ -1,7 +1,7 @@
 # Ignite — Spark SQL Compatibility Triage
 
 > Generated: 2026-05-17 (Day 3 audit)  
-> Source: `python/pysail/tests/spark/` skip/xfail markers + source code scan  
+> Source: `python/pyzelox/tests/spark/` skip/xfail markers + source code scan  
 > Note: GitHub Issues are disabled on this repo — tracking here instead.
 
 ---

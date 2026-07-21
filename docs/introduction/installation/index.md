@@ -8,7 +8,7 @@ rank: 3
 To quickly get started, you can install Sail from PyPI using `pip`.
 
 ```bash-vue
-pip install "pysail=={{ libVersion }}"
+pip install "pyzelox=={{ libVersion }}"
 ```
 
 You can refer to the [Deployment Guide](/guide/deployment/) for more information about deploying Sail.
@@ -48,7 +48,7 @@ This can be useful when you want to have Sail optimized for your hardware archit
 For example, the following command builds Sail with all features of the current CPU enabled.
 
 ```bash-vue
-env RUSTFLAGS="-C target-cpu=native" pip install "pysail=={{ libVersion }}" -v --no-binary pysail
+env RUSTFLAGS="-C target-cpu=native" pip install "pyzelox=={{ libVersion }}" -v --no-binary pyzelox
 ```
 
 You can refer to the [Rust documentation](https://doc.rust-lang.org/rustc/codegen-options/index.html)

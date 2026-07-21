@@ -15,7 +15,7 @@ The HTML fragments are loaded during the build process of the VitePress site.
 This makes the Python API reference an organic part of the single-page application (SPA) for the Sail documentation.
 
 The source code for the documentation site is located in the `docs` directory.
-The source code for the Python API reference is located in the `python/pysail/docs` directory.
+The source code for the Python API reference is located in the `python/pyzelox/docs` directory.
 
 ## Environment Setup
 

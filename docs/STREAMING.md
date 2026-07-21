@@ -82,7 +82,7 @@ Ordered by leverage (correctness/parity first, then breadth):
    reliability evidence GA needs (Kafka→Delta 24 h soak).
 
 ## How to validate what exists today
-`python/pysail/tests/spark/streaming/test_streaming_basic.py` and
+`python/pyzelox/tests/spark/streaming/test_streaming_basic.py` and
 `datasource/test_rate.py` exercise the live pipeline (rate source → transform →
-sink). Run via the pysail/maturin test harness (CI). Extending these into the P0
+sink). Run via the pyzelox/maturin test harness (CI). Extending these into the P0
 correctness + recovery assertions above is the next concrete step.
