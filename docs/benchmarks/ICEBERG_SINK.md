@@ -1,9 +1,9 @@
 # Iceberg streaming sink — measured evidence (correctness, latency, throughput, reliability)
 
-Date: 2026-06-13. Machine: 8-core Apple Silicon (single node). Vajra **release** (thin-LTO) unless
+Date: 2026-06-13. Machine: 8-core Apple Silicon (single node). Zelox **release** (thin-LTO) unless
 noted. Spark = pyspark 3.5.3 (local[*], Java 1.8) + `iceberg-spark-runtime-3.5_2.12-1.6.1`,
 HadoopCatalog. **All claims below are measured, not asserted.** Harness:
-`/tmp/spark_iceberg_bench.py` (Spark) + the Vajra scripts in this commit's session.
+`/tmp/spark_iceberg_bench.py` (Spark) + the Zelox scripts in this commit's session.
 
 ## Correctness / exactly-once (PROVEN, gated)
 - Idempotent replay: simulated crash-before-source-commit (staged batch present, snapshot already
@@ -30,14 +30,14 @@ checkpoint). Empty triggers commit no snapshot (verified: ~5 triggers → 1 snap
 
 ## Throughput (availableNow, full dataset, wallclock after input is staged)
 
-| scale | Vajra (release) | Spark Iceberg |
+| scale | Zelox (release) | Spark Iceberg |
 |-------|-----------------|---------------|
 | 1M | 0.03 s → **31.4M rows/s** | 7.63 s → 131k rows/s |
 | 5M | 0.11 s → **44.1M rows/s** | 7.70 s → 649k rows/s |
 | 20M | 0.43 s → **47.0M rows/s** | — |
 
 **Honest framing:** Spark's wallclock is dominated by ~7 s fixed JVM + streaming-query startup
-(1M and 5M both ≈7.7 s — the marginal data cost is small). Vajra runs as a persistent native
+(1M and 5M both ≈7.7 s — the marginal data cost is small). Zelox runs as a persistent native
 server (Spark Connect), so its wallclock is almost entirely data work — no per-query JVM startup.
 This is a real architectural advantage (no JVM; persistent server) and matters most for repeated
 availableNow/ETL jobs; for a single long-running continuous stream the startup is one-time, so the
@@ -64,19 +64,19 @@ i.e. the datagen *source* was the bottleneck (~9k rows/s), not the sink. Reporti
 **handicapped Flink**. The honest test has *both* engines read the **same 1M-row parquet input** and
 write Iceberg:
 
-| 1M parquet → Iceberg (streaming, identical input) | Vajra | Flink 1.18 |
+| 1M parquet → Iceberg (streaming, identical input) | Zelox | Flink 1.18 |
 |---|---|---|
 | Wallclock | **0.26 s** | 20.27 s |
 | Rows committed / correctness | 1,000,000, exactly-once | 1,000,000 (committed, 2 snapshots) |
 | Per-commit latency | p50 25 ms (release) | checkpoint-driven |
 | Process memory | ~90 MB (native server) | 2 JVMs (JobManager+TaskManager), ~GB |
 
-Flink's 20.27 s still carries real JVM + job-graph + checkpoint fixed overhead per job; Vajra runs
-as a persistent native server. Both are honest task wallclocks on identical input. Vajra also
+Flink's 20.27 s still carries real JVM + job-graph + checkpoint fixed overhead per job; Zelox runs
+as a persistent native server. Both are honest task wallclocks on identical input. Zelox also
 *validated* the full streaming committer path (1M rows, 58 snapshots in the per-checkpoint config).
 
 ## Container (Apple Silicon / linux-arm64 Docker)
-`vajra:latest` (1.05 GB, built from `docker/Dockerfile`, `CARGO_JOBS=2`) run as a container; the
+`zelox:latest` (1.05 GB, built from `docker/Dockerfile`, `CARGO_JOBS=2`) run as a container; the
 Iceberg sink inside it wrote 1M rows (distinct) and held **exactly-once on re-run (no dup)**; table
 verified real on the host-mounted volume. Containerized deployment works.
 
@@ -85,5 +85,5 @@ verified real on the host-mounted volume. Containerized deployment works.
   run remain for full endurance/at-scale claims (S3 is covered by the planned EKS run).
 - Throughput is single-partition streaming (per-core); multi-core streaming parallelism is a
   separate tracked item.
-- **Cluster (distributed Vajra)** Iceberg sink not yet run — the streaming checkpoint is consumed
+- **Cluster (distributed Zelox)** Iceberg sink not yet run — the streaming checkpoint is consumed
   at driver plan-time and the Iceberg commit exec's distributed-codec path needs wiring first.

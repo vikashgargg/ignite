@@ -345,7 +345,7 @@ At execution time:
 **Python subprocess isolation:**
 Ignite embeds the Python interpreter via PyO3. Child processes (e.g., from
 `multiprocessing`) see the same binary as `sys.executable` and fork correctly
-because of the `SAIL_RUN_PYTHON` env var gate in `main.rs`.
+because of the `ZELOX_RUN_PYTHON` env var gate in `main.rs`.
 
 ---
 

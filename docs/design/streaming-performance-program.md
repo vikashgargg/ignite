@@ -1,13 +1,13 @@
 # Streaming Performance Program — beat Flink/RisingWave/Arroyo on every pillar (SDLC board)
 
-**Charter (AIM):** Vajra (single-binary, no-JVM, Arrow+DataFusion) must OBJECTIVELY BEAT Flink (streaming),
+**Charter (AIM):** Zelox (single-binary, no-JVM, Arrow+DataFusion) must OBJECTIVELY BEAT Flink (streaming),
 RisingWave 3.0, Arroyo 0.15 on throughput, memory, latency, and speed — by learning their proven designs
 and eliminating their limitations, not copying. Every epic below is grounded in a named credible source,
 gated T1(local)→T2(kind)→T3(EKS), and DONE only when it **beats Flink on the measured number**.
 
 ## Honest baseline (measured EKS 100M realtime, 2026-07-18 — the gap we're closing)
 
-| Pillar | Vajra now | Flink | Target (DONE bar) |
+| Pillar | Zelox now | Flink | Target (DONE bar) |
 |---|---|---|---|
 | Correctness | 10 win/100M, byte-identical | 10 win/100M | ✅ **DONE — TIE, 0 mismatch** |
 | Throughput | 4.0M ev/s | 10.0M ev/s | **≥ Flink (≥10M)** |
@@ -15,7 +15,7 @@ gated T1(local)→T2(kind)→T3(EKS), and DONE only when it **beats Flink on the
 | Memory (passthrough) | 13.07 GiB | 3.88 GiB | **≤ Flink** |
 | Latency p50 / tail | 101 / 136 ms | 95 / 136 ms | **≤ Flink, win the tail (no-GC)** |
 
-*Vajra WINS memory in CONTINUOUS mode (3.9 vs 4.68) — so the realtime gaps are fixable, not fundamental.
+*Zelox WINS memory in CONTINUOUS mode (3.9 vs 4.68) — so the realtime gaps are fixable, not fundamental.
 Arroyo (Rust+Arrow+DataFusion) beats Flink 3–5× ⇒ the deficit is our execution model, not the language.*
 
 ---
@@ -38,7 +38,7 @@ Kafka sink producer buffer, all live for the whole run. Passthrough (no windows)
 - M1 [T3-profile] EC2 heap profile (jemalloc) of realtime passthrough → exact heap vs page-cache vs
   fixed-buffer breakdown (page-cache in cgroup memory.peak may inflate the number — must separate).
 - M2 credit-based flow control on `StreamExchange` edge: receiver-granted byte-credits, replace the fixed
-  `VAJRA_EXCHANGE_CHANNEL_CAP=16`. Grounded FLIP-2/RisingWave.
+  `ZELOX_EXCHANGE_CHANNEL_CAP=16`. Grounded FLIP-2/RisingWave.
 - M3 per-morsel byte-permit across the realtime pipeline (Polars) — bound total in-flight bytes.
 - M4 cap realtime reader prefetch + Kafka sink producer buffer (rebuilt small like continuous).
 **DONE:** realtime windowed + passthrough RSS ≤ Flink at EKS 100M.
@@ -69,8 +69,8 @@ realtime commit interval off the record path. **DONE:** p50 ≤ Flink AND tail (
 
 ## EPIC-C — Cleanup: remove unproven code (prod-grade surface)  [P1, interleave]
 Verify-then-remove (look-before-delete; coalesce_flow_events is ACTUALLY wired in Flight shuffle — keep):
-`VAJRA_T7_FUSE` (source fusion, opt-in, unproven), `VAJRA_RT_SINGLE` (legacy reader opt-out),
-`VAJRA_KAFKA_LEGACY_POLL` (poll opt-out), dual idle → **E4-only** (streaming-watermark.md debt), unused
+`ZELOX_T7_FUSE` (source fusion, opt-in, unproven), `ZELOX_RT_SINGLE` (legacy reader opt-out),
+`ZELOX_KAFKA_LEGACY_POLL` (poll opt-out), dual idle → **E4-only** (streaming-watermark.md debt), unused
 sweep knobs. **DONE:** one proven path each, clippy+tests green, no behavior regression.
 
 ## SDLC / board discipline

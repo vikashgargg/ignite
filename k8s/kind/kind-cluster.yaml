@@ -1,6 +1,6 @@
 # T2 tier (docs/design/three-tier-sdlc.md): a LOCAL, FREE Kubernetes cluster (kind = k8s in Docker) that
 # mirrors the EKS streaming topology — a dedicated `role=kafka` node + a `role=compute` node — so the SAME
-# manifests (kafka.yaml, vajra-stream.yaml, flink-session.yaml, jobs) and the SAME nodeSelectors deploy
+# manifests (kafka.yaml, zelox-stream.yaml, flink-session.yaml, jobs) and the SAME nodeSelectors deploy
 # unchanged. This catches the Kubernetes-specific failures (pod scheduling, multi-pod CPU/mem contention,
 # service networking, Kafka broker, Flink-SQL) that a local `--workers N` process CANNOT see and that every
 # EKS surprise came from — WITHOUT the EKS cost. Resource REQUESTS are scaled down by the kind test overlay

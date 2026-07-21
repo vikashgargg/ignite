@@ -47,10 +47,10 @@ def configure_sail_environment():
     # Set the default parallelism to a fixed value regardless of the
     # number of CPU cores to ensure deterministic test results, especially for
     # snapshot tests involving execution plans.
-    os.environ["SAIL_EXECUTION__DEFAULT_PARALLELISM"] = "4"
+    os.environ["ZELOX_EXECUTION__DEFAULT_PARALLELISM"] = "4"
     # Set the stack size explicitly to assist the configuration removal test.
     # And we need the larger stack size to support large query plans in the test.
-    os.environ["SAIL_RUNTIME__STACK_SIZE"] = "16777216"
+    os.environ["ZELOX_RUNTIME__STACK_SIZE"] = "16777216"
 
     # Ensure the native module can be imported successfully.
     # This allows this function to be future-proof in case we ever change the native module name.

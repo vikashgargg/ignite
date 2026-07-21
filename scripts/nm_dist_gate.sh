@@ -2,7 +2,7 @@
 # VAJ-BF2 T-BF2.3 T1 gate: distributed N→M streaming windowed-agg correctness.
 #
 # A multi-partition (N) file source → keyed event-time window agg (StreamExchange N→M) → parquet,
-# on a local-cluster (driver + WORKERS in-process workers). With VAJRA_DISTRIBUTED_STREAM=1 the
+# on a local-cluster (driver + WORKERS in-process workers). With ZELOX_DISTRIBUTED_STREAM=1 the
 # keyed exchange is CUT into a cross-network Hash shuffle whose receiver MIN-merges distinct-source
 # watermarks + aligns Chandy-Lamport barriers (T-BF2.3b) and whose N window instances spread across
 # workers (T-BF2.5). This gate asserts the distributed cut is EXACTLY-EQUAL to the in-process
@@ -14,14 +14,14 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 WORKERS="${WORKERS:-4}"; ROWS="${ROWS:-4000}"; KEYS="${KEYS:-50}"; PARTS="${PARTS:-8}"
-BIN="$ROOT/target/debug/vajra"; PY="$ROOT/.venvs/smoke/bin/python"
+BIN="$ROOT/target/debug/zelox"; PY="$ROOT/.venvs/smoke/bin/python"
 STAMP="$$_$RANDOM"; INP="/tmp/nm_gate_in_$STAMP"
-[ -x "$BIN" ] || { echo "FATAL: build first: cargo build -p sail-cli --bin vajra"; exit 2; }
+[ -x "$BIN" ] || { echo "FATAL: build first: cargo build -p sail-cli --bin zelox"; exit 2; }
 rm -rf "$INP"
 
 start_srv() { # $1=gate $2=port
-  pkill -9 -f 'target/debug/vajra' 2>/dev/null; sleep 1
-  VAJRA_DISTRIBUTED_STREAM="$1" RUST_LOG=warn "$BIN" server --ip 127.0.0.1 --port "$2" \
+  pkill -9 -f 'target/debug/zelox' 2>/dev/null; sleep 1
+  ZELOX_DISTRIBUTED_STREAM="$1" RUST_LOG=warn "$BIN" server --ip 127.0.0.1 --port "$2" \
     --mode local-cluster --workers "$WORKERS" >/tmp/nm_gate_srv_$1.log 2>&1 &
   for i in $(seq 1 30); do nc -z 127.0.0.1 "$2" 2>/dev/null && break; sleep 1; done
 }
@@ -65,7 +65,7 @@ echo "=== gate ON (N→M cut + aligning shuffle + even-spread) ==="
 ON1=$(probe 1 50192 | grep -aoE 'RESULT .*' | tail -1); echo "  $ON1"
 echo "=== gate ON repeat (determinism) ==="
 ON2=$(probe 1 50193 | grep -aoE 'RESULT .*' | tail -1); echo "  $ON2"
-pkill -9 -f 'target/debug/vajra' 2>/dev/null; rm -rf "$INP" /tmp/nm_gate_out_* /tmp/nm_gate_ck_* 2>/dev/null
+pkill -9 -f 'target/debug/zelox' 2>/dev/null; rm -rf "$INP" /tmp/nm_gate_out_* /tmp/nm_gate_ck_* 2>/dev/null
 
 [ -n "$OFF" ] && [ "$OFF" != "RESULT 0 0 0" ] || { echo "NM_DIST_GATE FAIL: baseline produced no output"; exit 3; }
 if [ "$ON1" = "$OFF" ] && [ "$ON2" = "$OFF" ]; then

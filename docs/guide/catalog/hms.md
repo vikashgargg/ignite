@@ -93,7 +93,7 @@ If you run Sail in a distributed environment, each worker needs its own Kerberos
 When `auth = "kerberos"` is enabled, Sail expands `_HOST` in `kerberos_service_principal` from the hostname of the endpoint selected for that connection attempt.
 
 ```bash
-export SAIL_CATALOG__LIST='[{type="hms", name="sail", uris=["hms1.internal:9083","thrift://hms2.internal:9083"], auth="kerberos", kerberos_service_principal="hive-metastore/_HOST@EXAMPLE.COM"}]'
+export ZELOX_CATALOG__LIST='[{type="hms", name="sail", uris=["hms1.internal:9083","thrift://hms2.internal:9083"], auth="kerberos", kerberos_service_principal="hive-metastore/_HOST@EXAMPLE.COM"}]'
 ```
 
 ### Security Guarantees
@@ -121,12 +121,12 @@ Sail always creates its own tables as external (`EXTERNAL=TRUE`, `table_type = E
 ## Examples
 
 ```bash
-export SAIL_CATALOG__LIST='[{type="hive_metastore", name="sail", uris=["127.0.0.1:9083"]}]'
+export ZELOX_CATALOG__LIST='[{type="hive_metastore", name="sail", uris=["127.0.0.1:9083"]}]'
 
-export SAIL_CATALOG__LIST='[{type="hms", name="sail", uris=["hms1.internal:9083","hms2.internal:9083"], thrift_transport="framed", connect_timeout_secs=10}]'
+export ZELOX_CATALOG__LIST='[{type="hms", name="sail", uris=["hms1.internal:9083","hms2.internal:9083"], thrift_transport="framed", connect_timeout_secs=10}]'
 
-export SAIL_CATALOG__LIST='[{type="hms", name="sail", uris=["hms.internal:9083"], auth="kerberos", kerberos_service_principal="hive-metastore/_HOST@EXAMPLE.COM", min_sasl_qop="auth_int", thrift_transport="framed"}]'
+export ZELOX_CATALOG__LIST='[{type="hms", name="sail", uris=["hms.internal:9083"], auth="kerberos", kerberos_service_principal="hive-metastore/_HOST@EXAMPLE.COM", min_sasl_qop="auth_int", thrift_transport="framed"}]'
 
 # Enabling caching for database and table listings
-export SAIL_CATALOG__LIST='[{type="hms", name="sail", uris=["127.0.0.1:9083"], database_cache_type="global", database_cache_ttl_secs=3600, table_cache_type="global", table_cache_size=1000}]'
+export ZELOX_CATALOG__LIST='[{type="hms", name="sail", uris=["127.0.0.1:9083"], database_cache_type="global", database_cache_ttl_secs=3600, table_cache_type="global", table_cache_size=1000}]'
 ```

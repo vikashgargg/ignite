@@ -1,0 +1,20 @@
+[package]
+name = "zelox-logical-plan"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-function = { path = "../zelox-function" }
+
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+comfy-table = { workspace = true }
+html-escape = { workspace = true }
+log = { workspace = true }
+educe = { workspace = true }

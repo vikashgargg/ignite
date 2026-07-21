@@ -21,16 +21,16 @@ You can use any AWS credential provider supported by the AWS SDK to authenticate
 ## Examples
 
 ```bash
-export SAIL_CATALOG__LIST='[{type="glue", name="sail", region="us-west-2"}]'
+export ZELOX_CATALOG__LIST='[{type="glue", name="sail", region="us-west-2"}]'
 
 # Using a custom endpoint (e.g., LocalStack)
-export SAIL_CATALOG__LIST='[{type="glue", name="sail", region="us-east-1", endpoint_url="http://localhost:4566"}]'
+export ZELOX_CATALOG__LIST='[{type="glue", name="sail", region="us-east-1", endpoint_url="http://localhost:4566"}]'
 
 # Enabling caching for database and table listings
-export SAIL_CATALOG__LIST='[{type="glue", name="sail", region="us-west-2", database_cache_type="global", database_cache_size=100, database_cache_ttl_secs=3600, table_cache_type="global", table_cache_size=1000, table_cache_ttl_secs=3600}]'
+export ZELOX_CATALOG__LIST='[{type="glue", name="sail", region="us-west-2", database_cache_type="global", database_cache_size=100, database_cache_ttl_secs=3600, table_cache_type="global", table_cache_size=1000, table_cache_ttl_secs=3600}]'
 
 # Configuring cache scope (global or session)
 # Global scope shares the cache across all sessions.
 # Session scope keeps the cache private to a single session.
-export SAIL_CATALOG__LIST='[{type="glue", name="sail", region="us-west-2", database_cache_type="session"}]'
+export ZELOX_CATALOG__LIST='[{type="glue", name="sail", region="us-west-2", database_cache_type="session"}]'
 ```

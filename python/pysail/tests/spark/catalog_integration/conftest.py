@@ -42,8 +42,8 @@ def start_sail_server(
     from pysail.spark import SparkConnectServer
 
     env_vars: dict[str, str] = {
-        "SAIL_CATALOG__LIST": catalog_list,
-        "SAIL_EXECUTION__DEFAULT_PARALLELISM": "4",
+        "ZELOX_CATALOG__LIST": catalog_list,
+        "ZELOX_EXECUTION__DEFAULT_PARALLELISM": "4",
         **(extra_env or {}),
     }
 

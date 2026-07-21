@@ -59,8 +59,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
-          app-id: ${{ vars.LAKESAIL_CLAUDE_CODE_APP_ID }}
-          private-key: ${{ secrets.LAKESAIL_CLAUDE_CODE_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.LAKEZELOX_CLAUDE_CODE_APP_ID }}
+          private-key: ${{ secrets.LAKEZELOX_CLAUDE_CODE_APP_PRIVATE_KEY }}
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v5

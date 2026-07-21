@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Tear down EVERYTHING created for the Vajra EKS scale benchmark and verify
+# Tear down EVERYTHING created for the Zelox EKS scale benchmark and verify
 # nothing cost-incurring is left behind. Idempotent — safe to re-run.
 #
 # Usage: scripts/aws_eks_teardown.sh [cluster-name] [region] [s3-bucket] [ecr-repo]
 set -uo pipefail
 
-CLUSTER="${1:-vajra-scale}"
+CLUSTER="${1:-zelox-scale}"
 REGION="${2:-ap-south-1}"
 BUCKET="${3:-}"            # optional; pass the data bucket to delete it
-ECR_REPO="${4:-vajra}"
+ECR_REPO="${4:-zelox}"
 
-echo "================ Vajra EKS teardown (region=$REGION) ================"
+echo "================ Zelox EKS teardown (region=$REGION) ================"
 
 # 1. Delete the EKS cluster (removes its CloudFormation stack: VPC, subnets,
 #    nodegroup, EC2 nodes, security groups — everything eksctl created).

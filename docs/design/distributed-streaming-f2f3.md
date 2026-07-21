@@ -1,6 +1,6 @@
-# F2/F3 — Distributed stateful streaming: one Vajra engine for batch *and* realtime, on power with Flink
+# F2/F3 — Distributed stateful streaming: one Zelox engine for batch *and* realtime, on power with Flink
 
-**Goal.** Extend Vajra's existing *distributed batch* engine (driver/worker actors, Arrow-Flight
+**Goal.** Extend Zelox's existing *distributed batch* engine (driver/worker actors, Arrow-Flight
 shuffle, staged job graph) into a **distributed stateful streaming** engine — so the **same** engine,
 the **same** Spark API, and the **same** operators run **batch, micro-batch, and realtime
 (continuous)** workloads, exactly-once, scaled across nodes. Not a second runtime bolted on: batch is
@@ -30,7 +30,7 @@ substrate, not ported.
   simultaneously); `FlightData` carries `data_header` (Arrow IPC), `data_body` (batch), and
   `app_metadata` (control) — ideal for a **pipelined, marker-aware** cross-node shuffle.
 
-**What Vajra already has that maps 1:1:**
+**What Zelox already has that maps 1:1:**
 - Flow-event model: `FlowEvent::Marker(Checkpoint{epoch}|Watermark|…)` flows in-band with
   `FlowEvent::Data` — *these markers ARE Chandy-Lamport barriers* (Flink/RisingWave invariant).
 - `StreamExchangeExec` (1→N, **broadcasts markers**, hash-routes data) — the in-node exchange.
@@ -136,7 +136,7 @@ measured (F1b). Multi-node continuous stateful is **not** end-to-end yet.
 
 ### Harness finding (2026-06-15) — the real gap is execution-model integration, not codec
 
-Built the gate harness (`scripts/dist_streaming_smoke.py`): a Vajra server in **local-cluster mode**
+Built the gate harness (`scripts/dist_streaming_smoke.py`): a Zelox server in **local-cluster mode**
 (driver + 2 in-process workers, `--mode local-cluster --workers 2`) exercised through real Spark
 Connect. Results:
 - ✅ **Distributed batch is solid** — the full all-in-one batch suite (5/5) + a distributed
@@ -223,7 +223,7 @@ realtime sink's by-name multi-partition rejection (the F2/F3 scale-out path). So
   with no funnel.* Measured on a 2-worker cluster: continuous Kafka → `repartition(4, key)` → parquet
   writes `part-0..3` in parallel; EO across graceful restart **and `kill -9` mid-stream** → 10000
   distinct, contiguous (`MULTIPART_EXACTLY_ONCE`). (The in-memory `EpochCoordinator` is built + tested
-  but not needed here — object-store coordination fits Vajra's F4 atomic-commit architecture better; it
+  but not needed here — object-store coordination fits Zelox's F4 atomic-commit architecture better; it
   remains available for an RPC-based variant.)
 
 **The distributed reliability gate is complete + release-verified:** distributed batch; distributed
@@ -271,18 +271,18 @@ Spark-matched). The ONE remaining stateful gap, located precisely:
   W0,W1 commit pre-crash; W2's events are produced pre-crash with its window OPEN at a `kill -9`. After
   crash+restart+wave2 → **12 rows (W0..W5 × 2 keys), every count=10, no dup (W0/W1 not re-emitted),
   no loss (W2=10 survived)** ⇒ `F3C_STATEFUL_EO_ACROSS_CRASH PASS`. **Distributed continuous STATEFUL
-  exactly-once across a hard crash is validated end-to-end.** (Vajra allows windowed-agg under
+  exactly-once across a hard crash is validated end-to-end.** (Zelox allows windowed-agg under
   `Trigger.Continuous`; Spark forbids it.) Remaining for F2/F3: **F3-d** = true multi-NODE
   (`kubernetes-cluster`) gate vs Flink (this is all local-cluster = in-process workers on one box).
 
 ### F3-d prod-grade plan (multi-node gate — scoped 2026-06-22)
 Topology grounded: `--mode kubernetes-cluster` (`k8s/sail.yaml`) runs a driver pod that **dynamically
-spawns worker pods via the k8s API** (`SAIL_KUBERNETES__WORKER_POD_TEMPLATE` + RBAC: `Role` pods/`*`,
-`vajra-user` SA + binding — all present) landing on **separate nodes**, Arrow-Flight shuffle between
+spawns worker pods via the k8s API** (`ZELOX_KUBERNETES__WORKER_POD_TEMPLATE` + RBAC: `Role` pods/`*`,
+`zelox-user` SA + binding — all present) landing on **separate nodes**, Arrow-Flight shuffle between
 them — the real multi-node engine, distinct from local-cluster (in-process workers). Prod-grade
 sequence (multi-node distributed validation must be careful, not rushed):
 1. **Local de-risk on KIND (free)** — `k8s/kind-multinode.yaml` (1 control-plane + 2 workers). Rebuild
-   fresh `vajra:latest` (incl. F3-c) → `kind load` → `kubectl apply -k k8s/`. Run continuous stateful
+   fresh `zelox:latest` (incl. F3-c) → `kind load` → `kubectl apply -k k8s/`. Run continuous stateful
    (Kafka in-cluster → windowed-agg → sink); assert worker pods land on BOTH worker nodes (cross-node),
    distributed 6/6 + F3-c continuous-stateful EO across a **worker-pod kill** (multi-node failover).
    Gate before any cloud spend.
@@ -295,13 +295,13 @@ vs-Flink numbers recorded. Artifacts: `k8s/kind-multinode.yaml`, `k8s/sail.yaml`
 
 **F3-d step 1 (KIND multi-node) — PASS 2026-06-22.** 3-node KIND (1 control-plane + 2 workers),
 `kubernetes-cluster` mode. A distributed query made the driver dynamically spawn **5 worker pods that
-landed CROSS-NODE** (workers on both `vajra-f3d-worker` and `-worker2`, verified `get pods -o wide`) —
+landed CROSS-NODE** (workers on both `zelox-f3d-worker` and `-worker2`, verified `get pods -o wide`) —
 true multi-node distributed execution, not local-cluster in-process. `dist_streaming_smoke` **6/6**
 (batch.write / rate / file / windowed_file=97 / dedup=50 / join=200, every value Spark-matched) across
 the real multi-node cluster. **Prod insight (important):** the distributed sink needs **shared storage**
 — writing parquet to a worker pod's local `/tmp` fails cross-pod (reader on another pod sees no files);
 pointing outputs at the shared hostPath (`/tmp/sail`, the EKS analogue = S3, which the prior EKS runs
-used) makes it 6/6. So distributed streaming on Vajra requires object-store/shared sinks (already the
+used) makes it 6/6. So distributed streaming on Zelox requires object-store/shared sinks (already the
 F4 design). **Multi-node WORKER-POD-KILL failover — PASS 2026-06-22 (stateless continuous).** Continuous
 Kafka→parquet on the 3-node KIND cluster (driver spawns 5 workers); deleted a running worker pod
 (`kubectl delete pod --force`) MID-STREAM; query stayed alive, driver recovered; produced wave2;

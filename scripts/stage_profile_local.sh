@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # FREE local validation of the progressive per-stage profiler (scripts/stream_stage_profile.py).
-# Starts a release Vajra server, runs the SAME local Kafka topic through source -> parse -> full,
+# Starts a release Zelox server, runs the SAME local Kafka topic through source -> parse -> full,
 # prints each stage's throughput + the deltas that isolate from_json and shuffle+window+sink.
 # This validates the HARNESS (stages isolate correctly, counts sane) before the one EKS run.
 # Usage: TOPIC=bench_src N_EVENTS=10000000 bash scripts/stage_profile_local.sh
@@ -8,11 +8,11 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 PORT="${PORT:-50090}"; BOOT="${BOOT:-localhost:9092}"; TOPIC="${TOPIC:-bench_src}"
 N="${N_EVENTS:-10000000}"
-BIN="$ROOT/target/release/vajra"; PY="$ROOT/.venvs/smoke/bin/python"
-[ -x "$BIN" ] || { echo "FATAL: need release vajra"; exit 2; }
+BIN="$ROOT/target/release/zelox"; PY="$ROOT/.venvs/smoke/bin/python"
+[ -x "$BIN" ] || { echo "FATAL: need release zelox"; exit 2; }
 
-echo "=== start vajra server :$PORT (COMPLETE_ON_END=1 so every window flushes => equal row counts) ==="
-rm -rf /tmp/stage_*; VAJRA_COMPLETE_ON_END=1 "$BIN" server --ip 127.0.0.1 --port "$PORT" >/tmp/stage_srv.log 2>&1 & SRV=$!
+echo "=== start zelox server :$PORT (COMPLETE_ON_END=1 so every window flushes => equal row counts) ==="
+rm -rf /tmp/stage_*; ZELOX_COMPLETE_ON_END=1 "$BIN" server --ip 127.0.0.1 --port "$PORT" >/tmp/stage_srv.log 2>&1 & SRV=$!
 trap 'kill "$SRV" 2>/dev/null' EXIT
 for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done
 
@@ -22,7 +22,7 @@ for STAGE in nokey full; do
   LINE=$(SPARK_REMOTE="sc://localhost:$PORT" BOOT="$BOOT" TOPIC="$TOPIC" N_EVENTS="$N" STAGE="$STAGE" \
          OUT="/tmp/stage_out_$STAGE" CK="/tmp/stage_ck_$STAGE" \
          "$PY" scripts/stream_stage_profile.py 2>&1)
-  echo "$LINE" | grep -E "VAJRA_STAGE|Error|Exception|No files" | head -3
+  echo "$LINE" | grep -E "ZELOX_STAGE|Error|Exception|No files" | head -3
   TP_VAL=$(echo "$LINE" | grep -oE "throughput=[0-9.]+" | head -1 | cut -d= -f2)
   eval "TP_$STAGE=\"${TP_VAL:-0}\""
 done

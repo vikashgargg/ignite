@@ -1,5 +1,5 @@
--- Flink side of the Vajra-vs-Flink streaming head-to-head.
--- IDENTICAL logical query to scripts/stream_windowed_agg.py (Vajra):
+-- Flink side of the Zelox-vs-Flink streaming head-to-head.
+-- IDENTICAL logical query to scripts/stream_windowed_agg.py (Zelox):
 --   10s event-time TUMBLE window, GROUP BY window + k, COUNT(*).
 -- Bounded read (scan.bounded.mode = latest-offset) so Flink consumes the whole
 -- pre-loaded backlog and the job terminates -> wall time = catch-up throughput,

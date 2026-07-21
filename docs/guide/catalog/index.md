@@ -13,8 +13,8 @@ You can configure remote catalog providers to persist your table metadata across
 For example, you can configure memory catalogs using the `catalog.list` option and set the default catalog using the `catalog.default_catalog` option. The configuration can be done via environment variables before starting the Sail server.
 
 ```bash
-export SAIL_CATALOG__LIST='[{name="c1", type="memory", initial_database=["default"]}, {name="c2", type="iceberg-rest", uri="https://catalog.example.com"}]'
-export SAIL_CATALOG__DEFAULT_CATALOG="c1"
+export ZELOX_CATALOG__LIST='[{name="c1", type="memory", initial_database=["default"]}, {name="c2", type="iceberg-rest", uri="https://catalog.example.com"}]'
+export ZELOX_CATALOG__DEFAULT_CATALOG="c1"
 ```
 
 Then you can interact with the catalogs using the Spark API.

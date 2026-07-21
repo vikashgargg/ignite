@@ -1,6 +1,6 @@
-# Minimal-cost, production-shaped EKS cluster for Vajra scale benchmarking.
+# Minimal-cost, production-shaped EKS cluster for Zelox scale benchmarking.
 # Cost levers baked in:
-#   - Graviton (arm64) SPOT nodes (~70% cheaper; matches Vajra's arm64 image)
+#   - Graviton (arm64) SPOT nodes (~70% cheaper; matches Zelox's arm64 image)
 #   - NAT gateway DISABLED + public-subnet nodes (saves ~$0.045/hr + data)
 #   - Single small managed nodegroup; control plane is the only fixed cost ($0.10/hr)
 # Teardown is one command (`eksctl delete cluster`) because every resource lives
@@ -9,7 +9,7 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
-  name: vajra-scale
+  name: zelox-scale
   region: ap-south-1
   version: "1.31"
 
@@ -32,7 +32,7 @@ managedNodeGroups:
     volumeSize: 80
     volumeType: gp3
     privateNetworking: false   # public subnets → no NAT needed
-    labels: { role: vajra-worker }
+    labels: { role: zelox-worker }
     # Let pods read/write the benchmark S3 bucket via the node instance role.
     iam:
       attachPolicyARNs:

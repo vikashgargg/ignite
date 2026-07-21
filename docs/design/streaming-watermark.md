@@ -1,4 +1,4 @@
-# Vajra watermark-propagation contract (the grounded design)
+# Zelox watermark-propagation contract (the grounded design)
 
 Status: **implemented + enforced** (supersedes the original June "ready to build" note). This is the
 single authoritative contract for how event-time watermarks are generated, propagated, and consumed

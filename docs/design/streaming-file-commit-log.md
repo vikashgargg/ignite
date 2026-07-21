@@ -19,12 +19,12 @@ guarantee, not a live bug.
 - **Readers** of a path that contains `_spark_metadata` use the manifests and **ignore
   orphan files** not listed.
 
-## What Vajra already has (helps) and what's missing
+## What Zelox already has (helps) and what's missing
 **Have:**
 - Offset WAL + commit-after-durable + restore (`sources/<id>/{staged,committed}`), verified
   under SIGKILL for stateless + windowed + joins.
 - The reader's listing glob **already excludes `_`/`.`-prefixed paths** (`listing/source.rs`)
-  — so a `_vajra_metadata` dir is auto-excluded as data, and the read-side honoring can be
+  — so a `_zelox_metadata` dir is auto-excluded as data, and the read-side honoring can be
   **gated on its presence** (zero blast-radius for normal reads).
 - `batch_id` is already derived from the committed offset log (`read_latest_batch_id + 1`),
   so a replay of an uncommitted batch **reuses the same id** — the idempotency enabler.
@@ -35,13 +35,13 @@ guarantee, not a live bug.
    time. `plan_executor` *does* have `start.options["path"]` (next to `checkpointLocation`),
    so thread it to `StreamingQuery::new → run`.
 2. **Write-side manifest at commit.** In the runner's commit step (after durable, with the
-   offset commit), write `<output>/_vajra_metadata/<batchId>` listing this batch's new files
+   offset commit), write `<output>/_zelox_metadata/<batchId>` listing this batch's new files
    (discovered by diffing the output dir against existing manifests). Batch-id-keyed →
    replay overwrites the same slot.
 3. **Atomic commit marker.** Reuse/extend the offset commit as the single atomic point so
    "batch committed" ⟺ manifest + offset both durable; a crash in between re-runs the same
    batch-id idempotently.
-4. **Read-side honoring (gated).** In `listing/source.rs`, if `<output>/_vajra_metadata/`
+4. **Read-side honoring (gated).** In `listing/source.rs`, if `<output>/_zelox_metadata/`
    exists, read the manifests → committed file set → scan only those (ignore orphans). Gated
    on the dir's presence → no effect on normal reads.
 
@@ -64,7 +64,7 @@ guarantee, not a live bug.
   `StreamingQuery::new`, *after* the sink plan (with its fixed path) is built — so a
   deterministic `batch_id`-keyed filename can't be set at plan time without re-planning.
 - **Two viable correct approaches (each a real build, each with a wrinkle to resolve):**
-  1. **Sink reports paths** → runner writes `<output>/_vajra_metadata/<batchId>` from the
+  1. **Sink reports paths** → runner writes `<output>/_zelox_metadata/<batchId>` from the
      reported set (Spark `FileStreamSink`). Wrinkle: thread paths out of the
      count-emitting sink + the output path into the runner.
   2. **Atomic per-batch staging dir**: write to `<output>/_staging-<runId>/` (hidden →

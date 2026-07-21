@@ -1,4 +1,4 @@
-# Vajra — Apple Container image  (वज्र: Sanskrit for thunderbolt)
+# Zelox — Apple Container image  (वज्र: Sanskrit for thunderbolt)
 #
 # Apple Container (the `container` CLI on macOS 26 / Tahoe) reads this file
 # the same way Docker does — the format is identical.  The ENTRYPOINT/CMD
@@ -10,8 +10,8 @@
 #   make container-build                    # ~25-35 min first time
 #
 # Run after building:
-#   mkdir -p /tmp/vajra
-#   container run --name vajra -p 50051:50051 -v /tmp/vajra:/tmp/vajra vajra:latest
+#   mkdir -p /tmp/zelox
+#   container run --name zelox -p 50051:50051 -v /tmp/zelox:/tmp/zelox zelox:latest
 #
 # ── Apple Container workarounds ───────────────────────────────────────────────
 # 1. Subdirectory bug (issue #425): `container build` sends only root-level
@@ -83,7 +83,7 @@ RUN CARGO_BUILD_JOBS=1 \
     CARGO_PROFILE_RELEASE_OPT_LEVEL=1 \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
     cargo build --release -p sail-cli --bins --jobs 1 \
-    && cp /app/target/release/vajra /usr/local/bin/vajra
+    && cp /app/target/release/zelox /usr/local/bin/zelox
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM python:${PYTHON_VERSION}-slim
@@ -98,7 +98,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # pandas + pyarrow required for Arrow UDFs and Pandas UDFs.
 RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}" pandas pyarrow
 
-COPY --from=builder /usr/local/bin/vajra /usr/local/bin/vajra
+COPY --from=builder /usr/local/bin/zelox /usr/local/bin/zelox
 
 EXPOSE 50051
 
@@ -107,9 +107,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
         "import socket; s = socket.create_connection(('localhost', 50051), timeout=4); s.close()" \
     || exit 1
 
-ENTRYPOINT ["/usr/local/bin/vajra"]
+ENTRYPOINT ["/usr/local/bin/zelox"]
 # Default: single-node local mode.
-# Distributed modes via SAIL_MODE env var:
-#   local-cluster:      container run -e SAIL_MODE=local-cluster -v /tmp/vajra:/tmp/vajra vajra:latest
-#   kubernetes-cluster: set SAIL_MODE=kubernetes-cluster in K8s manifest (see k8s/sail.yaml)
+# Distributed modes via ZELOX_MODE env var:
+#   local-cluster:      container run -e ZELOX_MODE=local-cluster -v /tmp/zelox:/tmp/zelox zelox:latest
+#   kubernetes-cluster: set ZELOX_MODE=kubernetes-cluster in K8s manifest (see k8s/sail.yaml)
 CMD ["server", "--ip", "0.0.0.0", "--port", "50051"]

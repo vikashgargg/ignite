@@ -1,0 +1,20 @@
+[package]
+name = "zelox-server"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-telemetry = { path = "../zelox-telemetry" }
+
+tokio = { workspace = true }
+tonic = { workspace = true }
+tonic-reflection = { workspace = true }
+tonic-health = { workspace = true }
+fastrace = { workspace = true }
+tower = { workspace = true }
+log = { workspace = true }
+axum = { workspace = true }

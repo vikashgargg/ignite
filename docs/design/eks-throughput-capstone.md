@@ -5,14 +5,14 @@ when idle; mask 12-digit account IDs in all artifacts.
 
 ## 1. Why this exists (the one remaining gap)
 
-Across every other axis Vajra matches or beats Flink (correctness: per-partition watermark + EO across
+Across every other axis Zelox matches or beats Flink (correctness: per-partition watermark + EO across
 crash; **memory: 6.6× less**, 1.28 vs 8.5 GiB measured EKS; **incremental checkpoint**: window + join,
 O(delta) proven). The **single** open gap is **throughput**:
 
 | Run (c7g.4xlarge, Flink 1.19, shared 100M-event Kafka, 10s tumbling COUNT) | Throughput | Memory |
 |---|---|---|
 | Flink 1.19 baseline | **11.36M ev/s** @ 41.8s | 8.5 GiB |
-| Vajra (ordered-100M v2) | ~2.4× slower wall (17.5→41.8s class) | **1.28 GiB** |
+| Zelox (ordered-100M v2) | ~2.4× slower wall (17.5→41.8s class) | **1.28 GiB** |
 
 Localized (prior A/B, per-msg-timer): the gap is **downstream of Kafka read** — in
 `from_json → WatermarkExec → StreamExchangeExec → WindowAccumExec`. Kafka read is **not** the
@@ -32,7 +32,7 @@ stage we haven't proven dominant.
 
 ### Phase A — stage attribution (1 EKS run + instrumentation)
 Add **env-gated** cumulative stage timers (pattern: existing `KAFKA_BENCH` read-bench + `F5_PEAK`),
-behind `VAJRA_WM_PROF`, reporting per-operator µs + rows at `EndOfData`:
+behind `ZELOX_WM_PROF`, reporting per-operator µs + rows at `EndOfData`:
 - `from_json` decode (scalar UDF / arrow-json) — **prime suspect**: the realtime Kafka source is pinned
   `parallelism=1` (`kafka/reader.rs:279`, single instance reads ALL partitions for single-instance EO),
   so `from_json` + `WatermarkExec` run **single-threaded before the exchange** while Flink parses per
@@ -72,7 +72,7 @@ Each fix is A/B'd on the SAME harness; keep it only if it moves ev/s without reg
 
 ## 3. Like-for-like harness (no shortcuts — [[feedback_no_workarounds]])
 
-Reuse `k8s/stream/` (`eks-stream-cluster`, `kafka`, `flink-session`, `producer`, `vajra-stream`):
+Reuse `k8s/stream/` (`eks-stream-cluster`, `kafka`, `flink-session`, `producer`, `zelox-stream`):
 - **Identical** for both engines: c7g.4xlarge node(s), shared Kafka topic, **100M events**, **10s
   tumbling COUNT** windowed agg, same partition count, same parallelism = vCPU.
 - Measure **throughput = ev/s over the job-compute window** (Flink: REST `/jobs` job-duration to EXCLUDE
@@ -81,7 +81,7 @@ Reuse `k8s/stream/` (`eks-stream-cluster`, `kafka`, `flink-session`, `producer`,
   noisy number).
 
 ## 4. Success criteria
-- **Primary:** Vajra windowed-agg throughput **≥ 0.83× Flink** (≤1.2× slower); **stretch: ≥ 1.0×**.
+- **Primary:** Zelox windowed-agg throughput **≥ 0.83× Flink** (≤1.2× slower); **stretch: ≥ 1.0×**.
 - **Guardrail:** memory stays **≤ 2 GiB** (preserve the 6.6× win) and EO/correctness unchanged
   (every group exact, 0 loss) — re-run the correctness assertions, not just timing.
 

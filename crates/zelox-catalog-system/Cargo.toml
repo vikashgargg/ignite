@@ -1,0 +1,17 @@
+[package]
+name = "zelox-catalog-system"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-catalog = { path = "../zelox-catalog" }
+
+serde = { workspace = true }
+datafusion = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }

@@ -1,4 +1,4 @@
-# TPC-H SF-100 — Vajra vs Apache Spark (time AND memory, same node)
+# TPC-H SF-100 — Zelox vs Apache Spark (time AND memory, same node)
 
 The 22 TPC-H queries at **scale factor 100 (~100 GB raw; 38 GB Parquet)**, run on
 the **same single node**, **same node-local data**, identical SQL — measuring
@@ -6,26 +6,26 @@ the **same single node**, **same node-local data**, identical SQL — measuring
 "faster *and* less memory" head-to-head at real scale.
 
 - Node: AWS EKS `r7gd.4xlarge` (16 vCPU Graviton3, **128 GB**, local NVMe), spot.
-- Vajra: `local-cluster` (4 workers). Apache Spark **3.5.3**: `local[16]`, 95 GB driver.
+- Zelox: `local-cluster` (4 workers). Apache Spark **3.5.3**: `local[16]`, 95 GB driver.
 - Data generated once with DuckDB to node-local disk; both engines read it.
 - Single pass (no warmup), 2026-06-06, ap-south-1.
 
 ## Result
 
-| Metric | **Vajra** | Apache Spark 3.5.3 | Vajra advantage |
+| Metric | **Zelox** | Apache Spark 3.5.3 | Zelox advantage |
 |---|---|---|---|
 | Queries passed | **22/22** | 22/22 | tie |
 | **Total time (22q)** | **346.97 s** | 1099.27 s | **3.2× faster** |
 | Avg / query | 15.77 s | 49.97 s | 3.2× |
 | **Peak memory** | **51.7 GiB** | 115 GiB (saturated its cap) | **≥2.2× less** |
 
-**At SF-100, Vajra is ~3.2× faster and used less than half the memory** — and
+**At SF-100, Zelox is ~3.2× faster and used less than half the memory** — and
 completed every query without saturating RAM, while Spark pinned its 115 GiB
 ceiling.
 
 ## Per-query wall time (seconds)
 
-| Q | Vajra | Spark | Q | Vajra | Spark |
+| Q | Zelox | Spark | Q | Zelox | Spark |
 |---|---|---|---|---|---|
 | 1 | 4.74 | 69.41 | 12 | 4.37 | 21.42 |
 | 2 | 5.72 | 13.13 | 13 | 4.52 | 37.67 |
@@ -42,7 +42,7 @@ ceiling.
 ## The honest scaling story (important)
 The speedup **shrinks with scale**, and that is expected:
 - **TPC-H SF-1 (1 GB, warm): ~36×** — small/warm data is dominated by engine
-  overhead + JVM startup, where Vajra's Rust/DataFusion core wins big.
+  overhead + JVM startup, where Zelox's Rust/DataFusion core wins big.
 - **TPC-H SF-100 (100 GB): ~3.2× + ~2.2× less memory** — at scale both engines
   are genuinely I/O- and compute-bound; the constant-factor overhead matters
   less, so the gap narrows to a *still-substantial* ~3× faster while using half

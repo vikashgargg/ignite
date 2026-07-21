@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Vajra REALTIME (Spark 4.2 Trigger.RealTime) side of the EKS head-to-head vs Flink streaming.
+"""Zelox REALTIME (Spark 4.2 Trigger.RealTime) side of the EKS head-to-head vs Flink streaming.
 
 Runs the IDENTICAL 10s event-time tumbling keyed COUNT over the pre-loaded Kafka `events` backlog (+16
 closers), driven by `.trigger(realTime=<dur>)` — the native Spark 4.2 Real-Time Mode trigger we wired to
-Vajra's realtime engine. Measures the CATCH-UP DRAIN throughput apples-to-apples with Flink: poll the
+Zelox's realtime engine. Measures the CATCH-UP DRAIN throughput apples-to-apples with Flink: poll the
 REAL S3 output sum(count) until it reaches N (all 10 windows closed = backlog fully drained, since the
 closers advance the watermark past the last data window), record the wall. Then report completeness
 (windows / sum / per-group) read back from S3 — never `find`, always the S3 object listing (pyarrow).
@@ -41,11 +41,11 @@ def _s3fs():
 def assert_reader_integrity(files, s3):
     """Fail LOUDLY if the parquet decoder is broken, rather than report phantom data corruption.
     pyarrow 25.0.0 on linux-arm64 mis-decodes arrow-rs `RLE_DICTIONARY` int columns (indices collapse
-    toward one dict slot), which for 22 days looked like a Vajra realtime key-corruption bug — it was
+    toward one dict slot), which for 22 days looked like a Zelox realtime key-corruption bug — it was
     the READER. A pyarrow write→read self-test does NOT catch it (the bug is specific to arrow-rs's dict
     page layout), so we CROSS-CHECK an independent reader (duckdb) on the real files and abort on
     disagreement. See project_realtime_key_corruption_bug (RESOLVED 2026-07-21) +
-    feedback_verify_measurement_not_imagine. Prefer duckdb / Vajra-readback over pyarrow on arm64."""
+    feedback_verify_measurement_not_imagine. Prefer duckdb / Zelox-readback over pyarrow on arm64."""
     import platform, pyarrow as pa
     try:
         import duckdb  # independent C++ parquet impl; disagreement ⇒ one reader is broken
@@ -65,7 +65,7 @@ def assert_reader_integrity(files, s3):
         if pa_dk != du_dk:
             raise SystemExit(f"FATAL: parquet readers DISAGREE on distinct k (pyarrow {pa.__version__}="
                              f"{pa_dk}, duckdb={du_dk}). One decoder is broken — refusing to report a "
-                             f"result. Use the reader that matches Vajra's own readback.")
+                             f"result. Use the reader that matches Zelox's own readback.")
 
 def s3_sum():
     """Read the S3 output committed so far: (n_windows, sum_count, min_cnt, max_cnt). 0s if nothing yet."""
@@ -137,8 +137,8 @@ if consume_s is None and consumed >= N:
     consume_s = drain_s
 thr = N / drain_s / 1e6 if drain_s > 0 else 0.0
 if consume_s and consume_s > 0:
-    print(f"VAJRA_CONSUME_RATE consumed={consumed} consume_s={consume_s:.1f} "
+    print(f"ZELOX_CONSUME_RATE consumed={consumed} consume_s={consume_s:.1f} "
           f"throughput={N/consume_s/1e6:.3f}M_ev/s (REAL read/compute rate, cadence-independent)", flush=True)
-print(f"VAJRA_REALTIME_DRAIN events={N} drain_s={drain_s:.1f} throughput={thr:.3f}M_ev/s trigger=realTime", flush=True)
-print(f"VAJRA_COMPLETENESS windows={w} sum={tot} per_group[min={mn} max={mx}] "
+print(f"ZELOX_REALTIME_DRAIN events={N} drain_s={drain_s:.1f} throughput={thr:.3f}M_ev/s trigger=realTime", flush=True)
+print(f"ZELOX_COMPLETENESS windows={w} sum={tot} per_group[min={mn} max={mx}] "
       f"EXACT={'YES' if (w==10 and tot==N and mn==mx==10000) else 'NO'}", flush=True)

@@ -1,8 +1,8 @@
 # Intra-node streaming parallelism (closing the per-node throughput gap)
 
 ## Why this exists
-Phase-2 AWS head-to-head (`docs/benchmarks/FLINK_HEAD_TO_HEAD.md`): per **core**, Vajra
-beats Flink (stateless 1.34×, windowed ~3×, memory ~16×). But Vajra streaming runs on a
+Phase-2 AWS head-to-head (`docs/benchmarks/FLINK_HEAD_TO_HEAD.md`): per **core**, Zelox
+beats Flink (stateless 1.34×, windowed ~3×, memory ~16×). But Zelox streaming runs on a
 **single core** regardless of node size, so per **node** Flink can scale past us via
 `parallelism=N`. Closing that is the one remaining throughput lever.
 
@@ -30,7 +30,7 @@ So parallelism isn't "almost working" — it's architecturally single-stream. Th
 build.
 
 ## Architecture (v2, post-review) — reuse the engine we already have
-**Vajra already ships a distributed shuffle** (`sail-execution`: `ShuffleWriteExec`,
+**Zelox already ships a distributed shuffle** (`sail-execution`: `ShuffleWriteExec`,
 `ShuffleReadExec`, `RepartitionExec` with `Partitioning::Hash`/`RoundRobinBatch`, job-graph
 planner, task runner, spill). Streaming currently **bypasses** it (`sail-plan/src/lib.rs`
 disables repartition for streaming "so the pipeline runs unbroken").
@@ -84,7 +84,7 @@ A flow-event stream carries control markers (`Watermark`, `Checkpoint{id}`, `End
 ## Phase 1 root-cause (confirmed 2026-06-10)
 Tracing the multi-partition stateless write end-to-end:
 - The source emits N partitions; `FilterExec`, `FlowEventToDataExec`, `EmptySinkAdapterExec`
-  all **preserve** partitioning; Vajra's `create_writer` does **not** reject multi-partition.
+  all **preserve** partitioning; Zelox's `create_writer` does **not** reject multi-partition.
 - **The hard stop is DataFusion's `DataSinkExec`** — `datafusion-datasource/src/sink.rs:103`:
   *"DataSinkExec requires its input to have a single partition."* For batch the optimizer
   coalesces N→1; for an **unbounded (streaming) multi-partition** input it rejects →
@@ -150,7 +150,7 @@ this is **independent of parallelism** (reproduces at N=1) and of the key form:
   rows). The `final_group_by` remap looks correct, so the bug is deeper in the partial
   aggregate / window-struct grouping / emission path of `WindowAccumExec`.
 
-**Implication:** Vajra's windowed aggregation today is correct for the **window-only** case
+**Implication:** Zelox's windowed aggregation today is correct for the **window-only** case
 (`groupBy(window).count()`) but **not** for the **keyed** case. Phase 2 parallelism *targets*
 keyed windowed aggs, so it is blocked until keyed windowed aggregation is correct.
 

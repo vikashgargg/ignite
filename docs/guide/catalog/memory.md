@@ -17,5 +17,5 @@ A memory catalog can be configured using the following options.
 ## Examples
 
 ```bash
-export SAIL_CATALOG__LIST='[{type="memory", name="sail", initial_database=["dev", "analytics"], initial_database_comment="Development analytics database"}]'
+export ZELOX_CATALOG__LIST='[{type="memory", name="sail", initial_database=["dev", "analytics"], initial_database_comment="Development analytics database"}]'
 ```

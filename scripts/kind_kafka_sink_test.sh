@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # T2 (kind) end-to-end test for the PARALLEL Kafka sink (Gap 2). Real k8s: pre-load sink_in with N, run the
-# Vajra CONTINUOUS Kafka->Kafka passthrough (sink_in -> sink_out), then VERIFY all N were delivered (parallel
+# Zelox CONTINUOUS Kafka->Kafka passthrough (sink_in -> sink_out), then VERIFY all N were delivered (parallel
 # sink reads every partition, not just partition 0) + report throughput. Resources scaled for the kind VM.
 # Self-checking. Usage: TAG=parallel-sink N=2000000 RUN=30 scripts/kind_kafka_sink_test.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-TAG="${TAG:-parallel-sink}"; N="${N:-2000000}"; EPMS="${EPMS:-1000}"; RUN="${RUN:-30}"; NS=stream; CTX=kind-vajra-kind
+TAG="${TAG:-parallel-sink}"; N="${N:-2000000}"; EPMS="${EPMS:-1000}"; RUN="${RUN:-30}"; NS=stream; CTX=kind-zelox-kind
 kk() { kubectl --context "$CTX" -n "$NS" "$@"; }
 kubectl --context "$CTX" get ns "$NS" >/dev/null 2>&1 || kubectl --context "$CTX" create ns "$NS"
 scale_kind() { sed -E -e 's/cpu: "1[0-9]"/cpu: "1"/g' -e 's/cpu: "[6-9]"/cpu: "1"/g' -e 's/memory: "2[0-9]Gi"/memory: "2Gi"/g' -e 's/memory: "1[0-9]Gi"/memory: "1500Mi"/g' -e 's/"--workers", "4"/"--workers", "2"/g'; }
@@ -26,18 +26,18 @@ TOT=$(kk exec "$KPOD" -- /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server 
 [ "${TOT:-0}" = "$N" ] || { echo "ABORT: sink_in has $TOT != $N"; exit 3; }
 echo "TOPIC_CHECK sink_in=$TOT expected=$N"
 
-echo "==== [3] Vajra ($TAG) + client ===="
-ECR="$(aws ecr describe-repositories --region ap-south-1 --repository-name vajra --query 'repositories[0].repositoryUri' --output text | tr -d '[:space:]')"; REG="${ECR%/vajra}"
-sed -e "s#__ECR__/vajra:eo-multipart#vajra:$TAG#g" k8s/stream/vajra-stream.yaml | scale_kind | kk apply -f -
-kk patch deploy vajra-stream --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null 2>&1
-kk wait --for=condition=available --timeout=300s deployment/vajra-stream
-scale_kind < k8s/stream/vajra-client.yaml | kk apply -f -
-kk wait --for=condition=ready --timeout=300s pod/vajra-client
-until kk logs vajra-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
+echo "==== [3] Zelox ($TAG) + client ===="
+ECR="$(aws ecr describe-repositories --region ap-south-1 --repository-name zelox --query 'repositories[0].repositoryUri' --output text | tr -d '[:space:]')"; REG="${ECR%/zelox}"
+sed -e "s#__ECR__/zelox:eo-multipart#zelox:$TAG#g" k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
+kk patch deploy zelox-stream --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null 2>&1
+kk wait --for=condition=available --timeout=300s deployment/zelox-stream
+scale_kind < k8s/stream/zelox-client.yaml | kk apply -f -
+kk wait --for=condition=ready --timeout=300s pod/zelox-client
+until kk logs zelox-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
 
 echo "==== [4] continuous Kafka passthrough sink_in -> sink_out (${RUN}s) ===="
-SR="sc://vajra-stream.$NS.svc.cluster.local:50051"; BOOT="kafka.$NS.svc.cluster.local:9092"
-kk exec vajra-client -- sh -c "SPARK_REMOTE=$SR BOOT=$BOOT RUN=$RUN python3 - <<'PY'
+SR="sc://zelox-stream.$NS.svc.cluster.local:50051"; BOOT="kafka.$NS.svc.cluster.local:9092"
+kk exec zelox-client -- sh -c "SPARK_REMOTE=$SR BOOT=$BOOT RUN=$RUN python3 - <<'PY'
 import os, time
 from pyspark.sql import SparkSession, functions as F
 s=SparkSession.builder.remote(os.environ['SPARK_REMOTE']).getOrCreate()

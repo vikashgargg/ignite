@@ -2,18 +2,18 @@
 # Realtime end-to-end latency gate — PRODUCTION_READINESS.md §4 (latency) / "beats Flink".
 #
 # Latency is Flink's defining property and where the no-JVM/no-GC architecture should win on
-# the TAIL (no GC pauses). This measures produce -> Vajra realtime (Kafka->Kafka passthrough,
+# the TAIL (no GC pauses). This measures produce -> Zelox realtime (Kafka->Kafka passthrough,
 # continuous trigger, at-least-once = the low-latency per-flush path) -> output-visible, per
 # record: latency_ms = consume_wall_ms - embedded produce_ts_ms. Reports p50/p99/p99.9/max.
 #
-# Local/free (local Kafka + vajra binary). For a "beats Flink" claim, run the same passthrough
+# Local/free (local Kafka + zelox binary). For a "beats Flink" claim, run the same passthrough
 # on Flink and compare tails. Usage: BOOT=localhost:9092 DURATION_S=60 RATE=20000 scripts/stream_latency.sh
 set -uo pipefail
 BOOT="${BOOT:-localhost:9092}"; IN_TOPIC="${IN_TOPIC:-lat_in}"; OUT_TOPIC="${OUT_TOPIC:-lat_out}"
 PORT="${PORT:-50072}"; CK="${CK:-/tmp/lat_ck}"; RATE="${RATE:-20000}"; DURATION_S="${DURATION_S:-60}"
 WORKERS="${WORKERS:-2}"; ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN=""; for c in "$ROOT/target/release/vajra" "$ROOT/target/debug/vajra"; do [ -x "$c" ] && BIN="$c" && break; done
-[ -z "$BIN" ] && { echo "FATAL: build vajra (cargo build --release -p sail-cli)" >&2; exit 2; }
+BIN=""; for c in "$ROOT/target/release/zelox" "$ROOT/target/debug/zelox"; do [ -x "$c" ] && BIN="$c" && break; done
+[ -z "$BIN" ] && { echo "FATAL: build zelox (cargo build --release -p sail-cli)" >&2; exit 2; }
 PY="$ROOT/.venvs/smoke/bin/python"; [ -x "$PY" ] || { echo "FATAL: .venvs/smoke missing" >&2; exit 2; }
 KPOD=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1); [ -z "$KPOD" ] && { echo "FATAL: no kafka" >&2; exit 2; }
 echo "=== latency: binary=$BIN duration=${DURATION_S}s rate=${RATE}/s ==="

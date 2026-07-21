@@ -11,10 +11,10 @@ Verified head-to-head on a dedicated 2-node topology (Kafka isolated):
 | Engine | wall | throughput | peak RSS | reads 100M? |
 |---|--:|--:|--:|:--:|
 | Flink 1.19 | 17.3 s | 5.8M ev/s | 8.6 GiB | yes (verified) |
-| Vajra (before) | 65 s | 1.5M ev/s | 1.3 GiB | **no — 95.07M (under-read, fixed separately)** |
+| Zelox (before) | 65 s | 1.5M ev/s | 1.3 GiB | **no — 95.07M (under-read, fixed separately)** |
 
-Vajra is ~3.8× slower **on this workload** despite 6.4× less memory. The earlier
-"Vajra 1.33× faster" was a co-location artifact (Kafka starved Flink's CPU); with a
+Zelox is ~3.8× slower **on this workload** despite 6.4× less memory. The earlier
+"Zelox 1.33× faster" was a co-location artifact (Kafka starved Flink's CPU); with a
 dedicated Kafka node Flink shows its real speed.
 
 ## Root cause (read from the plan, not guessed)
@@ -58,7 +58,7 @@ KafkaSource(N) → [StreamBarrierAlign N→1] → WatermarkExec(1) → [StreamEx
   `Final`) and vectorized hashing/`GroupedHashAggregateStream`; Arrow columnar batches keep
   the partial state compact.
 
-## Vajra design (one engine, native, better than both)
+## Zelox design (one engine, native, better than both)
 
 Reuse the existing, tested 1→N `StreamExchangeExec` and N→1 `StreamBarrierAlignExec`, but
 move the heavy work **above** the funnel so it runs N-way in parallel, and shrink what the
@@ -115,8 +115,8 @@ marked idle (emits an Idle marker) so it does not hold the global min back — m
 
 ## Validation plan
 
-1. Local (debug): `dist_streaming_smoke.py` 6/6 unchanged; `VAJRA_COUNT == produced` at
+1. Local (debug): `dist_streaming_smoke.py` 6/6 unchanged; `ZELOX_COUNT == produced` at
    10M and the windowed-agg result count equals the pre-change result.
-2. EKS (release, dedicated 2-node): re-run the verified head-to-head — expect Vajra
+2. EKS (release, dedicated 2-node): re-run the verified head-to-head — expect Zelox
    throughput to reach/beat Flink with reads=100M and unchanged memory advantage; re-run the
    EO chaos test (100000/100000 across kill).

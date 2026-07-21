@@ -1,6 +1,6 @@
 # Spark 3.5.3 baseline for the P4 batch-on-S3 benchmark: runs the SAME scripts/batch_s3_bench.py
 # (generate -> write Parquet to S3 -> read back + aggregate) in local[16] on the SAME node + S3 bucket
-# as Vajra (run AFTER scaling Vajra to 0 = fair). Spark reaches s3:// via hadoop-aws (Hadoop 3.3.4
+# as Zelox (run AFTER scaling Zelox to 0 = fair). Spark reaches s3:// via hadoop-aws (Hadoop 3.3.4
 # matches Spark 3.5.3) using the node instance role (com.amazonaws...InstanceProfileCredentialsProvider).
 # Requires ConfigMap 'batch-s3-script' (= scripts/batch_s3_bench.py) + env S3_PATH/N_ROWS at run time.
 apiVersion: batch/v1

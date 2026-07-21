@@ -220,7 +220,7 @@ def _run_sail_hms_server(
 
     catalogs_config = f'[{{name="sail", type="hms", uris=["{hms_endpoint}"]}}]'
     env = {
-        "SAIL_CATALOG__LIST": catalogs_config,
+        "ZELOX_CATALOG__LIST": catalogs_config,
         **(extra_env or {}),
     }
     old_env = {key: os.environ.get(key) for key in env}

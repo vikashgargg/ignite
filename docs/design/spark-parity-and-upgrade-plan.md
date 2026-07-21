@@ -1,6 +1,6 @@
-# Vajra — Spark-parity gap list + DataFusion/Arrow upgrade plan (STANDING, updated 2026-07-04)
+# Zelox — Spark-parity gap list + DataFusion/Arrow upgrade plan (STANDING, updated 2026-07-04)
 
-The maintained list of what remains to make Vajra a **true drop-in Spark replacement** ([charter](../../MEMORY.md)),
+The maintained list of what remains to make Zelox a **true drop-in Spark replacement** ([charter](../../MEMORY.md)),
 plus the safe path to adopt the latest DataFusion/Arrow via LakeSail v0.6.5 as a proven reference. Work this
 architect-first, T1→T2→T3 ([three-tier-sdlc.md](three-tier-sdlc.md)); update this doc as items land.
 
@@ -9,7 +9,7 @@ architect-first, T1→T2→T3 ([three-tier-sdlc.md](three-tier-sdlc.md)); update
 - **Versions:** DataFusion **54.0.0**, Arrow **58.3.0** (`Cargo.toml`) — upgraded 2026-07-06, T2-validated. (Note: Arrow-rs is at 58.x — "Arrow
   25" was a version mix-up; the real target is 58.3.0.)
 - **Streaming (just landed, merged to main cfae68f1):** crash-EO exactly-once (aligned barriers + exact
-  PartitionEOF idle + emit floor) EKS-confirmed; final-window completeness (opt-in `VAJRA_COMPLETE_ON_END`,
+  PartitionEOF idle + emit floor) EKS-confirmed; final-window completeness (opt-in `ZELOX_COMPLETE_ON_END`,
   Flink scan.bounded.mode parity); **parallel Kafka sink** (fixed a 15/16 data-loss bug + ~300× throughput,
   100M/100M @ 1.67M msg/s on EKS). All T1→T2→T3 validated. 3-tier SDLC + kind tier established.
 - **SQL compat:** 105/105 scorecard; TPC-H SF-1 ~36× vs Spark; TPC-DS 97/99. Batch-on-S3 6.2× vs Spark.
@@ -155,7 +155,7 @@ Each is a Spark-compat win; cherry-pick from LakeSail v0.6.5 (same fork lineage)
 - [ ] TPC-H SF-100 distributed < 60s (10-node K8s)
 - [ ] autoscaling / elasticity; rescale-from-checkpoint on EKS (mechanism done locally)
 - [ ] observability (metrics/traces) + Grafana; zero-downtime upgrade; multi-region
-- [ ] `pip install vajra-pyspark` one-liner works unchanged
+- [ ] `pip install zelox-pyspark` one-liner works unchanged
 
 **Platform upgrade:**
 - [ ] DataFusion 54.0 + Arrow 58.3 (§2)

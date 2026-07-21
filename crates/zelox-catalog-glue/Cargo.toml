@@ -1,0 +1,23 @@
+[package]
+name = "zelox-catalog-glue"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-catalog = { path = "../zelox-catalog" }
+
+arrow = { workspace = true }
+async-trait = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-glue = { workspace = true }
+aws-smithy-types = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+arrow = { workspace = true }
+testcontainers = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

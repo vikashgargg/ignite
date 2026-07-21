@@ -1,0 +1,17 @@
+[package]
+name = "zelox-cache"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+
+thiserror = { workspace = true }
+object_store = { workspace = true }
+datafusion = { workspace = true }
+chrono = { workspace = true }
+log = { workspace = true }
+moka = { workspace = true }

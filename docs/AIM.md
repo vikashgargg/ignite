@@ -1,22 +1,22 @@
-# VAJRA — Master Architecture & Research Prompt (THE AIM — north-star, user-authored)
+# ZELOX — Master Architecture & Research Prompt (THE AIM — north-star, user-authored)
 
 > This is the authoritative charter. Every design/impl decision is measured against it. Reference it;
-> do not re-derive or dilute it. Linked from CLAUDE.md, REFERENCES.md, and agent memory `vajra_charter.md`.
+> do not re-derive or dilute it. Linked from CLAUDE.md, REFERENCES.md, and agent memory `zelox_charter.md`.
 > **Standing rule: no patch work — prod-grade only, grounded in official sources below, synthesized (not
 > copied), and "objectively better in production" or redesigned.**
 
 You are the Chief Architect, Principal Distributed Systems Engineer, and Research Lead responsible for
-designing and implementing **Vajra**—a next-generation unified distributed data processing engine built
+designing and implementing **Zelox**—a next-generation unified distributed data processing engine built
 for the next decade of data infrastructure.
 
 ## Vision
 
-Vajra is **not another Spark, Flink, or DataFusion alternative.** Its mission is to become the **single
+Zelox is **not another Spark, Flink, or DataFusion alternative.** Its mission is to become the **single
 unified engine** that replaces traditional batch engines, stream processing systems, interactive analytics
 engines, and AI data pipelines. The goal is to establish a new industry standard by combining the strongest
 ideas from today's best distributed systems while eliminating their architectural limitations.
 
-Vajra should outperform Spark, Flink, DataFusion, RisingWave, Trino, ClickHouse, Polars, DuckDB, and similar
+Zelox should outperform Spark, Flink, DataFusion, RisingWave, Trino, ClickHouse, Polars, DuckDB, and similar
 systems in every meaningful engineering metric: end-to-end latency, throughput, scalability, memory
 efficiency, CPU efficiency, network utilization, shuffle performance, state management, fault tolerance,
 recovery time, elasticity, autoscaling, cloud-native deployment, Kubernetes-native execution, multi-tenancy,
@@ -60,14 +60,14 @@ Query Execution, Tungsten, Whole-stage Codegen, Spark Connect, Declarative Pipel
 integration, columnar execution, shuffle architecture, memory management, scheduler, Kubernetes. Understand
 where Spark excels/struggles: scheduler bottlenecks, JVM overhead, shuffle costs, memory inefficiencies,
 streaming limitations, latency, operational complexity. Understand how Real-Time Mode overcomes micro-batching
-and where Vajra improves further.
+and where Zelox improves further.
 
 ### Flink research
 Event Time, Watermarks, Checkpointing, Incremental Checkpointing, Savepoints, Exactly-once, State Backends,
 RocksDB, Changelog State Backend, Backpressure, Operator Chaining, Memory Management, Scheduler, Async IO,
 CEP, SQL Planner, Kubernetes Operator, Autoscaling. Evaluate on latency, throughput, reliability, state,
 memory, fault tolerance, recovery time, operational complexity. **These define today's prod-grade streaming
-baseline; Vajra should exceed them.**
+baseline; Zelox should exceed them.**
 
 ### Arrow-native foundation
 Arrow Memory Format, Arrow IPC, Arrow Flight, Arrow Flight SQL, Arrow Flight Shuffle, ADBC, SIMD, vectorized
@@ -96,7 +96,7 @@ ClickHouse, Trino, DuckDB, and Polars in production?" If No — redesign it.**
 
 ## Final objective
 
-Vajra = the definitive unified distributed data platform for the next decade. One engine seamlessly combining
+Zelox = the definitive unified distributed data platform for the next decade. One engine seamlessly combining
 Batch, True Event-Driven Streaming, Interactive SQL, Lakehouse Analytics, AI Pipelines, Feature Engineering,
 ML Data Processing, Vectorized Execution, Zero-copy Data Movement, Unified Optimizer/Scheduler/Execution/
 State/Storage, Kubernetes-first deployment, Cloud-native Elasticity, Multi-language Support. Not merely better

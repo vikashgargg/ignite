@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vajra side of the Vajra-vs-Flink streaming head-to-head.
+"""Zelox side of the Zelox-vs-Flink streaming head-to-head.
 
 Identical logical query to the Flink SQL job (k8s/stream/flink-sql.sql):
     SELECT window_start, k, COUNT(*)
@@ -13,7 +13,7 @@ available data and stops, giving a clean catch-up throughput directly comparable
 to Flink's published "events/s" windowed-aggregation number.
 
 Env:
-  SPARK_REMOTE  sc://<vajra>:50051
+  SPARK_REMOTE  sc://<zelox>:50051
   BOOT          Kafka bootstrap (kafka.stream.svc.cluster.local:9092)
   TOPIC         events
   N_EVENTS      total produced (for throughput calc)
@@ -69,5 +69,5 @@ row = out.agg(F.sum("count").alias("total"),
               F.countDistinct("window").alias("n_win"),
               F.countDistinct("k").alias("n_keys")).collect()[0]
 total, n_win, n_keys = row["total"], row["n_win"], row["n_keys"]
-print(f"VAJRA_WAGG events={N} wall_s={dt:.2f} throughput={N/dt/1e6:.3f}M_events/s "
+print(f"ZELOX_WAGG events={N} wall_s={dt:.2f} throughput={N/dt/1e6:.3f}M_events/s "
       f"groups={windows} total_events={total} n_windows={n_win} n_keys={n_keys}", flush=True)

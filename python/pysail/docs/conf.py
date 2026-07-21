@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     from sphinx.application import Sphinx
 
 project = "Sail"
-copyright = "Vajra"  # noqa: A001
-author = "Vajra"
+copyright = "Zelox"  # noqa: A001
+author = "Zelox"
 
 extensions = [
     "sphinx.ext.autodoc",

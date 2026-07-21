@@ -2,13 +2,13 @@
 
 > The streaming latency + EO + throughput + memory gaps vs Flink are now closed/won
 > (`STREAMING_VS_FLINK_EKS.md`). The remaining operational gap is **large keyed state**:
-> Vajra keeps streaming state **in memory** and snapshots it **whole** to the checkpoint.
+> Zelox keeps streaming state **in memory** and snapshots it **whole** to the checkpoint.
 > Flink handles huge state via RocksDB + incremental checkpoints + (2.0) disaggregated
-> state (ForSt). This designs a Vajra state backend that **matches and then beats** Flink —
-> not by porting RocksDB, but by exploiting Vajra's no-JVM, Arrow-columnar, object-store-first
+> state (ForSt). This designs a Zelox state backend that **matches and then beats** Flink —
+> not by porting RocksDB, but by exploiting Zelox's no-JVM, Arrow-columnar, object-store-first
 > architecture.
 
-## Where Vajra is today
+## Where Zelox is today
 - `WindowAccumExec` keeps partial-aggregate state in `AccumState.pending_rows: Vec<RecordBatch>`
   (in memory), pruned to open windows, and **full-snapshotted** to the object-store checkpoint
   on epoch/EndOfData (`state_io::stage_state`). `StreamJoinExec` / dedup hold state in memory too.
@@ -26,7 +26,7 @@
 - **DataFusion** — `GroupedHashAggregateStream` + `MemoryPool` spill: when a memory budget is
   exceeded, spill to disk and merge — the model for *bounded-memory* operators.
 
-## Vajra design — `StateBackend`: Arrow-columnar, spillable, disaggregated-native
+## Zelox design — `StateBackend`: Arrow-columnar, spillable, disaggregated-native
 A pluggable trait, Arrow-first (state is RecordBatches, not opaque bytes), used by
 `WindowAccumExec` / `StreamJoinExec` / dedup instead of in-memory `Vec`s:
 
@@ -53,8 +53,8 @@ trait StateBackend {
 2. **Incremental + disaggregated checkpoints (matches ForSt, native).** State is keyed by
    **key-group** and content-addressed; `checkpoint(epoch)` uploads only key-groups **changed
    since the last epoch** to the object store (delta), writing one atomic manifest
-   (`state/<op>/<epoch>/manifest`) — reusing Vajra's existing single-atomic-object commit (the
-   same primitive the realtime EO sink uses). Because Vajra is **object-store-first already**,
+   (`state/<op>/<epoch>/manifest`) — reusing Zelox's existing single-atomic-object commit (the
+   same primitive the realtime EO sink uses). Because Zelox is **object-store-first already**,
    "disaggregated state" is the natural representation, not a bolt-on: the object store *is* the
    state of record; the local store is a write-back **cache**. This is the ForSt idea, native.
 
@@ -69,7 +69,7 @@ trait StateBackend {
 - **Arrow-columnar state** → vectorized merge/scan, zero-copy to the agg operators (Flink
   serializes per-key rows).
 - **Object-store-first** → checkpoints are cheap (state already remote, only the delta), and
-  elasticity is free — Flink retrofitted this in 2.0 (ForSt); Vajra is built that way.
+  elasticity is free — Flink retrofitted this in 2.0 (ForSt); Zelox is built that way.
 
 ## Build order (each step compiles + is chaos/scale-testable)
 1. **`StateBackend` trait + in-memory impl** (parity refactor): move `WindowAccumExec` off the

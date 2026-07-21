@@ -1,30 +1,30 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: vajra
+  name: zelox
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vajra-spark-server
-  namespace: vajra
+  name: zelox-spark-server
+  namespace: zelox
   labels:
-    app.kubernetes.io/name: vajra
+    app.kubernetes.io/name: zelox
     app.kubernetes.io/component: spark-server
 spec:
   # We cannot have more than one replica because each Spark session is tied to a single pod.
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: vajra
+      app.kubernetes.io/name: zelox
       app.kubernetes.io/component: spark-server
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: vajra
+        app.kubernetes.io/name: zelox
         app.kubernetes.io/component: spark-server
     spec:
-      serviceAccountName: vajra-user
+      serviceAccountName: zelox-user
       volumes:
         - name: tmp-sail
           hostPath:
@@ -36,8 +36,8 @@ spec:
             type: DirectoryOrCreate
       containers:
         - name: server
-          image: vajra:latest
-          command: [ "vajra" ]
+          image: zelox:latest
+          command: [ "zelox" ]
           args: [ "server", "--ip", "0.0.0.0", "--port", "50051" ]
           ports:
             - containerPort: 50051
@@ -50,39 +50,39 @@ spec:
           env:
             - name: RUST_LOG
               value: info
-            - name: SAIL_MODE
+            - name: ZELOX_MODE
               value: "kubernetes-cluster"
-            - name: SAIL_CLUSTER__DRIVER_LISTEN_HOST
+            - name: ZELOX_CLUSTER__DRIVER_LISTEN_HOST
               value: "0.0.0.0"
-            - name: SAIL_CLUSTER__DRIVER_EXTERNAL_HOST
+            - name: ZELOX_CLUSTER__DRIVER_EXTERNAL_HOST
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-            - name: SAIL_KUBERNETES__IMAGE
-              value: vajra:latest
-            - name: SAIL_KUBERNETES__NAMESPACE
-              value: vajra
-            - name: SAIL_KUBERNETES__DRIVER_POD_NAME
+            - name: ZELOX_KUBERNETES__IMAGE
+              value: zelox:latest
+            - name: ZELOX_KUBERNETES__NAMESPACE
+              value: zelox
+            - name: ZELOX_KUBERNETES__DRIVER_POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: SAIL_KUBERNETES__WORKER_SERVICE_ACCOUNT_NAME
-              value: vajra-user
-            - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
+            - name: ZELOX_KUBERNETES__WORKER_SERVICE_ACCOUNT_NAME
+              value: zelox-user
+            - name: ZELOX_KUBERNETES__WORKER_POD_TEMPLATE
               value: >-
                 {"spec":{"volumes":[{"name":"tmp-sail","hostPath":{"path":"/private/tmp/sail","type":"DirectoryOrCreate"}},{"name":"tmp-sail-alt","hostPath":{"path":"/tmp/sail","type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"tmp-sail","mountPath":"/private/tmp/sail"},{"name":"tmp-sail-alt","mountPath":"/tmp/sail"}]}]}}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: vajra-spark-server
-  namespace: vajra
+  name: zelox-spark-server
+  namespace: zelox
   labels:
-    app.kubernetes.io/name: vajra
+    app.kubernetes.io/name: zelox
     app.kubernetes.io/component: spark-server
 spec:
   selector:
-    app.kubernetes.io/name: vajra
+    app.kubernetes.io/name: zelox
     app.kubernetes.io/component: spark-server
   ports:
     - protocol: TCP
@@ -92,8 +92,8 @@ spec:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: vajra-spark-server
-  namespace: vajra
+  name: zelox-spark-server
+  namespace: zelox
 rules:
   - apiGroups: [ "" ]
     resources: [ "pods" ]
@@ -102,19 +102,19 @@ rules:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: vajra-user
-  namespace: vajra
+  name: zelox-user
+  namespace: zelox
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: vajra-spark-server
-  namespace: vajra
+  name: zelox-spark-server
+  namespace: zelox
 subjects:
   - kind: ServiceAccount
-    name: vajra-user
-    namespace: vajra
+    name: zelox-user
+    namespace: zelox
 roleRef:
   kind: Role
-  name: vajra-spark-server
+  name: zelox-spark-server
   apiGroup: rbac.authorization.k8s.io

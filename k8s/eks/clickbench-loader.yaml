@@ -4,13 +4,13 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: vajra
+  name: zelox
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: clickbench-loader
-  namespace: vajra
+  namespace: zelox
 spec:
   backoffLimit: 2
   template:

@@ -25,7 +25,7 @@ In an empty directory, create a `Dockerfile` with the following content.
 In the same directory, run the following command to build the Docker image.
 
 ```bash-vue
-docker build -t sail:latest --build-arg PYSAIL_VERSION={{ libVersion }} .
+docker build -t sail:latest --build-arg PYZELOX_VERSION={{ libVersion }} .
 ```
 
 <script setup>

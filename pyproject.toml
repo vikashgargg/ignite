@@ -34,7 +34,7 @@ test = [
     # The dependencies for testing the installed package.
     # PySpark 4.1.0 does not work on Windows.
     #   https://issues.apache.org/jira/browse/SPARK-54745
-    # 4.2 extends Real-Time Mode to PySpark (stateless); Vajra's stateful continuous path predates it.
+    # 4.2 extends Real-Time Mode to PySpark (stateless); Zelox's stateful continuous path predates it.
     "pyspark-client>=4.0,<4.3,!=4.1.0",
     "pandas<3",
     "duckdb>=1.0,<2",
@@ -131,7 +131,7 @@ install-pysail = "\"{env:HATCH_UV}\" pip install pysail --no-index -f target/whe
 
 [tool.hatch.envs.coverage]
 template = "default"
-env-vars = { RUSTC_WORKSPACE_WRAPPER = ".github/scripts/rustc-workspace-wrapper.sh", LLVM_PROFILE_FILE = "target/coverage/sail-%p-%m.profraw" }
+env-vars = { RUSTC_WORKSPACE_WRAPPER = ".github/scripts/rustc-workspace-wrapper.sh", LLVM_PROFILE_FILE = "target/coverage/zelox-%p-%m.profraw" }
 
 [tool.hatch.envs.docs]
 python = "3.11"
@@ -282,7 +282,7 @@ testpaths = ["python"]
 [tool.maturin]
 python-source = "python"
 module-name = "pysail._native"
-manifest-path = "crates/sail-python/Cargo.toml"
+manifest-path = "crates/zelox-python/Cargo.toml"
 features = [
     "pyo3/extension-module",
     "pyo3/abi3-py38",

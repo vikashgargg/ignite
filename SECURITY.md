@@ -1,7 +1,7 @@
 # Security Policy
 
 ## Status
-Vajra is **pre-1.0 (`v0.6.0-alpha`)**. It has security *features* (Bearer-token
+Zelox is **pre-1.0 (`v0.6.0-alpha`)**. It has security *features* (Bearer-token
 auth, TLS/mTLS) but has **not yet had a third-party penetration test or formal
 security audit**. Treat it as not-yet-hardened: run it on **trusted networks
 behind your own authentication/perimeter** until the §3 items in
@@ -36,10 +36,10 @@ Enforced defaults (as of the security pass):
 - **A token without TLS is refused at startup.** Set `--tls-cert/--tls-key` when
   using `--auth-token`; the token rides in request metadata and is only
   confidential over TLS. Override only on a trusted network with
-  `SAIL_AUTH__ALLOW_INSECURE_TOKEN=true`.
+  `ZELOX_AUTH__ALLOW_INSECURE_TOKEN=true`.
 - **The Web UI binds to `127.0.0.1:4040` by default** (it is unauthenticated).
-  Expose it deliberately with `SAIL_UI__HOST=0.0.0.0` behind your own network
-  policy, or disable it with `SAIL_UI__ENABLED=false`.
+  Expose it deliberately with `ZELOX_UI__HOST=0.0.0.0` behind your own network
+  policy, or disable it with `ZELOX_UI__ENABLED=false`.
 - **gRPC reflection is disabled automatically when an auth token is set**, so a
   secured server does not allow anonymous schema enumeration.
 
@@ -47,8 +47,8 @@ Still recommended:
 - Use **mTLS** (`--tls-ca`) for service-to-service trust where possible.
 - Do not expose the gRPC port to untrusted networks.
 - **Bound the memory pool** so a heavy/hostile query can't OOM the host:
-  `SAIL_RUNTIME__MEMORY_POOL__TYPE=fair` (or `greedy`) and
-  `SAIL_RUNTIME__MEMORY_POOL__FAIR__MAX_SIZE=<bytes>`. The default is `unbounded`.
+  `ZELOX_RUNTIME__MEMORY_POOL__TYPE=fair` (or `greedy`) and
+  `ZELOX_RUNTIME__MEMORY_POOL__FAIR__MAX_SIZE=<bytes>`. The default is `unbounded`.
 - Per-connection stream/in-flight caps are enforced by default (256 each); a
   per-query wall-time budget is not yet enforced (see THREAT_MODEL.md F6).
 - Run with least-privilege OS/K8s permissions and per-pod resource limits.

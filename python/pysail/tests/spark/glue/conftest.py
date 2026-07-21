@@ -55,15 +55,15 @@ def glue_remote(moto_endpoint: str) -> Generator[str, None, None]:
     catalogs_config = f'[{{name="sail", type="glue", region="us-east-1", endpoint_url="{moto_endpoint}"}}]'
 
     # Set environment variables for Sail configuration
-    old_catalogs = os.environ.get("SAIL_CATALOG__LIST")
+    old_catalogs = os.environ.get("ZELOX_CATALOG__LIST")
     old_aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
     old_aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
-    old_parallelism = os.environ.get("SAIL_EXECUTION__DEFAULT_PARALLELISM")
+    old_parallelism = os.environ.get("ZELOX_EXECUTION__DEFAULT_PARALLELISM")
 
-    os.environ["SAIL_CATALOG__LIST"] = catalogs_config
+    os.environ["ZELOX_CATALOG__LIST"] = catalogs_config
     os.environ["AWS_ACCESS_KEY_ID"] = "testing"
     os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"  # noqa: S105
-    os.environ["SAIL_EXECUTION__DEFAULT_PARALLELISM"] = "4"
+    os.environ["ZELOX_EXECUTION__DEFAULT_PARALLELISM"] = "4"
 
     server = SparkConnectServer("127.0.0.1", 0)
     server.start(background=True)
@@ -74,9 +74,9 @@ def glue_remote(moto_endpoint: str) -> Generator[str, None, None]:
 
     # Restore environment
     if old_catalogs is None:
-        os.environ.pop("SAIL_CATALOG__LIST", None)
+        os.environ.pop("ZELOX_CATALOG__LIST", None)
     else:
-        os.environ["SAIL_CATALOG__LIST"] = old_catalogs
+        os.environ["ZELOX_CATALOG__LIST"] = old_catalogs
     if old_aws_key is None:
         os.environ.pop("AWS_ACCESS_KEY_ID", None)
     else:
@@ -86,9 +86,9 @@ def glue_remote(moto_endpoint: str) -> Generator[str, None, None]:
     else:
         os.environ["AWS_SECRET_ACCESS_KEY"] = old_aws_secret
     if old_parallelism is None:
-        os.environ.pop("SAIL_EXECUTION__DEFAULT_PARALLELISM", None)
+        os.environ.pop("ZELOX_EXECUTION__DEFAULT_PARALLELISM", None)
     else:
-        os.environ["SAIL_EXECUTION__DEFAULT_PARALLELISM"] = old_parallelism
+        os.environ["ZELOX_EXECUTION__DEFAULT_PARALLELISM"] = old_parallelism
 
 
 @pytest.fixture(scope="module")

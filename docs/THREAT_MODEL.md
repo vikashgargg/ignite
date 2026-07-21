@@ -1,4 +1,4 @@
-# Vajra — Threat Model & Security Findings
+# Zelox — Threat Model & Security Findings
 
 First-pass internal security review (2026-06-06). Scope: the Spark Connect gRPC
 server, its auth/TLS, the Web UI, and the dependency supply chain. This is **not**
@@ -6,7 +6,7 @@ a substitute for a third-party penetration test (still outstanding — see
 [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) §3).
 
 ## Assets
-- **Data**: the contents of tables/files Vajra reads/writes (Parquet, Delta,
+- **Data**: the contents of tables/files Zelox reads/writes (Parquet, Delta,
   Iceberg, object stores).
 - **Credentials**: object-store keys, catalog tokens, the Bearer auth token, TLS
   private keys.
@@ -61,13 +61,13 @@ open (liveness probes need it; it discloses nothing sensitive).
 `web_ui::serve` previously bound `0.0.0.0:4040` unconditionally.
 **Fixed:** added `UiConfig { enabled, host, port }` defaulting to **`127.0.0.1:4040`**,
 so the unauthenticated UI is not reachable off-host by default. Operators can set
-`SAIL_UI__HOST` (e.g. `0.0.0.0` behind a network policy) or `SAIL_UI__ENABLED=false`.
+`ZELOX_UI__HOST` (e.g. `0.0.0.0` behind a network policy) or `ZELOX_UI__ENABLED=false`.
 
 ### F4 — Bearer token over cleartext (Medium) — **FIXED**
 The token interceptor functioned regardless of TLS, so with TLS off the token
 travelled in request metadata in the clear.
 **Fixed:** the server now **refuses to start** when a token is set without TLS,
-unless `SAIL_AUTH__ALLOW_INSECURE_TOKEN=true` is set explicitly (trusted-network
+unless `ZELOX_AUTH__ALLOW_INSECURE_TOKEN=true` is set explicitly (trusted-network
 escape hatch). Guidance also in SECURITY.md.
 
 ### F5 — Insecure by default (Low, by design)
@@ -80,7 +80,7 @@ hardened-deployment guidance covers production.
 - **Added:** finite per-connection caps — `max_concurrent_streams` (256) and
   `concurrency_limit_per_connection` (256) in `ServerBuilderOptions`, so one client
   cannot open unbounded streams / in-flight requests.
-- **Memory:** a bounded memory pool already exists (`SAIL_RUNTIME__MEMORY_POOL__TYPE
+- **Memory:** a bounded memory pool already exists (`ZELOX_RUNTIME__MEMORY_POOL__TYPE
   =fair|greedy` + `..._MAX_SIZE`); the *default* is `unbounded`. **Production
   deployments should set a bounded pool** (documented in SECURITY.md). We keep the
   default unbounded to avoid silently capping legitimate large analytics queries.

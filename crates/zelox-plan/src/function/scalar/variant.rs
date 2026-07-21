@@ -1,0 +1,24 @@
+use zelox_function::scalar::variant::spark_is_variant_null::SparkIsVariantNullUdf;
+use zelox_function::scalar::variant::spark_json_to_variant::SparkJsonToVariantUdf;
+use zelox_function::scalar::variant::spark_schema_of_variant::SparkSchemaOfVariantUdf;
+use zelox_function::scalar::variant::spark_to_variant_object::SparkToVariantObjectUdf;
+use zelox_function::scalar::variant::spark_variant_get::SparkVariantGet;
+use zelox_function::scalar::variant::spark_variant_to_json::SparkVariantToJsonUdf;
+
+use crate::function::common::ScalarFunction;
+
+pub(super) fn list_built_in_variant_functions() -> Vec<(&'static str, ScalarFunction)> {
+    use crate::function::common::ScalarFunctionBuilder as F;
+
+    vec![
+        ("is_variant_null", F::udf(SparkIsVariantNullUdf::new())),
+        ("parse_json", F::udf(SparkJsonToVariantUdf::new())),
+        ("schema_of_variant", F::udf(SparkSchemaOfVariantUdf::new())),
+        // schema_of_variant_agg is registered as an aggregate function
+        ("to_variant_object", F::udf(SparkToVariantObjectUdf::new())),
+        ("try_parse_json", F::udf(SparkJsonToVariantUdf::try_new())),
+        ("try_variant_get", F::udf(SparkVariantGet::new(true))),
+        ("variant_get", F::udf(SparkVariantGet::new(false))),
+        ("variant_to_json", F::udf(SparkVariantToJsonUdf::new())),
+    ]
+}

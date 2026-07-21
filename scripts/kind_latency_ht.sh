@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# T2 REALTIME latency head-to-head on kind (LOCAL, FREE): Vajra (continuous) vs Flink 1.19 (streaming).
+# T2 REALTIME latency head-to-head on kind (LOCAL, FREE): Zelox (continuous) vs Flink 1.19 (streaming).
 # THE Flink-class metric a micro-batch cannot express, run on REAL Kubernetes (pods, service networking,
-# the vajra image) BEFORE any EKS spend. Both engines run the IDENTICAL Kafka lat_in -> raw value
+# the zelox image) BEFORE any EKS spend. Both engines run the IDENTICAL Kafka lat_in -> raw value
 # passthrough -> Kafka lat_out at a fixed rate; a shared in-pod loadgen embeds produce_ts and a consumer
 # computes now-produce_ts per record -> p50/p99/p99.9/max (no-JVM/no-GC target = better TAIL).
-# SEQUENTIAL (never concurrent): Vajra measured + torn down, THEN Flink — so both fit the 8-vCPU Docker VM.
+# SEQUENTIAL (never concurrent): Zelox measured + torn down, THEN Flink — so both fit the 8-vCPU Docker VM.
 # Same manifests/topology as EKS; resource requests scaled to a laptop via scale_kind (T2 tests
 # topology/scheduling, not scale). Assumes `TAG=<img> scripts/kind_up.sh` already ran (cluster up + image loaded).
 # Usage: RATE=5000 DUR=45 TAG=bf6 scripts/kind_latency_ht.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-RATE="${RATE:-5000}"; DUR="${DUR:-45}"; TAG="${TAG:-bf6}"; NS=stream; CTX="${CTX:-kind-vajra-kind}"
+RATE="${RATE:-5000}"; DUR="${DUR:-45}"; TAG="${TAG:-bf6}"; NS=stream; CTX="${CTX:-kind-zelox-kind}"
 BOOT="kafka.$NS.svc.cluster.local:9092"
 kk() { kubectl --context "$CTX" -n "$NS" "$@"; }
 # Scale EKS resource requests down to the kind Docker VM, keeping the SAME manifests/topology.
@@ -31,9 +31,9 @@ for t in lat_in lat_out; do
 done
 echo "topics ready"
 
-# ---- shared in-pod loadgen+consumer (runs in vajra-client, which has confluent-kafka) ----
+# ---- shared in-pod loadgen+consumer (runs in zelox-client, which has confluent-kafka) ----
 loadgen_consume() { # $1=label -> LATENCY_RESULT line
-  kk exec vajra-client -- sh -c "BOOT=$BOOT RATE=$RATE DUR=$DUR python3 - <<'PY'
+  kk exec zelox-client -- sh -c "BOOT=$BOOT RATE=$RATE DUR=$DUR python3 - <<'PY'
 import os, time, json, threading
 from confluent_kafka import Producer, Consumer
 boot=os.environ['BOOT']; rate=int(os.environ['RATE']); dur=int(os.environ['DUR'])
@@ -69,26 +69,26 @@ print(f'LATENCY_RESULT n={len(lat)} p50_ms={pct(50)} p99_ms={pct(99)} p999_ms={p
 PY" 2>&1 | grep -a LATENCY_RESULT | sed "s/^/[$1] /"
 }
 
-echo "==== [2] VAJRA ($TAG) realtime passthrough ===="
-sed -e "s#__ECR__/vajra:eo-multipart#vajra:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/vajra-stream.yaml | scale_kind | kk apply -f -
-kk wait --for=condition=available --timeout=300s deployment/vajra-stream
-kk apply -f k8s/stream/vajra-client.yaml
-kk wait --for=condition=ready --timeout=300s pod/vajra-client
-until kk logs vajra-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
-kk cp scripts/stream_latency_query.py vajra-client:/tmp/lat.py
-SR="sc://vajra-stream.$NS.svc.cluster.local:50051"
-kk exec vajra-client -- sh -c "SPARK_REMOTE=$SR BOOT=$BOOT IN_TOPIC=lat_in OUT_TOPIC=lat_out CK=/tmp/lat_ck python3 /tmp/lat.py" >/tmp/vlat.log 2>&1 &
+echo "==== [2] ZELOX ($TAG) realtime passthrough ===="
+sed -e "s#__ECR__/zelox:eo-multipart#zelox:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
+kk wait --for=condition=available --timeout=300s deployment/zelox-stream
+kk apply -f k8s/stream/zelox-client.yaml
+kk wait --for=condition=ready --timeout=300s pod/zelox-client
+until kk logs zelox-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
+kk cp scripts/stream_latency_query.py zelox-client:/tmp/lat.py
+SR="sc://zelox-stream.$NS.svc.cluster.local:50051"
+kk exec zelox-client -- sh -c "SPARK_REMOTE=$SR BOOT=$BOOT IN_TOPIC=lat_in OUT_TOPIC=lat_out CK=/tmp/lat_ck python3 /tmp/lat.py" >/tmp/vlat.log 2>&1 &
 VQ=$!; sleep 15
-VAJRA_LAT=$(loadgen_consume VAJRA)
+ZELOX_LAT=$(loadgen_consume ZELOX)
 kill $VQ 2>/dev/null
-kk delete deploy vajra-stream --ignore-not-found >/dev/null 2>&1
+kk delete deploy zelox-stream --ignore-not-found >/dev/null 2>&1
 
-echo "==== [3] FLINK 1.19 streaming passthrough (fair: parallelism=2 == Vajra workers=2) ===="
+echo "==== [3] FLINK 1.19 streaming passthrough (fair: parallelism=2 == Zelox workers=2) ===="
 # CRITICAL: scale_kind scales only k8s resource *limits*; Flink's INTERNAL JVM sizing
 # (taskmanager.memory.process.size, default 24576m for the EKS big node) must ALSO be scaled
 # or the TM OOMKills (exitCode 137) in the small pod -> 0 slots register -> job FAILs on slot
 # timeout. And parallelism/slots must drop from 16 (16-way on ~1 laptop core = thrash/stall)
-# to 2 to match Vajra. flink_scale bakes both in.
+# to 2 to match Zelox. flink_scale bakes both in.
 flink_scale() {
   sed -E \
     -e 's/numberOfTaskSlots: 16/numberOfTaskSlots: 2/' -e 's/parallelism.default: 16/parallelism.default: 2/' \
@@ -130,6 +130,6 @@ kk delete -f k8s/stream/flink-session.yaml --ignore-not-found >/dev/null 2>&1
 kk delete job flink-lat --ignore-not-found >/dev/null 2>&1
 
 echo ""; echo "######## T2/kind REALTIME LATENCY HEAD-TO-HEAD (rate=$RATE/s dur=${DUR}s) ########"
-echo "$VAJRA_LAT"
+echo "$ZELOX_LAT"
 echo "$FLINK_LAT"
 echo "(no-JVM/no-GC target = better p99/p999/max TAIL; kind is topology-faithful but laptop-scale)"

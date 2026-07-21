@@ -1,4 +1,4 @@
-# Vajra → prod-grade, better-than-Flink streaming replacement — roadmap
+# Zelox → prod-grade, better-than-Flink streaming replacement — roadmap
 
 **Thesis:** don't out-feature a decade of Flink. Win decisively on **cost/memory + unified engine +
 no-JVM + incremental checkpoint**, reach **parity** on the rest, and make the few **operability**
@@ -6,11 +6,11 @@ features that actually gate prod adoption first-class. This doc is the standing 
 streaming work cites a P0/P1 item here + the `STREAMING_ARCHITECTURE.md` gap cell it advances.
 
 ## HONEST scorecard (measured; claim only what's verified — see [[feedback_competitive_claims_bar]])
-**EKS 100M, c7g.4xlarge, bounded availableNow (2026-06-30):** throughput Vajra 4.92M vs Flink 5.67M
-ev/s = **1.15× SLOWER**; memory Vajra 10.38 vs Flink 8.57 GiB = **1.2× MORE** (this path). So we are
+**EKS 100M, c7g.4xlarge, bounded availableNow (2026-06-30):** throughput Zelox 4.92M vs Flink 5.67M
+ev/s = **1.15× SLOWER**; memory Zelox 10.38 vs Flink 8.57 GiB = **1.2× MORE** (this path). So we are
 **competitive, NOT categorically better — yet.** Per-stage fix targets: source_read>exchange>from_json.
 
-## Where Vajra is ahead / a moat (qualified — not universal)
+## Where Zelox is ahead / a moat (qualified — not universal)
 - **Memory: 6.6× less ON THE CONTINUOUS path** (prior EKS, 1.28 vs 8.5 GiB) — BUT the bounded
   availableNow path shows 1.2× MORE (2026-06-30). ⇒ **path-dependent; do NOT claim "better memory"
   unqualified.**
@@ -30,7 +30,7 @@ event-time windows, stream-stream joins, spillable bounded-memory state.
    sufficient.*
 2. **Rescaling from checkpoint** — restore a job at a **different parallelism** (redistribute keyed
    state). Flink's real operational killer feature; without it you can't grow/shrink a running job.
-   **Vajra differentiator angle:** state is already immutable Arrow chunks → rescale = re-assign chunk
+   **Zelox differentiator angle:** state is already immutable Arrow chunks → rescale = re-assign chunk
    key-ranges, cheaper than re-reading/re-partitioning a RocksDB snapshot. Design:
    `streaming-rescale-from-checkpoint.md` (TODO).
 3. **Multi-node EO + soak/endurance + chaos at scale** — finish F2/F3 remainder (streaming Flight

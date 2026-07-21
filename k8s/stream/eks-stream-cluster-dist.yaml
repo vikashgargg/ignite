@@ -1,6 +1,6 @@
-# Short-lived, cost-shaped EKS cluster for the Vajra-vs-Flink STREAMING head-to-head.
+# Short-lived, cost-shaped EKS cluster for the Zelox-vs-Flink STREAMING head-to-head.
 # Topology mirrors the published benchmark: a dedicated Kafka node (role=kafka) and
-# a 16-vCPU compute node (role=compute) on which Flink and Vajra run SEQUENTIALLY
+# a 16-vCPU compute node (role=compute) on which Flink and Zelox run SEQUENTIALLY
 # (never concurrently) against the SAME shared Kafka topic — true like-for-like.
 #
 # Cost levers:
@@ -12,7 +12,7 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
-  name: vajra-stream-dist
+  name: zelox-stream-dist
   region: ap-south-1
   version: "1.31"
 
@@ -39,7 +39,7 @@ managedNodeGroups:
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/AmazonS3FullAccess   # P1: streaming sink writes Parquet/Iceberg to S3
-                                                       # (node instance role; Vajra object-store from_env)
+                                                       # (node instance role; Zelox object-store from_env)
   - name: kafka
     amiFamily: AmazonLinux2023
     instanceTypes: ["m7g.2xlarge"]   # 8 vCPU, 32 GB — dedicated Kafka broker

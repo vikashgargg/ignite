@@ -2,8 +2,8 @@
 # distributed topology (driver dynamically spawns worker pods that land on SEPARATE nodes,
 # Arrow-Flight shuffle between them) WITHOUT cloud cost, before the EKS multi-node + Flink gate.
 # 1 control-plane (hosts the driver) + 2 workers (host the dynamically-scheduled worker pods).
-#   kind create cluster --config k8s/kind-multinode.yaml --name vajra-f3d
-#   kind load docker-image vajra:latest --name vajra-f3d
+#   kind create cluster --config k8s/kind-multinode.yaml --name zelox-f3d
+#   kind load docker-image zelox:latest --name zelox-f3d
 #   kubectl apply -k k8s/      # kubernetes-cluster server + RBAC
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4

@@ -1,9 +1,9 @@
-# Contributing to Vajra
+# Contributing to Zelox
 
 Contributions are more than welcome!
 
-Vajra is a fork of [Sail](https://github.com/lakehq/sail) (by LakeSail, Apache-2.0); see the `NOTICE`
-file for attribution. Issues and PRs for **Vajra** belong in this repository.
+Zelox is a fork of [Sail](https://github.com/lakehq/sail) (by LakeSail, Apache-2.0); see the `NOTICE`
+file for attribution. Issues and PRs for **Zelox** belong in this repository.
 
 Please submit [GitHub issues](https://github.com/vikashgargg/ignite/issues) for bug reports and feature
 requests (templates will guide you). You are welcome to ask questions in

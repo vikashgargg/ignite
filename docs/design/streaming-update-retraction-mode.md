@@ -6,7 +6,7 @@ correctness on ordered streams) validated on EKS 2026-06-21: every group exactly
 
 ## Why
 
-Vajra's window operator today (`crates/sail-physical-plan/src/streaming/window_accum.rs`)
+Zelox's window operator today (`crates/sail-physical-plan/src/streaming/window_accum.rs`)
 is **emit-on-window-close, append-only** — the exact model of Spark Structured Streaming
 and RisingWave's default. A window emits once when `watermark ≥ window_end`, then its
 state is dropped. Any record that arrives for an already-closed window is **silently
@@ -18,12 +18,12 @@ tight watermark drops late data — and Flink SQL and Spark drop it too.
 | Spark append / Flink SQL | dropped | dropped |
 | Flink DataStream | re-fire window (allowedLateness) | side output (kept) |
 | Materialize / differential dataflow | retract + update | retract + update (never lost) |
-| **Vajra today** | dropped | dropped |
-| **Vajra (this design)** | retract + update (changelog) | side output (kept) |
+| **Zelox today** | dropped | dropped |
+| **Zelox (this design)** | retract + update (changelog) | side output (kept) |
 
-Vajra already carries the primitive nobody else exposes under the Spark API:
+Zelox already carries the primitive nobody else exposes under the Spark API:
 `FlowEvent::Data { batch, retracted: BooleanArray }`. The window operator currently hard-codes
-`retracted = all-false`. Using it, Vajra can deliver Flink-DataStream correctness +
+`retracted = all-false`. Using it, Zelox can deliver Flink-DataStream correctness +
 Materialize convergence through the Spark `outputMode("update")` API — beating both
 Spark and Flink-SQL on the correctness axis with zero data loss.
 
@@ -86,7 +86,7 @@ Spark and Flink-SQL on the correctness axis with zero data loss.
 ## Validation (must beat both)
 
 - Out-of-order stream (shuffled event-time, watermark `d`, `L` > out-of-orderness):
-  Vajra `update` mode → **0 loss**, final per-group counts exact; Spark append + Flink SQL
+  Zelox `update` mode → **0 loss**, final per-group counts exact; Spark append + Flink SQL
   → measurable drop on the same stream. This is the head-to-head that demonstrates "better
   than both" on correctness.
 - Append mode regression: identical to today's validated EKS result (every group 10000).

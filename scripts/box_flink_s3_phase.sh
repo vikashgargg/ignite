@@ -18,9 +18,9 @@ K create configmap flink-sql-s3 --from-file=flink-sql.sql=k8s/stream/flink-sql-s
 K delete job flink-s3 --ignore-not-found >/dev/null 2>&1
 sed -e 's/name: flink-runner/name: flink-s3/' -e 's/{ name: flink-sql }/{ name: flink-sql-s3 }/g' -e 's/name: flink-sql,/name: flink-sql-s3,/g' k8s/stream/flink-runner-job-s3.yaml | K apply -f - >/dev/null
 t0=$(date +%s); FDRAIN=""
-countwin(){ K exec vajra-client -- python3 -c "import boto3,io,pyarrow.parquet as pq;c=boto3.client('s3',endpoint_url='$EP',aws_access_key_id='minioadmin',aws_secret_access_key='minioadmin');ks=[x['Key'] for x in c.list_objects_v2(Bucket='vajra',Prefix='flink_out/').get('Contents',[]) if 'part-' in x['Key'] and '.inprogress' not in x['Key']];w=set();r=0;s=0
+countwin(){ K exec zelox-client -- python3 -c "import boto3,io,pyarrow.parquet as pq;c=boto3.client('s3',endpoint_url='$EP',aws_access_key_id='minioadmin',aws_secret_access_key='minioadmin');ks=[x['Key'] for x in c.list_objects_v2(Bucket='zelox',Prefix='flink_out/').get('Contents',[]) if 'part-' in x['Key'] and '.inprogress' not in x['Key']];w=set();r=0;s=0
 for k in ks:
- t=pq.read_table(io.BytesIO(c.get_object(Bucket='vajra',Key=k)['Body'].read()));r+=t.num_rows;s+=sum(t.column('cnt').to_pylist());w.update(str(x) for x in t.column('window_start').to_pylist())
+ t=pq.read_table(io.BytesIO(c.get_object(Bucket='zelox',Key=k)['Body'].read()));r+=t.num_rows;s+=sum(t.column('cnt').to_pylist());w.update(str(x) for x in t.column('window_start').to_pylist())
 print(len(w),r,s)" 2>/dev/null; }
 for i in $(seq 1 200); do
   sleep 5; read W R S <<<"$(countwin)"

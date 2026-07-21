@@ -6,11 +6,11 @@
 #     DataFusion spills the Final hash table under the bounded MemoryPool) — NOT linear in N.
 # Compares the operator-level memory claim of docs/design/streaming-spillable-state-f5.md.
 set -euo pipefail
-BIN=${VAJRA_BIN:-./target/release/vajra}
+BIN=${ZELOX_BIN:-./target/release/zelox}
 PY=${PY:-.venvs/smoke/bin/python}   # Spark-Connect client venv (pyspark 3.5.3)
 [ -x "$PY" ] || { echo "FATAL: Spark-Connect venv missing at $PY"; exit 2; }
 PORT=${PORT:-50071}
-BUDGET=${SAIL_STREAMING_STATE_BUDGET_BYTES:-4194304} # 4 MiB default small budget
+BUDGET=${ZELOX_STREAMING_STATE_BUDGET_BYTES:-4194304} # 4 MiB default small budget
 NS=${NS:-"200000 500000 1000000"}
 ROOT=$(mktemp -d /tmp/f5val.XXXX)
 echo "F5.2 validate: budget=$BUDGET bytes, Ns=[$NS], root=$ROOT"
@@ -32,7 +32,7 @@ for N in $NS; do
   DIR="$ROOT/in_$N"; OUT="$ROOT/out_$N"; CK="$ROOT/ck_$N"
   gen "$N" "$DIR"
   # start server with the small budget
-  SAIL_STREAMING_STATE_BUDGET_BYTES=$BUDGET VAJRA_F5_DEBUG=1 \
+  ZELOX_STREAMING_STATE_BUDGET_BYTES=$BUDGET ZELOX_F5_DEBUG=1 \
     "$BIN" server --ip 127.0.0.1 --port "$PORT" >"$ROOT/server_$N.log" 2>&1 &
   SRV=$!
   sleep 4

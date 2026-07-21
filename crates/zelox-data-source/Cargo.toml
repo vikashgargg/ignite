@@ -1,0 +1,47 @@
+[package]
+name = "zelox-data-source"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+# VAJ-T7 source-fusion: the Kafka reader parses `value` -> typed struct in-source via
+# zelox-function's parse_json_binary_to_struct (acyclic downward edge — verified).
+zelox-function = { path = "../zelox-function" }
+zelox-sql-analyzer = { path = "../zelox-sql-analyzer" }
+
+async-trait = { workspace = true }
+async-stream = { workspace = true }
+rdkafka = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-datasource = { workspace = true }
+datafusion-session = { workspace = true }
+object_store = { workspace = true }
+chumsky = { workspace = true }
+glob = { workspace = true }
+url = { workspace = true }
+regex = { workspace = true }
+percent-encoding = { workspace = true }
+log = { workspace = true }
+bytes = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+chrono = { workspace = true }
+pyo3 = { workspace = true }
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+arrow-pyarrow = { workspace = true }
+dashmap = { workspace = true }
+once_cell = { workspace = true }
+thiserror = { workspace = true }
+
+[build-dependencies]
+zelox-build-scripts = { path = "../zelox-build-scripts" }

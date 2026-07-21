@@ -7219,872 +7219,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
-name = "sail-build-scripts"
-version = "0.1.0"
-dependencies = [
- "lazy_static",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "serde",
- "serde_yaml",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "sail-cache"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "datafusion",
- "log",
- "moka",
- "object_store",
- "sail-common",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "sail-catalog"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "lazy_static",
- "log",
- "moka",
- "regex",
- "sail-common",
- "sail-common-datafusion",
- "serde",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "sail-catalog-glue"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "async-trait",
- "aws-config",
- "aws-sdk-glue",
- "aws-smithy-types",
- "sail-catalog",
- "sail-common-datafusion",
- "testcontainers",
- "tokio",
-]
-
-[[package]]
-name = "sail-catalog-hms"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "async-trait",
- "bitflags 2.11.1",
- "chrono",
- "datafusion",
- "futures",
- "hive_metastore",
- "libloading 0.8.9",
- "log",
- "pilota",
- "sail-catalog",
- "sail-common",
- "sail-common-datafusion",
- "serde_json",
- "tempfile",
- "testcontainers",
- "tokio",
- "volo",
- "volo-thrift",
-]
-
-[[package]]
-name = "sail-catalog-iceberg"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "async-trait",
- "reqwest",
- "sail-catalog",
- "sail-common",
- "sail-common-datafusion",
- "sail-iceberg",
- "serde",
- "serde_json",
- "serde_with",
- "testcontainers",
- "tokio",
- "url",
- "uuid",
- "wiremock",
-]
-
-[[package]]
-name = "sail-catalog-memory"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "dashmap",
- "sail-catalog",
- "sail-common-datafusion",
-]
-
-[[package]]
-name = "sail-catalog-onelake"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "async-trait",
- "reqwest",
- "sail-catalog",
- "sail-common-datafusion",
- "serde",
- "tokio",
-]
-
-[[package]]
-name = "sail-catalog-system"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "datafusion",
- "futures",
- "sail-catalog",
- "sail-common-datafusion",
- "serde",
- "tokio",
-]
-
-[[package]]
-name = "sail-catalog-unity"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "async-trait",
- "chrono",
- "prettyplease",
- "progenitor",
- "progenitor-client",
- "reqwest",
- "sail-catalog",
- "sail-common",
- "sail-common-datafusion",
- "secrecy",
- "serde",
- "serde_json",
- "serde_yaml",
- "syn 2.0.117",
- "tempfile",
- "testcontainers",
- "tokio",
- "wiremock",
-]
-
-[[package]]
-name = "sail-cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "log",
- "mimalloc",
- "pprof",
- "pyo3",
- "rustls",
- "sail-common",
- "sail-execution",
- "sail-flight",
- "sail-session",
- "sail-spark-connect",
- "sail-telemetry",
- "tempfile",
- "tikv-jemallocator",
- "tokio",
-]
-
-[[package]]
-name = "sail-common"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "arrow-buffer",
- "arrow-schema",
- "figment",
- "glob",
- "half",
- "iana-time-zone",
- "num-traits",
- "num_enum",
- "secrecy",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror 2.0.18",
- "tokio",
- "toml",
-]
-
-[[package]]
-name = "sail-common-datafusion"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "chrono",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "either",
- "futures",
- "lazy_static",
- "lexical-core",
- "object_store",
- "parquet-variant-compute",
- "parquet-variant-json",
- "pin-project-lite",
- "prettyplease",
- "proc-macro2",
- "prost",
- "quote",
- "regex",
- "ryu",
- "sail-common",
- "serde",
- "serde_arrow",
- "serde_json",
- "serde_yaml",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
- "tonic-prost-build",
- "url",
-]
-
-[[package]]
-name = "sail-data-source"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "arrow-pyarrow",
- "arrow-schema",
- "async-stream",
- "async-trait",
- "bytes",
- "chrono",
- "chumsky 0.12.0",
- "dashmap",
- "datafusion",
- "datafusion-common",
- "datafusion-datasource",
- "datafusion-session",
- "futures",
- "glob",
- "log",
- "object_store",
- "once_cell",
- "percent-encoding",
- "pyo3",
- "rdkafka",
- "regex",
- "sail-build-scripts",
- "sail-common",
- "sail-common-datafusion",
- "sail-function",
- "sail-sql-analyzer",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "url",
-]
-
-[[package]]
-name = "sail-delta-lake"
-version = "0.1.0"
-dependencies = [
- "arrow-schema",
- "async-trait",
- "bytes",
- "chrono",
- "crc32fast",
- "datafusion",
- "datafusion-common",
- "datafusion-functions-nested",
- "datafusion-physical-expr",
- "educe",
- "futures",
- "indexmap 2.14.0",
- "itertools",
- "log",
- "moka",
- "object_store",
- "once_cell",
- "parquet",
- "percent-encoding",
- "roaring",
- "sail-common",
- "sail-common-datafusion",
- "sail-data-source",
- "serde",
- "serde_arrow",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "sail-execution"
-version = "0.1.0"
-dependencies = [
- "arrow-flight",
- "chrono",
- "datafusion",
- "datafusion-proto",
- "datafusion-spark",
- "fastrace",
- "futures",
- "indexmap 2.14.0",
- "k8s-openapi",
- "kube",
- "log",
- "object_store",
- "prost",
- "prost-build",
- "rand 0.10.1",
- "readonly",
- "sail-catalog",
- "sail-catalog-system",
- "sail-common",
- "sail-common-datafusion",
- "sail-data-source",
- "sail-delta-lake",
- "sail-function",
- "sail-iceberg",
- "sail-logical-plan",
- "sail-physical-plan",
- "sail-python-udf",
- "sail-server",
- "sail-telemetry",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
- "tonic-types",
- "tower",
- "url",
-]
-
-[[package]]
-name = "sail-flight"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "arrow-flight",
- "datafusion",
- "futures",
- "log",
- "prost",
- "sail-common",
- "sail-common-datafusion",
- "sail-plan",
- "sail-server",
- "sail-session",
- "sail-sql-analyzer",
- "sail-telemetry",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
- "tonic-build",
- "uuid",
-]
-
-[[package]]
-name = "sail-function"
-version = "0.1.0"
-dependencies = [
- "aes",
- "aes-gcm",
- "arrow",
- "arrow-schema",
- "base64 0.22.1",
- "cbc",
- "chrono",
- "chrono-tz",
- "chumsky 0.12.0",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "datafusion-expr-common",
- "datafusion-functions",
- "datafusion-functions-nested",
- "datafusion-physical-expr",
- "half",
- "jiter",
- "lazy_static",
- "num",
- "ordered-float 5.3.0",
- "parquet-variant",
- "parquet-variant-compute",
- "parquet-variant-json",
- "rand 0.10.1",
- "rand_distr",
- "regex",
- "sail-common",
- "sail-common-datafusion",
- "sail-sql-analyzer",
- "serde_json",
- "simd-json",
- "thiserror 2.0.18",
- "twox-hash",
- "url",
- "xee-xpath",
- "xot",
-]
-
-[[package]]
-name = "sail-gold-test"
-version = "0.1.0"
-dependencies = [
- "clap",
- "lazy_static",
- "regex",
- "sail-spark-connect",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sail-iceberg"
-version = "0.1.0"
-dependencies = [
- "apache-avro",
- "async-stream",
- "async-trait",
- "bytes",
- "chrono",
- "datafusion",
- "datafusion-common",
- "flate2",
- "futures",
- "log",
- "murmur3",
- "object_store",
- "once_cell",
- "ordered-float 5.3.0",
- "parquet",
- "rust_decimal",
- "sail-common",
- "sail-common-datafusion",
- "sail-data-source",
- "serde",
- "serde_arrow",
- "serde_json",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "sail-logical-optimizer"
-version = "0.1.0"
-dependencies = [
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
-]
-
-[[package]]
-name = "sail-logical-plan"
-version = "0.1.0"
-dependencies = [
- "comfy-table",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "educe",
- "html-escape",
- "log",
- "sail-common",
- "sail-common-datafusion",
- "sail-function",
-]
-
-[[package]]
-name = "sail-object-store"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "aws-config",
- "aws-credential-types",
- "aws-smithy-async",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "chrono",
- "dashmap",
- "datafusion",
- "datafusion-common",
- "fastrace",
- "fastrace-futures",
- "futures",
- "hdfs-native-object-store",
- "hf-hub",
- "lazy_static",
- "log",
- "object_store",
- "regex",
- "reqwest",
- "sail-common",
- "sail-telemetry",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tonic",
- "url",
-]
-
-[[package]]
-name = "sail-physical-optimizer"
-version = "0.1.0"
-dependencies = [
- "datafusion",
- "datafusion-physical-expr",
- "log",
- "sail-physical-plan",
-]
-
-[[package]]
-name = "sail-physical-plan"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "bytes",
- "chrono",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "futures",
- "log",
- "object_store",
- "sail-catalog",
- "sail-common-datafusion",
- "sail-logical-plan",
- "serde_json",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
-name = "sail-plan"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "async-recursion",
- "async-trait",
- "chrono",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "datafusion-expr-common",
- "datafusion-functions",
- "datafusion-functions-nested",
- "datafusion-spark",
- "educe",
- "either",
- "futures",
- "half",
- "indexmap 2.14.0",
- "lazy_static",
- "log",
- "object_store",
- "rand 0.10.1",
- "regex",
- "ryu",
- "sail-catalog",
- "sail-catalog-memory",
- "sail-common",
- "sail-common-datafusion",
- "sail-function",
- "sail-logical-plan",
- "sail-physical-plan",
- "sail-python-udf",
- "sail-sql-analyzer",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
- "uuid",
-]
-
-[[package]]
-name = "sail-plan-lakehouse"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "log",
- "sail-common-datafusion",
- "sail-data-source",
- "sail-delta-lake",
- "sail-iceberg",
- "sail-logical-plan",
- "sail-physical-plan",
- "url",
-]
-
-[[package]]
-name = "sail-python"
-version = "0.1.0"
-dependencies = [
- "log",
- "pyo3",
- "sail-cli",
- "sail-common",
- "sail-flight",
- "sail-spark-connect",
- "sail-telemetry",
- "tokio",
-]
-
-[[package]]
-name = "sail-python-udf"
-version = "0.1.0"
-dependencies = [
- "arrow-pyarrow",
- "base64 0.22.1",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "educe",
- "futures",
- "md-5 0.11.0",
- "num-bigint",
- "pyo3",
- "sail-common",
- "sail-common-datafusion",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
-name = "sail-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "fastrace",
- "log",
- "sail-common",
- "sail-telemetry",
- "tokio",
- "tonic",
- "tonic-health",
- "tonic-reflection",
- "tower",
-]
-
-[[package]]
-name = "sail-session"
-version = "0.1.0"
-dependencies = [
- "arrow",
- "arrow-pyarrow",
- "async-stream",
- "async-trait",
- "chrono",
- "datafusion",
- "datafusion-common",
- "datafusion-expr",
- "datafusion-physical-expr",
- "fastrace",
- "futures",
- "indexmap 2.14.0",
- "log",
- "pyo3",
- "readonly",
- "sail-cache",
- "sail-catalog",
- "sail-catalog-glue",
- "sail-catalog-hms",
- "sail-catalog-iceberg",
- "sail-catalog-memory",
- "sail-catalog-onelake",
- "sail-catalog-system",
- "sail-catalog-unity",
- "sail-common",
- "sail-common-datafusion",
- "sail-data-source",
- "sail-delta-lake",
- "sail-execution",
- "sail-iceberg",
- "sail-logical-optimizer",
- "sail-logical-plan",
- "sail-object-store",
- "sail-physical-optimizer",
- "sail-physical-plan",
- "sail-plan",
- "sail-plan-lakehouse",
- "sail-python-udf",
- "sail-server",
- "sail-sql-analyzer",
- "sail-telemetry",
- "sail-vortex",
- "secrecy",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
-]
-
-[[package]]
-name = "sail-spark-connect"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "axum",
- "bytes",
- "chrono",
- "datafusion",
- "fastrace",
- "futures",
- "lazy_static",
- "log",
- "monostate",
- "pbjson",
- "pbjson-build",
- "pbjson-types",
- "phf 0.13.1",
- "prettyplease",
- "prost",
- "prost-build",
- "prost-types",
- "pyo3",
- "quote",
- "regex",
- "sail-cache",
- "sail-common",
- "sail-common-datafusion",
- "sail-data-source",
- "sail-execution",
- "sail-plan",
- "sail-python-udf",
- "sail-server",
- "sail-session",
- "sail-sql-analyzer",
- "secrecy",
- "serde",
- "serde_json",
- "subtle",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
- "tonic-types",
- "uuid",
-]
-
-[[package]]
-name = "sail-sql-analyzer"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "chumsky 0.12.0",
- "either",
- "lazy_static",
- "log",
- "regex",
- "sail-common",
- "sail-sql-parser",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "sail-sql-macro"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "sail-sql-parser"
-version = "0.1.0"
-dependencies = [
- "chumsky 0.12.0",
- "either",
- "itertools",
- "paste",
- "phf 0.13.1",
- "prettyplease",
- "quote",
- "sail-common",
- "sail-sql-macro",
- "serde",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "sail-telemetry"
-version = "0.1.0"
-dependencies = [
- "datafusion",
- "env_logger",
- "fastrace",
- "fastrace-futures",
- "fastrace-opentelemetry",
- "futures",
- "lazy_static",
- "log",
- "num-traits",
- "opentelemetry",
- "opentelemetry-appender-log",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
- "paste",
- "pin-project-lite",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "sail-common",
- "sail-common-datafusion",
- "serde",
- "serde_yaml",
- "syn 2.0.117",
- "thiserror 2.0.18",
- "tokio",
- "tonic",
- "tower",
-]
-
-[[package]]
-name = "sail-vortex"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "datafusion",
- "sail-common-datafusion",
-]
-
-[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10540,6 +9674,872 @@ dependencies = [
  "quote",
  "syn 2.0.117",
  "synstructure",
+]
+
+[[package]]
+name = "zelox-build-scripts"
+version = "0.1.0"
+dependencies = [
+ "lazy_static",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "serde",
+ "serde_yaml",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "zelox-cache"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "datafusion",
+ "log",
+ "moka",
+ "object_store",
+ "thiserror 2.0.18",
+ "zelox-common",
+]
+
+[[package]]
+name = "zelox-catalog"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "lazy_static",
+ "log",
+ "moka",
+ "regex",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "zelox-common",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-catalog-glue"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-glue",
+ "aws-smithy-types",
+ "testcontainers",
+ "tokio",
+ "zelox-catalog",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-catalog-hms"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "bitflags 2.11.1",
+ "chrono",
+ "datafusion",
+ "futures",
+ "hive_metastore",
+ "libloading 0.8.9",
+ "log",
+ "pilota",
+ "serde_json",
+ "tempfile",
+ "testcontainers",
+ "tokio",
+ "volo",
+ "volo-thrift",
+ "zelox-catalog",
+ "zelox-common",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-catalog-iceberg"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "testcontainers",
+ "tokio",
+ "url",
+ "uuid",
+ "wiremock",
+ "zelox-catalog",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-iceberg",
+]
+
+[[package]]
+name = "zelox-catalog-memory"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap",
+ "zelox-catalog",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-catalog-onelake"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "reqwest",
+ "serde",
+ "tokio",
+ "zelox-catalog",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-catalog-system"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "datafusion",
+ "futures",
+ "serde",
+ "tokio",
+ "zelox-catalog",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-catalog-unity"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "chrono",
+ "prettyplease",
+ "progenitor",
+ "progenitor-client",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "syn 2.0.117",
+ "tempfile",
+ "testcontainers",
+ "tokio",
+ "wiremock",
+ "zelox-catalog",
+ "zelox-common",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "log",
+ "mimalloc",
+ "pprof",
+ "pyo3",
+ "rustls",
+ "tempfile",
+ "tikv-jemallocator",
+ "tokio",
+ "zelox-common",
+ "zelox-execution",
+ "zelox-flight",
+ "zelox-session",
+ "zelox-spark-connect",
+ "zelox-telemetry",
+]
+
+[[package]]
+name = "zelox-common"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-buffer",
+ "arrow-schema",
+ "figment",
+ "glob",
+ "half",
+ "iana-time-zone",
+ "num-traits",
+ "num_enum",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "zelox-common-datafusion"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "either",
+ "futures",
+ "lazy_static",
+ "lexical-core",
+ "object_store",
+ "parquet-variant-compute",
+ "parquet-variant-json",
+ "pin-project-lite",
+ "prettyplease",
+ "proc-macro2",
+ "prost",
+ "quote",
+ "regex",
+ "ryu",
+ "serde",
+ "serde_arrow",
+ "serde_json",
+ "serde_yaml",
+ "syn 2.0.117",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tonic-prost-build",
+ "url",
+ "zelox-common",
+]
+
+[[package]]
+name = "zelox-data-source"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-pyarrow",
+ "arrow-schema",
+ "async-stream",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "chumsky 0.12.0",
+ "dashmap",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-datasource",
+ "datafusion-session",
+ "futures",
+ "glob",
+ "log",
+ "object_store",
+ "once_cell",
+ "percent-encoding",
+ "pyo3",
+ "rdkafka",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "url",
+ "zelox-build-scripts",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-function",
+ "zelox-sql-analyzer",
+]
+
+[[package]]
+name = "zelox-delta-lake"
+version = "0.1.0"
+dependencies = [
+ "arrow-schema",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-functions-nested",
+ "datafusion-physical-expr",
+ "educe",
+ "futures",
+ "indexmap 2.14.0",
+ "itertools",
+ "log",
+ "moka",
+ "object_store",
+ "once_cell",
+ "parquet",
+ "percent-encoding",
+ "roaring",
+ "serde",
+ "serde_arrow",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+ "uuid",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-data-source",
+]
+
+[[package]]
+name = "zelox-execution"
+version = "0.1.0"
+dependencies = [
+ "arrow-flight",
+ "chrono",
+ "datafusion",
+ "datafusion-proto",
+ "datafusion-spark",
+ "fastrace",
+ "futures",
+ "indexmap 2.14.0",
+ "k8s-openapi",
+ "kube",
+ "log",
+ "object_store",
+ "prost",
+ "prost-build",
+ "rand 0.10.1",
+ "readonly",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tonic-types",
+ "tower",
+ "url",
+ "zelox-catalog",
+ "zelox-catalog-system",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-data-source",
+ "zelox-delta-lake",
+ "zelox-function",
+ "zelox-iceberg",
+ "zelox-logical-plan",
+ "zelox-physical-plan",
+ "zelox-python-udf",
+ "zelox-server",
+ "zelox-telemetry",
+]
+
+[[package]]
+name = "zelox-flight"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-flight",
+ "datafusion",
+ "futures",
+ "log",
+ "prost",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tonic-build",
+ "uuid",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-plan",
+ "zelox-server",
+ "zelox-session",
+ "zelox-sql-analyzer",
+ "zelox-telemetry",
+]
+
+[[package]]
+name = "zelox-function"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "arrow",
+ "arrow-schema",
+ "base64 0.22.1",
+ "cbc",
+ "chrono",
+ "chrono-tz",
+ "chumsky 0.12.0",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "datafusion-expr-common",
+ "datafusion-functions",
+ "datafusion-functions-nested",
+ "datafusion-physical-expr",
+ "half",
+ "jiter",
+ "lazy_static",
+ "num",
+ "ordered-float 5.3.0",
+ "parquet-variant",
+ "parquet-variant-compute",
+ "parquet-variant-json",
+ "rand 0.10.1",
+ "rand_distr",
+ "regex",
+ "serde_json",
+ "simd-json",
+ "thiserror 2.0.18",
+ "twox-hash",
+ "url",
+ "xee-xpath",
+ "xot",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-sql-analyzer",
+]
+
+[[package]]
+name = "zelox-gold-test"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "lazy_static",
+ "regex",
+ "serde",
+ "serde_json",
+ "zelox-spark-connect",
+]
+
+[[package]]
+name = "zelox-iceberg"
+version = "0.1.0"
+dependencies = [
+ "apache-avro",
+ "async-stream",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "flate2",
+ "futures",
+ "log",
+ "murmur3",
+ "object_store",
+ "once_cell",
+ "ordered-float 5.3.0",
+ "parquet",
+ "rust_decimal",
+ "serde",
+ "serde_arrow",
+ "serde_json",
+ "url",
+ "uuid",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-data-source",
+]
+
+[[package]]
+name = "zelox-logical-optimizer"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+]
+
+[[package]]
+name = "zelox-logical-plan"
+version = "0.1.0"
+dependencies = [
+ "comfy-table",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "educe",
+ "html-escape",
+ "log",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-function",
+]
+
+[[package]]
+name = "zelox-object-store"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "aws-config",
+ "aws-credential-types",
+ "aws-smithy-async",
+ "aws-smithy-runtime-api",
+ "aws-smithy-types",
+ "chrono",
+ "dashmap",
+ "datafusion",
+ "datafusion-common",
+ "fastrace",
+ "fastrace-futures",
+ "futures",
+ "hdfs-native-object-store",
+ "hf-hub",
+ "lazy_static",
+ "log",
+ "object_store",
+ "regex",
+ "reqwest",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "url",
+ "zelox-common",
+ "zelox-telemetry",
+]
+
+[[package]]
+name = "zelox-physical-optimizer"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "datafusion-physical-expr",
+ "log",
+ "zelox-physical-plan",
+]
+
+[[package]]
+name = "zelox-physical-plan"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "futures",
+ "log",
+ "object_store",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "zelox-catalog",
+ "zelox-common-datafusion",
+ "zelox-logical-plan",
+]
+
+[[package]]
+name = "zelox-plan"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-recursion",
+ "async-trait",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "datafusion-expr-common",
+ "datafusion-functions",
+ "datafusion-functions-nested",
+ "datafusion-spark",
+ "educe",
+ "either",
+ "futures",
+ "half",
+ "indexmap 2.14.0",
+ "lazy_static",
+ "log",
+ "object_store",
+ "rand 0.10.1",
+ "regex",
+ "ryu",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "uuid",
+ "zelox-catalog",
+ "zelox-catalog-memory",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-function",
+ "zelox-logical-plan",
+ "zelox-physical-plan",
+ "zelox-python-udf",
+ "zelox-sql-analyzer",
+]
+
+[[package]]
+name = "zelox-plan-lakehouse"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "log",
+ "url",
+ "zelox-common-datafusion",
+ "zelox-data-source",
+ "zelox-delta-lake",
+ "zelox-iceberg",
+ "zelox-logical-plan",
+ "zelox-physical-plan",
+]
+
+[[package]]
+name = "zelox-python"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pyo3",
+ "tokio",
+ "zelox-cli",
+ "zelox-common",
+ "zelox-flight",
+ "zelox-spark-connect",
+ "zelox-telemetry",
+]
+
+[[package]]
+name = "zelox-python-udf"
+version = "0.1.0"
+dependencies = [
+ "arrow-pyarrow",
+ "base64 0.22.1",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "educe",
+ "futures",
+ "md-5 0.11.0",
+ "num-bigint",
+ "pyo3",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "zelox-common",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "fastrace",
+ "log",
+ "tokio",
+ "tonic",
+ "tonic-health",
+ "tonic-reflection",
+ "tower",
+ "zelox-common",
+ "zelox-telemetry",
+]
+
+[[package]]
+name = "zelox-session"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-pyarrow",
+ "async-stream",
+ "async-trait",
+ "chrono",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "datafusion-physical-expr",
+ "fastrace",
+ "futures",
+ "indexmap 2.14.0",
+ "log",
+ "pyo3",
+ "readonly",
+ "secrecy",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "zelox-cache",
+ "zelox-catalog",
+ "zelox-catalog-glue",
+ "zelox-catalog-hms",
+ "zelox-catalog-iceberg",
+ "zelox-catalog-memory",
+ "zelox-catalog-onelake",
+ "zelox-catalog-system",
+ "zelox-catalog-unity",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-data-source",
+ "zelox-delta-lake",
+ "zelox-execution",
+ "zelox-iceberg",
+ "zelox-logical-optimizer",
+ "zelox-logical-plan",
+ "zelox-object-store",
+ "zelox-physical-optimizer",
+ "zelox-physical-plan",
+ "zelox-plan",
+ "zelox-plan-lakehouse",
+ "zelox-python-udf",
+ "zelox-server",
+ "zelox-sql-analyzer",
+ "zelox-telemetry",
+ "zelox-vortex",
+]
+
+[[package]]
+name = "zelox-spark-connect"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "axum",
+ "bytes",
+ "chrono",
+ "datafusion",
+ "fastrace",
+ "futures",
+ "lazy_static",
+ "log",
+ "monostate",
+ "pbjson",
+ "pbjson-build",
+ "pbjson-types",
+ "phf 0.13.1",
+ "prettyplease",
+ "prost",
+ "prost-build",
+ "prost-types",
+ "pyo3",
+ "quote",
+ "regex",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "subtle",
+ "syn 2.0.117",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tonic-types",
+ "uuid",
+ "zelox-cache",
+ "zelox-common",
+ "zelox-common-datafusion",
+ "zelox-data-source",
+ "zelox-execution",
+ "zelox-plan",
+ "zelox-python-udf",
+ "zelox-server",
+ "zelox-session",
+ "zelox-sql-analyzer",
+]
+
+[[package]]
+name = "zelox-sql-analyzer"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chumsky 0.12.0",
+ "either",
+ "lazy_static",
+ "log",
+ "regex",
+ "thiserror 2.0.18",
+ "zelox-common",
+ "zelox-sql-parser",
+]
+
+[[package]]
+name = "zelox-sql-macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "zelox-sql-parser"
+version = "0.1.0"
+dependencies = [
+ "chumsky 0.12.0",
+ "either",
+ "itertools",
+ "paste",
+ "phf 0.13.1",
+ "prettyplease",
+ "quote",
+ "serde",
+ "syn 2.0.117",
+ "zelox-common",
+ "zelox-sql-macro",
+]
+
+[[package]]
+name = "zelox-telemetry"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "env_logger",
+ "fastrace",
+ "fastrace-futures",
+ "fastrace-opentelemetry",
+ "futures",
+ "lazy_static",
+ "log",
+ "num-traits",
+ "opentelemetry",
+ "opentelemetry-appender-log",
+ "opentelemetry-otlp",
+ "opentelemetry_sdk",
+ "paste",
+ "pin-project-lite",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "serde",
+ "serde_yaml",
+ "syn 2.0.117",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tower",
+ "zelox-common",
+ "zelox-common-datafusion",
+]
+
+[[package]]
+name = "zelox-vortex"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "datafusion",
+ "zelox-common-datafusion",
 ]
 
 [[package]]

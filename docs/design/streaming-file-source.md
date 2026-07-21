@@ -3,7 +3,7 @@
 `spark.readStream.format("parquet"|"csv"|"json").load(dir)`. Goal: match **and beat** Flink
 `FileSource` + Spark `FileStreamSource` on throughput, while matching their exactly-once and
 operational semantics. Built on DataFusion's `ListingTable` (which already enumerates
-file/row-group splits) + Vajra's flow-event streaming.
+file/row-group splits) + Zelox's flow-event streaming.
 
 ## Status
 | Capability | State | Notes |
@@ -25,7 +25,7 @@ file/row-group splits) + Vajra's flow-event streaming.
   to parallel readers; checkpointed enumerator state gives exactly-once.
 
 ## Build plan — cross-run exactly-once (next)
-Reuse Vajra's existing offset-WAL commit (`commit_source_offsets` already promotes
+Reuse Zelox's existing offset-WAL commit (`commit_source_offsets` already promotes
 `<ck>/sources/0/staged → committed` atomically, content-agnostic) to store the **processed-files
 set** instead of a row offset:
 
@@ -65,7 +65,7 @@ the same alignment needed for correct multi-partition event-time watermarks.
 ## Build plan — continuous new-file polling (grounded findings, 2026-06-12)
 For a non-`availableNow` trigger: a poll loop (interval = trigger) that re-lists the dir, emits
 new files as flow-event micro-batches, never emitting `EndOfData`. **Scope finding (traced the
-runner):** this is NOT just a poll loop — Vajra uses a **continuous-dataflow** model (one plan
+runner):** this is NOT just a poll loop — Zelox uses a **continuous-dataflow** model (one plan
 runs forever, à la Flink), and `StreamingQuery::run` commits source offsets **only on clean
 stream-end** (`commit_source_offsets` fires when the stream `task` resolves; markers are
 stripped by `FlowEventToDataExec` before the runner). So:
@@ -80,7 +80,7 @@ stripped by `FlowEventToDataExec` before the runner). So:
   commits only after each micro-batch's output is durable, with no race.
 
 ### LOCKED design (2026-06-12) — Spark micro-batch **re-plan loop**, reusing proven EO
-Chosen over Flink barrier-snapshotting because it **reuses Vajra's crash-tested machinery**
+Chosen over Flink barrier-snapshotting because it **reuses Zelox's crash-tested machinery**
 with no new EO protocol:
 - **Each trigger = a fresh *bounded* micro-batch.** Re-resolve+execute the plan with
   `bounded=true` (so the source lists, processes only *new* files via the metadata log, emits
@@ -111,4 +111,4 @@ restart → no reprocess; **SIGKILL mid-continuous → restart → no loss, no d
 ## Throughput note
 Parallel split reading (done) is the main lever to **beat** Flink/Spark: file/row-group splits
 are read concurrently across `target_partitions`, then transformed/written in parallel
-(Vajra's parallel streaming sink). The metadata log adds correctness without serializing I/O.
+(Zelox's parallel streaming sink). The metadata log adds correctness without serializing I/O.

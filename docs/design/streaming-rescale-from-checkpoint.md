@@ -19,7 +19,7 @@ range** of key-groups; rescale to M′ just re-assigns key-group ranges to the M
 physically organized by key-group so an instance reads exactly the key-groups it now owns. Cost: read +
 re-serialize the RocksDB state for the moved key-groups.
 
-## Vajra design — key-groups on the immutable-Arrow-chunk substrate
+## Zelox design — key-groups on the immutable-Arrow-chunk substrate
 
 ### 1. Fixed key-groups (G, default 128, configurable as max-parallelism)
 `kg(key) = hash(key) % G`. The keyed exchange (`StreamExchangeExec`, already hashes by key) routes by
@@ -50,12 +50,12 @@ For new instance `i′` owning KG range `R′`:
    Path (b): read + filter rows to `R′`.
 4. Residual (in-RAM tail) is small → always read + filter.
 
-### The Vajra differentiator
+### The Zelox differentiator
 Because state is **immutable Arrow chunks referenced by a manifest** (not a mutable RocksDB instance),
 KG-aligned rescale (path a) is a **manifest re-assignment with ZERO state rewrite** — each new
 instance's manifest just references the chunks for its KGs (refcount via the existing
 SharedStateRegistry). Flink must read + re-serialize the moved key-groups out of RocksDB. → rescale is
-**cheaper + faster** on Vajra, on the same substrate that already gives O(delta) checkpoints + 6.6×
+**cheaper + faster** on Zelox, on the same substrate that already gives O(delta) checkpoints + 6.6×
 memory.
 
 ## STATUS (2026-06-29) — primitive layer DONE + PROVEN; operator wiring remains

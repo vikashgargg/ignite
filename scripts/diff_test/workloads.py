@@ -1,9 +1,9 @@
 """Differential-testing workloads: real Spark-pipeline patterns.
 
 Each workload is (name, [setup_sql...], query_sql). We run the SAME SQL on the
-reference engine (real Apache Spark, JVM) and the candidate (Vajra via Spark
+reference engine (real Apache Spark, JVM) and the candidate (Zelox via Spark
 Connect), then assert byte-identical results. This proves a production pipeline
-can switch to Vajra and get the same answers — the trust artifact.
+can switch to Zelox and get the same answers — the trust artifact.
 
 Cover the COMMON PATH that real pipelines actually use, not edge cases.
 """
@@ -278,7 +278,7 @@ WORKLOADS = [
      "SELECT array_contains(array(1,2,3),2) ac, size(array(1,2,3)) sz, "
      "sort_array(array_distinct(array(1,1,2,3,3))) ad"),
     # array_position value is correct (2); only the declared result type differs
-    # (Spark bigint vs Vajra decimal(20,0)) — isolated + allowlisted in diff.py.
+    # (Spark bigint vs Zelox decimal(20,0)) — isolated + allowlisted in diff.py.
     ("array_position", [],
      "SELECT array_position(array(10,20,30),20) ap"),
     ("array_set_ops", [],
@@ -411,7 +411,7 @@ WORKLOADS = [
      "SELECT from_unixtime(0,'yyyy-MM-dd HH:mm:ss') fu, unix_timestamp('1970-01-01 00:00:00','yyyy-MM-dd HH:mm:ss') ut"),
 
     # ── Casts / coercion (clean inputs; overflow/invalid are ANSI-mode
-    #    dependent — Spark 3.5 non-ANSI wraps/nulls, Vajra matches Spark 4.x
+    #    dependent — Spark 3.5 non-ANSI wraps/nulls, Zelox matches Spark 4.x
     #    ANSI and errors — so we test the path both engines agree on) ─────────
     ("cast_string_numeric", [],
      "SELECT CAST('42' AS INT) i, CAST('3.14' AS DOUBLE) d, CAST('100' AS LONG) l"),
@@ -448,7 +448,7 @@ WORKLOADS = [
     # ── Advanced numeric ──────────────────────────────────────────────────────
     ("numeric_conv_unhex", [],
      "SELECT conv('FF',16,10) cv, CAST(unhex('41') AS STRING) uh"),
-    # bround value is correct (banker's rounding: 2.5->2, 3.5->4); Vajra returns
+    # bround value is correct (banker's rounding: 2.5->2, 3.5->4); Zelox returns
     # double where Spark returns decimal — value-equal type diff, allowlisted.
     ("bround", [],
      "SELECT bround(2.5,0) br, bround(3.5,0) br2"),
@@ -503,7 +503,7 @@ WORKLOADS = [
     # ── typeof ────────────────────────────────────────────────────────────────
     ("typeof_misc", [],
      "SELECT typeof(1) t_int, typeof(1.5) t_dbl, typeof('x') t_str, typeof(true) t_bool"),
-    # width_bucket value correct (bucket 3); Spark bigint vs Vajra int — allowlisted.
+    # width_bucket value correct (bucket 3); Spark bigint vs Zelox int — allowlisted.
     ("width_bucket", [],
      "SELECT width_bucket(5.0, 0.0, 10.0, 5) wb"),
 
@@ -525,7 +525,7 @@ WORKLOADS = [
      ],
      "SELECT mode(x) md FROM t"),
     # percentile_approx value correct (median 2); Spark returns input type (int),
-    # Vajra returns double — value-correct type diff, allowlisted (cf. percentile).
+    # Zelox returns double — value-correct type diff, allowlisted (cf. percentile).
     ("percentile_approx", [
         "CREATE OR REPLACE TEMP VIEW t AS SELECT * FROM VALUES (1),(2),(2),(3),(2),(4) AS v(x)",
      ],

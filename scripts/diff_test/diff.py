@@ -8,31 +8,31 @@ import json
 import sys
 
 # Workloads with a documented, accepted difference. These fall into two buckets:
-# (1) Spark 3.5 (our reference, Java-8-limited) vs Spark 4.x semantics that Vajra
+# (1) Spark 3.5 (our reference, Java-8-limited) vs Spark 4.x semantics that Zelox
 #     targets; (2) value-correct result-TYPE metadata differences (same values,
 #     different declared type/precision). Each entry is justified; none is a
 #     wrong answer.
 KNOWN_VERSION_DIFFS = {
     # percentile_disc return type: Spark 3.5 -> double, Spark 4.x -> input type
-    # (Int here). Vajra matches 4.x.
+    # (Int here). Zelox matches 4.x.
     "percentile",
     # round() on a decimal literal: Spark applies a specific result-precision
-    # rule (decimal(4,2)); Vajra/DataFusion keep the input precision
+    # rule (decimal(4,2)); Zelox/DataFusion keep the input precision
     # (decimal(6,2)). The VALUE is identical (3.14); only the declared precision
     # metadata differs. LakeSail uses the identical expr_fn::round and has the
     # same gap, so there is nothing to adapt — low impact, value-correct.
     "math_funcs",
-    # transform() lambda index is bigint in Vajra, so `x + i` widens the element
+    # transform() lambda index is bigint in Zelox, so `x + i` widens the element
     # type int->bigint. Element VALUES are identical; only array<int> vs
     # array<bigint> metadata differs.
     "array_transform_index",
-    # bround() returns double in Vajra vs decimal in Spark. The numeric value is
+    # bround() returns double in Zelox vs decimal in Spark. The numeric value is
     # identical (banker's rounding); only the declared type differs.
     "bround",
     # percentile_approx on integral input: Spark returns the input type (int),
-    # Vajra returns double. Median value identical; declared type differs.
+    # Zelox returns double. Median value identical; declared type differs.
     "percentile_approx",
-    # width_bucket: Spark returns bigint, Vajra returns int. Bucket value
+    # width_bucket: Spark returns bigint, Zelox returns int. Bucket value
     # identical; declared type differs.
     "width_bucket",
 }
@@ -50,7 +50,7 @@ def main():
             diverge.append((name, "missing in one engine"))
             continue
         # If reference errored, skip (reference is the source of truth; its error
-        # usually means the workload itself is invalid — not a Vajra bug).
+        # usually means the workload itself is invalid — not a Zelox bug).
         if "error" in r:
             ok.append((name, f"ref-error (skipped): {r['error'][:60]}"))
             continue
@@ -75,7 +75,7 @@ def main():
         ok.append((name, "match"))
 
     print("=" * 70)
-    print("  VAJRA DIFFERENTIAL TEST vs Apache Spark (reference)")
+    print("  ZELOX DIFFERENTIAL TEST vs Apache Spark (reference)")
     print("=" * 70)
     for name, msg in ok:
         print(f"  [PASS] {name}  {('· ' + msg) if msg != 'match' else ''}")

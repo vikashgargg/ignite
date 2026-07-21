@@ -4,11 +4,11 @@
 Produces JSON {id, ts} to IN_TOPIC at RATE/s for DURATION_S while a consumer reads OUT_TOPIC and records
 now_ms - ts per record. Whatever engine does the IN->OUT raw passthrough is measured IDENTICALLY ->
 fair p50/p99/p99.9/max:
-  - Vajra: scripts/stream_latency_query.py  (Kafka value passthrough, continuous trigger)
+  - Zelox: scripts/stream_latency_query.py  (Kafka value passthrough, continuous trigger)
   - Flink: k8s/stream/flink-sql-latency.sql (raw passthrough, continuous)
 Latency is Flink's defining property + where no-JVM/no-GC should win on the TAIL (no GC pauses).
 
-Usage: BOOT=.. IN_TOPIC=lat_in OUT_TOPIC=lat_out RATE=20000 DURATION_S=60 ENGINE=vajra|flink \
+Usage: BOOT=.. IN_TOPIC=lat_in OUT_TOPIC=lat_out RATE=20000 DURATION_S=60 ENGINE=zelox|flink \
        python lat_probe.py
 """
 import os, time, json, threading

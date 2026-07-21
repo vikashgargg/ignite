@@ -46,7 +46,7 @@ watermark work — see CODEMAP "Watermark/source wiring"). The fusion rule must 
   parsed value bytes per message; emits the parsed struct columns (+ partition/timestamp for watermark).
 - **Codec round-trip** (`sail-execution/src/codec.rs` + `physical.proto`): `ParseSpec` must serialize, or
   log a single-node-only gap. (Distributed-aware rule.)
-- **Gated `VAJRA_FUSE_PARSE`** default-off until EKS-validated (zero regression risk while iterating).
+- **Gated `ZELOX_FUSE_PARSE`** default-off until EKS-validated (zero regression risk while iterating).
 
 ## Risk + mitigation
 - **Semantic parity:** reuse T7a `ColBuilder` (same coercion) → identical by construction. Gate with the
@@ -63,5 +63,5 @@ watermark work — see CODEMAP "Watermark/source wiring"). The fusion rule must 
 4. ONE EKS 100M run: source_read must drop (~100.6→~50s), from_json→0 (folded), beat Flink? + teardown $0.
 
 ## Done-criteria
-`VAJRA_FUSE_PARSE` on: from_json operator removed for the Kafka path, source_read down ~50s, throughput
+`ZELOX_FUSE_PARSE` on: from_json operator removed for the Kafka path, source_read down ~50s, throughput
 ≤1.0× Flink with memory ≤ Flink, all parity/correctness gates green, codec round-trips (or gap logged).

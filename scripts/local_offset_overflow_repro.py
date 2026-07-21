@@ -10,7 +10,7 @@ Phase:
   query   : run the identical 10s tumbling-window keyed COUNT (availableNow)
 
 Run the server first in the SAME mode as EKS:
-  target/debug/vajra server --mode local-cluster --workers 4 --port 50099
+  target/debug/zelox server --mode local-cluster --workers 4 --port 50099
 Then: produce, then query (against a debug/unstripped binary -> real backtrace).
 """
 import sys, os, json, time

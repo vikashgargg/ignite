@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# FLINK unbounded realtime streaming, measured SYMMETRICALLY with Vajra: time from job start until the
+# FLINK unbounded realtime streaming, measured SYMMETRICALLY with Zelox: time from job start until the
 # SINK (Kafka wagg_out) holds ALL 10 windows / 100M (output-complete), not consumer-offset. This is the
-# apples-to-apples end-to-end realtime throughput (consume+window+emit) vs Vajra's S3-completeness drain.
+# apples-to-apples end-to-end realtime throughput (consume+window+emit) vs Zelox's S3-completeness drain.
 # Also captures peak TM RSS and the full aggregation output (for the identical-output check).
 # Usage: scripts/eks_flink_wagg_complete.sh [N]
 set -uo pipefail

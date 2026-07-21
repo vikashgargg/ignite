@@ -1,7 +1,7 @@
 # Single-broker KRaft Kafka for the streaming head-to-head. Pinned (nodeSelector
 # role=kafka) to its own c7g.4xlarge so it never competes with the engine-under-test
 # (which gets a dedicated role=compute node with all 16 vCPU). The producer pre-loads
-# a bounded topic; Flink and Vajra each consume the SAME topic from earliest.
+# a bounded topic; Flink and Zelox each consume the SAME topic from earliest.
 apiVersion: v1
 kind: Namespace
 metadata: { name: stream }

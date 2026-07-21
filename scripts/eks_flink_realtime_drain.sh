@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # FLINK UNBOUNDED realtime-streaming drain of the pre-loaded `events` backlog (no scan.bounded.mode) —
-# the true realtime comparison to Vajra's Trigger.RealTime. Submits the streaming SQL async
+# the true realtime comparison to Zelox's Trigger.RealTime. Submits the streaming SQL async
 # (dml-sync=false), then measures the catch-up DRAIN wall by polling the Kafka consumer-group `flink-wagg`
 # lag until it hits ~0 (all N consumed). Captures peak TM RSS. Cancels the job + tears the session.
 # Usage: scripts/eks_flink_realtime_drain.sh [N]

@@ -1,4 +1,4 @@
-# Flink 1.19 session with S3 PARQUET sink (fair like-for-like vs Vajra, which writes parquet to S3).
+# Flink 1.19 session with S3 PARQUET sink (fair like-for-like vs Zelox, which writes parquet to S3).
 # Adds: (1) S3 plugin via ENABLE_BUILT_IN_PLUGINS (flink-s3-fs-hadoop, uses node instance role creds);
 # (2) flink-sql-parquet format jar in /opt/flink/lib; (3) checkpointing (filesystem sink commits on ckpt).
 # TM on role=compute (has S3 access); JM on role=kafka.

@@ -1,4 +1,4 @@
-# Vajra — Build Status
+# Zelox — Build Status
 
 > Last updated: 2026-07-06
 > Branch: `upgrade/datafusion54-arrow583`
@@ -12,7 +12,7 @@
 > [spark-parity-and-upgrade-plan.md](docs/design/spark-parity-and-upgrade-plan.md), [REFERENCES.md](docs/REFERENCES.md).
 >
 > **Prior (2026-07-04, streaming milestone on `main`):** crash-EO exactly-once (16-part continuous `kill -9`,
-> EKS-confirmed dup=0 exact), final-window completeness (`VAJRA_COMPLETE_ON_END` = Flink `scan.bounded.mode`
+> EKS-confirmed dup=0 exact), final-window completeness (`ZELOX_COMPLETE_ON_END` = Flink `scan.bounded.mode`
 > parity, 10 windows/100M), and a **parallel Kafka sink** (fixed a 15/16-partition data-loss bug + ~300×
 > throughput; 100M/100M @ 1.67M msg/s). All validated **T1 local → T2 kind → T3 EKS** ([3-tier SDLC](docs/design/three-tier-sdlc.md)). Next: DataFusion 54 / Arrow 58.3 upgrade + LakeSail v0.6.5 features — see
 > [docs/design/spark-parity-and-upgrade-plan.md](docs/design/spark-parity-and-upgrade-plan.md).
@@ -25,7 +25,7 @@
 
 ## Honest headline (measured, 2026-07-02)
 
-**Vajra is a strong Spark *batch* replacement and a competitive Flink *streaming* replacement —
+**Zelox is a strong Spark *batch* replacement and a competitive Flink *streaming* replacement —
 claimed only where measured head-to-head, path-dependence flagged.**
 
 - **Batch vs Spark 3.5.3:** wins across the board — TPC-H SF-100 ~3.2× faster / ~2.2× less RAM;
@@ -43,16 +43,16 @@ official Flink 1.19, shared Kafka, identical 10 s tumbling keyed-COUNT.
 Full writeup: [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAMING_VS_FLINK_EKS.md),
 [docs/design/tri-engine-benchmark-matrix.md](docs/design/tri-engine-benchmark-matrix.md).
 
-| Dimension | Flink 1.19 | Vajra | Verdict |
+| Dimension | Flink 1.19 | Zelox | Verdict |
 |---|---|---|---|
-| **Throughput** | 5.78M ev/s | 5.28M ev/s | 🟡 Vajra **~1.10× slower** (competitive; was 1.15×, after T1–T7a) |
-| **Memory** (peak RSS) | 8.55 GiB | ~7.1 GiB | 🟢 Vajra **~1.2× less** (streaming; **path-dependent** — batch is ~8× less) |
+| **Throughput** | 5.78M ev/s | 5.28M ev/s | 🟡 Zelox **~1.10× slower** (competitive; was 1.15×, after T1–T7a) |
+| **Memory** (peak RSS) | 8.55 GiB | ~7.1 GiB | 🟢 Zelox **~1.2× less** (streaming; **path-dependent** — batch is ~8× less) |
 | **Latency** | ms (Kafka) | competitive, **tail better** (no GC pauses) | 🟢 tail / 🟡 median |
 | **Exactly-once** (hard-kill chaos) | mature | EO ✓ incl. **real S3 sink** (P1 dup=0, bit-identical) | 🟢 correct / 🟡 less hardened |
 
 > **Honesty note (supersedes earlier claims):** an *earlier, lighter* EKS run (2026-06-19) reported
-> Vajra 1.33× *faster* throughput and 6.4× less memory at ~1.5M ev/s. The **rigorous tri-engine
-> Nexmark-methodology run at ~5.3M ev/s is authoritative and supersedes it** — Vajra is
+> Zelox 1.33× *faster* throughput and 6.4× less memory at ~1.5M ev/s. The **rigorous tri-engine
+> Nexmark-methodology run at ~5.3M ev/s is authoritative and supersedes it** — Zelox is
 > **competitive, ~1.1× slower on throughput**, memory **path-dependent**. We claim only the measured
 > head-to-head and flag path-dependence (per the project's honest-claims bar). Remaining for full
 > Flink parity: throughput (VAJ-T7 parse-fusion), large-state backend, mid-job recovery time,
@@ -66,7 +66,7 @@ Canonical Uber/Netflix/Apple prod patterns on **real object storage**
 | Workload | Result | Verdict |
 |---|---|---|
 | **P1** Kafka → 10 s windowed-agg → **Parquet on S3**, exactly-once | clean + **EO-under-crash** (kill -9 → resume from S3 checkpoint): rows=9000 dup=0 sum=90M **bit-identical**; 4.67M ev/s, RSS 7.25 GiB | 🟢 **EO on a real object-store sink, proven** |
-| **P4** batch: gen 200M → write **Parquet on S3** → read+agg vs Spark 3.5.3 | Vajra **5.92 s / 3.44 GiB** vs Spark **36.94 s / 8.1 GiB**; both rows=200M distinct_k=1000 sum identical | 🟢 **6.2× faster, 2.4× less mem, identical output** |
+| **P4** batch: gen 200M → write **Parquet on S3** → read+agg vs Spark 3.5.3 | Zelox **5.92 s / 3.44 GiB** vs Spark **36.94 s / 8.1 GiB**; both rows=200M distinct_k=1000 sum identical | 🟢 **6.2× faster, 2.4× less mem, identical output** |
 
 All AWS torn down to $0 after each run.
 
@@ -78,10 +78,10 @@ All AWS torn down to $0 after each run.
 |---|---|
 | Workspace clippy `-D warnings` green (first time) | ✅ `90f69f22` |
 | Delta declared-nullability metaData fix (feature suite 134→144) | ✅ `2d1147d6` |
-| TPC-H SF-1 head-to-head: **Vajra 1.78s vs Spark 3.5.3 63.46s (~36×)** | ✅ `9805ffae`, [docs/benchmarks/TPCH_SF1.md](docs/benchmarks/TPCH_SF1.md) |
-| ClickBench (1M, same machine): **Vajra 3.87s vs Spark 48.07s (~12.4×)** | ✅ [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md) |
+| TPC-H SF-1 head-to-head: **Zelox 1.78s vs Spark 3.5.3 63.46s (~36×)** | ✅ `9805ffae`, [docs/benchmarks/TPCH_SF1.md](docs/benchmarks/TPCH_SF1.md) |
+| ClickBench (1M, same machine): **Zelox 3.87s vs Spark 48.07s (~12.4×)** | ✅ [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md) |
 | **ClickBench FULL 100M distributed on AWS EKS (Graviton spot, S3, kubernetes-cluster): 43/43, 377.9s** | ✅ ~$1 run, torn down to $0; [docs/SCALE_TESTING.md](docs/SCALE_TESTING.md) |
-| **TPC-H SF-100 (100 GB) on AWS EKS, time+memory vs Spark: Vajra 347s / 51.7 GiB vs Spark 1099s / 115 GiB → ~3.2× faster, ~2.2× less RAM** | ✅ [docs/benchmarks/TPCH_SF100.md](docs/benchmarks/TPCH_SF100.md) |
+| **TPC-H SF-100 (100 GB) on AWS EKS, time+memory vs Spark: Zelox 347s / 51.7 GiB vs Spark 1099s / 115 GiB → ~3.2× faster, ~2.2× less RAM** | ✅ [docs/benchmarks/TPCH_SF100.md](docs/benchmarks/TPCH_SF100.md) |
 | Differential trust harness **37→124 workloads, 124/124 vs Spark** | ✅ `d079af37` |
 | Real Spark-compat fixes: `log(x)` 1-arg, `array_position`→bigint, `get_json_object` array-index | ✅ |
 
@@ -90,15 +90,15 @@ All AWS torn down to $0 after each run.
 |---|---|
 | `local` | ✅ 105/105 |
 | `local-cluster` (4 workers, distributed) | ✅ 105/105 |
-| **Apple Container** (fresh image, `SAIL_MODE=local-cluster`, 4 workers) | ✅ 105/105 |
-| **K8s** (kind, `SAIL_MODE=kubernetes-cluster`, driver pod spawns worker pods) | ✅ 105/105 |
+| **Apple Container** (fresh image, `ZELOX_MODE=local-cluster`, 4 workers) | ✅ 105/105 |
+| **K8s** (kind, `ZELOX_MODE=kubernetes-cluster`, driver pod spawns worker pods) | ✅ 105/105 |
 
 > **All four deployment modes verified at 105/105 with the fresh binary.** Apple build
 > needed a 5 GB builder VM (`container builder start --memory 5g`; default 2 GB OOM-killed
 > `hive_metastore` on the 8 GB host). K8s needed four real fixes, all committed:
 > `docker/Dockerfile` Rust `1.86→1.95` (`aws-config` MSRV 1.91.1), `ARG CARGO_JOBS`
 > (8 parallel jobs OOM-killed the final link → cap to 2 on small hosts), the scorecard
-> `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/sail`, not `/tmp/vajra`), and the two
+> `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/sail`, not `/tmp/zelox`), and the two
 > `_metadata` tests switched from a client-local `tempfile` dir to the shared `tmp` root so
 > worker pods can see the files. The K8s driver dynamically spawned `sail-worker-*` pods per
 > query — true distributed execution.
@@ -121,7 +121,7 @@ All AWS torn down to $0 after each run.
 ### Production hardening (the "true Spark replacement" work)
 | Item | Status |
 |---|---|
-| **Python-version-agnostic UDFs** — subprocess execution via `VAJRA_PYTHON` | ✅ works on any Python 3.10–3.14+ without recompiling (Spark-like model) |
+| **Python-version-agnostic UDFs** — subprocess execution via `ZELOX_PYTHON` | ✅ works on any Python 3.10–3.14+ without recompiling (Spark-like model) |
 | **Lambda HOFs in distributed mode** (`transform`/`filter`/`exists`/`forall`/`aggregate`/`zip_with`/`array_sort`/`map_*`) | ✅ added to distributed codec (`HigherOrderUdf` proto) |
 | **WITH RECURSIVE in distributed mode** | ✅ recursive-query subtree kept in one stage (no shuffle split) |
 | `install.sh` — auto Python 3.10+ detection, pyspark 4.x venv, all Spark Connect deps | ✅ |
@@ -140,7 +140,7 @@ All AWS torn down to $0 after each run.
 ## Phase 1 — Complete ✅
 
 ### Foundation ✅
-- Forked `lakehq/sail` → Vajra; binary renamed `vajra`; CLI restructured
+- Forked `lakehq/sail` → Zelox; binary renamed `zelox`; CLI restructured
 - GitHub Actions CI: check / test / clippy / fmt / distributed-scorecard / k8s-scorecard / macos-scorecard on every push
 - Cross-compile: Linux x86_64 + aarch64 musl via `cargo-zigbuild`; macOS universal2
 - Release workflow: publishes binaries on `v*` tags
@@ -198,7 +198,7 @@ Q05 0.08s  Q10 0.10s  Q15 0.05s  Q20 0.06s
 - Layer-cache split: manifests → `cargo fetch` → build (fast incremental rebuilds)
 - SIGTERM graceful shutdown handler; HEALTHCHECK TCP probe
 - `make container-build` / `make container-run` / `make container-run-cluster`
-- Binary: `vajra-aarch64-apple-darwin` (~105 MB, statically linked)
+- Binary: `zelox-aarch64-apple-darwin` (~105 MB, statically linked)
 
 ### CI status — being made genuinely green (Phase 4.2, 2026-06)
 
@@ -255,12 +255,12 @@ CI jobs: `fmt`, `clippy`, `test`, `build-linux`, `distributed-scorecard`,
 | Item | Status |
 |---|---|
 | Scheduler HA (K8s Lease-based leader election) | ✅ `--ha` flag, `KubernetesLeaderElector` |
-| Bearer token auth (`--auth-token` / `SAIL_AUTH__TOKEN`) | ✅ `BearerTokenInterceptor` |
+| Bearer token auth (`--auth-token` / `ZELOX_AUTH__TOKEN`) | ✅ `BearerTokenInterceptor` |
 | mTLS (`--tls-cert/--tls-key/--tls-ca`) | ✅ |
 | K8s CI validation (kind in GitHub Actions) | ✅ `k8s-scorecard` job |
 | macOS CI validation (Apple Silicon native) | ✅ `macos-scorecard` job |
 | Standard Docker image (`docker/Dockerfile`) | ✅ K8s-ready |
-| K8s Helm chart (server + worker, HPA) | ✅ `helm/vajra/` |
+| K8s Helm chart (server + worker, HPA) | ✅ `helm/zelox/` |
 
 ---
 
@@ -274,7 +274,7 @@ CI jobs: `fmt`, `clippy`, `test`, `build-linux`, `distributed-scorecard`,
 | Streaming checkpoint recovery on restart | ✅ reads max batchId from `offsets/` dir |
 | TPC-DS query suite script | ✅ `scripts/tpcds_score.py` |
 | TPC-H distributed benchmark script | ✅ `scripts/tpch_distributed.py` + CI job |
-| `vajra-pyspark` PyPI package | ✅ `python/vajra_pyspark/` |
+| `zelox-pyspark` PyPI package | ✅ `python/zelox_pyspark/` |
 | Stream × static join | ✅ |
 | `DESCRIBE QUERY` | ✅ returns (col_name, data_type, comment) rows |
 | `df.approxQuantile()` | ✅ `approx_percentile_cont_udaf` |
@@ -327,17 +327,17 @@ CI jobs: `fmt`, `clippy`, `test`, `build-linux`, `distributed-scorecard`,
 
 ## Competitive Position vs LakeSail v0.6.3 (2026-06-02)
 
-LakeSail is at v0.6.3 (released 2026-05-21). As of Phase 4 Sprint 4.1, Vajra **leads or matches LakeSail on every dimension**, and now additionally has a production-grade Python-version-agnostic UDF runtime and verified distributed correctness for lambda HOFs + recursive CTEs.
+LakeSail is at v0.6.3 (released 2026-05-21). As of Phase 4 Sprint 4.1, Zelox **leads or matches LakeSail on every dimension**, and now additionally has a production-grade Python-version-agnostic UDF runtime and verified distributed correctness for lambda HOFs + recursive CTEs.
 
-> **Honest framing (read this):** Vajra is forked from `lakehq/sail`, so the
+> **Honest framing (read this):** Zelox is forked from `lakehq/sail`, so the
 > analytical core (Rust + DataFusion) is shared lineage with LakeSail. We do
-> **not** claim Vajra is "faster than LakeSail" — query perf vs Spark sits in the
+> **not** claim Zelox is "faster than LakeSail" — query perf vs Spark sits in the
 > same ballpark for both, and we have not run a head-to-head. The differentiation
 > below is real on **operational features, demonstrable trust (CI-gating
 > differential harness), multi-mode verification, and transparent per-scale
 > benchmarks**. Full read: [docs/benchmarks/COMPETITIVE.md](docs/benchmarks/COMPETITIVE.md).
 
-| Dimension | LakeSail v0.6.3 | **Vajra v0.6.0** | **Vajra Advantage** |
+| Dimension | LakeSail v0.6.3 | **Zelox v0.6.0** | **Zelox Advantage** |
 |---|---|---|---|
 | Runtime | Rust | **Rust** | — |
 | Cold start | ~2 s | **~200 ms** | **10× faster** |
@@ -374,15 +374,15 @@ LakeSail is at v0.6.3 (released 2026-05-21). As of Phase 4 Sprint 4.1, Vajra **l
 | **K8s Helm chart + HPA** | ❌ | **✅** | **✅ unique** |
 | **Scheduler HA** | ❌ | **✅** | **✅ unique** |
 | **Web UI :4040** | ❌ | **✅** | **✅ unique** |
-| pip install | `pysail` | **`vajra-pyspark`** | — |
+| pip install | `pysail` | **`zelox-pyspark`** | — |
 
-**Summary: Vajra now leads LakeSail on ALL streaming features, ALL infrastructure features, and ALL new Sprint 4–6 catch-up items. The gap is fully closed.**
+**Summary: Zelox now leads LakeSail on ALL streaming features, ALL infrastructure features, and ALL new Sprint 4–6 catch-up items. The gap is fully closed.**
 
 ---
 
 ## Known Limitations
 
-- **macOS: Apple Silicon only** — `vajra-aarch64-apple-darwin` binary and Apple Container require arm64 (M1/M2/M3/M4). Intel Macs are not supported.
+- **macOS: Apple Silicon only** — `zelox-aarch64-apple-darwin` binary and Apple Container require arm64 (M1/M2/M3/M4). Intel Macs are not supported.
 - **Vortex reads/writes**: `sail-vortex` registered as format skeleton; actual I/O pending `vortex-datafusion` DataFusion 53.x compat
 - **TPC-H SF-100**: Code ready; hardware run needed (10-node K8s cluster)
 - **Kafka → Delta 24h endurance**: Code ready; dedicated infra needed

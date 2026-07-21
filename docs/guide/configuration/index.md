@@ -37,7 +37,7 @@ To map a configuration key to an environment variable, use the following steps:
 
 1. Convert letters in the key to uppercase. Keep digits and underscores (`_`) unchanged.
 2. Replace `.` in the key with two underscores (`__`) to separate hierarchy levels.
-3. Prefix the key with `SAIL_`.
+3. Prefix the key with `ZELOX_`.
 
 To specify a configuration value, use its **string representation** that follows TOML syntax, while the quotes around string values can be omitted.
 
@@ -55,19 +55,19 @@ The examples are shown in a shell script.
 ```bash
 # Set `mode` to "local".
 # The quotes (`""`) are part of the shell syntax and are not seen by Sail.
-export SAIL_MODE="local"
+export ZELOX_MODE="local"
 
 # Set `mode` to "local" using a quoted string.
 # The outer quotes (`''`) are part of the shell syntax and are not seen by Sail.
 # The inner quotes (`""`) are part of the string representation of the
 # configuration value and are seen by Sail.
-export SAIL_MODE='"local"'
+export ZELOX_MODE='"local"'
 
 # Set `cluster.worker_task_slots` to 16.
 # The quotes (`""`) are part of the shell syntax and are not seen by Sail.
-export SAIL_CLUSTER__WORKER_TASK_SLOTS="16"
+export ZELOX_CLUSTER__WORKER_TASK_SLOTS="16"
 
 # Set multiple configuration options at once.
 # The quotes (`''`) are part of the shell syntax and are not seen by Sail.
-export SAIL_CLUSTER='{ worker_task_slots = 16, worker_max_count = 2 }'
+export ZELOX_CLUSTER='{ worker_task_slots = 16, worker_max_count = 2 }'
 ```

@@ -14,8 +14,8 @@ from pysail.testing.spark.utils.common import is_jvm_spark
 @pytest.fixture(scope="session")
 def remote():
     """Override the global remote fixture to use local-cluster mode for this module."""
-    original_mode = os.environ.get("SAIL_MODE")
-    os.environ["SAIL_MODE"] = "local-cluster"
+    original_mode = os.environ.get("ZELOX_MODE")
+    os.environ["ZELOX_MODE"] = "local-cluster"
 
     try:
         server = SparkConnectServer("127.0.0.1", 0)
@@ -27,9 +27,9 @@ def remote():
     finally:
         # Restore original environment
         if original_mode is None:
-            os.environ.pop("SAIL_MODE", None)
+            os.environ.pop("ZELOX_MODE", None)
         else:
-            os.environ["SAIL_MODE"] = original_mode
+            os.environ["ZELOX_MODE"] = original_mode
 
 
 @pytest.fixture(scope="module")

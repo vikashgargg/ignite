@@ -1,4 +1,4 @@
-# ClickBench — Vajra vs Apache Spark (head-to-head)
+# ClickBench — Zelox vs Apache Spark (head-to-head)
 
 The 43 standard [ClickBench](https://benchmark.clickhouse.com/) analytical
 queries over the `hits` table, identical Parquet input and identical SQL on the
@@ -10,16 +10,16 @@ tractable on an 8 GB host; the official 100M-row (~14 GB) set needs a larger box
 
 | Engine | Build | Total (43q) | Avg/query | Passed |
 |---|---|---|---|---|
-| **Vajra** | release (thin LTO) | **3.872 s** | 0.090 s | **43/43** |
+| **Zelox** | release (thin LTO) | **3.872 s** | 0.090 s | **43/43** |
 | Apache Spark 3.5.3 | JVM (Java 8) | 48.072 s | 1.136 s | 42/43 |
 
-**Vajra is ≈12.4× faster** end-to-end and passes **all 43** queries. Spark 3.5.3
+**Zelox is ≈12.4× faster** end-to-end and passes **all 43** queries. Spark 3.5.3
 fails Q40 with `DATATYPE_MISMATCH.DATA_DIFF_TYPES` on its `CASE WHEN … THEN Referer`
-branch (a stricter 3.5 coercion rule); Vajra accepts it, matching Spark 4.x.
+branch (a stricter 3.5 coercion rule); Zelox accepts it, matching Spark 4.x.
 
 ## How to reproduce
 ```bash
-# Vajra (server running on :50051)
+# Zelox (server running on :50051)
 SPARK_REMOTE=sc://localhost:50051 python scripts/clickbench.py            # smoke
 SPARK_REMOTE=sc://localhost:50051 CLICKBENCH_FULL=1 python scripts/clickbench.py  # full 14 GB
 
@@ -32,7 +32,7 @@ SPARK_REMOTE=local[4] CLICKBENCH_DATA=~/.cache/clickbench python scripts/clickbe
 The **complete official ClickBench** (100M rows, 13.7 GB Parquet) run **distributed
 on a real EKS cluster** (2026-06-05, ap-south-1):
 - 3× Graviton (arm64) **spot** nodes, NAT disabled (`k8s/eks/cluster.yaml`).
-- Vajra in `SAIL_MODE=kubernetes-cluster` — the driver pod **dynamically spawned
+- Zelox in `ZELOX_MODE=kubernetes-cluster` — the driver pod **dynamically spawned
   worker pods** across the nodes (true distributed execution).
 - Data read from **S3** (`s3://…/clickbench`) via the node IAM role.
 

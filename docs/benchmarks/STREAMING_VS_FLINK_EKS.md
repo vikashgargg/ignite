@@ -1,9 +1,9 @@
-# Vajra vs Flink — streaming head-to-head on EKS (2026-06-17)
+# Zelox vs Flink — streaming head-to-head on EKS (2026-06-17)
 
 Real, like-for-like windowed-aggregation head-to-head on AWS EKS, Graviton
 `c7g.4xlarge` (16 vCPU — the exact class of Flink's published 1.19 windowed-agg
 baseline), official Apache Flink 1.19. **No workarounds: this records what actually
-happened, including a genuine Vajra bug the test surfaced.**
+happened, including a genuine Zelox bug the test surfaced.**
 
 ## Methodology (true like-for-like)
 
@@ -15,7 +15,7 @@ happened, including a genuine Vajra bug the test surfaced.**
   catch-up throughput (directly comparable to Flink's published "events/s").
   - Flink: SQL `TUMBLE(...)`, Kafka connector, `scan.bounded.mode=latest-offset`,
     `table.dml-sync=true`, blackhole sink, parallelism 16. (`k8s/stream/flink-sql.sql`)
-  - Vajra: Spark Structured Streaming `window(...,"10 seconds")`, `availableNow`.
+  - Zelox: Spark Structured Streaming `window(...,"10 seconds")`, `availableNow`.
     (`scripts/stream_windowed_agg.py`)
 - **Hardware:** each engine ran ALONE on a dedicated `c7g.4xlarge` (16 vCPU / ~26 GiB
   for the engine), Kafka on a separate node, run sequentially — identical resources.
@@ -26,7 +26,7 @@ happened, including a genuine Vajra bug the test surfaced.**
 | Engine | Workload | Result | Peak RSS |
 |---|---|---|---|
 | **Apache Flink 1.19** | 100M-event 10s tumbling windowed COUNT | **8.8 s → 11.36M events/s** | **8.5 GiB** |
-| **Vajra** (at time of run) | same | **FAILED — Arrow i32 offset overflow** (root-caused + FIXED, commit 6b812758; see below) | — |
+| **Zelox** (at time of run) | same | **FAILED — Arrow i32 offset overflow** (root-caused + FIXED, commit 6b812758; see below) | — |
 
 Flink's number is clean and official-setup (the only config fix needed was exposing
 the JobManager **blob port 6124** in the service, per Flink's standalone-Kubernetes
@@ -43,13 +43,13 @@ topic, same 10s tumbling keyed COUNT, run sequentially:
 | Engine | Wall (100M events) | Throughput |
 |---|--:|--:|
 | **Apache Flink 1.19** | 88.6 s | **1.13M ev/s** |
-| **Vajra** (fixed) | 205.8 s | **0.49M ev/s** |
+| **Zelox** (fixed) | 205.8 s | **0.49M ev/s** |
 
-**Honest result: on this streaming windowed-aggregation, Vajra is ~2.3× *slower*
+**Honest result: on this streaming windowed-aggregation, Zelox is ~2.3× *slower*
 than Flink.** No overflow, correct, but not winning. Raising the Arrow batch size
 16× (8192 → 131072) did **not** help (203 s) — so per-batch overhead is not the cause.
 
-**Root cause (confirmed in code):** Vajra's Kafka source is **single-threaded** —
+**Root cause (confirmed in code):** Zelox's Kafka source is **single-threaded** —
 `KafkaSourceExec` reports `Partitioning::UnknownPartitioning(1)` and rejects
 `partition != 0` (reader.rs:232,322), so one execution partition reads *all* Kafka
 partitions and runs `from_json` + pre-aggregation on a single core. Flink runs **16
@@ -61,7 +61,7 @@ Kafka partitions — one reader per partition (Spark Structured Streaming: one t
 TopicPartition; Flink: one source subtask per partition) → `UnknownPartitioning(N)`,
 each instance reading its assigned partitions, offsets staged per instance.
 
-### Parallel source — IMPLEMENTED + RE-MEASURED (Vajra now BEATS Flink)
+### Parallel source — IMPLEMENTED + RE-MEASURED (Zelox now BEATS Flink)
 
 Implemented (commit bd8679f2): `KafkaSourceExec` reports `UnknownPartitioning(N)`
 (N = `target_partitions`); `execute(i)` owns the Kafka partitions whose stable global
@@ -77,14 +77,14 @@ Re-measured, same single c7g.4xlarge, same 100M-event workload, both engines:
 | Engine | Wall (100M) | Throughput | vs Flink |
 |---|--:|--:|--:|
 | Apache Flink 1.19 | 86.4 s | 1.157M ev/s | 1.0× |
-| Vajra **single-threaded source** (before) | 205.8 s | 0.49M ev/s | 0.42× |
-| **Vajra parallel source** (after) | **64.8 s** | **1.543M ev/s** | **1.33× faster** |
+| Zelox **single-threaded source** (before) | 205.8 s | 0.49M ev/s | 0.42× |
+| **Zelox parallel source** (after) | **64.8 s** | **1.543M ev/s** | **1.33× faster** |
 
-**Parallelizing the source took Vajra from 0.42× → 1.33× of Flink (a 3.15× self-speedup)
-— Vajra now wins this windowed-aggregation head-to-head**, on identical hardware, with
+**Parallelizing the source took Zelox from 0.42× → 1.33× of Flink (a 3.15× self-speedup)
+— Zelox now wins this windowed-aggregation head-to-head**, on identical hardware, with
 no JVM and Arrow-columnar execution.
 
-Honest caveat (orthogonal, documented): Vajra's `availableNow`+checkpoint emits only
+Honest caveat (orthogonal, documented): Zelox's `availableNow`+checkpoint emits only
 watermark-*closed* windows and stages the rest for the next run (here 927 window-key
 groups emitted), whereas Flink's bounded read fires all windows. Throughput is measured
 over all 100M processed events (both engines fully process the stream); aligning the
@@ -93,15 +93,15 @@ identical-output comparison.
 
 ## Four-dimension scorecard (all measured on one c7g.4xlarge unless noted)
 
-| Dimension | Flink 1.19 | Vajra | Verdict |
+| Dimension | Flink 1.19 | Zelox | Verdict |
 |---|---|---|---|
-| **Throughput** (100M windowed-agg) | 1.157M ev/s | **1.543M ev/s** | **Vajra 1.33× faster** |
-| **Memory** (peak RSS, same job) | 8.24 GiB | **1.29 GiB** | **Vajra ~6.4× less** (no JVM, Arrow) |
-| **Reliability** (exactly-once) | mature, battle-tested | **EO across hard kill ✓** (parallel src, 100000/100000) | Vajra correct; Flink more hardened |
+| **Throughput** (100M windowed-agg) | 1.157M ev/s | **1.543M ev/s** | **Zelox 1.33× faster** |
+| **Memory** (peak RSS, same job) | 8.24 GiB | **1.29 GiB** | **Zelox ~6.4× less** (no JVM, Arrow) |
+| **Reliability** (exactly-once) | mature, battle-tested | **EO across hard kill ✓** (parallel src, 100000/100000) | Zelox correct; Flink more hardened |
 | **Latency** | ms (Kafka sink) / ~checkpoint (file) | **p50 ~30 s realtime-mode probe** | **Flink wins clearly** |
 
 - **Memory** — `/sys/fs/cgroup/memory.peak` after each engine's identical windowed-agg
-  run: Flink 8.24 GiB vs Vajra **1.29 GiB**. The no-JVM / Arrow-columnar architecture
+  run: Flink 8.24 GiB vs Zelox **1.29 GiB**. The no-JVM / Arrow-columnar architecture
   shows up as a real ~6.4× memory advantage.
 - **Reliability** — EO-chaos: produce 0–49999 → parallel Kafka→parquet (checkpoint) →
   **hard-kill the server mid-stream** → restart → produce 50000–99999 → re-run; durable
@@ -109,10 +109,10 @@ identical-output comparison.
   offset staging is crash-safe. (Flink remains far more production-hardened — unaligned/
   incremental checkpoints, autoscaling, years at scale.)
 - **Latency — was the clear weakness; now CLOSED with the Kafka sink.** The original
-  realtime-mode Kafka→*file* probe measured p50 ≈ 30 s — because Vajra had **no record-level
+  realtime-mode Kafka→*file* probe measured p50 ≈ 30 s — because Zelox had **no record-level
   low-latency sink** (only a per-epoch file sink). Implementing a **Kafka sink** (commit
   `74b167bc`, record-paced produce-on-arrival; grounded in Spark `KafkaStreamWriter` + Flink
-  `KafkaSink` FLIP-143) and re-measuring **Kafka→Vajra→Kafka** end-to-end (Vajra started
+  `KafkaSink` FLIP-143) and re-measuring **Kafka→Zelox→Kafka** end-to-end (Zelox started
   first, true streaming latency, 10k ev/s):
 
   | Config | p50 | p99 | min | correctness |
@@ -127,7 +127,7 @@ identical-output comparison.
   (commit `0e9aedfd`; a 5 ms data-flush timer emits records on arrival while commits stay at
   the `Trigger.Continuous` interval — the **Spark Real-Time Mode** idea, native Arrow impl)
   cut p99 from **1021 ms → 51 ms at the SAME 1 s epoch** — proving it's the decoupling, not a
-  smaller commit cadence. **Vajra now hits sub-100 ms p99 without sacrificing commit/EO
+  smaller commit cadence. **Zelox now hits sub-100 ms p99 without sacrificing commit/EO
   efficiency.** Default delivery is at-least-once (Spark/Flink default).
 
 - **Exactly-once to Kafka — IMPLEMENTED + chaos-VALIDATED** (commit `f1b978e0`). EO mode
@@ -135,7 +135,7 @@ identical-output comparison.
   read-process-write pattern: a transactional producer commits each epoch's records AND the
   source's consumed offsets in **one atomic Kafka transaction** (`send_offsets_to_transaction`),
   a stable `transactional.id` **fences/aborts orphaned txns** on restart, and the source
-  recovers from the group's committed offset. Chaos test — Kafka→Vajra→Kafka, **kill -9
+  recovers from the group's committed offset. Chaos test — Kafka→Zelox→Kafka, **kill -9
   mid-stream**, restart, `read_committed` consumer:
 
   ```
@@ -143,20 +143,20 @@ identical-output comparison.
   ```
 
   **Each of 100000 inputs appears exactly once across a hard crash — no dup, no loss.**
-  Vajra now matches Flink's exactly-once-to-Kafka guarantee.
+  Zelox now matches Flink's exactly-once-to-Kafka guarantee.
 
-**Summary (updated):** Vajra **wins throughput (1.33×) and memory (6.4×)**, holds
+**Summary (updated):** Zelox **wins throughput (1.33×) and memory (6.4×)**, holds
 **exactly-once** across a hard kill, and — with the new Kafka sink — is now **Flink-class
 on latency** (p50 51 ms, p99 tunable to the epoch interval; was ~30 s). Flink remains
-ahead on **sub-interval p99 + exactly-once-to-Kafka maturity** (transactional EO is Vajra's
+ahead on **sub-interval p99 + exactly-once-to-Kafka maturity** (transactional EO is Zelox's
 next step) and on **operational hardening** (large state, mid-job failure recovery,
 unaligned checkpoints — see `docs/PROD_GRADE_ROADMAP.md`). The gap from "wins 2 of 4 axes"
 to "replaces Flink" narrowed materially: throughput ✓, memory ✓, latency now competitive,
 exactly-once correct (Kafka-transactional EO + maturity remaining).
 
-## The Vajra bug this surfaced (honest finding)
+## The Zelox bug this surfaced (honest finding)
 
-On the identical 100M-event workload, the Vajra worker **panicked**:
+On the identical 100M-event workload, the Zelox worker **panicked**:
 
 ```
 thread 'tokio-rt-worker' panicked at arrow-buffer-58.1.0/src/buffer/offset.rs:167:35:
@@ -210,7 +210,7 @@ The defect was **conflating three concerns the proven systems keep separate**:
 (the exact failing case): completes cleanly, **no overflow**.
 
 ### Still open for a clean head-to-head number
-- A clean Vajra throughput figure needs the dedicated-node EKS topology (Kafka + engine
+- A clean Zelox throughput figure needs the dedicated-node EKS topology (Kafka + engine
   on separate c7g.4xlarge), not the single-instance validation host. Pending a future
   EKS run with the fixed image (and an account vCPU-quota raise — current limit is 16).
 - Windowed-agg under `availableNow`+checkpoint emits only watermark-*closed* windows
@@ -221,17 +221,17 @@ The defect was **conflating three concerns the proven systems keep separate**:
 ## Reproduce
 - Cluster: `k8s/eks-bench.yaml` (eksctl). Kafka + producer: `k8s/stream/kafka.yaml`,
   `k8s/stream/producer-job.yaml`. Flink: `k8s/stream/flink-session.yaml`,
-  `flink-sql.sql`, `flink-runner-job.yaml`. Vajra: `k8s/stream/vajra-stream.yaml`,
+  `flink-sql.sql`, `flink-runner-job.yaml`. Zelox: `k8s/stream/zelox-stream.yaml`,
   `scripts/stream_windowed_agg.py`. Local repro: `scripts/local_offset_overflow_repro.py`.
 
 ## Status
 Batch (TPC-H SF-100) vs Spark is already published (`TPCH_SF100.md`: 3.2× faster,
 2.2× less memory). Streaming: **Flink baseline captured (11.36M ev/s, 8.5 GiB); the
-Vajra offset-overflow bug it surfaced is root-caused and FIXED (commit 6b812758),
-validated overflow-free on the same hardware + 100M-event workload.** A clean Vajra
+Zelox offset-overflow bug it surfaced is root-caused and FIXED (commit 6b812758),
+validated overflow-free on the same hardware + 100M-event workload.** A clean Zelox
 *throughput* head-to-head number remains to be measured on the dedicated-node EKS
 topology with the fixed image (blocked only by an account vCPU-quota raise).
 
 This is the intended value of a true, no-workaround head-to-head: it found a real,
-scale-dependent engine bug, and the fix realigns Vajra with how Spark/DataFusion/Arrow
+scale-dependent engine bug, and the fix realigns Zelox with how Spark/DataFusion/Arrow
 separate admission control, columnar buffering, and the 2 GiB array limit.

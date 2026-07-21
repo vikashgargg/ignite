@@ -1,13 +1,13 @@
 # Apache Spark 3.5.3 reference: run the SAME tpch_distributed.py at SF-100 in
-# local[*] mode on the same node + same node-local data as Vajra. Reports wall
+# local[*] mode on the same node + same node-local data as Zelox. Reports wall
 # time per query and the pod's peak memory (cgroup v2 memory.peak) at the end.
 # Requires a ConfigMap 'tpch-script' (= scripts/tpch_distributed.py), created at
-# run time. Run AFTER scaling Vajra to 0 so it gets the full node.
+# run time. Run AFTER scaling Zelox to 0 so it gets the full node.
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: spark-tpch-sf100
-  namespace: vajra
+  namespace: zelox
 spec:
   backoffLimit: 0
   template:

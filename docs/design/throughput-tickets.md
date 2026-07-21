@@ -1,6 +1,6 @@
 # EPIC VAJ-THRU — beat Flink on windowed-agg throughput
 
-**Baseline (EKS 100M, c7g.4xlarge, 2026-06-30):** Vajra 4.92M vs Flink 5.67M ev/s = **1.15× slower**,
+**Baseline (EKS 100M, c7g.4xlarge, 2026-06-30):** Zelox 4.92M vs Flink 5.67M ev/s = **1.15× slower**,
 1.2× more memory. Per-stage CPU: `source_read 106s ≫ exchange 80s > from_json 38s > finalize 23s`.
 **Goal:** ≤1.0× Flink (beat) on this path, keep correctness/EO. Work the stages in CPU-rank order.
 
@@ -11,7 +11,7 @@ Each ticket: status · acceptance criteria (AC) · the CODEMAP module it touches
 |---|---|---|---|
 | **VAJ-T1** | source_read | ✅ DONE | Projection-aware `KafkaArrowBuilders` — build+append ONLY projected cols; clippy green; committed. Kills 100M constant-topic-string copies + 3 wasted column builds. |
 | **VAJ-T2** | source_read | �doing | Partition-keyed offset state — no per-msg `String` alloc/hash in the hot loop; **durable (topic,part)→offset commit format preserved**; unit test; clippy green. |
-| **VAJ-T3** | validate | ✅ DONE | EKS 100M re-run (2026-06-30): Vajra **5.18M ev/s** (was 4.92) vs Flink 5.72 = **1.10× slower** (was 1.15×); RSS 10.19 GiB (was 10.38). WM_PROF: source_read 106→**99.7s**, exchange 80→**68s**, from_json 38s, finalize 23→19.6s. Real +5.4% gain, did NOT beat Flink. Torn down $0. |
+| **VAJ-T3** | validate | ✅ DONE | EKS 100M re-run (2026-06-30): Zelox **5.18M ev/s** (was 4.92) vs Flink 5.72 = **1.10× slower** (was 1.15×); RSS 10.19 GiB (was 10.38). WM_PROF: source_read 106→**99.7s**, exchange 80→**68s**, from_json 38s, finalize 23→19.6s. Real +5.4% gain, did NOT beat Flink. Torn down $0. |
 | **VAJ-T4** | exchange | 🔨 NEXT | Cut `concat_batches` copy in `StreamExchangeExec::distribute` + arrow `Utf8View` (version-upgrade) — now the clearest lever (68s) + helps memory. |
 | **VAJ-T5** | source_read | 📋 backlog | source_read floor ~100s = rdkafka poll + necessary value-payload copy (10GB @100M). Investigate: borrow-from-rdkafka-buffer into Arrow (zero-copy value), bigger fetch.max.bytes. Diminishing — after T4. |
 | **VAJ-T6** | from_json | 📋 backlog | from_json 38s — simd-json now relatively bigger; revisit only after T4+T5. |
@@ -29,7 +29,7 @@ never pays the raw-value round-trip. ⇒ our Arrow/no-GC edge is being SPENT on 
 | Ticket | Status | What |
 |---|---|---|
 | **VAJ-T7** | 🔨 NEXT (the big one) | **Fuse JSON parse into the source** — parse value→struct cols inside the read; raw value never materialized as a full column; exchange carries narrow parsed cols. Attacks source_read + from_json + exchange at once. Grounded: Flink deserialize-in-source + DataFusion projection/expr pushdown into scan. |
-| **VAJ-T4** | ✅ DONE+EKS | One `take` per owner via `vajra_key_groups` (was 128-split+`concat_batches`). EKS: 5.18→**5.33M ev/s**, gap 1.10→**1.085×**, RSS 10.19→**9.90 GiB**. BUT exchange CPU 68→66.5s only (shuffle cost = hash+route+send, NOT the concat copy) ⇒ exchange has a LOW ceiling. Did NOT reach parity. |
+| **VAJ-T4** | ✅ DONE+EKS | One `take` per owner via `zelox_key_groups` (was 128-split+`concat_batches`). EKS: 5.18→**5.33M ev/s**, gap 1.10→**1.085×**, RSS 10.19→**9.90 GiB**. BUT exchange CPU 68→66.5s only (shuffle cost = hash+route+send, NOT the concat copy) ⇒ exchange has a LOW ceiling. Did NOT reach parity. |
 | **VAJ-T7** | 🔨 measurement-justified | T4 didn't win; upstream still ~206s, window starved. Biggest remaining = **source_read 102s (value-byte copy) + from_json 37s = ~140s**. Rewrite from_json parse (simd-json + direct-builder, semantic-parity + simd-json-padding care) and/or fuse parse into source. On branch streaming/t7-parse-fusion; final confident EKS after. |
 | VAJ-T5/T6 | backlog | source_read poll floor / simd-json — only if T7+T4 don't reach ≤1.0×. |
 
@@ -53,6 +53,6 @@ never pays the raw-value round-trip. ⇒ our Arrow/no-GC edge is being SPENT on 
 - WM_PROF counters → `sail-common-datafusion/src/streaming/event/encoding.rs`.
 
 ## Grounding (REFERENCES)
-- §170 — Flink's weakness = per-record deserialize; Vajra's edge = Arrow bulk-columnar (T1).
+- §170 — Flink's weakness = per-record deserialize; Zelox's edge = Arrow bulk-columnar (T1).
 - Flink per-split (TopicPartition) offset state — not re-hashed per record (T2).
 - §68 — Spark RT-mode `KafkaSourceRDD` one task / TopicPartition.

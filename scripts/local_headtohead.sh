@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# LOCAL Vajra-vs-Flink head-to-head ($0, file-based — no Kafka networking). Same JSON data dir, same
+# LOCAL Zelox-vs-Flink head-to-head ($0, file-based — no Kafka networking). Same JSON data dir, same
 # logical query (10s event-time TUMBLE, GROUP BY window+k, COUNT), both BOUNDED → wall = catch-up
-# throughput. Measures throughput (N/wall) + peak RSS. Fair: RELEASE vajra vs release Flink.
+# throughput. Measures throughput (N/wall) + peak RSS. Fair: RELEASE zelox vs release Flink.
 # Usage: N=10000000 K=10000 bash scripts/local_headtohead.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 N="${N:-10000000}"; K="${K:-10000}"; PORT="${PORT:-50080}"
-BIN="$ROOT/target/release/vajra"; PY="$ROOT/.venvs/smoke/bin/python"
+BIN="$ROOT/target/release/zelox"; PY="$ROOT/.venvs/smoke/bin/python"
 DIR=/tmp/h2h/events; FLINK_IMG=flink:1.19-scala_2.12
-[ -x "$BIN" ] || { echo "FATAL: need release vajra (cargo build --release -p sail-cli --bin vajra)"; exit 2; }
+[ -x "$BIN" ] || { echo "FATAL: need release zelox (cargo build --release -p sail-cli --bin zelox)"; exit 2; }
 
 echo "=== gen $N events, $K keys -> $DIR ==="
 rm -rf /tmp/h2h; mkdir -p "$DIR"
 NWIN="${NWIN:-10}"; NF="${NF:-8}"   # NWIN: spread events over NWIN windows (output K*NWIN << N → fair sink)
                                      # NF: split input into NF files so BOTH engines read in parallel
-                                     # (Flink splits a single file; Vajra is 1-file-1-task, so equal
+                                     # (Flink splits a single file; Zelox is 1-file-1-task, so equal
                                      # files = equal parallelism = fair throughput).
 "$PY" - "$N" "$K" "$DIR" "$NWIN" "$NF" <<'PY'
 import sys
@@ -66,22 +66,22 @@ FLINK_MEM=$(docker exec h2h_flink sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/n
 docker exec h2h_flink sh -c 'grep -iE "Complete execution|Exception|error" /tmp/flink_out.log | head -3'
 docker rm -f h2h_flink >/dev/null 2>&1
 
-# ---------------- Vajra (release server + file windowed-agg via state_scale_stress) ------------
-echo "=== Vajra run ==="
-"$BIN" server --ip 127.0.0.1 --port "$PORT" >/tmp/h2h_vajra_srv.log 2>&1 & SRV=$!
+# ---------------- Zelox (release server + file windowed-agg via state_scale_stress) ------------
+echo "=== Zelox run ==="
+"$BIN" server --ip 127.0.0.1 --port "$PORT" >/tmp/h2h_zelox_srv.log 2>&1 & SRV=$!
 for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done
-( P=0; while kill -0 "$SRV" 2>/dev/null; do R=$(ps -o rss= -p "$SRV" 2>/dev/null | tr -d ' '); [ -n "${R:-}" ] && [ "$R" -gt "$P" ] && P=$R; echo "$P" >/tmp/h2h_vajra_peak; sleep 0.2; done ) & SMP=$!
-VAJRA_LINE=$(SPARK_REMOTE="sc://localhost:$PORT" DIR="$DIR" OUT=/tmp/h2h/v_out CK=/tmp/h2h/v_ck \
+( P=0; while kill -0 "$SRV" 2>/dev/null; do R=$(ps -o rss= -p "$SRV" 2>/dev/null | tr -d ' '); [ -n "${R:-}" ] && [ "$R" -gt "$P" ] && P=$R; echo "$P" >/tmp/h2h_zelox_peak; sleep 0.2; done ) & SMP=$!
+ZELOX_LINE=$(SPARK_REMOTE="sc://localhost:$PORT" DIR="$DIR" OUT=/tmp/h2h/v_out CK=/tmp/h2h/v_ck \
   "$PY" scripts/state_scale_stress.py 2>&1 | grep -E "STREAMING")
 kill "$SRV" 2>/dev/null; kill "$SMP" 2>/dev/null; wait 2>/dev/null
-VAJRA_WALL=$(echo "$VAJRA_LINE" | grep -oE "wall_s=[0-9.]+" | cut -d= -f2)
-VAJRA_MEM_KB=$(cat /tmp/h2h_vajra_peak 2>/dev/null || echo 0)
+ZELOX_WALL=$(echo "$ZELOX_LINE" | grep -oE "wall_s=[0-9.]+" | cut -d= -f2)
+ZELOX_MEM_KB=$(cat /tmp/h2h_zelox_peak 2>/dev/null || echo 0)
 
 # ---------------- compare ----------------
 echo "================= LOCAL HEAD-TO-HEAD (N=$N, K=$K) ================="
-awk -v n="$N" -v fs="${FLINK_S:-0}" -v fw="${FLINK_WALL:-0}" -v fm="${FLINK_MEM:-0}" -v vw="${VAJRA_WALL:-0}" -v vmk="${VAJRA_MEM_KB:-0}" 'BEGIN{
+awk -v n="$N" -v fs="${FLINK_S:-0}" -v fw="${FLINK_WALL:-0}" -v fm="${FLINK_MEM:-0}" -v vw="${ZELOX_WALL:-0}" -v vmk="${ZELOX_MEM_KB:-0}" 'BEGIN{
   printf "Flink : compute=%.1fs (wall=%.0fs)  throughput=%.2fM ev/s  peakRSS=%.2f GiB\n", fs, fw, (fs>0?n/fs/1e6:0), fm/1073741824;
-  printf "Vajra : wall=%.1fs              throughput=%.2fM ev/s  peakRSS=%.2f GiB\n", vw, (vw>0?n/vw/1e6:0), vmk/1048576;
-  if(fs>0&&vw>0) printf "Vajra vs Flink: throughput %.2fx ; memory %.2fx less\n", fs/vw, (fm/1073741824)/(vmk/1048576);
+  printf "Zelox : wall=%.1fs              throughput=%.2fM ev/s  peakRSS=%.2f GiB\n", vw, (vw>0?n/vw/1e6:0), vmk/1048576;
+  if(fs>0&&vw>0) printf "Zelox vs Flink: throughput %.2fx ; memory %.2fx less\n", fs/vw, (fm/1073741824)/(vmk/1048576);
 }'
 echo "(Flink compute = REST job duration, excludes JVM/cluster startup; output K*NWIN rows << N so sink is fair both sides)"

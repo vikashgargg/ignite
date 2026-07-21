@@ -3,8 +3,8 @@
 + per-checkpoint bytes = O(delta). Driven by scripts/inc_ckpt_gate.sh.
 
 Continuous stateful windowed COUNT over N distinct keys (env N, default 2000) so the operator's keyed
-state is non-trivial (with a small SAIL_STREAMING_STATE_BUDGET_BYTES it SPILLS → immutable chunks).
-Under VAJRA_INC_CKPT=1 each Checkpoint{epoch} writes only a MANIFEST (references the chunks) + a small
+state is non-trivial (with a small ZELOX_STREAMING_STATE_BUDGET_BYTES it SPILLS → immutable chunks).
+Under ZELOX_INC_CKPT=1 each Checkpoint{epoch} writes only a MANIFEST (references the chunks) + a small
 residual — independent of total state size — instead of a full re-copy. Recovery restores the committed
 epoch's manifest → residual + chunks (restore_epoch_incremental). The crash probe (an OPEN window at
 kill -9) only survives if that incremental snapshot+restore is correct.
@@ -42,7 +42,7 @@ def produce(windows, extra_ts=None):
     if extra_ts is not None:
         lines.append(json.dumps({"k": 0, "ts": extra_ts}))
     subprocess.run(
-        ["docker", "exec", "-i", "vajra_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
+        ["docker", "exec", "-i", "zelox_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
          "--bootstrap-server", BOOT, "--topic", TOPIC],
         input=("\n".join(lines) + "\n").encode(), capture_output=True, check=True)
 

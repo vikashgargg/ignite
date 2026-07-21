@@ -6,7 +6,7 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["Vajra Contributors"]
+authors = ["Zelox Contributors"]
 edition = "2021"
 homepage = "https://github.com/vikashgargg/ignite"
 license = "Apache-2.0"

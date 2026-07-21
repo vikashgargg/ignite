@@ -1,15 +1,15 @@
 # Apache Spark 3.5.3 reference for the OFFICIAL TPC-DS-99 power test (batch baseline, dimension B2).
-# Runs the SAME scripts/tpcds_score.py (all 99 queries, sequential = power test) that Vajra runs, in
-# Spark local[16] mode on the SAME node + node-local resources as Vajra (run AFTER scaling Vajra to 0
+# Runs the SAME scripts/tpcds_score.py (all 99 queries, sequential = power test) that Zelox runs, in
+# Spark local[16] mode on the SAME node + node-local resources as Zelox (run AFTER scaling Zelox to 0
 # so it gets the full node = fair). tpcds_score.py generates its data in-process via DuckDB at TPCDS_SF,
 # so no shared data volume is needed. Reports per-query wall + total + the pod's peak memory (cgroup v2).
 # Requires a ConfigMap 'tpcds-script' (= scripts/tpcds_score.py), created at run time:
-#   kubectl -n vajra create configmap tpcds-script --from-file=tpcds_score.py=scripts/tpcds_score.py
+#   kubectl -n zelox create configmap tpcds-script --from-file=tpcds_score.py=scripts/tpcds_score.py
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: spark-tpcds-99
-  namespace: vajra
+  namespace: zelox
 spec:
   backoffLimit: 0
   template:

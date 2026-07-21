@@ -15,11 +15,11 @@ REFERENCES §3). F5 closes this — the last gap to "prod-grade like Flink" for 
 
 ## Design (grounded: DataFusion spill + Flink ForSt)
 **Principle (ForSt):** state is object-store-native with a bounded local memory cache + async I/O;
-spill in Arrow format. Vajra already has the pieces — `state_io` (Arrow-IPC ↔ `CheckpointStore`
+spill in Arrow format. Zelox already has the pieces — `state_io` (Arrow-IPC ↔ `CheckpointStore`
 object-store) and DataFusion's `RuntimeEnv`/`DiskManager`/`MemoryPool` (spillable aggregation).
 
 **1. Bound + spill `pending_rows` (increment 1 — this change).**
-A byte budget `SAIL_STREAMING__STATE_MEMORY_BUDGET` (default e.g. 256 MiB). As partial batches
+A byte budget `ZELOX_STREAMING__STATE_MEMORY_BUDGET` (default e.g. 256 MiB). As partial batches
 accumulate, track bytes; when over budget, **spill** the oldest partial batches to a spill store
 (Arrow-IPC blob via `state_io` encode → `CheckpointStore` when a checkpoint dir is set = ForSt
 object-store path; else DataFusion `DiskManager` temp file = local-disk path). Keep only the budget's
@@ -40,7 +40,7 @@ groups), not O(batches×groups).
 `scripts/state_scale_stress.py` at **large N (e.g. 10M–50M keys)** with a small state budget:
 - correctness: input == output (no loss), and
 - **bounded RSS** (≈ budget, NOT linear in N) — vs today's linear growth → OOM.
-Head-to-head: Flink (RocksDB) on the same N — Vajra should match (hold state ≫ RAM) and ideally win
+Head-to-head: Flink (RocksDB) on the same N — Zelox should match (hold state ≫ RAM) and ideally win
 on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
 
 ## Build roadmap (tracked — this is a state backend, a multi-step change)
@@ -48,7 +48,7 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   Arrow-IPC chunks ↔ `CheckpointStore`), unit-tested (`spill_chunks_roundtrip_and_gc`). Safe building
   block, not yet wired into the hot path.
 - **F5.1 wire spill into `WindowAccumExec` — DONE + validated 2026-06-22 (commit):** per-instance byte
-  budget (`SAIL_STREAMING_STATE_BUDGET_BYTES`, default 128 MiB); over budget → spill `pending_rows`
+  budget (`ZELOX_STREAMING_STATE_BUDGET_BYTES`, default 128 MiB); over budget → spill `pending_rows`
   chunk to the checkpoint store, evict from RAM; `gather_partials` folds spills back at every
   finalize/snapshot (EO unchanged — the durable snapshot is always the full flattened state); finalize
   GCs consumed spills. Validated: 200k keys, **256 KB budget → 23 spills**, output **200000 exact**
@@ -81,13 +81,13 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   tree-reduce merge step; no hand-rolled accumulator merging). Wired **compact-before-spill** (Data
   handler: over budget → compact, then spill only if still over) + **compact-on-retain**
   (`rebuild_retained_state` collapses carried-forward open windows so long/large/update-mode windows
-  stay O(distinct), not O(batches×groups)). Kill-switch `VAJRA_F5_NO_COMPACT`. Errors propagate (never
+  stay O(distinct), not O(batches×groups)). Kill-switch `ZELOX_F5_NO_COMPACT`. Errors propagate (never
   silently drop state). **Validated A/B** (`scripts/f5_compact_validate.sh`, 100k keys × 20 rounds =
   2M rows, 2 MiB budget): out == 100000 EXACT both ways (correctness-preserving); spills **24 (OFF) →
   0 (ON)** — compaction collapses recurring-key partials to the distinct set, eliminating spill when
   the distinct state fits budget (Flink keyed-accumulator parity). Retain across finalize was already
   done in F5.2 (`rebuild_retained_state` keeps open windows); F5.3 adds the compaction.
-  - **OPEN BUG (found 2026-06-24, made compaction OPT-IN `VAJRA_F5_COMPACT=1`, default OFF):** the
+  - **OPEN BUG (found 2026-06-24, made compaction OPT-IN `ZELOX_F5_COMPACT=1`, default OFF):** the
     **compact-THEN-spill** path loses closed-window state on UNIQUE keys → streaming query emits NO
     output. A/B at 1M unique keys / 1 MiB budget: compaction OFF → out 1,000,000 EXACT (24 spills);
     compaction ON → **no output**. The 2M-row A/B above missed it because compaction there produced 0
@@ -99,7 +99,7 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
     the BOUNDED 256 KB pool → all 300 keys + window end survive). So the IPC/schema/bounded-merge
     hypotheses are RULED OUT. The bug only manifests in the **full multi-partition operator run** (8-way
     `StreamExchangeExec` + real planner's CSE-renamed window col) — the single-partition unit harness
-    doesn't reproduce it. NEXT: reproduce via the e2e harness with `VAJRA_F5_COMPACT=1` instrumented to
+    doesn't reproduce it. NEXT: reproduce via the e2e harness with `ZELOX_F5_COMPACT=1` instrumented to
     log per-partition emit counts, or a multi-partition operator test. Until fixed, default OFF = the
     F5.2-validated-correct path (spilling alone already bounds state; compaction is only an optimization).
 - **F5.4 gate:** @ 10M–50M keys, small budget → input==output + **bounded RSS**; head-to-head vs
@@ -109,7 +109,7 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
   sub-second batch runs with an O(N) sink, process RSS is dominated by the sink + allocator retention,
   not the operator working set.
 - **F5-join (stream-stream join spill) — DONE + tested 2026-06-24 (commit):** `StreamJoinExec`'s
-  per-side buffers (`JoinAccum.left_buf/right_buf`) spill over `SAIL_STREAMING_STATE_BUDGET_BYTES` to
+  per-side buffers (`JoinAccum.left_buf/right_buf`) spill over `ZELOX_STREAMING_STATE_BUDGET_BYTES` to
   the object-store (`state_io`, same primitive). The join builds the hash on the small INCOMING batch
   and **streams the OTHER side's buffer (in-RAM + spilled) as the probe** via `SpillSourceExec` — so
   join memory is bounded by the incoming batch, not the (≫RAM) buffer. Inner-join only (planner-enforced,
@@ -128,7 +128,7 @@ on memory (no JVM). That is the "prod-grade like Flink large-state" proof.
 
 ## The bar — HIGHER than Flink (not just parity)
 - **Object-store-NATIVE state from day one.** Flink only got disaggregated state in 2.0 (ForSt, bolted
-  onto a local-RocksDB lineage); Vajra spills/checkpoints to object-store in ONE Arrow-IPC format from
+  onto a local-RocksDB lineage); Zelox spills/checkpoints to object-store in ONE Arrow-IPC format from
   the start — same blob for spill and checkpoint, no separate state serializer, no local-disk ceiling.
 - **Arrow-columnar state, zero-copy, vectorized restore** — vs RocksDB's row-oriented KV (serialize per
   key). Restore = mmap/stream Arrow batches straight into the operator.

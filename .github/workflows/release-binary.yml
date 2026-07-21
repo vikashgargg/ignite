@@ -45,11 +45,11 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: thin
         run: cargo build --release -p sail-cli --target x86_64-unknown-linux-gnu
       - name: Rename binary
-        run: cp target/x86_64-unknown-linux-gnu/release/vajra vajra-x86_64-unknown-linux-gnu
+        run: cp target/x86_64-unknown-linux-gnu/release/zelox zelox-x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v4
         with:
-          name: vajra-x86_64-unknown-linux-gnu
-          path: vajra-x86_64-unknown-linux-gnu
+          name: zelox-x86_64-unknown-linux-gnu
+          path: zelox-x86_64-unknown-linux-gnu
           retention-days: 1
 
   build-macos:
@@ -72,7 +72,7 @@ jobs:
       # Build against Homebrew python@3.12 — the exact interpreter install.sh
       # provisions on user machines, so the binary's absolute Python framework
       # link (/opt/homebrew/opt/python@3.12/...) resolves at runtime. With the
-      # subprocess UDF model (VAJRA_PYTHON) the embedded Python is only a fallback.
+      # subprocess UDF model (ZELOX_PYTHON) the embedded Python is only a fallback.
       # NOTE: this is a NATIVE arm64 build, so PYO3_CROSS_PYTHON_VERSION (set at
       # workflow level for the Linux musl cross-build) must be cleared here or
       # PyO3 enters cross mode and links the wrong python3.11.
@@ -84,11 +84,11 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: thin
         run: cargo build --release -p sail-cli --target aarch64-apple-darwin
       - name: Rename binary
-        run: cp target/aarch64-apple-darwin/release/vajra vajra-aarch64-apple-darwin
+        run: cp target/aarch64-apple-darwin/release/zelox zelox-aarch64-apple-darwin
       - uses: actions/upload-artifact@v4
         with:
-          name: vajra-aarch64-apple-darwin
-          path: vajra-aarch64-apple-darwin
+          name: zelox-aarch64-apple-darwin
+          path: zelox-aarch64-apple-darwin
           retention-days: 1
 
   release:
@@ -104,7 +104,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: vajra-*
+          pattern: zelox-*
           merge-multiple: true
           path: dist
       - name: Show release assets

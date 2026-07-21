@@ -1,0 +1,29 @@
+{{- if and .Values.autoscaling.enabled (eq .Values.mode "kubernetes-cluster") }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "zelox.fullname" . }}-workers
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "zelox.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "zelox.fullname" . }}-workers
+  minReplicas: {{ .Values.workers.minReplicas }}
+  maxReplicas: {{ .Values.workers.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+{{- end }}

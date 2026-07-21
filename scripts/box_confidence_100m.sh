@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Confidence validation on ONE mid-size EC2 (32 GiB) instead of an EKS cluster (user rec #3, cheaper).
 # Reproduces the REALTIME 100M memory + throughput that an 8 GiB laptop cannot, reusing the SAME kind
-# manifests validated at 2M. On-box: build strip=false jemalloc-prof image -> kind -> Kafka+MinIO+Vajra
-# -> produce 100M -> Vajra realtime drain (peak RSS + throughput + jeprof heap + correctness) -> Flink
+# manifests validated at 2M. On-box: build strip=false jemalloc-prof image -> kind -> Kafka+MinIO+Zelox
+# -> produce 100M -> Zelox realtime drain (peak RSS + throughput + jeprof heap + correctness) -> Flink
 # realtime apples-to-apples -> byte-identical compare. Terminates the box at the end.
 # Usage: N=100000000 scripts/box_confidence_100m.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-N="${N:-100000000}"; REGION="${REGION:-ap-south-1}"; ITYPE="${INSTANCE_TYPE:-r7g.2xlarge}"  # 8 vCPU / 64 GiB — Kafka+Vajra headroom for 100M
-PROFILE="${PROFILE:-vajra-bench-ec2}"; SG="${SG:-sg-043445d6492980581}"; SUBNET="${SUBNET:-subnet-07d37405bf8df92fa}"
+N="${N:-100000000}"; REGION="${REGION:-ap-south-1}"; ITYPE="${INSTANCE_TYPE:-r7g.2xlarge}"  # 8 vCPU / 64 GiB — Kafka+Zelox headroom for 100M
+PROFILE="${PROFILE:-zelox-bench-ec2}"; SG="${SG:-sg-043445d6492980581}"; SUBNET="${SUBNET:-subnet-07d37405bf8df92fa}"
 AMI="$(aws ssm get-parameter --region "$REGION" --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --query Parameter.Value --output text)"
 KEY=/tmp/zelox-conf-key.pem; KN="zelox-conf-$$"
 mask(){ sed -E 's/[0-9]{12}/<ACCT>/g'; }

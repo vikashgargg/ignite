@@ -1,8 +1,8 @@
-<!-- Thanks for contributing to Vajra! Keep changes prod-grade and honest. -->
+<!-- Thanks for contributing to Zelox! Keep changes prod-grade and honest. -->
 
 ## Summary
 
-<!-- What does this PR do and why? Link the issue / board ticket (e.g. VAJRA-D1). -->
+<!-- What does this PR do and why? Link the issue / board ticket (e.g. ZELOX-D1). -->
 
 Closes #
 

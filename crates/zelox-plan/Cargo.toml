@@ -1,0 +1,47 @@
+[package]
+name = "zelox-plan"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-python-udf = { path = "../zelox-python-udf" }
+zelox-sql-analyzer = { path = "../zelox-sql-analyzer" }
+zelox-catalog = { path = "../zelox-catalog" }
+zelox-catalog-memory = { path = "../zelox-catalog-memory" }
+zelox-function = { path = "../zelox-function" }
+zelox-logical-plan = { path = "../zelox-logical-plan" }
+zelox-physical-plan = { path = "../zelox-physical-plan" }
+
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+datafusion-expr-common = { workspace = true }
+datafusion-functions = { workspace = true }
+datafusion-functions-nested = { workspace = true }
+datafusion-spark = { workspace = true }
+educe = { workspace = true }
+thiserror = { workspace = true }
+tonic = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+async-recursion = { workspace = true }
+lazy_static = { workspace = true }
+ryu = { workspace = true }
+either = { workspace = true }
+tokio = { workspace = true }
+rand = { workspace = true }
+uuid = { workspace = true }
+object_store = { workspace = true }
+half = { workspace = true }
+arrow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+indexmap = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+regex = { workspace = true }

@@ -1,7 +1,7 @@
-# Migrating from Apache Spark to Vajra
+# Migrating from Apache Spark to Zelox
 
-> Vajra implements the Spark Connect gRPC protocol.  
-> In most cases **zero code changes are required** — just point your session at a Vajra server.
+> Zelox implements the Spark Connect gRPC protocol.  
+> In most cases **zero code changes are required** — just point your session at a Zelox server.
 
 ---
 
@@ -14,8 +14,8 @@ spark = SparkSession.builder \
     .master("spark://scheduler:7077") \
     .getOrCreate()
 
-# After (Vajra) — change only this line
-spark = SparkSession.builder.remote("sc://vajra-server:50051").getOrCreate()
+# After (Zelox) — change only this line
+spark = SparkSession.builder.remote("sc://zelox-server:50051").getOrCreate()
 ```
 
 That's it for most batch workloads. The rest of your PySpark code runs unchanged.
@@ -59,7 +59,7 @@ def zscore(s: pd.Series) -> pd.Series:
 # Arrow batch UDFs — same syntax, zero-copy
 ```
 
-> **Note**: The Vajra server process must have `PYTHONPATH` pointing to your PySpark installation
+> **Note**: The Zelox server process must have `PYTHONPATH` pointing to your PySpark installation
 > so embedded Python can find `pyspark` for UDF deserialization.
 > In Docker: `pip install pyspark` in the image (already done in the published Dockerfile).
 
@@ -117,7 +117,7 @@ query = df.writeStream.foreachBatch(process_batch).start()
 spark.sql("CREATE DATABASE mydb")
 spark.sql("CREATE TABLE mydb.t (id INT, val STRING) USING DELTA")
 
-# Iceberg REST catalog (configure via SAIL_CATALOG__*)
+# Iceberg REST catalog (configure via ZELOX_CATALOG__*)
 # Unity Catalog (stub — production-ready in Sprint 4)
 ```
 
@@ -180,38 +180,38 @@ Stubs exist but are not production-hardened for schema evolution or ACL enforcem
 ### Single Binary (Development)
 ```sh
 curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
-vajra server --ip 0.0.0.0 --port 50051
+zelox server --ip 0.0.0.0 --port 50051
 ```
 
 ### Docker (K8s / Apple Container)
 ```sh
-docker build -t vajra:latest -f docker/Dockerfile .
-docker run -p 50051:50051 vajra:latest
+docker build -t zelox:latest -f docker/Dockerfile .
+docker run -p 50051:50051 zelox:latest
 ```
 
 ### Kubernetes
 ```sh
 kubectl apply -f k8s/sail.yaml
-kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051
+kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051
 ```
 
 ### High Availability (K8s Lease election)
 ```sh
 # Set env var and enable HA flag — multiple pods can run; one holds the lease
-vajra server --ip 0.0.0.0 --port 50051 --ha
-# Or in K8s: SAIL_MODE=kubernetes-cluster with --ha in args
+zelox server --ip 0.0.0.0 --port 50051 --ha
+# Or in K8s: ZELOX_MODE=kubernetes-cluster with --ha in args
 ```
 
 ### Bearer Token Auth
 ```sh
-vajra server --ip 0.0.0.0 --port 50051 --auth-token my-secret-token
-# Or via env var: SAIL_AUTH__TOKEN=my-secret-token vajra server ...
+zelox server --ip 0.0.0.0 --port 50051 --auth-token my-secret-token
+# Or via env var: ZELOX_AUTH__TOKEN=my-secret-token zelox server ...
 ```
 
 Client side:
 ```python
 spark = SparkSession.builder \
-    .remote("sc://vajra:50051") \
+    .remote("sc://zelox:50051") \
     .config("spark.connect.grpc.binding.userAgent", "..") \
     .getOrCreate()
 # PySpark Spark Connect passes Authorization header automatically when
@@ -224,10 +224,10 @@ spark = SparkSession.builder \
 
 | Variable | Effect |
 |---|---|
-| `SAIL_MODE` | `local` / `local-cluster` / `kubernetes-cluster` |
-| `SAIL_AUTH__TOKEN` | Require Bearer token on all gRPC calls |
-| `SAIL_CLUSTER__WORKER_INITIAL_COUNT` | Number of workers for local-cluster mode |
-| `SAIL_KUBERNETES__NAMESPACE` | K8s namespace for worker pods |
+| `ZELOX_MODE` | `local` / `local-cluster` / `kubernetes-cluster` |
+| `ZELOX_AUTH__TOKEN` | Require Bearer token on all gRPC calls |
+| `ZELOX_CLUSTER__WORKER_INITIAL_COUNT` | Number of workers for local-cluster mode |
+| `ZELOX_KUBERNETES__NAMESPACE` | K8s namespace for worker pods |
 | `RUST_LOG` | Log level (`warn` / `info` / `debug`) |
 | `PYTHONPATH` | Must include PySpark site-packages for UDFs |
 
@@ -235,7 +235,7 @@ spark = SparkSession.builder \
 
 ## Performance Comparison
 
-| Workload | Apache Spark 3.5 | Vajra | Speedup |
+| Workload | Apache Spark 3.5 | Zelox | Speedup |
 |---|---|---|---|
 | Cold start | 30–120 s | **~200 ms** | **150–600x** |
 | TPC-H SF-1 (22 queries) | ~60 s (warm JVM) | **1.515 s** | **40x** |
@@ -247,16 +247,16 @@ spark = SparkSession.builder \
 ## FAQ
 
 **Q: Do I need to change my `pyspark` version?**  
-A: No. Vajra is compatible with `pyspark[connect]==4.0.0`. Client-side PySpark is unchanged.
+A: No. Zelox is compatible with `pyspark[connect]==4.0.0`. Client-side PySpark is unchanged.
 
 **Q: Does it work with existing Delta Lake tables?**  
-A: Yes. Vajra uses `delta-rs` to read/write Delta Lake tables in the same format as Spark.
+A: Yes. Zelox uses `delta-rs` to read/write Delta Lake tables in the same format as Spark.
 
-**Q: Can I run both Spark and Vajra against the same Delta table?**  
+**Q: Can I run both Spark and Zelox against the same Delta table?**  
 A: Yes. The on-disk format is identical.
 
 **Q: What about Spark 3.x vs 4.x APIs?**  
-A: Vajra targets the Spark Connect protocol (Spark 4.0). DataFrame API compatibility covers both 3.x and 4.x usage patterns.
+A: Zelox targets the Spark Connect protocol (Spark 4.0). DataFrame API compatibility covers both 3.x and 4.x usage patterns.
 
-**Q: Does Vajra replace the Spark driver or the whole cluster?**  
-A: Both. Vajra is a drop-in replacement for the entire Spark cluster — driver, executors, and scheduler. You don't need Hadoop, YARN, or a separate cluster manager.
+**Q: Does Zelox replace the Spark driver or the whole cluster?**  
+A: Both. Zelox is a drop-in replacement for the entire Spark cluster — driver, executors, and scheduler. You don't need Hadoop, YARN, or a separate cluster manager.

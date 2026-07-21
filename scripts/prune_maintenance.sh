@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Disk-pressure watchdog for the Vajra build tree — PROD-GRADE, threshold-driven.
+# Disk-pressure watchdog for the Zelox build tree — PROD-GRADE, threshold-driven.
 #
 # Why this exists: a once-a-day cron cannot react to a build loop that fills tens of GiB in
 # hours. This script is meant to run FREQUENTLY (every ~10 min via launchd, see
@@ -18,11 +18,11 @@
 # Idempotent, safe to run concurrently-ish (best-effort flock), self-rotating log.
 set -uo pipefail
 
-ROOT="${VAJRA_ROOT:-/Users/vikashgarg/Desktop/ignite}"
-WARN_GB="${VAJRA_PRUNE_WARN_GB:-30}"   # below this: drop incremental caches
-CRIT_GB="${VAJRA_PRUNE_CRIT_GB:-15}"   # below this: full cargo clean (only if no build running)
-LOG="${VAJRA_PRUNE_LOG:-/tmp/vajra_prune.log}"
-LOCK="/tmp/vajra_prune.lock"
+ROOT="${ZELOX_ROOT:-/Users/vikashgarg/Desktop/ignite}"
+WARN_GB="${ZELOX_PRUNE_WARN_GB:-30}"   # below this: drop incremental caches
+CRIT_GB="${ZELOX_PRUNE_CRIT_GB:-15}"   # below this: full cargo clean (only if no build running)
+LOG="${ZELOX_PRUNE_LOG:-/tmp/zelox_prune.log}"
+LOCK="/tmp/zelox_prune.lock"
 
 cd "$ROOT" 2>/dev/null || exit 0
 

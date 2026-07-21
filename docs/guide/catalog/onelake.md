@@ -27,10 +27,10 @@ If `bearer_token` is not provided, Sail will attempt to find credentials from th
 ## Examples
 
 ```bash
-export SAIL_CATALOG__LIST='[{type="onelake", name="fabric", url="workspace/lakehouse.Lakehouse"}]'
+export ZELOX_CATALOG__LIST='[{type="onelake", name="fabric", url="workspace/lakehouse.Lakehouse"}]'
 
 # Bearer token authentication
-export SAIL_CATALOG__LIST='[{type="onelake", name="fabric", url="workspace/lakehouse.Lakehouse", bearer_token="..."}]'
+export ZELOX_CATALOG__LIST='[{type="onelake", name="fabric", url="workspace/lakehouse.Lakehouse", bearer_token="..."}]'
 ```
 
 <script setup>

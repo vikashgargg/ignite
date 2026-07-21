@@ -1,7 +1,7 @@
-# Vajra — Feature Roadmap for the Decade
+# Zelox — Feature Roadmap for the Decade
 
 > Created: 2026-05-31 · Updated: 2026-07-05
-> Purpose: Track every feature that makes Vajra the undisputed Spark replacement
+> Purpose: Track every feature that makes Zelox the undisputed Spark replacement
 > for this decade — pulled from Spark 4.1, LakeSail v0.6.5 (DataFusion 54.0.0 + Arrow 58.3.0),
 > Databricks research, and FAANG/NVIDIA engineering blogs.
 > **The maintained gap list + LakeSail v0.6.5 feature-adoption + DF/Arrow upgrade plan now live in
@@ -27,11 +27,11 @@
 ## Part 1 — Spark 4.1 Gap Analysis (features we still need)
 
 Spark 4.1.1 was released January 9, 2026. 1,800+ Jira tickets, 230+ contributors.
-These are the gaps between Vajra and Spark 4.1 that matter for production users.
+These are the gaps between Zelox and Spark 4.1 that matter for production users.
 
 ### 1.1 SQL & Functions
 
-| Feature | Spark 4.1 | Vajra | Priority |
+| Feature | Spark 4.1 | Zelox | Priority |
 |---|---|---|---|
 | `approx_top_k` / `approx_top_k_combine` | ✅ GA | ✅ Sprint 4.1 | P1 |
 | KLL quantile sketch functions | ✅ GA | ✅ Sprint 4.1 | P1 |
@@ -56,7 +56,7 @@ These are the gaps between Vajra and Spark 4.1 that matter for production users.
 
 ### 1.2 Structured Streaming
 
-| Feature | Spark 4.1 | Vajra | Priority |
+| Feature | Spark 4.1 | Zelox | Priority |
 |---|---|---|---|
 | **Real-Time Mode (RTM)** — sub-second, single-digit ms | ✅ GA Aug 2025 | 📅 Phase 5 | P1 |
 | Stream-stream join with virtual column families | ✅ | 📅 Phase 4 | P1 |
@@ -70,7 +70,7 @@ These are the gaps between Vajra and Spark 4.1 that matter for production users.
 
 ### 1.3 Python / UDFs
 
-| Feature | Spark 4.1 | Vajra | Priority |
+| Feature | Spark 4.1 | Zelox | Priority |
 |---|---|---|---|
 | Python Arrow UDTF (Table-Generating, zero-copy) | ✅ | 📅 Phase 4 | P1 |
 | Python Arrow UDF yield scalar values | ✅ | 📅 Phase 4 | P1 |
@@ -84,7 +84,7 @@ These are the gaps between Vajra and Spark 4.1 that matter for production users.
 
 ### 1.4 Connectors & Data Sources
 
-| Feature | Spark 4.1 | Vajra | Priority |
+| Feature | Spark 4.1 | Zelox | Priority |
 |---|---|---|---|
 | JDBC Driver for Spark Connect | ✅ SPIP | 📅 Phase 4 | P1 |
 | Join pushdown for DSv2 (Oracle/Postgres/MySQL/MSSQL) | ✅ | 📅 Phase 4 | P2 |
@@ -99,7 +99,7 @@ These are the gaps between Vajra and Spark 4.1 that matter for production users.
 
 ### 1.5 ML / Connect
 
-| Feature | Spark 4.1 | Vajra | Priority |
+| Feature | Spark 4.1 | Zelox | Priority |
 |---|---|---|---|
 | Spark ML on Connect (GA) | ✅ | 💡 Research | P2 |
 | CloneSession RPC for Spark Connect | ✅ | 📅 Phase 4 | P2 |
@@ -112,7 +112,7 @@ These are the gaps between Vajra and Spark 4.1 that matter for production users.
 
 LakeSail v0.6.3 released May 21, 2026.
 
-| Feature | LakeSail Version | Vajra | Priority |
+| Feature | LakeSail Version | Zelox | Priority |
 |---|---|---|---|
 | Geospatial types — Geometry / Geography | v0.5.1 | 📅 Phase 4 | P2 |
 | TIME type (Spark 4.0) | v0.5.2 | 📅 Phase 4 | P2 |
@@ -127,7 +127,7 @@ LakeSail v0.6.3 released May 21, 2026.
 | Iceberg partition transform implementation | v0.5.3 | 📅 Phase 4 | P1 |
 | Incremental Delta version checksums | v0.6.1 | 📅 Phase 4 | P3 |
 
-**Vajra still uniquely leads on** (LakeSail still missing):
+**Zelox still uniquely leads on** (LakeSail still missing):
 Kafka streaming, foreachBatch, memory sink, streaming checkpoint, event-time windows,
 stateful deduplication, theta sketches, JWT auth, mTLS, Apple Container, K8s Helm,
 Scheduler HA, Web UI :4040, 10× TPC-H speed, 3-4× smaller binary, 10× faster cold start.
@@ -138,7 +138,7 @@ Scheduler HA, Web UI :4040, 10× TPC-H speed, 3-4× smaller binary, 10× faster 
 
 These are production features that large Databricks/Delta users depend on.
 
-| Feature | Status in Delta | Vajra | Priority |
+| Feature | Status in Delta | Zelox | Priority |
 |---|---|---|---|
 | **Deletion Vectors** (mark-delete without rewrite) | GA | 📅 Phase 4 | P1 |
 | **Liquid Clustering** (`CLUSTER BY AUTO`) | GA DBR 15.2+ | 📅 Phase 4 | P1 |
@@ -160,7 +160,7 @@ These are production features that large Databricks/Delta users depend on.
 ## Part 4 — Next-Generation Features (Phase 5-6 / "Spark Built for This Decade")
 
 These are features that didn't exist when Spark was designed in 2012.
-Implementing them makes Vajra the engine Spark would have been if built today.
+Implementing them makes Zelox the engine Spark would have been if built today.
 
 ### 4.1 AI-Native Data Engine
 
@@ -199,7 +199,7 @@ Implementing them makes Vajra the engine Spark would have been if built today.
 
 | Feature | Why It Matters | Priority |
 |---|---|---|
-| **`vajra pipeline` command** — define datasets + queries | Spark Declarative Pipelines equivalent, no JVM | P1 |
+| **`zelox pipeline` command** — define datasets + queries | Spark Declarative Pipelines equivalent, no JVM | P1 |
 | Auto-dependency ordering of pipeline tables | User writes `CREATE LIVE TABLE t AS SELECT …`; engine handles order | P1 |
 | Automatic checkpoints + incremental refresh | Only process new data since last run | P1 |
 | Pipeline lineage graph (DAG visualisation in Web UI) | Operators see data flows without reading code | P2 |
@@ -235,16 +235,16 @@ Implementing them makes Vajra the engine Spark would have been if built today.
 
 | Feature | Why It Matters | Priority |
 |---|---|---|
-| **`vajra notebook`** — Jupyter kernel over Spark Connect | Notebook-native Vajra without PySpark boilerplate | P1 |
+| **`zelox notebook`** — Jupyter kernel over Spark Connect | Notebook-native Zelox without PySpark boilerplate | P1 |
 | Interactive explain plan in Web UI (visual DAG) | Debug slow queries without reading JSON | P1 |
 | Query profiler (per-operator time breakdown) | Identify bottlenecks in seconds | P1 |
-| `vajra fmt` — auto-format SQL files | Like `rustfmt` for SQL pipelines | P2 |
-| `vajra lint` — catch common SQL anti-patterns | Cartesian joins, missing WHERE on DELETE | P2 |
+| `zelox fmt` — auto-format SQL files | Like `rustfmt` for SQL pipelines | P2 |
+| `zelox lint` — catch common SQL anti-patterns | Cartesian joins, missing WHERE on DELETE | P2 |
 | Language Server Protocol (LSP) for Spark SQL | Autocomplete + type checking in VSCode/JetBrains | P2 |
 | REST API for query submission (non-gRPC) | HTTP/JSON for teams not using PySpark | P2 |
 | OpenAPI / Swagger spec for REST API | Auto-generated client SDKs in any language | P3 |
 
-### 4.8 Managed Cloud ("vajra.cloud")
+### 4.8 Managed Cloud ("zelox.cloud")
 
 | Feature | Why It Matters | Priority |
 |---|---|---|
@@ -301,7 +301,7 @@ LakeSail got 95% there. Spark built today would have all of these:
 │   ✅ Apple Container + K8s + Helm + HA auth                     │
 │   📅 JDBC Driver for Spark Connect     (Phase 4)                │
 │   📅 REST API (non-gRPC)              (Phase 4)                  │
-│   📅 vajra notebook (Jupyter kernel)   (Phase 4)                │
+│   📅 zelox notebook (Jupyter kernel)   (Phase 4)                │
 │   📅 TPC-H SF-100 distributed <60s    (needs hardware)          │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -319,7 +319,7 @@ LakeSail got 95% there. Spark built today would have all of these:
 - [x] Column DEFAULT values in DDL
 - [x] Table constraints (PRIMARY KEY, UNIQUE — metadata-only)
 - [x] `raise_error` → `[USER_RAISED_EXCEPTION]` prefix
-- [x] **Python-version-agnostic UDFs** (subprocess via `VAJRA_PYTHON` — any Python 3.10–3.14+)
+- [x] **Python-version-agnostic UDFs** (subprocess via `ZELOX_PYTHON` — any Python 3.10–3.14+)
 - [x] **Lambda HOFs in distributed mode** (added to remote codec)
 - [x] **WITH RECURSIVE in distributed mode** (single-stage recursive subtree)
 - [ ] Schema-level collation (COLLATE keyword) — deferred to 4.1b
@@ -350,7 +350,7 @@ LakeSail got 95% there. Spark built today would have all of these:
 ### Sprint 4.5 — Performance + DX
 - Query result cache (session-level)
 - Bloom filters on CSV/JSON
-- vajra notebook (Jupyter kernel)
+- zelox notebook (Jupyter kernel)
 - Web UI: visual explain plan DAG
 - REST API endpoint (HTTP/JSON)
 

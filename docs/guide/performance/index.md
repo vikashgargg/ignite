@@ -10,7 +10,7 @@ Sail is designed to provide high performance for data processing workloads. Howe
 ## Configuration Options
 
 ::: info
-Here, we refer to configuration options by their names, such as `execution.batch_size`, but you can typically set these options via environment variables, such as `SAIL_EXECUTION__BATCH_SIZE`.
+Here, we refer to configuration options by their names, such as `execution.batch_size`, but you can typically set these options via environment variables, such as `ZELOX_EXECUTION__BATCH_SIZE`.
 Refer to the [Configuration Guide](../configuration/) for more information on how Sail configuration works in general.
 :::
 

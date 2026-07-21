@@ -23,7 +23,7 @@ s = SparkSession.builder.remote(f"sc://localhost:{PORT}").getOrCreate()
 def produce(lo, hi):
     lines = [json.dumps({"id": i}) for i in range(lo, hi)]
     p = subprocess.run(
-        ["docker", "exec", "-i", "vajra_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
+        ["docker", "exec", "-i", "zelox_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
          "--bootstrap-server", BOOT, "--topic", TOPIC],
         input=("\n".join(lines) + "\n").encode(), capture_output=True)
     assert p.returncode == 0, p.stderr[-200:]

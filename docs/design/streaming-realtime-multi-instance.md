@@ -3,12 +3,12 @@
 **Status:** design. **Advances:** throughput capstone Phase B ([eks-throughput-capstone.md](eks-throughput-capstone.md))
 + per-partition-watermark/last-window correctness (#2b, [streaming-per-partition-watermark.md](streaming-per-partition-watermark.md)).
 **Grounded in:** Flink FLIP-27 (one split per reader), Chandy-Lamport barriers, Spark 4.1 RT-mode, +
-Vajra's already-built bounded path / `StreamBarrierAlignExec` / EpochCoordinator (REFERENCES §1/§2).
+Zelox's already-built bounded path / `StreamBarrierAlignExec` / EpochCoordinator (REFERENCES §1/§2).
 
 ## Problem (Phase A, measured)
 The realtime/continuous Kafka source is pinned `parallelism=1` (`kafka/reader.rs:286`): ONE instance
 reads ALL N partitions, runs `from_json` + `WatermarkExec` single-threaded, then the exchange fans out.
-`VAJRA_WM_PROF` shows the window **STARVED** (input_wait ≈100%, finalize 0%) ⇒ the source path is the
+`ZELOX_WM_PROF` shows the window **STARVED** (input_wait ≈100%, finalize 0%) ⇒ the source path is the
 ~2.4×-vs-Flink bottleneck. It also forces the per-partition-watermark workaround (single-instance MIN +
 discovery-grace) whose last-window edge is still open. Both stem from **single-instance read**.
 
@@ -45,18 +45,18 @@ partition — because it has no per-epoch realtime commit, just final offsets.)
 
 ## Build steps (incremental, each locally gated — final throughput on EKS)
 1. **Flip realtime `parallelism`** from 1 to `count_kafka_partitions` (`reader.rs:286`) behind a gate
-   (`VAJRA_RT_MULTI`), wire per-instance offset keys (already exist for bounded). Gate OFF = today.
+   (`ZELOX_RT_MULTI`), wire per-instance offset keys (already exist for bounded). Gate OFF = today.
 2. **Per-instance epoch staging + union commit**; restart-seek from the union. Validate EO with
    `inc_ckpt_gate.sh PARTS=4` (must stay no-dup/no-loss across crash) at N instances.
 3. **Drop the per-partition `WatermarkExec` workaround** on this path (each instance single-partition →
    monotone watermark; exchange MIN-merges) — re-run the continuous gate: expect bit-exact, last-window
    edge GONE (closes #2b).
-4. **Re-profile** with `VAJRA_WM_PROF` (window should no longer be starved) + **EKS throughput** A/B vs
+4. **Re-profile** with `ZELOX_WM_PROF` (window should no longer be starved) + **EKS throughput** A/B vs
    the single-instance baseline and vs Flink. Target ≤1.2× Flink, keep the 6.6× memory win.
 
-## STATUS — step 1 DONE 2026-06-30 (gated VAJRA_RT_MULTI)
+## STATUS — step 1 DONE 2026-06-30 (gated ZELOX_RT_MULTI)
 Realtime parallelism flips 1→N (reuse bounded per-partition read + offset keys). Re-profile
-(VAJRA_WM_PROF, PARTS=4 N=3000): pipeline RUNS CLEAN (no panic); total rows processed **180k→720k (4×)
+(ZELOX_WM_PROF, PARTS=4 N=3000): pipeline RUNS CLEAN (no panic); total rows processed **180k→720k (4×)
 at the same ~42s wall** ⇒ the N parallel readers parallelize source read+`from_json` as intended; the
 window is fast (finalize 216ms) and never the bottleneck. CAVEATS: (1) rows include continuous re-reads
 (720k > ~210k produced) so the LOCAL number is confounded — **real throughput = controlled EKS** (step

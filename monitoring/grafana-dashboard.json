@@ -3,7 +3,7 @@
     {
       "name": "DS_PROMETHEUS",
       "label": "Prometheus",
-      "description": "Prometheus/Mimir datasource receiving Vajra OTLP metrics",
+      "description": "Prometheus/Mimir datasource receiving Zelox OTLP metrics",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
@@ -16,7 +16,7 @@
     { "type": "panel", "id": "stat", "name": "Stat", "version": "" },
     { "type": "panel", "id": "gauge", "name": "Gauge", "version": "" }
   ],
-  "description": "Vajra distributed Spark engine — query throughput, latency, and execution metrics",
+  "description": "Zelox distributed Spark engine — query throughput, latency, and execution metrics",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -301,7 +301,7 @@
   ],
   "refresh": "30s",
   "schemaVersion": 37,
-  "tags": ["vajra", "spark", "distributed"],
+  "tags": ["zelox", "spark", "distributed"],
   "templating": {
     "list": [
       {
@@ -327,7 +327,7 @@
   "time": { "from": "now-1h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Vajra — Distributed Spark Engine",
-  "uid": "vajra-distributed-v1",
+  "title": "Zelox — Distributed Spark Engine",
+  "uid": "zelox-distributed-v1",
   "version": 1
 }

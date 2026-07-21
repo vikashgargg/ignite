@@ -22,11 +22,11 @@ See [Common Options](./index.md#common-options) for caching configuration.
 ## Examples
 
 ```bash
-export SAIL_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com"}]'
+export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com"}]'
 
 # OAuth authentication
-export SAIL_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com", warehouse="s3://data/warehouse", oauth_access_token="..."}]'
+export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com", warehouse="s3://data/warehouse", oauth_access_token="..."}]'
 
 # Bearer token authentication
-export SAIL_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com", warehouse="s3://data/warehouse", bearer_access_token="..."}]'
+export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com", warehouse="s3://data/warehouse", bearer_access_token="..."}]'
 ```

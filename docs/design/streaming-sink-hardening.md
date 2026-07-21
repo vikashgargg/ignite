@@ -26,7 +26,7 @@ can be stale after a crash between the two writes. Never trust it blindly.
 
 ## C3 — The dedup key must be STABLE across replay
 The batch/epoch id used for idempotency must come from a record that advances **atomically** with
-the source offset, so a replay reuses the same id. In Vajra this is
+the source offset, so a replay reuses the same id. In Zelox this is
 `file_stream::current_batch_id` (batch id embedded in the source's `staged`/`committed` offset
 record, promoted by one atomic rename). A separately-maintained counter would renumber the replay
 and defeat idempotency.

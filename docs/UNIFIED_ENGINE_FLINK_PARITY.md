@@ -1,9 +1,9 @@
-# Vajra — one engine for batch + streaming + realtime (Spark API, Flink-class streaming)
+# Zelox — one engine for batch + streaming + realtime (Spark API, Flink-class streaming)
 
 > **⚠️ Measured update (2026-06-19):** the rigorous, like-for-like head-to-head vs **official
 > Apache Flink 1.19** on EKS supersedes the older single-node "sub-ms / Flink 1.18"
-> directional figures below. Measured: Vajra **wins throughput (1.33×) and memory (6.4×)**
-> and holds **exactly-once across a hard kill**, but **Flink wins latency** (Vajra has no
+> directional figures below. Measured: Zelox **wins throughput (1.33×) and memory (6.4×)**
+> and holds **exactly-once across a hard kill**, but **Flink wins latency** (Zelox has no
 > record-level low-latency sink yet). Authoritative results + the grounded gap analysis +
 > roadmap: **[STREAMING_VS_FLINK_EKS.md](benchmarks/STREAMING_VS_FLINK_EKS.md)** and
 > **[PROD_GRADE_ROADMAP.md](PROD_GRADE_ROADMAP.md)**. Treat the "realtime/latency" claims
@@ -14,7 +14,7 @@ on the same native engine:
 - **batch** — Spark-class (already shipped; ~30× faster than Spark 3.5 on TPC-H SF-1, head-to-head).
 - **streaming (micro-batch)** — Spark Structured Streaming-compatible (`readStream`/`writeStream`,
   triggers, watermarks, checkpoints).
-- **realtime (Vajra realtime mode)** — Flink-class low-latency *continuous* execution of the same
+- **realtime (Zelox realtime mode)** — Flink-class low-latency *continuous* execution of the same
   streaming query, for tens-of-ms tail latency and per-event processing.
 
 This document is the honest gap analysis vs Apache Flink (the streaming gold standard) and the
@@ -27,9 +27,9 @@ Sources: Flink stateful-stream-processing & fault-tolerance docs
 
 ---
 
-## 0. Architecture thesis — why Vajra is fundamentally leaner (governs every feature)
+## 0. Architecture thesis — why Zelox is fundamentally leaner (governs every feature)
 
-**We do not port Flink's mechanisms into Vajra. We re-derive each capability on a leaner substrate,
+**We do not port Flink's mechanisms into Zelox. We re-derive each capability on a leaner substrate,
 then prove "better" with a fair, no-workaround measurement.** Three structural advantages Spark and
 Flink cannot retrofit (they're baked into their foundations):
 
@@ -39,7 +39,7 @@ Flink cannot retrofit (they're baked into their foundations):
    JVM object overhead** → data lives in compact Arrow buffers, the structural reason for the measured
    7–16× memory wins; (c) no JIT warmup — a persistent native server.
 2. **Arrow columnar + vectorized (DataFusion).** Flink processes one row/object at a time (good
-   latency, costly per-record CPU+memory). Vajra processes Arrow batches vectorized (SIMD,
+   latency, costly per-record CPU+memory). Zelox processes Arrow batches vectorized (SIMD,
    cache-friendly). Realtime mode shrinks the flow-event batch toward 1 row for latency **while staying
    vectorized**, approaching Flink's latency without Flink's per-record CPU cost (measured: sub-ms
    latency *at* multi-M rows/s simultaneously — the micro-batch-vs-continuous tradeoff doesn't bind us
@@ -63,11 +63,11 @@ don't yet beat Flink (e.g. distributed multi-node throughput today), we say so.
 
 ---
 
-## 1. Flink feature matrix vs Vajra (honest status)
+## 1. Flink feature matrix vs Zelox (honest status)
 
 Legend: ✅ done & evidenced · 🟡 partial · ⬜ gap.
 
-| # | Flink capability | Why it matters | Vajra status | Priority |
+| # | Flink capability | Why it matters | Zelox status | Priority |
 |---|---|---|---|---|
 | F1 | **Continuous (event-at-a-time) pipelined execution**, tens-of-ms latency | Flink's defining property | ✅ realtime mode (`Trigger.Continuous`): long-lived flow-event pipeline; sub-ms processing latency measured (F1c); **continuous Kafka→durable file sink exactly-once across restart measured on real Kafka (F1b)** — marker-driven sink + atomic `realtime/committed`; beyond Spark Continuous (at-least-once, no file sink), Flink-EO without alignment. Gaps: multi-partition + stateful → F2/F3 | **P0 — DONE (stateless)** |
 | F2 | **Distributed stateful streaming with operator parallelism** (sharded keyed state across the cluster) | Scale-out throughput | 🟡 single-partition per-core; keyed `StreamExchangeExec` + multi-partition `WindowAccumExec` exist locally; not distributed across nodes; streaming/Iceberg-commit not in distributed codec | **P0** |
@@ -91,14 +91,14 @@ any parity claim.
 
 ---
 
-## 2. Vajra realtime mode (the F1 design)
+## 2. Zelox realtime mode (the F1 design)
 
 Goal: run the *same* Spark-API streaming query with Flink-class latency, without forcing users to a new
-API. A query opts in via a trigger, mirroring Spark's `Trigger.Continuous` but backed by Vajra's
+API. A query opts in via a trigger, mirroring Spark's `Trigger.Continuous` but backed by Zelox's
 flow-event engine:
 
 ```python
-df.writeStream.format("iceberg").trigger(realtime=True)   # Vajra realtime mode
+df.writeStream.format("iceberg").trigger(realtime=True)   # Zelox realtime mode
 df.writeStream.format("iceberg").trigger(processingTime="1 second")  # micro-batch (today)
 ```
 
@@ -128,10 +128,10 @@ This is the unifying piece: **Spark API in, batch / micro-batch / realtime out �
 `foreachBatch`; `StreamingQuery.recentProgress`/`lastProgress`. Differential-tested vs real Spark
 (105/105 scorecard; TPC-H/TPC-DS). → see `docs/` scorecards.
 
-**Flink compatibility (the *capabilities*, not the DataStream API):** Vajra does not expose Flink's
+**Flink compatibility (the *capabilities*, not the DataStream API):** Zelox does not expose Flink's
 Java DataStream API; instead it delivers Flink's *semantics* under the Spark API + realtime mode —
 event-time/watermarks (F7), stateful windows/joins (F8/F9), exactly-once (F3/F10), continuous latency
-(F1). A `docs/FLINK_COMPATIBILITY.md` will track each Flink capability → Vajra mechanism → evidence.
+(F1). A `docs/FLINK_COMPATIBILITY.md` will track each Flink capability → Zelox mechanism → evidence.
 
 ---
 
@@ -146,7 +146,7 @@ crash/correctness tests + a measured head-to-head, then claim.
    across restart). Commits 9187582e → 37640fe3 → 47b9f10c.
 2. **P0 — Kafka source offset EO (F11).** Persist/restore per-partition Kafka offsets in the atomic offset
    record (the file-source pattern) → end-to-end EO from the #1 production source.
-3. **P0 — Vajra realtime mode (F1).** Continuous low-latency execution path + `trigger(realtime=True)` +
+3. **P0 — Zelox realtime mode (F1).** Continuous low-latency execution path + `trigger(realtime=True)` +
    latency metrics; reject plans that can't run continuously (named).
 4. **P0 — Distributed stateful streaming + barrier checkpoints (F2+F3).** Thread streaming through the
    distributed codec (StageInput already carries `bounded`); a real `CheckpointCoordinator` with aligned
@@ -160,10 +160,10 @@ After each P0: a measured, fair head-to-head vs Flink (same input, no workaround
 
 ## 5. Dependency edge — DataFusion 54.0.0 upgrade (own sprint)
 
-Vajra is on **DataFusion 54.0.0 / Arrow 58.3.0** (upgraded 2026-07-06). DataFusion **54.0.0** (released 2026-06-12) brings
-engine-core wins that flow straight into Vajra's batch *and* streaming without us writing them — the
+Zelox is on **DataFusion 54.0.0 / Arrow 58.3.0** (upgraded 2026-07-06). DataFusion **54.0.0** (released 2026-06-12) brings
+engine-core wins that flow straight into Zelox's batch *and* streaming without us writing them — the
 "leaner substrate" thesis paying off via the upstream:
-- **Repartition coalesce → up to 50% faster on skew** — directly speeds Vajra's keyed
+- **Repartition coalesce → up to 50% faster on skew** — directly speeds Zelox's keyed
   `StreamExchangeExec` + the distributed shuffle (relevant to F2 parallel streaming).
 - **Parquet morsel-driven parallelism → ~2× faster scans on skewed data** — speeds the streaming
   file source + batch reads.

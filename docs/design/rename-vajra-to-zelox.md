@@ -19,8 +19,8 @@ repository. Per AIM.md this is a synthesize-not-copy product; the rename makes t
 | Crate dirs + names | `crates/sail-<x>` / `sail-<x>` | `crates/zelox-<x>` / `zelox-<x>` | 37 crates; `git mv` to keep history |
 | Rust lib paths (imports) | `sail_<x>` | `zelox_<x>` | ~8.7k `use` / path refs — the bulk |
 | Binary | `vajra` | `zelox` | `sail-cli` → `zelox-cli`, `[[bin]] name` |
-| Runtime env prefix | `VAJRA_*` | `ZELOX_*` | e.g. `VAJRA_T7_FUSE` → `ZELOX_T7_FUSE` |
-| Config env prefix | `SAIL_*` | `ZELOX_*` | `SAIL_RUNTIME__…`, `SAIL_MODE` |
+| Runtime env prefix | `ZELOX_*` | `ZELOX_*` | e.g. `ZELOX_T7_FUSE` → `ZELOX_T7_FUSE` |
+| Config env prefix | `ZELOX_*` | `ZELOX_*` | `ZELOX_RUNTIME__…`, `ZELOX_MODE` |
 | Config file namespace | `sail` keys in `application.yaml` | `zelox` | + the loader prefix |
 | Container image / ECR repo | `vajra` | `zelox` | new ECR repo `zelox`; keep `vajra` until cutover |
 | k8s resources | `vajra-stream`, `vajra-client` | `zelox-stream`, `zelox-client` | namespace `stream` unchanged |
@@ -34,7 +34,7 @@ UPPER `ZELOX_` for env. **`sail-build-scripts` → `zelox-build-scripts`** (hyph
 - 37 `sail-*` crates.
 - `sail_` (Rust paths): **8,681** occ / 462 files — largest bucket.
 - `sail-` (Cargo deps, dirs): **1,141** / 176 files.
-- `VAJRA_`: **376** / 102 · `SAIL_`: **406** / 107.
+- `ZELOX_`: **376** / 102 · `ZELOX_`: **406** / 107.
 - `vajra`: **1,145** / 162 · `Vajra`: **993** / 200.
 - **Total ≈ 12,700 occurrences / ~500 files.** ⇒ scripted + compiler-verified, never hand-edited.
 
@@ -56,7 +56,7 @@ Order matters: dirs → crate names → deps → Rust paths → env → brand �
    Rename the bin: `sail-cli` → `zelox-cli`, `[[bin]] name = "vajra"` → `"zelox"`.
 3. **Rust paths:** repo-wide `sail_<x>` → `zelox_<x>` (word-boundary regex; the 8.7k bucket). `cargo build`
    is the verifier — a missed ref fails to compile, so this phase is self-checking.
-4. **Env vars:** `VAJRA_` → `ZELOX_` and `SAIL_` → `ZELOX_` across code + yaml + scripts. **Add a
+4. **Env vars:** `ZELOX_` → `ZELOX_` and `ZELOX_` → `ZELOX_` across code + yaml + scripts. **Add a
    back-compat shim** in the config/env loader that still reads the old prefixes for one release with a
    deprecation warning (prod-grade: don't strand existing deployments).
 5. **Config namespace:** `application.yaml` `sail:` root → `zelox:`; update the config loader prefix.
@@ -65,7 +65,7 @@ Order matters: dirs → crate names → deps → Rust paths → env → brand �
 7. **Scripts + manifests:** rename script files (`git mv`), k8s resource names, image tags.
 
 **Verification gates (each must pass before merge):** `cargo build --workspace`, `cargo clippy
---all-targets -D warnings`, full test suite, T1 correctness gate, `grep -rI 'sail_\|sail-\|VAJRA_\|vajra'`
+--all-targets -D warnings`, full test suite, T1 correctness gate, `grep -rI 'sail_\|sail-\|ZELOX_\|vajra'`
 returns only intentional upstream-attribution hits.
 
 ## 6. Infra cutover

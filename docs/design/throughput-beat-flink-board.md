@@ -1,7 +1,7 @@
 # Throughput: beat Flink — the STRUCTURAL board (2026-07-12, code-verified + KB-mapped)
 
 ## Root cause (why no-JVM/columnar/no-serde is still 1.4× behind Flink) — VERIFIED IN CODE
-Vajra is NOT actually no-serde. **Every streaming operator DECODES its input FlowEvent → runs the DataFusion
+Zelox is NOT actually no-serde. **Every streaming operator DECODES its input FlowEvent → runs the DataFusion
 RecordBatch op → ENCODES its output FlowEvent** (`DecodedFlowEventStream` + `EncodedFlowEventStream`, seen in
 dedup/collector/limit/window_accum/exchange). The `source→from_json→watermark→exchange→window→sink` pipeline
 does ~5–6 encode + 5–6 decode PER BATCH; each `encode_inner` allocates a marker column

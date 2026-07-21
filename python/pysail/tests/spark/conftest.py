@@ -15,7 +15,7 @@ from pysail.testing.spark.utils.common import is_jvm_spark, pyspark_version
 # This doctest option flag is used to annotate tests involving
 # extended Spark features supported by Sail.
 # The test will be skipped when running on JVM Spark.
-SAIL_ONLY = doctest.register_optionflag("SAIL_ONLY")
+ZELOX_ONLY = doctest.register_optionflag("ZELOX_ONLY")
 
 
 def pytest_configure(config):
@@ -238,7 +238,7 @@ def pytest_collection_modifyitems(session, config, items):  # noqa: ARG001
         for item in items:
             if isinstance(item, DoctestItem):
                 for example in item.dtest.examples:
-                    if example.options.get(SAIL_ONLY):
+                    if example.options.get(ZELOX_ONLY):
                         example.options[doctest.SKIP] = True
             # Skip pytest-bdd scenarios with @sail-only tag
             # Note: pytest-bdd preserves the hyphen in marker names

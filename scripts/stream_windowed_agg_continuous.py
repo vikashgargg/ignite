@@ -62,4 +62,4 @@ try:
 except Exception:
     pass
 dt = time.time() - t0
-print(f"VAJRA_WAGG_CONTINUOUS events={N} ran_s={dt:.1f} trigger=continuous", flush=True)
+print(f"ZELOX_WAGG_CONTINUOUS events={N} ran_s={dt:.1f} trigger=continuous", flush=True)

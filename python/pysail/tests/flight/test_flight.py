@@ -9,8 +9,8 @@ from pysail.flight import FlightSqlServer
 
 @pytest.fixture(scope="module")
 def flight_uri():
-    if "SAIL_FLIGHT_URI" in os.environ:
-        yield os.environ["SAIL_FLIGHT_URI"]
+    if "ZELOX_FLIGHT_URI" in os.environ:
+        yield os.environ["ZELOX_FLIGHT_URI"]
         return
 
     server = FlightSqlServer(ip="127.0.0.1", port=0)

@@ -1,4 +1,4 @@
-# Vajra BOARD — the master kanban (beat Spark + Flink on EVERY axis)
+# Zelox BOARD — the master kanban (beat Spark + Flink on EVERY axis)
 
 > **This is the single source of truth for "what's planned vs achieved" against the [CHARTER](../CLAUDE.md)
 > aim: one unified engine that OBJECTIVELY BEATS Spark (batch) + Flink (streaming) on every production
@@ -8,7 +8,7 @@
 > - Distribution / repo GA: [public-ga-readiness-board.md](design/public-ga-readiness-board.md)
 > - Streaming spec + gap register: [STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md)
 > - Active epic: [EPIC-beat-flink-streaming.md](design/EPIC-beat-flink-streaming.md) · [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.md)
-> - ⭐ **Per-pillar grounded map** (Vajra vs Flink/RisingWave 3.0/Arroyo 0.15/Polars/Spark 4.1 RTM, source-cited, answers "no-JVM yet slow"): [vajra-per-pillar-grounded-map.md](design/vajra-per-pillar-grounded-map.md)
+> - ⭐ **Per-pillar grounded map** (Zelox vs Flink/RisingWave 3.0/Arroyo 0.15/Polars/Spark 4.1 RTM, source-cited, answers "no-JVM yet slow"): [zelox-per-pillar-grounded-map.md](design/zelox-per-pillar-grounded-map.md)
 >
 > **SDLC law (per charter):** every ticket (a) cites the axis it advances + a named OSS design ref,
 > (b) is architect-first (design before code), (c) is DONE only when **T1 local → T2 kind → T3 EKS**
@@ -25,11 +25,11 @@ Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmea
 | Axis | vs S | vs F | State | Evidence (measured) | Owning epic/ticket |
 |------|:---:|:---:|:---:|---|---|
 | **Batch throughput** | `>` | — | ✅ | P4 200M ETL: 5.92s vs Spark 36.94s = **6.2×**; TPC-H SF1 1.78 vs 63.46s | [P4](design/production-workload-benchmark.md) |
-| **Streaming throughput** | — | `<` | 🟡 | Distributed gap = **Kafka source CONSUME rate** (Vajra `StreamConsumer` ~4M/s vs Flink `KafkaSource` ~10M/s); transport/shuffle/serde/JVM RULED OUT. **FLIP-27 batch-queue consume MEASURED 2.8×** (`rd_kafka_consume_batch_queue`, local 10M A/B: 1.38→3.89 M/s, identical Arrow build), kind bounded EXACT + 2.33× wall — gated `VAJRA_KAFKA_BATCH_QUEUE`. Branch `throughput/kafka-batch-queue-flip27`; EKS at-scale number pending | **VAJ-BF2** |
-| **Realtime windowed completeness** | — | `=` | ✅ | **Vajra continuous == Flink (apples-to-apples, both→MinIO parquet, kind 2026-07-17):** real time-ordered stream = **15 windows / 150000, every (window,key)=10, no partial-split/over-emit/dup = EXACT == Flink**. Root cause (traced w/ instrumentation, grounded Flink `WatermarkStatus.IDLE`): batch-queue source emitted Idle on a TRANSIENT empty drain → exchange excluded an active channel → frozen watermark. FIX = source Idle only at genuine high-watermark (`a3f2ee15`). Far-ahead-closer over-emit also fixed (live watermark floor, `5820abfb`) | [per-pillar map](design/vajra-per-pillar-grounded-map.md) |
-| **Latency (Kafka→Kafka passthrough)** | — | `>` | 🟢 | **T2/kind fair (parallelism=2 both): Vajra p50=30/p99=125/p999=127/max=128ms vs Flink p50=42/p99=580/p999=765/max=767ms — WINS every pct, TAIL 4.6–6× (no-GC).** Full windowed e2e still TODO | [D2](design/prodgrade-dimensions-scorecard.md) |
+| **Streaming throughput** | — | `<` | 🟡 | Distributed gap = **Kafka source CONSUME rate** (Zelox `StreamConsumer` ~4M/s vs Flink `KafkaSource` ~10M/s); transport/shuffle/serde/JVM RULED OUT. **FLIP-27 batch-queue consume MEASURED 2.8×** (`rd_kafka_consume_batch_queue`, local 10M A/B: 1.38→3.89 M/s, identical Arrow build), kind bounded EXACT + 2.33× wall — gated `ZELOX_KAFKA_BATCH_QUEUE`. Branch `throughput/kafka-batch-queue-flip27`; EKS at-scale number pending | **VAJ-BF2** |
+| **Realtime windowed completeness** | — | `=` | ✅ | **Zelox continuous == Flink (apples-to-apples, both→MinIO parquet, kind 2026-07-17):** real time-ordered stream = **15 windows / 150000, every (window,key)=10, no partial-split/over-emit/dup = EXACT == Flink**. Root cause (traced w/ instrumentation, grounded Flink `WatermarkStatus.IDLE`): batch-queue source emitted Idle on a TRANSIENT empty drain → exchange excluded an active channel → frozen watermark. FIX = source Idle only at genuine high-watermark (`a3f2ee15`). Far-ahead-closer over-emit also fixed (live watermark floor, `5820abfb`) | [per-pillar map](design/zelox-per-pillar-grounded-map.md) |
+| **Latency (Kafka→Kafka passthrough)** | — | `>` | 🟢 | **T2/kind fair (parallelism=2 both): Zelox p50=30/p99=125/p999=127/max=128ms vs Flink p50=42/p99=580/p999=765/max=767ms — WINS every pct, TAIL 4.6–6× (no-GC).** Full windowed e2e still TODO | [D2](design/prodgrade-dimensions-scorecard.md) |
 | **Memory** | `>` | `~` | 🟡 | Continuous: 7.06 vs Flink 8.58 GiB (win); bounded: 10.38 vs 8.57 (lose) → **path-dependent** | [D3](design/prodgrade-dimensions-scorecard.md), F5 spill |
-| **CPU / per-stage** | — | `~` | 🟡 | **FAIR head-to-head (2026-07-10, both→S3, 100M): Flink 5.07M vs Vajra 2.32M = Flink 2.2×. Vajra is SOURCE_READ BOUND: source_read=40–49s ≈ 43s WALL >> from_json=11s > exchange_cpu=0; shuffle_recv=608s = blocked-WAIT (window starves behind source).** THE LEVER = Kafka source read + Arrow decode, NOT shuffle. Mem: Vajra 3.70GiB/pod < Flink 9.27GiB. [§8](design/distributed-shuffle-throughput.md) | VAJ-BF2 |
+| **CPU / per-stage** | — | `~` | 🟡 | **FAIR head-to-head (2026-07-10, both→S3, 100M): Flink 5.07M vs Zelox 2.32M = Flink 2.2×. Zelox is SOURCE_READ BOUND: source_read=40–49s ≈ 43s WALL >> from_json=11s > exchange_cpu=0; shuffle_recv=608s = blocked-WAIT (window starves behind source).** THE LEVER = Kafka source read + Arrow decode, NOT shuffle. Mem: Zelox 3.70GiB/pod < Flink 9.27GiB. [§8](design/distributed-shuffle-throughput.md) | VAJ-BF2 |
 | **Network / shuffle** | — | `>msgs` | 🟡 | Distributed shuffle ROOT-CAUSED (per-pod WM_PROF): Flight small-batch IPC (24k ~4k-row msgs; exchange_cpu=0). FIXED: periodic watermarks (9cd7d05c) + `coalesce_flow_events` (276d7d8d/b1313f45). **T1+T2-free VALIDATED: 2.14× fewer Flight messages, counts EXACT** (`local_dist_coalesce_check.sh`, `kind_shuffle_coalesce_ab.sh`). T3 throughput NUMBER pending. Design: [shuffle-throughput](design/distributed-shuffle-throughput.md) | **VAJ-BF2** |
 | **State mgmt** | — | `=` | ✅ | Spillable windowed-agg+join state (F5), out==N exact @5M; 64k-cap fixed | [F5](design/streaming-spillable-state-f5.md) |
 | **Fault tolerance / EO** | `=` | `=` | ✅ | dup=0 across kill-9 on EKS (aligned barriers + exact idle + emit floor) | [distributed-eo](design/distributed-eo-coordinator-wiring.md) |
@@ -38,16 +38,16 @@ Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmea
 | **Rescale / elasticity** | — | `=` | 🟡 | Key-group rescale on Arrow chunks (FLIP-8), crash-gated; bit-exact gated by EO residual | [rescale](design/streaming-rescale-from-checkpoint.md) |
 | **K8s-native** | `=` | `=` | ✅ | `kubernetes-cluster` mode: driver dynamically launches worker pods + Flight shuffle | [f2f3 §F3-d](design/distributed-streaming-f2f3.md) |
 | **Cost (idle→$0)** | — | — | ✅ | AWS torn to $0 when idle (standing discipline) | — |
-| **Completeness** | `=` | `=` | ✅ | EKS 100M: 10 windows/100M matches Flink (VAJRA_COMPLETE_ON_END) | [completeness](design/EPIC-beat-flink-streaming.md) |
+| **Completeness** | `=` | `=` | ✅ | EKS 100M: 10 windows/100M matches Flink (ZELOX_COMPLETE_ON_END) | [completeness](design/EPIC-beat-flink-streaming.md) |
 | **Parallel Kafka sink** | — | `=` | ✅ | 100M/100M delivered @1.67M msg/s (N parallel tasks, per-task txn.id) | [f2f3](design/distributed-streaming-f2f3.md) |
-| **Realtime passthrough latency/thruput** | — | `>lat` | 🟡 | LATENCY now WINS on T2/kind fair (see Latency row: Vajra p50=30/max=128 vs Flink p50=42/max=767ms). Earlier p50=257ms was the pre-fix 1/16-partition sink bug. Throughput at scale still TODO on EKS | [gap](design/EPIC-beat-flink-streaming.md) |
+| **Realtime passthrough latency/thruput** | — | `>lat` | 🟡 | LATENCY now WINS on T2/kind fair (see Latency row: Zelox p50=30/max=128 vs Flink p50=42/max=767ms). Earlier p50=257ms was the pre-fix 1/16-partition sink bug. Throughput at scale still TODO on EKS | [gap](design/EPIC-beat-flink-streaming.md) |
 | **DX / PySpark-compat** | `=` | — | ✅ | PySpark runs unchanged; batch+streaming smoke 6/6 vs Spark 3.5.3 | [f2f3](design/distributed-streaming-f2f3.md) |
 | **Interactive SQL** | `~` | — | 🟡 | ClickBench 60.11 vs LakeSail 65.50s (shared core); vs ClickHouse/Trino unmeasured | [clickbench](design/) |
 | **AI-native execution** | `?` | `?` | ⬜ | Not started (charter axis; backlog) | — |
 | **Lakehouse (Delta/Iceberg)** | `~` | — | 🟡 | Delta 144/163; Iceberg batch+stream partial | [delta](design/) |
 | **Backpressure** | — | `?` | 🔴 | Bounded mpsc channels exist; not measured under slow sink (D10); credit-flow = T-BF2.4 | [D10](design/prodgrade-dimensions-scorecard.md) |
 
-**Honest one-liner (per [competitive-claims-bar]):** Vajra **beats Spark decisively on batch**
+**Honest one-liner (per [competitive-claims-bar]):** Zelox **beats Spark decisively on batch**
 (6.2×) and is **competitive-not-categorically-better vs Flink on streaming** — parity on
 correctness/EO/state/completeness, path-dependent on memory/throughput, behind on realtime
 passthrough latency + still-unmeasured on e2e latency/cold-start/recovery-time. The active epic
@@ -56,7 +56,7 @@ passthrough latency + still-unmeasured on e2e latency/cold-start/recovery-time. 
 > **Realtime per-key correctness — TIE CONFIRMED (2026-07-21).** The 2026-07-20 "realtime key-corruption
 > bug" was a **measurement artifact**: pyarrow 25.0.0 on linux-arm64 mis-decodes arrow-rs `RLE_DICTIONARY`
 > int columns. The same file bytes read 1000 distinct keys (uniform 10×/key) via arrow-rs, duckdb, and
-> pyarrow 16.1/18.1/21.0; only pyarrow 25.0.0 gives 944. Vajra realtime windowed-agg output is correct
+> pyarrow 16.1/18.1/21.0; only pyarrow 25.0.0 gives 944. Zelox realtime windowed-agg output is correct
 > per-key end-to-end. Harness hardened with a reader-integrity guard (duckdb cross-check / pin pyarrow≤21).
 
 ---
@@ -64,7 +64,7 @@ passthrough latency + still-unmeasured on e2e latency/cold-start/recovery-time. 
 ## 2. Active sprint — EPIC VAJ-BF2 (distributed streaming + Arrow-Flight exchange)
 
 **Goal:** beat Flink on streaming throughput by distributing the ranked #2 stage (exchange, 89.8s)
-across nodes with no-JVM zero-copy Arrow shuffle — the only stage where Vajra can *structurally* win.
+across nodes with no-JVM zero-copy Arrow shuffle — the only stage where Zelox can *structurally* win.
 Design: [vaj-bf2-distributed-streaming.md](design/vaj-bf2-distributed-streaming.md).
 
 | Ticket | Axis | Design ref | Backlog | Design | Impl | T1 | T2 | T3 | Commit |
@@ -98,7 +98,7 @@ benchmark is **N→M** (source parallelism = #kafka-partitions) so T-BF2.2's 1�
 → **T-BF2.3 is critical path**; (2) even 1→N did NOT spread — `TaskSlotAssigner::next()` fill-first-packs
 a stage onto one worker → **new critical ticket T-BF2.5 (even placement)**. Cutting the boundary is
 necessary but not sufficient. Kind torn down, AWS $0. Detail: [vaj-bf2 §4e](design/vaj-bf2-distributed-streaming.md).
-**T2 kind (vajra:bf4):** T-BF2.6 CONFIRMED — with `worker_task_slots=2` the 8 window instances spread across
+**T2 kind (zelox:bf4):** T-BF2.6 CONFIRMED — with `worker_task_slots=2` the 8 window instances spread across
 4 pods (2 each, clean even-spread p0/4 p1/5 p2/6 p3/7). At the DEFAULT slots=8 they pack on 1 pod: one worker
 holds the whole 8-task region AND the region is assigned before other workers register (timing race) → **T-BF2.7**
 (wait-for-workers before assigning; Spark minRegisteredResourcesRatio / Flink slot-wait). **VAJ-BF2 distribution

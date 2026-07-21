@@ -1,6 +1,6 @@
-# Vajra streaming latency — baseline & path to Flink-class
+# Zelox streaming latency — baseline & path to Flink-class
 
-Validating **where Vajra streaming latency is today** (2026-06-09), with the
+Validating **where Zelox streaming latency is today** (2026-06-09), with the
 research-backed targets it must reach to be "on par with Flink." Honest baseline +
 the concrete gaps to close.
 
@@ -14,7 +14,7 @@ the concrete gaps to close.
 Sources: Decodable, Confluent, Onehouse, and a 2024 multi-cloud Flink-vs-Spark
 benchmark (Flink p99 74±3 ms vs Spark 231±8 ms under exactly-once @ 50k ev/s).
 
-## What Vajra is today
+## What Zelox is today
 - **Architecture: micro-batch** (flow events + markers + per-micro-batch operators),
   but with a **~10 ms tick** — so latency is far below Spark's default-trigger class.
 - **MEASURED end-to-end latency (2026-06-09): sub-millisecond.** With `LatencyTracker`
@@ -93,7 +93,7 @@ Consequences:
    until continuous execution is fixed; bounded execution regression-tested OK.)
 3. No streaming **progress metrics** (`lastProgress`/`processedRowsPerSecond`).
 
-So the defensible statement today: **Continuous streaming now works and Vajra's
+So the defensible statement today: **Continuous streaming now works and Zelox's
 measured end-to-end latency is sub-millisecond (p99 ≤0.3 ms) at 100 rows/s
 single-node — Flink-class.** What remains: measure under high throughput, stateful
 operators, and on a cluster; and expose latency via `StreamingQuery.lastProgress`
@@ -124,5 +124,5 @@ operators, and on a cluster; and expose latency via `StreamingQuery.lastProgress
 ## How these numbers were measured (reproduce)
 Rate source stamps each row with `now()` at generation; `current_timestamp()` at the
 sink is processing time, so `proc_ts − timestamp` is end-to-end latency. Run via the
-pyspark `sc://` client against `vajra server` (see [STREAMING.md](STREAMING.md) for
+pyspark `sc://` client against `zelox server` (see [STREAMING.md](STREAMING.md) for
 the harness). Continuous-mode measurement is blocked on items #1–#2 above.

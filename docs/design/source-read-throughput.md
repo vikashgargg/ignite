@@ -4,9 +4,9 @@
 that closes the measured Flink gap. Grounded in [REFERENCES §8](../REFERENCES.md) (FLIP-27 + rust-rdkafka).
 
 ## 1. Root cause (MEASURED, not assumed)
-Fair EKS head-to-head (100M, both → S3 parquet): **Flink 5.07M vs Vajra 2.32M = 2.2×**. Per-pod WM_PROF:
+Fair EKS head-to-head (100M, both → S3 parquet): **Flink 5.07M vs Zelox 2.32M = 2.2×**. Per-pod WM_PROF:
 `source_read` ≈ the wall. SOURCE_POLL/BUILD split (local 5M): **poll 58% + per-message bookkeeping 37% +
-Arrow build 5%**. The columnar build is NOT the bottleneck (as it should be). Vajra is **per-message
+Arrow build 5%**. The columnar build is NOT the bottleneck (as it should be). Zelox is **per-message
 CONSUME-bound**.
 
 ## 2. Why (official)
@@ -27,7 +27,7 @@ Per source instance (already 1/partition, FLIP-27):
    a **bounded channel** (`tokio::sync::mpsc`, capacity = backpressure = Flink credit-flow analog).
 3. **Per-partition `Vec<i64>` offsets** (dense index) — no per-message HashMap.
 Net: Flink-batched consume + our columnar/no-JVM build ⇒ target **> Flink 5.07M**, and memory stays low
-(Vajra 3.70 GiB/pod vs Flink 9.27 GiB).
+(Zelox 3.70 GiB/pod vs Flink 9.27 GiB).
 
 ## 4. Correctness — MUST preserve (the risk surface; each has a gate)
 The consume loop (reader.rs:1245) is interwoven with:
@@ -40,7 +40,7 @@ The consume loop (reader.rs:1245) is interwoven with:
   counts-exact + crash-EO dup=0.*
 - **3 paths** — bounded(availableNow) / realtime(continuous EO) / unbounded. Port carefully; do bounded
   FIRST (the throughput path), validate, then realtime.
-- **Bounded memory** — the prefetch cap (`VAJRA_KAFKA_PREFETCH_*`) + the bounded channel keep RSS ≈
+- **Bounded memory** — the prefetch cap (`ZELOX_KAFKA_PREFETCH_*`) + the bounded channel keep RSS ≈
   prefetch×partitions. *Gate: F5/RSS unchanged.*
 
 ## 5. Measurement plan (measure, don't assume — the confidence gates)
@@ -51,7 +51,7 @@ The consume loop (reader.rs:1245) is interwoven with:
 - **C2 (T1 full pipeline, local):** windowed-agg WM_PROF SOURCE_POLL/BUILD — source_read poll share DROPS,
   counts exact.
 - **C3 (T2 kind):** real pods, counts exact + crash-EO dup=0.
-- **C4 (T3 EKS):** ONE fair head-to-head vs Flink — Vajra throughput ≥ Flink, tear $0.
+- **C4 (T3 EKS):** ONE fair head-to-head vs Flink — Zelox throughput ≥ Flink, tear $0.
 
 ## 6. Confidence bar (do NOT implement the production rewrite until ALL true)
 - [ ] C1 micro-bench shows BaseConsumer-fetch-thread materially faster than current.
@@ -67,7 +67,7 @@ Per AIM, leverage our columnar/Arrow edge. KB findings (REFERENCES §6/§8):
 - **Tried, MEASURED no help (don't repeat):** (a) **arrow-json columnar decode** in from_json = ~PARITY with
   our serde_json (we're already Rust; the win is vs Java/Jackson) — REFERENCES §6. (b) **VAJ-T7
   source-fusion** (parse pushdown into the columnar source) = MEASURED NO throughput beat (from_json already
-  pre-exchange); kept opt-in `VAJRA_T7_FUSE`.
+  pre-exchange); kept opt-in `ZELOX_T7_FUSE`.
 - **The columnar-OPTIMAL consume (this fix):** the CONSUME bottleneck (58% poll) is librdkafka per-message +
   StreamConsumer overhead — NOT a columnar gap, a CONSUME-MODEL gap. The columnar-right fix = **batch the
   consume (BaseConsumer / `rd_kafka_consume_batch`) and build ONE Arrow columnar batch from the message
@@ -111,7 +111,7 @@ correctly PREVENTED the BaseConsumer-fetch-thread + Vec-offsets production rewri
 only thing that reduces the per-CALL count (Flink's batched poll analog). Likely MODEST (~20-30%: saves the
 poll call, not the per-msg BorrowedMessage+append+copy), NOT 2×. HONEST: the ~2× read gap vs Flink is
 substantially the rust-rdkafka per-message consume vs Java KafkaConsumer.poll(500)-batched; closing it fully
-may need the batch FFI + is not guaranteed. **Vajra's PROVEN wins stand: memory (3.70 vs 9.27 GiB), batch
+may need the batch FFI + is not guaranteed. **Zelox's PROVEN wins stand: memory (3.70 vs 9.27 GiB), batch
 6.2× vs Spark, latency (no-GC), unified engine, correctness/EO.** DECISION POINT: (a) build the batch-FFI
 variant + measure (modest, some risk) OR (b) accept streaming-throughput as competitive-not-beating on this
 per-message-consume-bound axis and invest in the proven-win axes.
@@ -131,21 +131,21 @@ node runs source+window+shuffle+Flight all on 16 vCPU (contended), while **Flink
 (`table.exec.mini-batch` 2s/50k) makes its WINDOW very cheap → more CPU left for the read. So the gap is
 likely **CPU CONTENTION + Flink's cheaper aggregation / operator fusion**, NOT the Kafka consume. NEXT (per
 option c): re-profile the FULL pipeline stage CPU on EKS (source vs window vs shuffle) with a MULTI-node
-cluster (uncontend the read) + measure Vajra's window/agg CPU vs Flink's mini-batch. The `kafka_read_bench_*`
-variants stay (#[ignore]) as the proof. Vajra's PROVEN wins stand (memory, batch 6.2× vs Spark, latency, EO).
+cluster (uncontend the read) + measure Zelox's window/agg CPU vs Flink's mini-batch. The `kafka_read_bench_*`
+variants stay (#[ignore]) as the proof. Zelox's PROVEN wins stand (memory, batch 6.2× vs Spark, latency, EO).
 
 ## 11. REFRAME (2026-07-11) — the lever is FETCH/COMPUTE OVERLAP, not the consume model
-**Stage-by-stage map vs Flink (grounded: FLIP-27 + Flink operator-chaining/mini-batch research + Vajra code):**
-- Vajra source = `async_stream::stream!` (reader.rs:681/949) that `yield`s batches, **pulled inline by the
+**Stage-by-stage map vs Flink (grounded: FLIP-27 + Flink operator-chaining/mini-batch research + Zelox code):**
+- Zelox source = `async_stream::stream!` (reader.rs:681/949) that `yield`s batches, **pulled inline by the
   downstream operator on the SAME tokio task**. No spawn/channel decouples fetch from compute ⇒ per source
   task, **poll Kafka → build Arrow → from_json → shuffle-encode → yield are SERIALIZED on one thread**.
 - Flink FLIP-27: `KafkaPartitionSplitReader` runs in a **DEDICATED fetcher thread** feeding a handover queue;
   the pipeline thread consumes it ⇒ **fetch OVERLAPS compute**. Flink also chains operators (one thread, no
-  handover) and mini-batches the agg — but the source/compute OVERLAP is the structural piece Vajra lacks.
-- ⇒ Vajra wall ≈ fetch + compute (serial); Flink wall ≈ max(fetch, compute) (overlapped). If fetch≈compute
+  handover) and mini-batches the agg — but the source/compute OVERLAP is the structural piece Zelox lacks.
+- ⇒ Zelox wall ≈ fetch + compute (serial); Flink wall ≈ max(fetch, compute) (overlapped). If fetch≈compute
   that alone is ~2× — matching the measured 2.32M vs 5.07M. **Why the 3 consume gates showed nothing:** they
   measured fetch ALONE (no downstream) ⇒ blind to the overlap. The lever was never the poll model.
-- Window mini-batch: Vajra ALREADY does per-batch Partial pre-agg (window_accum.rs:337) ✅ not the gap.
+- Window mini-batch: Zelox ALREADY does per-batch Partial pre-agg (window_accum.rs:337) ✅ not the gap.
   Same-node shuffle: ALREADY mpsc RecordBatch zero-copy (stream_manager/local.rs) ✅; only CROSS-node
   serializes via Flight IPC (a separate, secondary lever — measure after overlap).
 **Prod-grade design (FLIP-27 SourceReaderBase model): dedicated fetch thread (`std::thread`, off the tokio
@@ -173,15 +173,15 @@ Bench (bench_src 10M, release), spare-core counts:
 **CONCLUSION:** free source-side levers (consume model, fetch/compute overlap) are within noise / small; none
 is the decisive 2×. The EKS 2.2× is real but NOT yet isolated to a stage with confidence (WM_PROF summed-CPU
 can't cleanly attribute the serial-path time). **The one AIM-right decisive experiment = a PROGRESSIVE
-per-stage throughput profile on real cores** (source→count, +from_json→count, +window→count, full→S3), Vajra
+per-stage throughput profile on real cores** (source→count, +from_json→count, +window→count, full→S3), Zelox
 vs Flink per-operator (Flink web UI). Build+validate the harness FREE on kind (correctness), then ONE EKS run
 pinpoints the exact 2× stage. Until then: do NOT implement a source rewrite (all free evidence says it won't
-move the 2×). Vajra's PROVEN wins stand: batch 6.2× vs Spark, memory, latency (no-GC tail), unified, EO.
+move the 2×). Zelox's PROVEN wins stand: batch 6.2× vs Spark, memory, latency (no-GC tail), unified, EO.
 
 ## 13. Per-stage profiler built + VALIDATED FREE locally (2026-07-11) — local is SOURCE-bound; the 2× is CROSS-NODE Flight IPC
 Built `scripts/stream_stage_profile.py` + `scripts/stage_profile_local.sh` (progressive stages via the PROVEN
 parquet-append sink; COMPLETE_ON_END flushes every window ⇒ equal counts = fair). Free-validation findings
-(each a real harness lesson, caught before EKS): (a) Vajra streaming has NO memory/complete sink (rows=None) —
+(each a real harness lesson, caught before EKS): (a) Zelox streaming has NO memory/complete sink (rows=None) —
 use parquet; (b) a giant window never closes in append mode (watermark) — use 10s windows that close;
 (c) macOS bash 3.2 has no assoc arrays; (d) normalize throughput by ACTUAL emitted rows, not assumed N.
 **Local result (bench_src 10M, equal counts):** nokey(from_json+window, 1 hot group) 2.251M/s ≈ source ceiling
@@ -189,7 +189,7 @@ use parquet; (b) a giant window never closes in append mode (watermark) — use 
 add ~nothing over the source; the whole single-node pipeline is SOURCE/FETCH-bound and the same-node shuffle is
 mpsc (zero-copy, free).** The one thing local CANNOT exercise = the **CROSS-NODE Flight shuffle serialization**
 (single-node stays mpsc). KB already root-caused exactly this ([[project_shuffle_coalesce_wip]]: distributed lag
-= Flight small-batch IPC, Vajra 2.09M vs Flink 5.77M = 2.77×) — matches the user's "no-serde-but-slow" intuition:
+= Flight small-batch IPC, Zelox 2.09M vs Flink 5.77M = 2.77×) — matches the user's "no-serde-but-slow" intuition:
 same-node no serde, CROSS-node serializes via Flight IPC. **NEXT (free): run the SAME profiler on kind (T2,
 multi-pod = REAL Flight shuffle) to measure the cross-pod shuffle delta before EKS.** The lever is the Flight
 shuffle IPC (batch-size / zero-copy / coalescing), NOT the Kafka source. Don't rewrite the source.

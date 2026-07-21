@@ -1,11 +1,11 @@
-# Vajra — standard Docker image (K8s / Linux CI builds)
+# Zelox — standard Docker image (K8s / Linux CI builds)
 #
 # This Dockerfile builds from source without the Apple Container tarball
 # workaround (see docker/apple/Dockerfile for Apple Container builds).
 #
 # Usage:
-#   docker build -t vajra:latest -f docker/Dockerfile .
-#   docker run -p 50051:50051 vajra:latest
+#   docker build -t zelox:latest -f docker/Dockerfile .
+#   docker run -p 50051:50051 zelox:latest
 
 ARG PYTHON_VERSION=3.12
 ARG PYSPARK_VERSION=4.0.0
@@ -65,7 +65,7 @@ RUN CARGO_BUILD_JOBS=${CARGO_JOBS:-$(nproc)} \
     CARGO_PROFILE_RELEASE_DEBUG=${RELEASE_DEBUG} \
     CARGO_PROFILE_RELEASE_STRIP=${RELEASE_STRIP} \
     cargo build --release -p sail-cli --bins ${CARGO_FEATURES:+--features ${CARGO_FEATURES}} \
-    && cp /app/target/release/vajra /usr/local/bin/vajra
+    && cp /app/target/release/zelox /usr/local/bin/zelox
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM python:${PYTHON_VERSION}-slim
@@ -79,11 +79,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Full pyspark (not pyspark-client) required for UDF cloudpickle deserialization.
 # pandas + pyarrow required for Arrow UDFs and Pandas UDFs.
 # grpcio + grpcio-status + protobuf are the Spark Connect client deps so in-container
-# `vajra run` / `vajra shell` (which connect via sc://) work, not just the server.
+# `zelox run` / `zelox shell` (which connect via sc://) work, not just the server.
 RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}" pandas pyarrow \
         grpcio grpcio-status protobuf googleapis-common-protos
 
-COPY --from=builder /usr/local/bin/vajra /usr/local/bin/vajra
+COPY --from=builder /usr/local/bin/zelox /usr/local/bin/zelox
 
 EXPOSE 50051
 
@@ -92,5 +92,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
         "import socket; s = socket.create_connection(('localhost', 50051), timeout=4); s.close()" \
     || exit 1
 
-ENTRYPOINT ["/usr/local/bin/vajra"]
+ENTRYPOINT ["/usr/local/bin/zelox"]
 CMD ["server", "--ip", "0.0.0.0", "--port", "50051"]

@@ -1,4 +1,4 @@
-# TPC-H SF-1 — Vajra vs Apache Spark (head-to-head)
+# TPC-H SF-1 — Zelox vs Apache Spark (head-to-head)
 
 Reproducible single-node benchmark: all 22 TPC-H queries, scale factor 1
 (~1 GB), identical Parquet input and identical query SQL, run on the same
@@ -8,12 +8,12 @@ machine with both engines warm and 4-way parallelism.
 
 | Engine | Build | Total (22q) | Avg/query | Passed | Speedup |
 |---|---|---|---|---|---|
-| **Vajra** | release (thin LTO) | **1.780 s** | 0.081 s | 22/22 | **~36×** |
+| **Zelox** | release (thin LTO) | **1.780 s** | 0.081 s | 22/22 | **~36×** |
 | Apache Spark 3.5.3 | JVM (Java 8) | 63.463 s | 2.885 s | 22/22 | 1× |
 
 ## Per-query time (seconds)
 
-| Q | Vajra | Spark | | Q | Vajra | Spark |
+| Q | Zelox | Spark | | Q | Zelox | Spark |
 |---|---|---|---|---|---|---|
 | 1 | 0.14 | 3.84 | | 12 | 0.09 | 1.55 |
 | 2 | 0.03 | 2.28 | | 13 | 0.07 | 3.77 |
@@ -30,13 +30,13 @@ machine with both engines warm and 4-way parallelism.
 ## How to reproduce
 
 ```bash
-# 1. Build release Vajra
+# 1. Build release Zelox
 CARGO_PROFILE_RELEASE_LTO=thin cargo build --release -p sail-cli
 
 # 2. Start the server (see scripts/spark-tests/run-server.sh for full env)
-target/release/vajra server -C <pyspark_dir>
+target/release/zelox server -C <pyspark_dir>
 
-# 3. Vajra (warm), generating SF-1 data
+# 3. Zelox (warm), generating SF-1 data
 SPARK_REMOTE=sc://localhost:50051 TPCH_SF=1 TPCH_DATA_DIR=/tmp/tpch_sf1 \
   TPCH_WARMUP=1 python scripts/tpch_distributed.py
 

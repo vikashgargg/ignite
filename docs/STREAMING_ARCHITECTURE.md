@@ -1,6 +1,6 @@
-# Vajra Streaming Architecture (authoritative spec)
+# Zelox Streaming Architecture (authoritative spec)
 
-**Purpose.** Single source of truth for Vajra's streaming engine: the component
+**Purpose.** Single source of truth for Zelox's streaming engine: the component
 contracts, the full feature matrix, the honest gap register, and the validation gates.
 We build to *fill this matrix* — not to chase bugs. Every change must cite the cell it
 advances and meet that cell's done-criteria. Grounded in the Apache references, not copied
@@ -11,7 +11,7 @@ engine under the Spark API. See [[feedback_prod_grade_bar]], [[feedback_no_worka
 
 From Flink's dynamic-table model: **a continuous query's output must be semantically
 equivalent to the same query run in batch on a snapshot of the input.** Every streaming
-operator + sink is judged against this. Vajra's differential primitive is
+operator + sink is judged against this. Zelox's differential primitive is
 `FlowEvent::Data{ batch, retracted: BooleanArray }` — Flink's *retract stream*
 (`retracted=false` = INSERT / UPDATE_AFTER; `retracted=true` = UPDATE_BEFORE / DELETE).
 
@@ -77,7 +77,7 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   that N=2/single-sink f3c never stresses), or (2) window operator state/emit-vs-offset misalignment
   across the epoch boundary at 8 partitions. NEXT = instrument a continuous run to log which epoch
   commits which (window,key) and find the double-commit; do NOT build a redundant sink. Still BLOCKS
-  flipping `VAJRA_INC_CKPT` default-on.
+  flipping `ZELOX_INC_CKPT` default-on.
   **ROOT-CAUSED 2026-06-25 (artifact inspection, no extra runs):** the "dups" are NOT re-emits of the
   same value — they are **un-merged PARTIAL COUNTS that sum to the true count**: e.g. (W0,k170)→{epoch0:3,
   epoch24:7} (=10), (W0,k200)→{epoch0:8,epoch24:2}, and crucially (W2,k254)→{epoch24:7, epoch24:3}
@@ -129,7 +129,7 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   (Compounds with F5: even once uncapped, state is in-memory — no spill — so very large state OOMs.)
 
 - **P0 — throughput**: windowed agg ~2.5× slower than Flink wall (EKS 100M, 2026-06-21:
-  Flink 17.4s/8.7GiB vs Vajra **44s**/2.4GiB). LOCALIZED by elimination at EKS scale:
+  Flink 17.4s/8.7GiB vs Zelox **44s**/2.4GiB). LOCALIZED by elimination at EKS scale:
   (a) `from_json` = 3.67M rows/s single-thread (×16 ≫ 2.3M/s aggregate) ⇒ not it;
   (b) `shuffle.partitions=1` (no exchange) = 43.6s ≈ 44s ⇒ exchange/parallelism not it;
   (c) larger batch (128Ki) = worse (44s, 2.4GiB) ⇒ per-batch overhead not it;
@@ -161,7 +161,7 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
 
 1. **Unit** (in-crate, no I/O): operator logic, e.g. `window_accum::update_mode_tests` proves
    retract+insert convergence; `collector` netting test. Fast, runs in CI.
-2. **Local Spark-diff** (`scripts/diff_test`, local Kafka in docker): same query on Vajra vs real
+2. **Local Spark-diff** (`scripts/diff_test`, local Kafka in docker): same query on Zelox vs real
    Spark 3.5.3; assert bit-equal (append) or converged-equal (update). No cloud cost.
 3. **EKS vs Flink** (bundled, paid): 100M head-to-head — correctness (per-group exact, 0 loss),
    memory, throughput vs official Flink 1.19. One spend per milestone, torn down to $0 after.

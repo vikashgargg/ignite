@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Progressive per-stage throughput profiler (Vajra) — pinpoint WHERE the Flink gap is.
+"""Progressive per-stage throughput profiler (Zelox) — pinpoint WHERE the Flink gap is.
 
 Runs the SAME Kafka topic through three successive cut points, each `availableNow`
 (bounded catch-up), reporting throughput = N / wall for each. The DROP between
@@ -11,7 +11,7 @@ successive stages isolates that stage's cost:
 
   source->parse delta = from_json cost ; parse->full delta = shuffle+window+sink cost.
 
-Compare each Vajra stage to Flink's per-operator busy%/records-in (web UI) or the
+Compare each Zelox stage to Flink's per-operator busy%/records-in (web UI) or the
 matching Flink progressive job (scripts stage_profile runner). Grounded in AIM:
 measure each step, map to Flink, find where we lag — no guessing.
 
@@ -76,7 +76,7 @@ if STAGE in ("source", "nokey", "parse"):
     agg = parsed.groupBy(F.window("event_time", f"{WINDOW_S} seconds")).count()
     dt, got = run_agg(agg, OUT, CK)
     got = got or 0
-    print(f"VAJRA_STAGE stage=nokey events={N} wall_s={dt:.2f} "
+    print(f"ZELOX_STAGE stage=nokey events={N} wall_s={dt:.2f} "
           f"throughput={got/dt/1e6:.3f}M/s rows={got}", flush=True)
 
 elif STAGE == "full":
@@ -98,7 +98,7 @@ elif STAGE == "full":
     row = out.agg(F.sum("count").alias("total"),
                   F.countDistinct("window").alias("n_win")).collect()[0]
     total = row["total"] or 0
-    print(f"VAJRA_STAGE stage=full events={N} wall_s={dt:.2f} "
+    print(f"ZELOX_STAGE stage=full events={N} wall_s={dt:.2f} "
           f"throughput={total/dt/1e6:.3f}M/s total_events={total} n_windows={row['n_win']}",
           flush=True)
 

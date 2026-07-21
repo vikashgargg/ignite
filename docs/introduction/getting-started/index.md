@@ -102,7 +102,7 @@ If you use Sail in a notebook, you can adjust the session timeout to avoid endin
 ```python
 import os
 
-os.environ["SAIL_SPARK__SESSION_TIMEOUT_SECS"] = "3600"
+os.environ["ZELOX_SPARK__SESSION_TIMEOUT_SECS"] = "3600"
 ```
 
 You can refer to the [Configuration](/guide/configuration/) guide for more information about configuring Sail.

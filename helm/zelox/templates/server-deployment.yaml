@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "zelox.fullname" . }}-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "zelox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: spark-server
+spec:
+  replicas: {{ .Values.server.replicas }}
+  selector:
+    matchLabels:
+      {{- include "zelox.serverSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "zelox.serverSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "zelox.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - server
+            - --ip
+            - "0.0.0.0"
+            - --port
+            - {{ .Values.server.port | quote }}
+          ports:
+            - name: spark-connect
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.logLevel }}
+            - name: ZELOX_MODE
+              value: {{ .Values.mode }}
+            - name: ZELOX_CLUSTER__DRIVER_LISTEN_HOST
+              value: "0.0.0.0"
+            - name: ZELOX_CLUSTER__DRIVER_EXTERNAL_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: ZELOX_KUBERNETES__IMAGE
+              value: {{ include "zelox.image" . }}
+            - name: ZELOX_KUBERNETES__NAMESPACE
+              value: {{ .Values.namespace }}
+            - name: ZELOX_KUBERNETES__DRIVER_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: ZELOX_KUBERNETES__WORKER_SERVICE_ACCOUNT_NAME
+              value: {{ .Values.serviceAccount }}
+            - name: ZELOX_KUBERNETES__WORKER_POD_TEMPLATE
+              value: >-
+                {"spec":{"volumes":[{"name":"scratch","hostPath":{"path":{{ .Values.scratch.hostPath | quote }},"type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"scratch","mountPath":{{ .Values.scratch.hostPath | quote }}}],"resources":{{ .Values.workers.resources | toJson }}}]}}
+            - name: ZELOX_TELEMETRY__EXPORT_METRICS
+              value: {{ .Values.telemetry.exportMetrics | quote }}
+            - name: ZELOX_TELEMETRY__EXPORT_TRACES
+              value: {{ .Values.telemetry.exportTraces | quote }}
+            - name: ZELOX_TELEMETRY__EXPORT_LOGS
+              value: {{ .Values.telemetry.exportLogs | quote }}
+            - name: ZELOX_TELEMETRY__OTLP_ENDPOINT
+              value: {{ .Values.telemetry.otlpEndpoint | quote }}
+            - name: ZELOX_TELEMETRY__METRICS_EXPORT_INTERVAL_SECS
+              value: {{ .Values.telemetry.metricsExportIntervalSecs | quote }}
+            - name: ZELOX_TELEMETRY__METRICS_COLLECTION_INTERVAL_SECS
+              value: {{ .Values.telemetry.metricsCollectionIntervalSecs | quote }}
+            - name: ZELOX_CLUSTER__TASK_MAX_ATTEMPTS
+              value: {{ .Values.faultTolerance.taskMaxAttempts | quote }}
+            - name: ZELOX_CLUSTER__WORKER_HEARTBEAT_INTERVAL_SECS
+              value: {{ .Values.faultTolerance.workerHeartbeatIntervalSecs | quote }}
+            - name: ZELOX_CLUSTER__WORKER_HEARTBEAT_TIMEOUT_SECS
+              value: {{ .Values.faultTolerance.workerHeartbeatTimeoutSecs | quote }}
+            - name: ZELOX_CLUSTER__WORKER_LAUNCH_TIMEOUT_SECS
+              value: {{ .Values.faultTolerance.workerLaunchTimeoutSecs | quote }}
+            {{- with .Values.server.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            tcpSocket:
+              port: spark-connect
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: spark-connect
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+          volumeMounts:
+            - name: scratch
+              mountPath: {{ .Values.scratch.hostPath }}
+      volumes:
+        {{- include "zelox.scratchVolume" . | nindent 8 }}

@@ -45,6 +45,6 @@ jobs:
 
       - name: Update Gold Data
         run: |
-          env SAIL_UPDATE_GOLD_DATA=1 cargo nextest run
+          env ZELOX_UPDATE_GOLD_DATA=1 cargo nextest run
 
       - uses: ./.github/actions/detect-changes

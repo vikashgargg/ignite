@@ -8,12 +8,12 @@
 > **T2/kind FAIR head-to-head (2026-07-08, parallelism=2 both, Kafka→passthrough→Kafka):**
 > | | p50 | p99 | max |
 > |---|---|---|---|
-> | **Vajra** | **30 ms** | **125 ms** | **128 ms** |
+> | **Zelox** | **30 ms** | **125 ms** | **128 ms** |
 > | Flink 1.19 | 42 ms | 580 ms | 767 ms |
 >
-> **Vajra WINS every percentile, and the TAIL by 4.6–6×.** MECHANISM (grounded): Flink's p99/max
+> **Zelox WINS every percentile, and the TAIL by 4.6–6×.** MECHANISM (grounded): Flink's p99/max
 > spikes (580/767 ms) are **JVM stop-the-world GC pauses** — the canonical JVM streaming tail-latency
-> problem (REFERENCES: no-GC / off-heap-state). Vajra is Rust, **no GC** → the tail stays FLAT
+> problem (REFERENCES: no-GC / off-heap-state). Zelox is Rust, **no GC** → the tail stays FLAT
 > (125→128 ms, p99≈max). This is the no-JVM advantage made measurable — the axis where "single binary,
 > no JVM" shows up exactly as the charter predicts. The old "p50 ~30 s" below = the pre-sink per-epoch
 > **file** probe (superseded); the old EKS "p50 257 ms" = the pre-parallel-sink 1/16-partition bug
@@ -36,7 +36,7 @@
   delivery reports. Transactions: `init_transactions` / `begin_transaction` /
   `commit_transaction` / `abort_transaction`.
 
-## Vajra integration points (mapped against the current code)
+## Zelox integration points (mapped against the current code)
 - **Source of truth for the flow-event sink pattern:** `RealtimeFileSinkExec`
   (`crates/sail-data-source/src/streaming_decode.rs`) — consumes the **flow-event** input
   (not decoded), reads `Checkpoint{epoch}` barriers in-band to delimit epochs, accumulates an
@@ -81,7 +81,7 @@ cadence (which only governs durability/EO, off the record path — already the r
 intent). Also: honor `Trigger.ProcessingTime` intervals for predictable micro-batch latency.
 
 ## Acceptance criteria (how we prove it)
-- **Functional:** Kafka→Vajra→Kafka passthrough; consumer reads the output topic; values match
+- **Functional:** Kafka→Zelox→Kafka passthrough; consumer reads the output topic; values match
   input 1:1 (no loss/dup at AT_LEAST_ONCE allows dup → assert ⊇; at EXACTLY_ONCE assert ==).
 - **Latency:** sustained 100k ev/s, embed produce-wall-ms in each record, measure
   `consume_ms − produce_ms` on the output topic → **p99 < 100 ms** (vs the current ~30 s

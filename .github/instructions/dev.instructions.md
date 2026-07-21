@@ -17,7 +17,7 @@ Before committing changes, make sure to format your code and fix all Clippy warn
 Tests use "gold data" files for validation. If you change logic that affects output, you may need to update these files:
 
 ```bash
-env SAIL_UPDATE_GOLD_DATA=1 cargo nextest run
+env ZELOX_UPDATE_GOLD_DATA=1 cargo nextest run
 ```
 
 ### Python Development

@@ -1,0 +1,14 @@
+[package]
+name = "zelox-catalog-memory"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-catalog = { path = "../zelox-catalog" }
+
+async-trait = { workspace = true }
+dashmap = { workspace = true }

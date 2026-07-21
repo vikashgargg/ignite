@@ -1,4 +1,4 @@
-# Vajra prod-grade dimensions scorecard — measure EVERYTHING, then claim, then fix
+# Zelox prod-grade dimensions scorecard — measure EVERYTHING, then claim, then fix
 
 **Discipline (2026-07-01):** before claiming "Flink/Spark replacement" or doing prod fixes, measure each
 dimension that defines a prod-grade streaming+batch engine, honestly, vs a named baseline. Claim ONLY
@@ -28,7 +28,7 @@ grounded in Flink 2.x / Spark 4.1 RT-mode / RisingWave / StreamNative (REFERENCE
 6. D8/D9 already green — just fold into the scorecard run.
 
 ## Output
-One `scripts/dimensions_scorecard.sh` that runs D2–D10 locally + emits a table (Vajra vs baseline per
+One `scripts/dimensions_scorecard.sh` that runs D2–D10 locally + emits a table (Zelox vs baseline per
 dim), plus the EKS D1 number. Then: commit/push to CLAIM the measured design. Then prod fixes per dim,
 grounded — memory→Flink off-heap+credit-flow; latency→Spark RT concurrent-stages; recovery→ForSt;
 backpressure→FLIP-2; skew→Flink 2.3 adaptive-partition; state→RisingWave/ForSt tiered.

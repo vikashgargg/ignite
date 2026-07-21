@@ -1,0 +1,30 @@
+[package]
+name = "zelox-flight"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-plan = { path = "../zelox-plan" }
+zelox-server = { path = "../zelox-server" }
+zelox-sql-analyzer = { path = "../zelox-sql-analyzer" }
+zelox-session = { path = "../zelox-session" }
+zelox-telemetry = { path = "../zelox-telemetry" }
+
+arrow = { workspace = true }
+arrow-flight = { workspace = true }
+datafusion = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+futures = { workspace = true }
+prost = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+uuid = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Distributed continuous (Trigger.Continuous) exactly-once + HARD-CRASH recovery gate.
 
-Validates that Vajra's realtime/continuous streaming is exactly-once across a hard
+Validates that Zelox's realtime/continuous streaming is exactly-once across a hard
 crash (SIGKILL) of the server, on a multi-worker cluster, end-to-end through real
 Spark Connect.
 
 Driver (bash) sequence — see the committed run in docs/design/distributed-streaming-f2f3.md:
-  1. start `vajra server --mode local-cluster --workers 2 --port P`
+  1. start `zelox server --mode local-cluster --workers 2 --port P`
   2. python dist_continuous_eo_crash.py P w1     # produce 5000 -> continuous Kafka->parquet
-  3. pkill -9 -f 'vajra server'                   # HARD crash mid-stream (not graceful)
+  3. pkill -9 -f 'zelox server'                   # HARD crash mid-stream (not graceful)
   4. restart the server on port P
   5. python dist_continuous_eo_crash.py P check   # produce +5000 -> verify EO
 
@@ -31,7 +31,7 @@ s = SparkSession.builder.remote(f"sc://localhost:{PORT}").getOrCreate()
 def produce(lo, hi):
     lines = [json.dumps({"id": i}) for i in range(lo, hi)]
     p = subprocess.run(
-        ["docker", "exec", "-i", "vajra_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
+        ["docker", "exec", "-i", "zelox_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
          "--bootstrap-server", BOOT, "--topic", TOPIC],
         input=("\n".join(lines) + "\n").encode(), capture_output=True)
     assert p.returncode == 0, p.stderr[-200:]

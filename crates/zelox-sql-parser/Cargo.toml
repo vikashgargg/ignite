@@ -1,0 +1,25 @@
+[package]
+name = "zelox-sql-parser"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-sql-macro = { path = "../zelox-sql-macro" }
+
+chumsky = { workspace = true }
+phf = { workspace = true }
+either = { workspace = true }
+paste = { workspace = true }
+serde = { workspace = true }
+itertools = { workspace = true }
+
+[dev-dependencies]
+zelox-common = { path = "../zelox-common" }
+
+[build-dependencies]
+prettyplease = { workspace = true }
+syn = { workspace = true }
+quote = { workspace = true }

@@ -1,6 +1,6 @@
 # Debug-SYMBOL build of the EKS image: identical to docker/Dockerfile (opt-level=3,
 # LTO off) but keeps symbols + line tables so a panic prints a real backtrace with
-# Vajra frames (the normal release profile has strip=true). Diagnostic image only.
+# Zelox frames (the normal release profile has strip=true). Diagnostic image only.
 ARG PYTHON_VERSION=3.12
 ARG PYSPARK_VERSION=4.0.0
 ARG RUST_VERSION=1.95.0
@@ -27,14 +27,14 @@ RUN CARGO_BUILD_JOBS=$(nproc) \
     CARGO_PROFILE_RELEASE_STRIP=false \
     CARGO_PROFILE_RELEASE_DEBUG=line-tables-only \
     cargo build --release -p sail-cli --bins \
-    && cp /app/target/release/vajra /usr/local/bin/vajra
+    && cp /app/target/release/zelox /usr/local/bin/zelox
 
 FROM python:${PYTHON_VERSION}-slim
 ARG PYSPARK_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "pyspark==${PYSPARK_VERSION}" pandas pyarrow
-COPY --from=builder /usr/local/bin/vajra /usr/local/bin/vajra
+COPY --from=builder /usr/local/bin/zelox /usr/local/bin/zelox
 EXPOSE 50051
-ENTRYPOINT ["/usr/local/bin/vajra"]
+ENTRYPOINT ["/usr/local/bin/zelox"]
 CMD ["server", "--ip", "0.0.0.0", "--port", "50051"]

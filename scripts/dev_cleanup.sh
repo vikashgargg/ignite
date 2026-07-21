@@ -5,8 +5,8 @@
 #        SKIP_DOCKER=1 bash scripts/dev_cleanup.sh   # procs + /tmp only (don't touch Docker)
 set -uo pipefail
 
-echo "== killing stale Vajra/test processes (frees memory) =="
-for pat in 'target/debug/vajra' 'target/release/vajra' state_scale_stress inc_ckpt_gate \
+echo "== killing stale Zelox/test processes (frees memory) =="
+for pat in 'target/debug/zelox' 'target/release/zelox' state_scale_stress inc_ckpt_gate \
            local_headtohead correctness_gate f5_validate f3c_stateful_crash kafka-console-producer \
            'docker (restart|ps|run|exec)'; do
   pkill -9 -f "$pat" 2>/dev/null && echo "  killed: $pat" || true

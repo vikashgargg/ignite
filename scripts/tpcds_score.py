@@ -1,8 +1,8 @@
 """
-Vajra TPC-DS Compatibility Scorecard
+Zelox TPC-DS Compatibility Scorecard
 ======================================
 Runs all 99 TPC-DS queries (small scale factor, in-memory DuckDB-generated data)
-against a running Vajra server via Spark Connect and reports pass/fail per query.
+against a running Zelox server via Spark Connect and reports pass/fail per query.
 
 Usage:
     # Generate data + run all 99 queries
@@ -613,7 +613,7 @@ def main() -> None:
     else:
         query_nums = sorted(TPCDS_QUERIES.keys())
 
-    print(f"Vajra TPC-DS Scorecard  (SF={TPCDS_SF}, {len(query_nums)} queries)")
+    print(f"Zelox TPC-DS Scorecard  (SF={TPCDS_SF}, {len(query_nums)} queries)")
     print(f"Server: {SPARK_REMOTE}")
     print()
 

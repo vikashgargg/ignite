@@ -1,6 +1,6 @@
-# Vajra — Architecture
+# Zelox — Architecture
 
-Vajra is a Rust-native, single-binary Spark engine. It is a fork of
+Zelox is a Rust-native, single-binary Spark engine. It is a fork of
 [lakehq/sail](https://github.com/lakehq/sail), extended with a streamlined
 deployment story, a richer CLI, full Spark compatibility fixes, and a roadmap
 toward a managed cloud offering.
@@ -73,7 +73,7 @@ PySpark / SQL client
 
 | Crate | Role |
 |---|---|
-| `sail-cli` | Single binary entrypoint (`vajra`). Clap CLI with `server`, `sql`, `run`, `shell`, `bench`, `cluster`, `flight` subcommands. |
+| `sail-cli` | Single binary entrypoint (`zelox`). Clap CLI with `server`, `sql`, `run`, `shell`, `bench`, `cluster`, `flight` subcommands. |
 | `sail-spark-connect` | Spark Connect gRPC server (tonic). Deserialises Spark Connect proto messages. |
 | `sail-sql-parser` | SQL parser (chumsky + custom grammar). Produces an AST from SQL strings. |
 | `sail-sql-analyzer` | Name resolution, type inference, semantic analysis. |
@@ -113,7 +113,7 @@ PySpark / SQL client
 
 ## Streaming Architecture (Sprint 6)
 
-Vajra's structured streaming runs as a micro-batch loop on a background Tokio task. The new stateful components added in Sprint 6:
+Zelox's structured streaming runs as a micro-batch loop on a background Tokio task. The new stateful components added in Sprint 6:
 
 ```
 Kafka / Rate source
@@ -142,16 +142,16 @@ Key design points:
 ## Binary Modes
 
 ```
-vajra server                          # Spark Connect server (local dev)
-vajra sql "SELECT 1 + 1"             # One-shot SQL
-vajra run -f job.py                  # Run PySpark script
-vajra shell                          # Interactive PySpark shell
-vajra bench --scale-factor 10        # TPC-H benchmark
-vajra cluster --role=scheduler       # Distributed scheduler (Phase 2)
-vajra cluster --role=worker \        # Distributed worker (Phase 2)
+zelox server                          # Spark Connect server (local dev)
+zelox sql "SELECT 1 + 1"             # One-shot SQL
+zelox run -f job.py                  # Run PySpark script
+zelox shell                          # Interactive PySpark shell
+zelox bench --scale-factor 10        # TPC-H benchmark
+zelox cluster --role=scheduler       # Distributed scheduler (Phase 2)
+zelox cluster --role=worker \        # Distributed worker (Phase 2)
   --scheduler scheduler:7070
-vajra flight server                  # Arrow Flight SQL server
-vajra mcp-server                     # Spark MCP server
+zelox flight server                  # Arrow Flight SQL server
+zelox mcp-server                     # Spark MCP server
 ```
 
 ---

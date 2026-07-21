@@ -1,5 +1,5 @@
--- Flink REALTIME (UNBOUNDED streaming) side of the Vajra-Trigger.RealTime head-to-head.
--- IDENTICAL logical query to scripts/stream_realtime_drain.py (Vajra): 10s event-time TUMBLE window,
+-- Flink REALTIME (UNBOUNDED streaming) side of the Zelox-Trigger.RealTime head-to-head.
+-- IDENTICAL logical query to scripts/stream_realtime_drain.py (Zelox): 10s event-time TUMBLE window,
 -- GROUP BY window + k, COUNT(*). NO scan.bounded.mode => TRUE continuous streaming (Flink's core
 -- advantage, the mode we want to beat), submitted async (dml-sync=false); the harness measures the
 -- catch-up DRAIN of the pre-loaded backlog via the source consumer-group lag, and consumes wagg_out for

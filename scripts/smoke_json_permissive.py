@@ -2,7 +2,7 @@
 Smoke test: JSON permissive mode with _corrupt_record column.
 
 Run as:
-    VAJRA_BIN=./target/debug/ignite \
+    ZELOX_BIN=./target/debug/ignite \
     .venvs/smoke/bin/python scripts/smoke_json_permissive.py
 """
 from __future__ import annotations
@@ -14,12 +14,12 @@ import tempfile
 import time
 
 # ---------------------------------------------------------------------------
-# Start Vajra server
+# Start Zelox server
 # ---------------------------------------------------------------------------
 
-vajra_bin = os.environ.get("VAJRA_BIN", "./target/debug/ignite")
+zelox_bin = os.environ.get("ZELOX_BIN", "./target/debug/ignite")
 proc = subprocess.Popen(
-    [vajra_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
+    [zelox_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.PIPE,
 )

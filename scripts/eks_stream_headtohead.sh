@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Vajra-vs-Flink STREAMING head-to-head on EKS — reproducible orchestration.
+# Zelox-vs-Flink STREAMING head-to-head on EKS — reproducible orchestration.
 #
 # Assumes an EKS cluster is already up (k8s/stream/eks-stream-cluster.yaml) with
-# nodes labeled role=kafka and role=compute, and the arm64 vajra image in ECR.
+# nodes labeled role=kafka and role=compute, and the arm64 zelox image in ECR.
 # Runs the IDENTICAL 10s event-time tumbling-window keyed COUNT over the SAME
 # Kafka topic on both engines, sequentially (never concurrently), on the same
 # dedicated compute node — true like-for-like. Captures throughput + peak RSS.
@@ -13,8 +13,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 N="${1:-100000000}"
 REGION=ap-south-1
 NS=stream
-ECR="$(aws ecr describe-repositories --region $REGION --repository-name vajra --query 'repositories[0].repositoryUri' --output text)"
-REG="${ECR%/vajra}"
+ECR="$(aws ecr describe-repositories --region $REGION --repository-name zelox --query 'repositories[0].repositoryUri' --output text)"
+REG="${ECR%/zelox}"
 echo "ECR=$(echo "$ECR" | sed -E 's/[0-9]{12}/<ACCT>/g')  N=$N"
 
 kk() { kubectl -n "$NS" "$@"; }
@@ -45,28 +45,28 @@ echo "FLINK wall_s=$FLINK_WALL peak_bytes=$FLINK_MEM"
 kk delete -f k8s/stream/flink-session.yaml --ignore-not-found
 kk delete job flink-runner --ignore-not-found
 
-echo "================ [4/6] Vajra ================"
-sed -e "s|__ECR__|$REG|g" -e "s|vajra:eo-multipart|vajra:${TAG:-realtime-fix}|g" k8s/stream/vajra-stream.yaml | kk apply -f -
+echo "================ [4/6] Zelox ================"
+sed -e "s|__ECR__|$REG|g" -e "s|zelox:eo-multipart|zelox:${TAG:-realtime-fix}|g" k8s/stream/zelox-stream.yaml | kk apply -f -
 # VAJ-T7 source-fusion opt-in + per-stage CPU profile (source_read drop is the beat).
-[ "${VAJRA_T7_FUSE:-0}" = "1" ] && kk set env deploy/vajra-stream \
-  VAJRA_T7_FUSE=1 VAJRA_WM_PROF=1 RUST_LOG="warn,sail_physical_plan::streaming::window_accum=info,sail_execution::task_runner::core=debug" >/dev/null 2>&1
-wait_ready vajra-stream
-kk apply -f k8s/stream/vajra-client.yaml
-kk wait --for=condition=ready --timeout=300s pod/vajra-client
-until kk logs vajra-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
-kk cp scripts/stream_windowed_agg.py vajra-client:/tmp/wagg.py
+[ "${ZELOX_T7_FUSE:-0}" = "1" ] && kk set env deploy/zelox-stream \
+  ZELOX_T7_FUSE=1 ZELOX_WM_PROF=1 RUST_LOG="warn,sail_physical_plan::streaming::window_accum=info,sail_execution::task_runner::core=debug" >/dev/null 2>&1
+wait_ready zelox-stream
+kk apply -f k8s/stream/zelox-client.yaml
+kk wait --for=condition=ready --timeout=300s pod/zelox-client
+until kk logs zelox-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
+kk cp scripts/stream_windowed_agg.py zelox-client:/tmp/wagg.py
 
-echo "================ [5/6] Vajra windowed-agg run ================"
-VPOD=$(kk get pod -l app=vajra-stream -o jsonpath='{.items[0].metadata.name}')
-kk exec vajra-client -- sh -c \
-  "SPARK_REMOTE=sc://vajra-stream.$NS.svc.cluster.local:50051 BOOT=kafka.$NS.svc.cluster.local:9092 TOPIC=events N_EVENTS=$N OUT=/data/wagg_out CK=/data/wagg_ck python3 /tmp/wagg.py" \
-  2>&1 | grep VAJRA_WAGG
-VAJRA_MEM=$(kk exec "$VPOD" -- sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes' 2>/dev/null)
-echo "VAJRA peak_bytes=$VAJRA_MEM"
+echo "================ [5/6] Zelox windowed-agg run ================"
+VPOD=$(kk get pod -l app=zelox-stream -o jsonpath='{.items[0].metadata.name}')
+kk exec zelox-client -- sh -c \
+  "SPARK_REMOTE=sc://zelox-stream.$NS.svc.cluster.local:50051 BOOT=kafka.$NS.svc.cluster.local:9092 TOPIC=events N_EVENTS=$N OUT=/data/wagg_out CK=/data/wagg_ck python3 /tmp/wagg.py" \
+  2>&1 | grep ZELOX_WAGG
+ZELOX_MEM=$(kk exec "$VPOD" -- sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null || cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes' 2>/dev/null)
+echo "ZELOX peak_bytes=$ZELOX_MEM"
 
 echo "================ [6/6] Scorecard ================"
-awk -v fw="$FLINK_WALL" -v fm="$FLINK_MEM" -v vm="$VAJRA_MEM" -v n="$N" 'BEGIN{
+awk -v fw="$FLINK_WALL" -v fm="$FLINK_MEM" -v vm="$ZELOX_MEM" -v n="$N" 'BEGIN{
   printf "Flink : wall=%.1fs  throughput=%.3fM ev/s  peakRSS=%.2f GiB\n", fw, n/fw/1e6, fm/1073741824;
-  printf "Vajra : peakRSS=%.2f GiB (throughput from VAJRA_WAGG line above)\n", vm/1073741824;
+  printf "Zelox : peakRSS=%.2f GiB (throughput from ZELOX_WAGG line above)\n", vm/1073741824;
 }'
-echo "Done. Run scripts/aws_eks_teardown.sh vajra-stream-ht $REGION when finished."
+echo "Done. Run scripts/aws_eks_teardown.sh zelox-stream-ht $REGION when finished."

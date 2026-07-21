@@ -1,0 +1,21 @@
+[package]
+name = "zelox-python"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-telemetry = { path = "../zelox-telemetry" }
+zelox-flight = { path = "../zelox-flight" }
+zelox-spark-connect = { path = "../zelox-spark-connect" }
+zelox-cli = { path = "../zelox-cli" }
+
+pyo3 = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+
+[lib]
+crate-type = ["cdylib"]

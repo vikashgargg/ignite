@@ -13,7 +13,7 @@ Continuous windowed aggregation, release build, RUST_LOG=info latency instrument
 | windowed agg, continuous | **0.0 ms** | **0.0–0.1 ms** | **0.1 ms** |
 
 Sub-millisecond, sustained — Flink-class (Flink p99 ~tens of ms), not Spark's ~100 ms–1 s
-micro-batch class. Vajra's tick is ~1–10 ms with sub-ms per-batch processing.
+micro-batch class. Zelox's tick is ~1–10 ms with sub-ms per-batch processing.
 
 ## 2. Bounded state under load ✅ (the key reliability property)
 Stateful operators must keep memory bounded over long runs. Measured **peak RSS over
