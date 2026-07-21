@@ -104,12 +104,26 @@ fn key_stats() -> &'static std::sync::Mutex<std::collections::BTreeMap<String, K
         std::sync::OnceLock::new();
     M.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
 }
+/// Periodic KEY_TRACE dumper (every 5s) — realtime mode never emits `EndOfData`, so the census must be
+/// flushed on a timer, not only at end-of-stream. Started lazily on the first `key_trace` call.
+fn ensure_key_trace_dumper() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    STARTED.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("key-trace-dumper".to_string())
+            .spawn(|| loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                key_trace_dump();
+            });
+    });
+}
 /// Census the "k" group-key column of `batch` into the cumulative stats for `tag`. No-op if unset or the
 /// batch carries no "k" column (e.g. marker batches). Accepts Int32/Int64.
 pub fn key_trace(tag: &str, batch: &datafusion::arrow::record_batch::RecordBatch) {
     if !key_trace_enabled() {
         return;
     }
+    ensure_key_trace_dumper();
     let Some(col) = batch.column_by_name("k") else {
         return;
     };
