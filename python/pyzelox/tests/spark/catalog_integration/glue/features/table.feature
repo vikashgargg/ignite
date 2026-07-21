@@ -436,7 +436,7 @@ Feature: Glue catalog table operations
       """
       CREATE TABLE empty_select (id BIGINT, name STRING)
       USING parquet
-      LOCATION 'file:///tmp/sail_glue_empty_select'
+      LOCATION 'file:///tmp/zelox_glue_empty_select'
       """
     When query
       """

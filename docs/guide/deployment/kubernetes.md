@@ -87,11 +87,11 @@ Please refer to the [Changelog](/reference/changelog/) if the configuration ever
 
 :::
 
-Create a file `k8s/sail.yaml` with the following content.
+Create a file `k8s/zelox.yaml` with the following content.
 
 ::: code-group
 
-<<< ../../../k8s/sail.yaml [k8s/sail.yaml]
+<<< ../../../k8s/zelox.yaml [k8s/zelox.yaml]
 
 :::
 
@@ -99,7 +99,7 @@ Create the Kubernetes resources using the following command.
 The Sail Spark Connect server runs as a Kubernetes deployment, and the gRPC port is exposed as a Kubernetes service.
 
 ```bash
-kubectl apply -f k8s/sail.yaml
+kubectl apply -f k8s/zelox.yaml
 ```
 
 ## Overriding the Default Pod Spec
@@ -156,7 +156,7 @@ custom pod template (such as the `k8s/test-volume-patch.yaml` file shown above) 
 Once the pod template is in place, you can run pytest locally against the cluster with the following command.
 
 ```bash
-env SPARK_REMOTE="sc://localhost:50051" PYTEST_DEBUG_TEMPROOT="/tmp/sail" pytest --pyargs pyzelox
+env SPARK_REMOTE="sc://localhost:50051" PYTEST_DEBUG_TEMPROOT="/tmp/zelox" pytest --pyargs pyzelox
 ```
 
 ## Cleaning Up
@@ -165,7 +165,7 @@ Run the following command to clean up the Kubernetes resources for the Sail serv
 All Sail worker pods will be terminated automatically as well.
 
 ```bash
-kubectl delete -f k8s/sail.yaml
+kubectl delete -f k8s/zelox.yaml
 ```
 
 If you used Kustomize to deploy the Sail server, you can clean up the resources with the following command.

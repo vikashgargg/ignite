@@ -70,7 +70,7 @@ wait_port() {
 section "PHASE 1: Kubernetes cluster mode (kind)"
 
 kind delete cluster --name "$KIND_CLUSTER" 2>/dev/null || true
-mkdir -p /tmp/zelox /private/tmp/zelox /tmp/sail /private/tmp/sail
+mkdir -p /tmp/zelox /private/tmp/zelox /tmp/zelox /private/tmp/zelox
 
 log "Creating kind cluster '$KIND_CLUSTER'..."
 kind create cluster --name "$KIND_CLUSTER" \
@@ -82,7 +82,7 @@ kind load docker-image zelox:latest --name "$KIND_CLUSTER" \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Applying k8s manifests..."
-kubectl apply -f "$ZELOX_DIR/k8s/sail.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
+kubectl apply -f "$ZELOX_DIR/k8s/zelox.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Waiting for deployment (up to 3 min)..."
 if kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=180s \

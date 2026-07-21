@@ -16,7 +16,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }} # e.g. vikashgargg/ignite
+  IMAGE_NAME: ${{ github.repository }} # e.g. vikashgargg/zelox
 
 permissions:
   contents: read

@@ -98,7 +98,7 @@ All AWS torn down to $0 after each run.
 > `hive_metastore` on the 8 GB host). K8s needed four real fixes, all committed:
 > `docker/Dockerfile` Rust `1.86→1.95` (`aws-config` MSRV 1.91.1), `ARG CARGO_JOBS`
 > (8 parallel jobs OOM-killed the final link → cap to 2 on small hosts), the scorecard
-> `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/sail`, not `/tmp/zelox`), and the two
+> `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/zelox`, not `/tmp/zelox`), and the two
 > `_metadata` tests switched from a client-local `tempfile` dir to the shared `tmp` root so
 > worker pods can see the files. The K8s driver dynamically spawned `zelox-worker-*` pods per
 > query — true distributed execution.

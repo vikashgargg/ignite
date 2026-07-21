@@ -62,7 +62,7 @@ section "PHASE 2: kind cluster (kubernetes-cluster mode)"
 kind delete cluster --name "$KIND_CLUSTER" 2>/dev/null || true
 
 log "Creating kind cluster '$KIND_CLUSTER'..."
-mkdir -p /tmp/zelox /private/tmp/zelox /tmp/sail /private/tmp/sail
+mkdir -p /tmp/zelox /private/tmp/zelox /tmp/zelox /private/tmp/zelox
 kind create cluster --name "$KIND_CLUSTER" \
     --config "$ZELOX_DIR/k8s/kind-config.yaml" \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
@@ -72,7 +72,7 @@ kind load docker-image zelox:latest --name "$KIND_CLUSTER" \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Deploying Zelox to kind..."
-kubectl apply -f "$ZELOX_DIR/k8s/sail.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
+kubectl apply -f "$ZELOX_DIR/k8s/zelox.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Waiting for deployment rollout (up to 3 min)..."
 kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=180s \

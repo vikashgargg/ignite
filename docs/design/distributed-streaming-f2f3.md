@@ -276,7 +276,7 @@ Spark-matched). The ONE remaining stateful gap, located precisely:
   (`kubernetes-cluster`) gate vs Flink (this is all local-cluster = in-process workers on one box).
 
 ### F3-d prod-grade plan (multi-node gate — scoped 2026-06-22)
-Topology grounded: `--mode kubernetes-cluster` (`k8s/sail.yaml`) runs a driver pod that **dynamically
+Topology grounded: `--mode kubernetes-cluster` (`k8s/zelox.yaml`) runs a driver pod that **dynamically
 spawns worker pods via the k8s API** (`ZELOX_KUBERNETES__WORKER_POD_TEMPLATE` + RBAC: `Role` pods/`*`,
 `zelox-user` SA + binding — all present) landing on **separate nodes**, Arrow-Flight shuffle between
 them — the real multi-node engine, distinct from local-cluster (in-process workers). Prod-grade
@@ -291,7 +291,7 @@ sequence (multi-node distributed validation must be careful, not rushed):
 3. **Flink head-to-head** — same Kafka→stateful→sink multi-node; throughput / latency / memory /
    recovery-time. The credibility claim for "distributed stateful, on power with Flink."
 Acceptance: cross-node worker placement proven; distributed continuous-stateful EO across node loss;
-vs-Flink numbers recorded. Artifacts: `k8s/kind-multinode.yaml`, `k8s/sail.yaml`, F3-c gate scripts.
+vs-Flink numbers recorded. Artifacts: `k8s/kind-multinode.yaml`, `k8s/zelox.yaml`, F3-c gate scripts.
 
 **F3-d step 1 (KIND multi-node) — PASS 2026-06-22.** 3-node KIND (1 control-plane + 2 workers),
 `kubernetes-cluster` mode. A distributed query made the driver dynamically spawn **5 worker pods that
@@ -300,7 +300,7 @@ true multi-node distributed execution, not local-cluster in-process. `dist_strea
 (batch.write / rate / file / windowed_file=97 / dedup=50 / join=200, every value Spark-matched) across
 the real multi-node cluster. **Prod insight (important):** the distributed sink needs **shared storage**
 — writing parquet to a worker pod's local `/tmp` fails cross-pod (reader on another pod sees no files);
-pointing outputs at the shared hostPath (`/tmp/sail`, the EKS analogue = S3, which the prior EKS runs
+pointing outputs at the shared hostPath (`/tmp/zelox`, the EKS analogue = S3, which the prior EKS runs
 used) makes it 6/6. So distributed streaming on Zelox requires object-store/shared sinks (already the
 F4 design). **Multi-node WORKER-POD-KILL failover — PASS 2026-06-22 (stateless continuous).** Continuous
 Kafka→parquet on the 3-node KIND cluster (driver spawns 5 workers); deleted a running worker pod
@@ -311,4 +311,4 @@ EO recovery from the shared checkpoint) works. Remaining: the SAME across worker
 *stateful* windowed-agg (F3-c on multi-node — extends this with per-epoch state recovery); then
 EKS multi-node (real node loss) + Flink head-to-head (step 2/3).
 - **F3-d** (multi-node): `--mode kubernetes-cluster` (scheduler + worker pods across nodes, exists in
-  `k8s/sail.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.
+  `k8s/zelox.yaml`) running the above stateful pipeline vs Flink on multi-node EKS.

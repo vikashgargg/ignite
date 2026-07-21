@@ -4,12 +4,12 @@
 
 **Zelox is a Rust-native unified batch + streaming engine — Apache Spark's batch *and* Flink-class streaming in one binary. Drop in your existing PySpark code. No JVM. No Hadoop. One binary.**
 
-[![CI](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml/badge.svg)](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml)
-[![Release](https://img.shields.io/github/v/release/vikashgargg/ignite)](https://github.com/vikashgargg/ignite/releases)
+[![CI](https://github.com/vikashgargg/zelox/actions/workflows/zelox-ci.yml/badge.svg)](https://github.com/vikashgargg/zelox/actions/workflows/zelox-ci.yml)
+[![Release](https://img.shields.io/github/v/release/vikashgargg/zelox)](https://github.com/vikashgargg/zelox/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
 ```sh
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 ```
 
 ---
@@ -180,7 +180,7 @@ EKS and Apple `container`) is on GHCR, signed and SBOM-attested:
 
 ```sh
 # Start a Zelox Spark Connect server on :50051 (bind 0.0.0.0 so it's reachable through -p)
-docker run --rm -p 50051:50051 ghcr.io/vikashgargg/ignite:latest server --ip 0.0.0.0 --mode local
+docker run --rm -p 50051:50051 ghcr.io/vikashgargg/zelox:latest server --ip 0.0.0.0 --mode local
 ```
 
 ```python
@@ -190,7 +190,7 @@ spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
 spark.range(1_000_000).selectExpr("sum(id)").show()
 ```
 
-Verify provenance: `cosign verify ghcr.io/vikashgargg/ignite:latest` (keyless, Sigstore).
+Verify provenance: `cosign verify ghcr.io/vikashgargg/zelox:latest` (keyless, Sigstore).
 
 ### Prerequisites
 
@@ -202,7 +202,7 @@ Verify provenance: `cosign verify ghcr.io/vikashgargg/ignite:latest` (keyless, S
 ### Install (one command)
 
 ```sh
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 ```
 
 The installer:
@@ -431,7 +431,7 @@ Best for: development, notebooks, quick queries.
 
 ```sh
 # Install
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
 # Start server
@@ -522,7 +522,7 @@ Best for: distributed multi-node workloads. Works on Linux x86_64 / aarch64 and 
 kind create cluster --name zelox
 
 # 2. Deploy Zelox
-kubectl apply -f k8s/sail.yaml
+kubectl apply -f k8s/zelox.yaml
 
 # 3. Wait for pods ready
 kubectl wait --for=condition=ready pod -l app=zelox-spark-server \
@@ -572,7 +572,7 @@ EOF
 | `local-cluster` | `zelox server --mode local-cluster --workers 4` | Multi-core Mac | N in-process |
 | Apple Container local | `container run ... zelox:latest` | Isolated, reproducible | 1 container |
 | Apple Container cluster | `container run -e ZELOX_MODE=local-cluster ...` | Isolated multi-worker | N in-container |
-| Kubernetes | `kubectl apply -f k8s/sail.yaml` | Distributed, production | K8s pods |
+| Kubernetes | `kubectl apply -f k8s/zelox.yaml` | Distributed, production | K8s pods |
 
 ---
 
@@ -714,8 +714,8 @@ zelox bench [--scale-factor N]  TPC-H benchmark (requires pip install duckdb)
 
 ```sh
 # Prerequisites: Rust 1.91+, protoc 3.x, Python 3.10+
-git clone https://github.com/vikashgargg/ignite
-cd ignite
+git clone https://github.com/vikashgargg/zelox
+cd zelox
 
 # Dev build (fast, unoptimised)
 make dev

@@ -1,4 +1,4 @@
-name: Ignite CI
+name: Zelox CI
 
 on:
   push:
@@ -362,7 +362,7 @@ jobs:
           .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
 
       - name: Prepare shared scratch directories
-        run: mkdir -p /tmp/zelox /tmp/sail /private/tmp/sail
+        run: mkdir -p /tmp/zelox /tmp/zelox /private/tmp/zelox
 
       - name: Create kind cluster
         run: |
@@ -370,7 +370,7 @@ jobs:
           kind load docker-image zelox:latest --name zelox-ci
 
       - name: Apply k8s manifests
-        run: kubectl apply -f k8s/sail.yaml
+        run: kubectl apply -f k8s/zelox.yaml
 
       - name: Wait for deployment rollout
         run: kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=180s

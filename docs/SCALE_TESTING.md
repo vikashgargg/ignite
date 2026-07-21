@@ -55,7 +55,7 @@ kubectl wait --for=condition=complete job/clickbench-loader -n zelox --timeout=1
 ```bash
 # Point both the deployment image and the worker-pod-template image at ECR.
 sed "s#image: zelox:latest#image: $ECR/zelox:latest#g; \
-     s#value: zelox:latest#value: $ECR/zelox:latest#g" k8s/sail.yaml \
+     s#value: zelox:latest#value: $ECR/zelox:latest#g" k8s/zelox.yaml \
   | kubectl apply -f -
 kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=300s
 kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 &

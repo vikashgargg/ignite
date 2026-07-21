@@ -18,7 +18,7 @@
 # Idempotent, safe to run concurrently-ish (best-effort flock), self-rotating log.
 set -uo pipefail
 
-ROOT="${ZELOX_ROOT:-/Users/vikashgarg/Desktop/ignite}"
+ROOT="${ZELOX_ROOT:-/Users/vikashgarg/Desktop/zelox}"
 WARN_GB="${ZELOX_PRUNE_WARN_GB:-30}"   # below this: drop incremental caches
 CRIT_GB="${ZELOX_PRUNE_CRIT_GB:-15}"   # below this: full cargo clean (only if no build running)
 LOG="${ZELOX_PRUNE_LOG:-/tmp/zelox_prune.log}"

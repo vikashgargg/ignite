@@ -87,7 +87,7 @@ streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the dep
    multi-node head-to-head; tear to $0.
 
 ## 4b. Experiment 1 result (kind, 2026-07-07) — distributed execution CONFIRMED (batch); streaming pending
-Deployed `k8s/sail.yaml` (kubernetes-cluster driver, `zelox:t7fuse`) on kind. A trivial distributed
+Deployed `k8s/zelox.yaml` (kubernetes-cluster driver, `zelox:t7fuse`) on kind. A trivial distributed
 query (`spark.range(0,1e6,1,8).sum`) returned the correct result **and the driver dynamically launched
 5 worker pods** (`zelox-worker-*-1..5`) — so kubernetes-cluster worker-pod launch + cross-pod Flight
 shuffle + correct result are **PROVEN on kind**. The hard part (distributed worker launch + Flight
@@ -108,7 +108,7 @@ namespace** (`zelox`), skipping the flaky producer BOOT path, then ran the bound
 - **BUT the entire windowed-agg ran on ONE worker.** Worker 1's log shows `F5_PEAK p0..p7` — **all 8
   window partitions on a single pod**; workers 2–5 started their server, did **zero** window work, and
   were aborted at shutdown. The query executed to completion with **no exchange error** — it only
-  failed the post-hoc `read.parquet` verification (`No files found in file:///tmp/sail/wagg_out/`),
+  failed the post-hoc `read.parquet` verification (`No files found in file:///tmp/zelox/wagg_out/`),
   which is expected kind hostPath locality (sink wrote on worker 1's node; driver read its own node),
   **not** a Zelox fault.
 - ⇒ `StreamExchangeExec`'s mpsc **never crossed a pod** — not because it errors, but because the whole
@@ -182,7 +182,7 @@ Ran the gate-ON `zelox:bf2` on a 3-node kind cluster (`kind-multinode.yaml`), dr
 task placement (small, surgical, but changes global placement → gate + batch-correctness T1) →
 **T-BF2.3** N→M cross-network barrier align (so the 8-partition benchmark distributes) → **T-BF2.4**
 credit backpressure → T3 EKS. T2 caught this before EKS spend — exactly its purpose (kind torn down,
-AWS $0). *(Secondary harness note: kind cross-node `file:///tmp/sail` read still flaky for the post-hoc
+AWS $0). *(Secondary harness note: kind cross-node `file:///tmp/zelox` read still flaky for the post-hoc
 verify — the F5_PEAK worker logs are the reliable placement signal; use an object-store/S3 sink for the
 EKS verify, per f2f3 §F3-d.)*
 
@@ -532,13 +532,13 @@ windows; no-GC latency D2; memory).
   coalescing before Flight send (like the batch shuffle's IPC batching).
 
 ## 6. First step when building (T-BF2.1 resolved → sharpened)
-The distributed mode (`kubernetes-cluster`) exists AND a distributed manifest exists: **`k8s/sail.yaml`**
+The distributed mode (`kubernetes-cluster`) exists AND a distributed manifest exists: **`k8s/zelox.yaml`**
 = driver Deployment (`ZELOX_MODE=kubernetes-cluster`) + Service + RBAC (Role/ServiceAccount/RoleBinding
 so the driver launches worker pods via the k8s API) + a worker pod-template patch. The driver
 DYNAMICALLY launches worker pods (`KubernetesWorkerManager::launch_worker`); workers `register_worker`
-back (`driver/actor/handler.rs:62`). So the experiment adapts `k8s/sail.yaml`, not greenfield. Concrete
+back (`driver/actor/handler.rs:62`). So the experiment adapts `k8s/zelox.yaml`, not greenfield. Concrete
 first move:
-1. **On kind, deploy `k8s/sail.yaml` (kubernetes-cluster driver, image `zelox:TAG`) + run the
+1. **On kind, deploy `k8s/zelox.yaml` (kubernetes-cluster driver, image `zelox:TAG`) + run the
    windowed-agg** so the driver launches ≥2 worker pods. Observe: does the streaming DAG spread its
    stages across worker pods (like batch), and what happens at the `StreamExchangeExec` boundary — does
    it error (mpsc can't cross pods), fall back, or already route via Flight? This ONE experiment tells

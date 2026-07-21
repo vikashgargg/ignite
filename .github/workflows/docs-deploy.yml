@@ -44,13 +44,13 @@ jobs:
 
       - name: Sync to S3
         env:
-          S3_URI: s3://${{ vars.AWS_S3_BUCKET }}/sail/${{ inputs.version }}/
+          S3_URI: s3://${{ vars.AWS_S3_BUCKET }}/zelox/${{ inputs.version }}/
         run: |
           aws s3 sync docs/.vitepress/dist "${S3_URI}" --delete
 
       - name: Invalidate CloudFront Cache
         env:
           CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.AWS_CLOUDFRONT_DISTRIBUTION_ID }}
-          CLOUDFRONT_PATH: /sail/${{ inputs.version }}/*
+          CLOUDFRONT_PATH: /zelox/${{ inputs.version }}/*
         run: |
           aws cloudfront create-invalidation --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" --paths "${CLOUDFRONT_PATH}"

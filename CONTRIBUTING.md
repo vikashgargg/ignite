@@ -5,11 +5,11 @@ Contributions are more than welcome!
 Zelox is a fork of [Sail](https://github.com/lakehq/sail) (by LakeSail, Apache-2.0); see the `NOTICE`
 file for attribution. Issues and PRs for **Zelox** belong in this repository.
 
-Please submit [GitHub issues](https://github.com/vikashgargg/ignite/issues) for bug reports and feature
+Please submit [GitHub issues](https://github.com/vikashgargg/zelox/issues) for bug reports and feature
 requests (templates will guide you). You are welcome to ask questions in
-[GitHub Discussions](https://github.com/vikashgargg/ignite/discussions).
+[GitHub Discussions](https://github.com/vikashgargg/zelox/discussions).
 
-Feel free to open a [pull request](https://github.com/vikashgargg/ignite/pulls) for a code change. The
+Feel free to open a [pull request](https://github.com/vikashgargg/zelox/pulls) for a code change. The
 PR template lists the prod-grade checklist we hold every change to.
 
 ## Prod-grade bar

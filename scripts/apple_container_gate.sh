@@ -5,13 +5,13 @@
 # (native macOS arm64 runtime, Linux/arm64 VM). One command, exits 0 = green.
 #
 #   scripts/apple_container_gate.sh [IMAGE]
-#   IMAGE defaults to ghcr.io/vikashgargg/ignite:edge (override to test a local build or a tag).
+#   IMAGE defaults to ghcr.io/vikashgargg/zelox:edge (override to test a local build or a tag).
 #
 # Requires: macOS with the `container` CLI (>=1.0.0) and a Python with pyspark-client installed
 # (a Zelox venv, e.g. ~/.local/lib/zelox/venv, or any venv with `pip install pyspark`).
 set -euo pipefail
 
-IMAGE="${1:-ghcr.io/vikashgargg/ignite:edge}"
+IMAGE="${1:-ghcr.io/vikashgargg/zelox:edge}"
 NAME="zelox-gate"
 PORT="50051"
 PY="${ZELOX_PY:-python3}"

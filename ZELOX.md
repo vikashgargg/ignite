@@ -5,7 +5,7 @@
 
 ---
 
-## 0. Why Zelox, Not "Ignite"
+## 0. Why Zelox, Not "Zelox"
 
 The product needs a name that is:
 - **Memorable** — one word, globally pronounceable
@@ -362,7 +362,7 @@ Zelox's killer differentiator: **it's the only engine that runs natively on a Ma
 
 ```bash
 # Install
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 
 # Run on Apple Container (arm64 native, no Docker)
 make container-build

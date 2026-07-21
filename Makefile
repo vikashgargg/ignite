@@ -275,12 +275,12 @@ KIND_CLUSTER ?= zelox-dev
 
 kind-setup:
 	@echo "=== Creating kind cluster '$(KIND_CLUSTER)' ==="
-	mkdir -p /tmp/zelox /private/tmp/zelox /private/tmp/sail
+	mkdir -p /tmp/zelox /private/tmp/zelox /private/tmp/zelox
 	kind create cluster --name $(KIND_CLUSTER) --config k8s/kind-config.yaml
 	@echo "=== Loading $(IMAGE) into kind ==="
 	kind load docker-image $(IMAGE) --name $(KIND_CLUSTER)
 	@echo "=== Deploying Zelox to kind ==="
-	kubectl apply -f k8s/sail.yaml
+	kubectl apply -f k8s/zelox.yaml
 	@echo "=== Waiting for pod to be ready ==="
 	kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=120s
 	@echo ""

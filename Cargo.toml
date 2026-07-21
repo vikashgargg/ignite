@@ -8,10 +8,10 @@ resolver = "2"
 version = "0.1.0"
 authors = ["Zelox Contributors"]
 edition = "2021"
-homepage = "https://github.com/vikashgargg/ignite"
+homepage = "https://github.com/vikashgargg/zelox"
 license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/vikashgargg/ignite"
+repository = "https://github.com/vikashgargg/zelox"
 rust-version = "1.95.0"
 
 [workspace.lints.clippy]

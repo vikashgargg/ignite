@@ -1,4 +1,4 @@
-# Ignite — Spark SQL Compatibility Triage
+# Zelox — Spark SQL Compatibility Triage
 
 > Generated: 2026-05-17 (Day 3 audit)  
 > Source: `python/pyzelox/tests/spark/` skip/xfail markers + source code scan  
@@ -22,7 +22,7 @@
 | [C10] `monotonically_increasing_id` in GROUP BY projection | 5 | P1 | ✅ Fixed (Day 4) |
 
 **Total skipped/xfail tests audited:** 94 annotations across 34 files  
-**Ignite-only tests (correct behaviour that JVM Spark doesn't match):** ~15 (not bugs)
+**Zelox-only tests (correct behaviour that JVM Spark doesn't match):** ~15 (not bugs)
 
 ---
 
@@ -136,7 +136,7 @@ The `FILTER (WHERE ...)` clause on aggregate functions is parsed but not lowered
 
 ### Behaviour difference
 - **Spark:** Malformed JSON lines are written to a `_corrupt_record` column; valid lines are processed
-- **Ignite (Sail):** Malformed JSON causes a hard error / the entire file read fails
+- **Zelox (Sail):** Malformed JSON causes a hard error / the entire file read fails
 
 ### Fix (complete — Day 9, schema case)
 
@@ -163,7 +163,7 @@ column and populates it for each malformed line. Implementing this requires sche
 
 **Priority:** P1  
 **Files:** `test_write_table.py`  
-**Count:** 1 test (skipif not Ignite)
+**Count:** 1 test (skipif not Zelox)
 
 ### Failing operation
 ```sql

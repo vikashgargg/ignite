@@ -182,7 +182,7 @@ def _parquet_schema_evolve(spark, tmp):
 _remote_mode = bool(os.environ.get("SPARK_REMOTE", ""))
 if _remote_mode:
     # Shared path mounted into the server. Apple Container mounts /tmp/zelox;
-    # K8s mounts /tmp/sail (see k8s/kind-config.yaml + worker pod template), so
+    # K8s mounts /tmp/zelox (see k8s/kind-config.yaml + worker pod template), so
     # the path is overridable via SCORECARD_REMOTE_TMP.
     _tmp_root = os.environ.get("SCORECARD_REMOTE_TMP", "/tmp/zelox/scorecard-tmp")
     shutil.rmtree(_tmp_root, ignore_errors=True)

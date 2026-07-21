@@ -32,10 +32,10 @@ all = ["pandas>=1.5", "pyarrow>=10.0"]
 zelox-pyspark = "zelox_pyspark.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/vikashgargg/ignite"
-Documentation = "https://github.com/vikashgargg/ignite/blob/main/MIGRATION.md"
-Repository = "https://github.com/vikashgargg/ignite"
-Issues = "https://github.com/vikashgargg/ignite/issues"
+Homepage = "https://github.com/vikashgargg/zelox"
+Documentation = "https://github.com/vikashgargg/zelox/blob/main/MIGRATION.md"
+Repository = "https://github.com/vikashgargg/zelox"
+Issues = "https://github.com/vikashgargg/zelox/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/zelox_pyspark"]

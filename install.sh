@@ -1,9 +1,9 @@
 #!/usr/bin/env sh
-# Zelox installer — curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+# Zelox installer — curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 set -e
 
-REPO="vikashgargg/ignite"
-INSTALL_DIR="${ZELOX_INSTALL_DIR:-${IGNITE_INSTALL_DIR:-$HOME/.local/bin}}"
+REPO="vikashgargg/zelox"
+INSTALL_DIR="${ZELOX_INSTALL_DIR:-${ZELOX_INSTALL_DIR:-$HOME/.local/bin}}"
 VENV_DIR="${ZELOX_VENV_DIR:-$HOME/.local/lib/zelox/venv}"
 BINARY="zelox"
 

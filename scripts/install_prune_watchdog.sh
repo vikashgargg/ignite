@@ -7,7 +7,7 @@
 # Idempotent: re-running reinstalls cleanly. Also removes the superseded crontab entry.
 set -euo pipefail
 
-ROOT="${ZELOX_ROOT:-/Users/vikashgarg/Desktop/ignite}"
+ROOT="${ZELOX_ROOT:-/Users/vikashgarg/Desktop/zelox}"
 LABEL="com.zelox.prune"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 INTERVAL="${ZELOX_PRUNE_INTERVAL_SEC:-600}"   # every 10 minutes

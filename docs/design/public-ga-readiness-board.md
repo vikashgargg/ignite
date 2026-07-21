@@ -39,7 +39,7 @@ The crown jewel of "public prod-grade." Model: DataFusion/Polars/Vector publish 
 
 | ID | Pri | Status | Ticket / Acceptance criteria | OSS ref |
 |---|---|---|---|---|
-| **ZELOX-D1** | P0 | TODO | **Publish multi-arch (arm64+amd64) image to GHCR on release tag.** `docker/build-push-action` + `setup-buildx` + QEMU; tags `ghcr.io/vikashgargg/ignite:{version, latest, sha}`; `packages: write`; SAME arm image used on EKS + Apple container. AC: `docker pull ghcr.io/vikashgargg/ignite:latest && docker run …` works from a clean machine for both arches. | Vector `publish.yml`, DataFusion release |
+| **ZELOX-D1** | P0 | TODO | **Publish multi-arch (arm64+amd64) image to GHCR on release tag.** `docker/build-push-action` + `setup-buildx` + QEMU; tags `ghcr.io/vikashgargg/zelox:{version, latest, sha}`; `packages: write`; SAME arm image used on EKS + Apple container. AC: `docker pull ghcr.io/vikashgargg/zelox:latest && docker run …` works from a clean machine for both arches. | Vector `publish.yml`, DataFusion release |
 | **ZELOX-D2** | P0 | TODO | **README + docs "Run in 30s" with the pullable image** (`docker run … ghcr.io/…`), plus `helm install`. AC: a new user reaches a running Spark-Connect endpoint from copy-paste. | uv/ruff READMEs |
 | **ZELOX-D3** | P1 | EXISTS-partial | Binary release via `release-binary.yml` — verify it attaches signed per-platform tarballs + `install.sh` checksum-verifies. AC: `curl install.sh | sh` pins + verifies a checksum. | cargo-dist |
 | **ZELOX-D4** | P1 | TODO | **Publish Helm chart** (OCI to GHCR `helm push` or gh-pages index). AC: `helm install zelox oci://ghcr.io/…/charts/zelox`. | Bitnami, Grafana charts |

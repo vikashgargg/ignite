@@ -27,7 +27,7 @@ body:
     id: version
     attributes:
       label: Zelox version / image tag / commit
-      placeholder: "ghcr.io/vikashgargg/ignite:0.6.0 (or git sha)"
+      placeholder: "ghcr.io/vikashgargg/zelox:0.6.0 (or git sha)"
     validations:
       required: true
   - type: dropdown

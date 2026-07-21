@@ -179,7 +179,7 @@ Stubs exist but are not production-hardened for schema evolution or ACL enforcem
 
 ### Single Binary (Development)
 ```sh
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 zelox server --ip 0.0.0.0 --port 50051
 ```
 
@@ -191,7 +191,7 @@ docker run -p 50051:50051 zelox:latest
 
 ### Kubernetes
 ```sh
-kubectl apply -f k8s/sail.yaml
+kubectl apply -f k8s/zelox.yaml
 kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051
 ```
 

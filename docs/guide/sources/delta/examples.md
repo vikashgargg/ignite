@@ -12,7 +12,7 @@ rank: 1
 ::: code-group
 
 ```python [Python]
-path = "file:///tmp/sail/users"
+path = "file:///tmp/zelox/users"
 df = spark.createDataFrame(
     [(1, "Alice"), (2, "Bob")],
     schema="id INT, name STRING",
@@ -30,7 +30,7 @@ df.show()
 ```sql [SQL]
 CREATE TABLE users (id INT, name STRING)
 USING delta
-LOCATION 'file:///tmp/sail/users';
+LOCATION 'file:///tmp/zelox/users';
 
 INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
 
@@ -48,7 +48,7 @@ This improves query performance by skipping data files that do not match the fil
 ::: code-group
 
 ```python [Python]
-path = "file:///tmp/sail/metrics"
+path = "file:///tmp/zelox/metrics"
 df = spark.createDataFrame(
     [(2024, 1.0), (2025, 2.0)],
     schema="year INT, value FLOAT",
@@ -63,7 +63,7 @@ df.show()
 ```sql [SQL]
 CREATE TABLE metrics (year INT, value FLOAT)
 USING delta
-LOCATION 'file:///tmp/sail/metrics'
+LOCATION 'file:///tmp/zelox/metrics'
 PARTITIONED BY (year);
 
 INSERT INTO metrics VALUES (2024, 1.0), (2025, 2.0);
@@ -116,4 +116,4 @@ Existing Delta tables with column mapping can be read as usual.
 ## More Features
 
 We will continue adding more examples for advanced Delta Lake features as they become available in Sail.
-In the meantime, feel free to reach out to us on [Slack](https://lakesail.com/slack) or [GitHub Discussions](https://github.com/lakehq/sail/discussions) if you have questions!
+In the meantime, feel free to reach out to us on [Slack](https://lakesail.com/slack) or [GitHub Discussions](https://github.com/lakehq/zelox/discussions) if you have questions!

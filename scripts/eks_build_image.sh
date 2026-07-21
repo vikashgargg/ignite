@@ -33,10 +33,10 @@ echo "waiting sshd on ${IP%.*}.x ..."; for i in $(seq 1 40); do ssh $SSHO true 2
 
 ssh $SSHO 'sudo dnf install -y docker >/dev/null 2>&1 && sudo systemctl start docker' </dev/null
 rsync -az --delete --exclude target --exclude .git --exclude .venvs --exclude node_modules --exclude '*.parquet' \
-  -e "ssh -o StrictHostKeyChecking=no -i $KEY" ./ ec2-user@"$IP":~/ignite/
+  -e "ssh -o StrictHostKeyChecking=no -i $KEY" ./ ec2-user@"$IP":~/zelox/
 ssh $SSHO "bash -s" <<REMOTE
 set -e
 aws ecr get-login-password --region $REGION | sudo docker login --username AWS --password-stdin $REG >/dev/null 2>&1
-cd ~/ignite && sudo docker build -f docker/Dockerfile -t $REG/zelox:$TAG . && sudo docker push $REG/zelox:$TAG
+cd ~/zelox && sudo docker build -f docker/Dockerfile -t $REG/zelox:$TAG . && sudo docker push $REG/zelox:$TAG
 REMOTE
 echo "PUSHED $(echo "$REG" | mask)/zelox:$TAG"

@@ -103,7 +103,7 @@ The Sail server listens on the fixed port 50051.
 Start the Sail server in the background. Note that the `CI` environment variable must be present.
 
 ```bash
-nohup hatch run "${hatch_env}:env" CI=1 scripts/spark-tests/run-server.sh > /tmp/sail.log 2>&1 &
+nohup hatch run "${hatch_env}:env" CI=1 scripts/spark-tests/run-server.sh > /tmp/zelox.log 2>&1 &
 ```
 
 Run the following command to wait until the server is ready to accept connections.

@@ -1,6 +1,6 @@
 # zelox-pyspark
 
-Drop-in PySpark client for [Zelox](https://github.com/vikashgargg/ignite) — a Rust-native Spark Connect server that is 40× faster than Apache Spark with 100% Spark SQL compatibility.
+Drop-in PySpark client for [Zelox](https://github.com/vikashgargg/zelox) — a Rust-native Spark Connect server that is 40× faster than Apache Spark with 100% Spark SQL compatibility.
 
 ## Installation
 

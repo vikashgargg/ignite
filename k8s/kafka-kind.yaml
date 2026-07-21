@@ -1,6 +1,6 @@
 # Single-broker KRaft Kafka for the F3-d KIND multi-node de-risk. No nodeSelector (KIND nodes
 # are unlabeled); advertised listener = the in-cluster service DNS so the dynamically-spawned
-# Zelox worker pods (on the worker nodes) can reach it. Namespace `zelox` to match k8s/sail.yaml.
+# Zelox worker pods (on the worker nodes) can reach it. Namespace `zelox` to match k8s/zelox.yaml.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

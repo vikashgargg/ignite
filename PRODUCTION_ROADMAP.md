@@ -217,7 +217,7 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
   `ZELOX_MODE=local-cluster`, 4 workers) **105/105**, **K8s (kind, kubernetes-cluster mode,
   driver spawns worker pods)** **105/105**. Fixes landed: 5 GB Apple builder VM (default 2 GB
   OOM'd `hive_metastore`); `docker/Dockerfile` Rust `1.86→1.95` + `ARG CARGO_JOBS`
-  (`71e9bdf2`); scorecard `SCORECARD_REMOTE_TMP` for the K8s `/tmp/sail` mount + the two
+  (`71e9bdf2`); scorecard `SCORECARD_REMOTE_TMP` for the K8s `/tmp/zelox` mount + the two
   `_metadata` tests moved to the shared `tmp` root. **All four modes 105/105.**
 - [x] **Workspace clippy lane green** — `cargo clippy --all-targets --all-features -- -D warnings`
   exits 0 for the first time (commit `90f69f22`). Complied with the strict lints

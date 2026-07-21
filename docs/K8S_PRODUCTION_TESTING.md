@@ -153,7 +153,7 @@ For CI / pre-cloud confidence that the image + manifests are valid. This is what
 kind create cluster --name zelox
 make container-build-k8s            # or: docker build -f docker/Dockerfile -t zelox:latest .
 kind load docker-image zelox:latest --name zelox
-kubectl apply -f k8s/sail.yaml
+kubectl apply -f k8s/zelox.yaml
 kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=120s
 kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 &
 SPARK_REMOTE=sc://localhost:50051 python scripts/spark_compat_score.py   # expect 105/105
@@ -176,7 +176,7 @@ kind delete cluster --name zelox
 | Graceful shutdown (SIGTERM) | partial | **✅ drains in-flight tasks** |
 | PodDisruptionBudget | ❌ | **✅ quorum held during rollout** |
 | Object-store shuffle (S3/GCS) | ✅ | **✅ via `object_store`** |
-| Single-YAML quickstart | ❌ | **✅ `k8s/sail.yaml`** |
+| Single-YAML quickstart | ❌ | **✅ `k8s/zelox.yaml`** |
 | Spark compat in k8s mode | ~95% | **100% (105/105)** |
 | Distributed lambda HOFs + recursive CTE | partial | **✅ (Sprint 4.1 codec fix)** |
 
@@ -184,7 +184,7 @@ kind delete cluster --name zelox
 
 ## CI coverage
 
-The `k8s-scorecard` job in `.github/workflows/ignite-ci.yml` runs Path B (kind +
+The `k8s-scorecard` job in `.github/workflows/zelox-ci.yml` runs Path B (kind +
 `kubernetes-cluster` mode + 105 scorecard) on every push to a clean 16 GB runner —
 so the K8s deployment path is continuously validated regardless of local hardware.
 

@@ -28,11 +28,11 @@ spec:
       volumes:
         - name: tmp-sail
           hostPath:
-            path: /private/tmp/sail
+            path: /private/tmp/zelox
             type: DirectoryOrCreate
         - name: tmp-zelox-alt
           hostPath:
-            path: /tmp/sail
+            path: /tmp/zelox
             type: DirectoryOrCreate
       containers:
         - name: server
@@ -44,9 +44,9 @@ spec:
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: tmp-sail
-              mountPath: /private/tmp/sail
+              mountPath: /private/tmp/zelox
             - name: tmp-zelox-alt
-              mountPath: /tmp/sail
+              mountPath: /tmp/zelox
           env:
             - name: RUST_LOG
               value: info
@@ -70,7 +70,7 @@ spec:
               value: zelox-user
             - name: ZELOX_KUBERNETES__WORKER_POD_TEMPLATE
               value: >-
-                {"spec":{"volumes":[{"name":"tmp-sail","hostPath":{"path":"/private/tmp/sail","type":"DirectoryOrCreate"}},{"name":"tmp-zelox-alt","hostPath":{"path":"/tmp/sail","type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"tmp-sail","mountPath":"/private/tmp/sail"},{"name":"tmp-zelox-alt","mountPath":"/tmp/sail"}]}]}}
+                {"spec":{"volumes":[{"name":"tmp-sail","hostPath":{"path":"/private/tmp/zelox","type":"DirectoryOrCreate"}},{"name":"tmp-zelox-alt","hostPath":{"path":"/tmp/zelox","type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"tmp-sail","mountPath":"/private/tmp/zelox"},{"name":"tmp-zelox-alt","mountPath":"/tmp/zelox"}]}]}}
 ---
 apiVersion: v1
 kind: Service

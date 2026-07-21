@@ -1,4 +1,4 @@
-# Ignite — Master Build Plan
+# Zelox — Master Build Plan
 
 > Last updated: 2026-05-20  
 > Branch: `phase1/production-hardening`  
@@ -33,7 +33,7 @@
 
 ## 1. Project Vision
 
-Ignite is a **Rust-native, single-binary Spark engine**. It implements the
+Zelox is a **Rust-native, single-binary Spark engine**. It implements the
 Spark Connect gRPC protocol so existing PySpark code runs unchanged, but
 replaces the JVM + Python ser/de loop with a columnar, vectorized Rust
 execution engine built on Apache DataFusion and Apache Arrow.
@@ -62,7 +62,7 @@ execution engine built on Apache DataFusion and Apache Arrow.
                      │  Spark Connect gRPC (protobuf over HTTP/2)
                      ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      IGNITE SERVER  (zelox-spark-connect)               │
+│                      ZELOX SERVER  (zelox-spark-connect)               │
 │  tonic gRPC server  •  Spark Connect proto deserialiser                │
 │  Session management (zelox-session)  •  Auth middleware                 │
 └────────────────────┬───────────────────────────────────────────────────┘
@@ -237,7 +237,7 @@ whose statistics prove they cannot satisfy the predicate.
 ### 3.4 Execution Engine (`zelox-execution`)
 
 **DataFusion integration:**
-Ignite registers custom physical operators into DataFusion's `ExecutionContext`.
+Zelox registers custom physical operators into DataFusion's `ExecutionContext`.
 DataFusion drives execution via its `ExecutionPlan::execute()` → `SendableRecordBatchStream`.
 
 **Batch processing:**
@@ -343,7 +343,7 @@ At execution time:
 | UDTF | `pd.DataFrame` | `pd.DataFrame` | Table-returning |
 
 **Python subprocess isolation:**
-Ignite embeds the Python interpreter via PyO3. Child processes (e.g., from
+Zelox embeds the Python interpreter via PyO3. Child processes (e.g., from
 `multiprocessing`) see the same binary as `sys.executable` and fork correctly
 because of the `ZELOX_RUN_PYTHON` env var gate in `main.rs`.
 
@@ -469,7 +469,7 @@ checkpoint/
 ## 4. Crate Dependency Graph
 
 ```
-ignite (binary)
+zelox (binary)
 └── zelox-cli
     ├── zelox-spark-connect          ← Spark Connect gRPC server
     │   ├── zelox-session            ← session state
@@ -516,19 +516,19 @@ ignite (binary)
 
 | Week | Theme | Key deliverables |
 |---|---|---|
-| **W1** | Foundation | Fork sail → ignite, CI pipeline, binary rename, PLAN.md |
+| **W1** | Foundation | Fork sail → zelox, CI pipeline, binary rename, PLAN.md |
 | **W2** | Cross-compile | `cargo-zigbuild`, musl + universal macOS builds, install.sh, binary size < 80 MB |
 | **W3** | Spark compat audit | Full Spark 4.0 proto surface audit, compatibility test harness setup |
 | **W4** | Compat gaps batch 1 | Fix top-10 SQL compatibility failures (from W3 triage) |
 | **W5** | Python UDF | Pandas UDF / Arrow UDF roundtrip tests, cloudpickle support |
 | **W6** | Delta Lake write | `delta-rs` write path, ACID commit, schema enforcement |
 | **W7** | Compat gaps batch 2 | Fix next-10 SQL compat failures |
-| **W8** | PyPI package | `ignite-pyspark` thin client, `pip install ignite-pyspark` |
+| **W8** | PyPI package | `zelox-pyspark` thin client, `pip install zelox-pyspark` |
 | **W9** | Iceberg read | `iceberg-rust` REST catalog, snapshot time travel |
 | **W10** | TPC-H harness | SF-1 → SF-100 benchmark infra, first public numbers |
 | **W11** | Storage backends | GCS, Azure ADLS, HDFS auth, S3 multipart upload |
 | **W12** | Performance pass | Profile TPC-H bottlenecks, SIMD kernel tuning |
-| **W13** | Docs site | mdBook docs, API reference, `ignite explain` command |
+| **W13** | Docs site | mdBook docs, API reference, `zelox explain` command |
 | **W14** | Hardening | Error messages, config validation, graceful shutdown |
 | **W15** | Beta | Private beta with 3–5 design partners |
 | **W16–20** | Beta feedback | Bug fixes from beta, Spark 4.1 compat, ORC reader |
@@ -567,7 +567,7 @@ W3: compat audit
 |---|---|---|
 | **M7** | Scheduler core | Tokio-based scheduler, stage DAG builder, task queue |
 | **M8** | Worker protocol | Worker gRPC API, heartbeat, task lifecycle |
-| **M8** | K8s Helm chart | `helm install ignite ignite/ignite`, scheduler + worker pods |
+| **M8** | K8s Helm chart | `helm install zelox zelox/zelox`, scheduler + worker pods |
 | **M9** | Flight shuffle | Arrow Flight map/reduce shuffle, memory-first with spill |
 | **M9** | Fault tolerance | Task retry, worker failure detection, dead letter queue |
 | **M10** | Kafka source | `rdkafka` consumer, JSON/Avro/binary deserialisation |
@@ -592,7 +592,7 @@ W3: compat audit
 | **M19–20** | MLflow compat | MLflow REST API server backed by object store |
 | **M21** | GPU workers | DataFusion GPU execution path (CUDA/ROCm) |
 | **M22** | ONNX inference | Run ONNX models inside execution pipeline |
-| **M23** | Notebooks | Jupyter kernel backed by Ignite, web notebook UI |
+| **M23** | Notebooks | Jupyter kernel backed by Zelox, web notebook UI |
 | **M24** | v1.0.0 launch | Public cloud GA, pricing announcement |
 
 ---
@@ -603,7 +603,7 @@ W3: compat audit
 
 | Day | Done |
 |---|---|
-| Day 1 | Fork sail → vikashgargg/ignite; Rust 1.95 installed; `cargo check` passing; binary renamed `ignite`; CLI restructured; ARCHITECTURE.md; GitHub Actions CI (ignite-ci.yml); install.sh; README updated; committed + pushed `phase1/foundation` |
+| Day 1 | Fork sail → vikashgargg/zelox; Rust 1.95 installed; `cargo check` passing; binary renamed `zelox`; CLI restructured; ARCHITECTURE.md; GitHub Actions CI (zelox-ci.yml); install.sh; README updated; committed + pushed `phase1/foundation` |
 
 ### Week 2 (Current)
 
@@ -612,12 +612,12 @@ W3: compat audit
 | **Day 2** | ✅ Done | `cargo-zigbuild` + musl targets; cross-compile Linux x86_64 + aarch64; macOS universal binary; binary size report |
 | **Day 3** | ✅ Done | Gold test suite: all passing. Compat audit: 94 skip/xfail annotations triaged into 10 categories → `COMPAT.md` |
 | **Day 4** | ✅ Done | Spark compat fixes: DELETE without WHERE (C1), monotonically_increasing_id in aggregates (C2/C10), UPDATE SET CoW (C1), FILTER in aggregates (C4 — stale skip removed); workspace clean |
-| **Day 5** | ✅ Done | `ignite bench` implemented (DuckDB-driven, all 22 queries, timing table); C6 INSERT OVERWRITE stale skip removed; Makefile bench targets; end-goal memory + perf targets set |
+| **Day 5** | ✅ Done | `zelox bench` implemented (DuckDB-driven, all 22 queries, timing table); C6 INSERT OVERWRITE stale skip removed; Makefile bench targets; end-goal memory + perf targets set |
 | **Day 6** | ✅ Done | C8 managed tables fixed; C3 UDF skip removed (awaiting CI); README compat + memory target section added |
 | **Day 7** | ✅ Done | C5 JSON permissive mode (schema case): `PermissiveJsonDecoder` + `PermissiveJsonFormat` + `PermissiveJsonSource`; skip markers removed from `test_json_schema_show` / `test_json_schema_collect`; no-schema `_corrupt_record` remains open |
-| **Day 8** | ✅ Done | Apple Container local dev: fixed DNS (#656) + context bug (#425); thin LTO fix (OOM); `ignite:latest` built; PySpark smoke test ✅ `SELECT 1+1=2` |
+| **Day 8** | ✅ Done | Apple Container local dev: fixed DNS (#656) + context bug (#425); thin LTO fix (OOM); `zelox:latest` built; PySpark smoke test ✅ `SELECT 1+1=2` |
 | **Day 9** | ✅ Done | C5 full impl: `PermissiveJsonDecoder` streaming pipeline + 7 Rust unit tests (incl. `test_streaming_pipeline_permissive`); `scripts/smoke_json_permissive.py` — 5 PySpark end-to-end tests: PERMISSIVE, DROPMALFORMED, FAILFAST, columnNameOfCorruptRecord ✅ all green; merged via PR #1 squash into `phase1/foundation` |
-| **Day 10** | ✅ Done | Production hardening: Apple Container layer-cache split (`manifests.tar.gz` → `cargo fetch` + `crates.tar.gz` → build); SIGTERM handler in `zelox-cli/src/spark/server.rs`; `Ignite ready on …` readiness log; HEALTHCHECK TCP probe; `container-build` / `container-build-clean` Makefile targets; smoke test updated for new readiness string |
+| **Day 10** | ✅ Done | Production hardening: Apple Container layer-cache split (`manifests.tar.gz` → `cargo fetch` + `crates.tar.gz` → build); SIGTERM handler in `zelox-cli/src/spark/server.rs`; `Zelox ready on …` readiness log; HEALTHCHECK TCP probe; `container-build` / `container-build-clean` Makefile targets; smoke test updated for new readiness string |
 
 ### Day 2 Delivery Notes
 
@@ -625,7 +625,7 @@ W3: compat audit
 - `cargo-zigbuild` + zig 0.14.0 installed locally
 - Rust targets installed: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `x86_64-apple-darwin`, `aarch64-apple-darwin`
 - Local native build (`aarch64-apple-darwin`): **105 MB** release binary (macOS dynamically links Python3.framework via PyO3 — expected)
-- Linux musl sizes (statically linked, truly portable): measured in CI via `ignite-ci.yml`
+- Linux musl sizes (statically linked, truly portable): measured in CI via `zelox-ci.yml`
 
 **Binary size note:**
 The < 80 MB target applies to the Linux musl binary (static, no dylib deps). The macOS binary is larger because PyO3 links against Python3.framework dynamically. Linux musl CI builds will produce the stripped static binary meeting the target.
@@ -637,8 +637,8 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 - Makefile `build-macos` target detects and sets this automatically
 
 **CI additions (this session):**
-- `ignite-ci.yml`: `build-binary` → matrix `build-linux` (x86_64 + aarch64 musl) + new `build-macos-universal` job
-- `release-binary.yml`: new workflow — publishes `ignite-x86_64-unknown-linux-musl`, `ignite-aarch64-unknown-linux-musl`, `ignite-universal2-apple-darwin` as GitHub Release assets on `v*` tags (required by `install.sh`)
+- `zelox-ci.yml`: `build-binary` → matrix `build-linux` (x86_64 + aarch64 musl) + new `build-macos-universal` job
+- `release-binary.yml`: new workflow — publishes `zelox-x86_64-unknown-linux-musl`, `zelox-aarch64-unknown-linux-musl`, `zelox-universal2-apple-darwin` as GitHub Release assets on `v*` tags (required by `install.sh`)
 
 ### Day 4 Delivery Notes
 
@@ -654,7 +654,7 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 **Fix C1b — UPDATE SET as Copy-on-Write** (`crates/zelox-plan/src/resolver/command/update.rs` + `mod.rs`):
 - New file: `update.rs` implements `resolve_command_update` as: scan table → project each column through `CASE WHEN condition THEN new_val ELSE original_col END` → overwrite with `WriteMode::Truncate`
 - Wired into command dispatcher in `mod.rs`
-- Removed 6 UPDATE skips and 2 DELETE skips from `test_dml.py`; removed module-level Ignite skip (cleanup fixed via `try/finally` on `meow` table)
+- Removed 6 UPDATE skips and 2 DELETE skips from `test_dml.py`; removed module-level Zelox skip (cleanup fixed via `try/finally` on `meow` table)
 
 **Fix C4 — FILTER in aggregate functions** (`test_group_by.py`):
 - Confirmed `filter` is already lowered in `zelox-plan/src/resolver/expression/function.rs:147`
@@ -672,7 +672,7 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 **Trade-off:** Inherits sail's naming conventions and some zelox-specific abstractions. We rename only the binary/CLI; internal crates keep `zelox-` prefix to enable upstreaming patches.
 
 ### D2 — Keep `zelox-` prefix on internal crates
-**Decision:** Internal crates stay `zelox-*`; only the binary is named `ignite`.  
+**Decision:** Internal crates stay `zelox-*`; only the binary is named `zelox`.  
 **Reason:** Makes it easy to contribute fixes back to `lakehq/sail` without large rename diffs. Users never see crate names.  
 **Trade-off:** Slight naming confusion internally. Acceptable.
 

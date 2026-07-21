@@ -10,9 +10,9 @@ keywords:
   - analytics
   - arrow
   - datafusion
-home: https://github.com/vikashgargg/ignite
+home: https://github.com/vikashgargg/zelox
 sources:
-  - https://github.com/vikashgargg/ignite
+  - https://github.com/vikashgargg/zelox
 maintainers:
   - name: Zelox Contributors
-    url: https://github.com/vikashgargg/ignite
+    url: https://github.com/vikashgargg/zelox

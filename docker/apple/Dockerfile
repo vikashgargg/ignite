@@ -111,5 +111,5 @@ ENTRYPOINT ["/usr/local/bin/zelox"]
 # Default: single-node local mode.
 # Distributed modes via ZELOX_MODE env var:
 #   local-cluster:      container run -e ZELOX_MODE=local-cluster -v /tmp/zelox:/tmp/zelox zelox:latest
-#   kubernetes-cluster: set ZELOX_MODE=kubernetes-cluster in K8s manifest (see k8s/sail.yaml)
+#   kubernetes-cluster: set ZELOX_MODE=kubernetes-cluster in K8s manifest (see k8s/zelox.yaml)
 CMD ["server", "--ip", "0.0.0.0", "--port", "50051"]
