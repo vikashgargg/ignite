@@ -807,6 +807,10 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                     )
                     .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
                     for b in batches {
+                        // Census the EXACT bytes handed to the parquet encoder (env-gated). If this
+                        // reads 1000 keys but the file < 1000, the writer corrupts immutable data;
+                        // if this already reads < 1000, corruption is upstream of the write.
+                        sail_common_datafusion::streaming::event::encoding::key_trace("sink_commit", b);
                         w.write(b)
                             .map_err(|e| DataFusionError::ParquetError(Box::new(e)))?;
                     }
@@ -892,11 +896,24 @@ impl ExecutionPlan for RealtimeFileSinkExec {
                     Ok(FlowEvent::Data { batch, .. }) => {
                         // Append-only realtime (stateless): retractions don't occur. Buffer rows.
                         if batch.num_rows() > 0 {
-                            // KEY_TRACE: census the EXACT decoded rows the sink buffers → parquet. If
-                            // distinct-k here == window emit but the FILE < here, the parquet writer is
-                            // the culprit; if < window emit, the window→sink path (projection) is.
                             sail_common_datafusion::streaming::event::encoding::key_trace("sink_buffer", &batch);
-                            buffer.push(batch);
+                            // A durable sink must OWN its buffered data across the epoch (checkpoint)
+                            // boundary — it may not retain Arc-cloned *views* of upstream operator /
+                            // Flight-decode buffers, which get reused/overwritten before the deferred
+                            // `commit_epoch` write runs at the next Checkpoint marker (an await point).
+                            // Retaining aliased views corrupted the key column on Linux (allocator/
+                            // scheduling-timing dependent; both mac sanitizers clean). Flink's
+                            // StreamingFileSink / Arroyo / RisingWave sink writers all materialize into
+                            // sink-owned state at buffer time — mirror that: deep-copy into a fresh,
+                            // contiguous (offset-0) batch the instant we buffer it. `take` with
+                            // sequential indices GATHERS into freshly-allocated buffers (unlike
+                            // concat/slice, which can alias the source), so the copy is guaranteed.
+                            let idx = arrow::array::UInt32Array::from_iter_values(
+                                0u32..batch.num_rows() as u32,
+                            );
+                            let owned = arrow::compute::take_record_batch(&batch, &idx)
+                                .map_err(|e| DataFusionError::ArrowError(Box::new(e), None))?;
+                            buffer.push(owned);
                         }
                     }
                     Ok(FlowEvent::Marker(FlowMarker::Checkpoint { id })) => {
