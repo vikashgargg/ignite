@@ -18,7 +18,7 @@ production or redesign". Skill: `.claude/skills/dist-streaming-test`.
 - Feature branch per axis/ticket (`<axis>/<ticket>`), NOT direct-on-main. Keep `main` green: `cargo test
   --workspace` + `cargo clippy --all-targets -D warnings` (workspace denies unwrap/expect/panic) BEFORE
   any commit. Small, validated commits; commit message ends `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
-- Distributed-aware: a new physical-exec field must round-trip in `sail-execution/src/codec.rs` or be
+- Distributed-aware: a new physical-exec field must round-trip in `zelox-execution/src/codec.rs` or be
   logged as a single-node-only gap. Merge to main when T1→T2→T3 green; update BOARD cell + link commit
   the SAME turn.
 - CI (target): PR runs fmt + clippy(-D) + `cargo test --workspace` + the T1 gates; kind T2 gate on the

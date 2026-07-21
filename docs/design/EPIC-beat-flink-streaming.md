@@ -43,11 +43,11 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
   pushdown into scan.
 
 #### Concrete architecture (dep-layering + codec RESOLVED 2026-07-06)
-- **Layering (resolved):** `sail-data-source → sail-function` is a **clean acyclic downward edge**
-  (`sail-function` deps = sail-common / sail-common-datafusion / sail-sql-analyzer; none reach
-  sail-data-source). So the reader may call the parse routine directly — no relocation to a shared
+- **Layering (resolved):** `zelox-data-source → zelox-function` is a **clean acyclic downward edge**
+  (`zelox-function` deps = zelox-common / zelox-common-datafusion / zelox-sql-analyzer; none reach
+  zelox-data-source). So the reader may call the parse routine directly — no relocation to a shared
   crate needed.
-- **Step 1 — expose a batch parse API in sail-function** (`scalar/json/from_json.rs`): promote
+- **Step 1 — expose a batch parse API in zelox-function** (`scalar/json/from_json.rs`): promote
   `parse_json_to_struct` to `pub fn parse_json_binary_to_struct(values: &BinaryArray, fields: &Fields,
   options: &SparkFromJsonOptions, tz: &str) -> Result<StructArray>` (Binary variant of the existing
   Utf8 path; UTF-8 lossy per-row like Spark; reuses `ColBuilder` + `simd_parse_value` from T7b). Unit
@@ -58,10 +58,10 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
   `parse_json_binary_to_struct` and emit the struct's fields (flow-event-wrapped) **instead of**
   `value:Binary`. Output schema = `to_flow_event_schema(project(struct_fields))`. When `None`,
   behaviour is byte-identical to today (default; zero risk to non-JSON pipelines).
-- **Step 3 — codec round-trip** (`sail-execution/src/codec.rs`, `KafkaSourceExecNode`): add proto
+- **Step 3 — codec round-trip** (`zelox-execution/src/codec.rs`, `KafkaSourceExecNode`): add proto
   field `parse_value_as` (serialized `Fields` + options); encode in the `downcast_ref::<KafkaSourceExec>`
   arm, decode in `NodeKind::KafkaSource`. Distributed round-trip test (the codec test at ~L4715).
-- **Step 4 — physical-optimizer fusion rule** (`sail-physical-optimizer`, new
+- **Step 4 — physical-optimizer fusion rule** (`zelox-physical-optimizer`, new
   `fuse_streaming_source_parse.rs`): match `ProjectionExec`/unnest whose sole expr over the streaming
   source is `from_json(CAST(value AS Utf8), <schema-literal>)`; when the child is a `KafkaSourceExec`
   with `parse_value_as == None`, rewrite to the source with `parse_value_as = Some(...)` and drop the

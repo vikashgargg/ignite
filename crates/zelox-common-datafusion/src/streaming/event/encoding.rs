@@ -30,7 +30,7 @@ use crate::streaming::event::FlowEvent;
 /// dump to see the encode's share of the wall. Zero cost when the env var is unset.
 pub static ENCODE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Cumulative ns in `from_json` UDF invoke (the serde_json parse) — attribute the parse share of the
-/// streaming throughput gap. Written by sail-function's from_json, read by the window prof dump.
+/// streaming throughput gap. Written by zelox-function's from_json, read by the window prof dump.
 pub static FROM_JSON_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Cumulative ns in the Kafka source read+batch-build loop (across source instances). Written by
 /// kafka/reader.rs, read by the window prof dump — the COMPLETE per-stage breakdown for EKS pinpointing.

@@ -14,7 +14,7 @@ jobs:
       HATCH_ENV: "test.spark-4.1.1"
       # Coverage environment variables
       RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/.github/scripts/rustc-workspace-wrapper.sh
-      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/sail-catalog-it-%p-%m.profraw
+      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/zelox-catalog-it-%p-%m.profraw
     steps:
       - uses: actions/checkout@v4
 

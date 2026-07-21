@@ -108,10 +108,10 @@ operator (interval joins, outer-join state, watermark coordination, state TTL).
 - Regression: stream×static joins and all batch joins unchanged.
 
 ## Files
-- new `crates/sail-physical-plan/src/streaming/stream_join.rs` (`StreamJoinExec`)
-- new `crates/sail-logical-plan/src/streaming/stream_join.rs` (`StreamJoinNode`)
-- `crates/sail-plan/src/streaming/rewriter.rs` (Join arm → `StreamJoinNode`)
-- `crates/sail-session/src/planner.rs` (2-input wiring, key exprs vs data schema)
+- new `crates/zelox-physical-plan/src/streaming/stream_join.rs` (`StreamJoinExec`)
+- new `crates/zelox-logical-plan/src/streaming/stream_join.rs` (`StreamJoinNode`)
+- `crates/zelox-plan/src/streaming/rewriter.rs` (Join arm → `StreamJoinNode`)
+- `crates/zelox-session/src/planner.rs` (2-input wiring, key exprs vs data schema)
 
 The 2-input watermark **min-merge** here is the same primitive multi-stage pipelines
 will reuse — implement it generically.

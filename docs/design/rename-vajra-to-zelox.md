@@ -1,4 +1,4 @@
-# RFC: Rename Vajra → Zelox (product) + `sail-*` → `zelox-*` (crates) + new repo
+# RFC: Rename Vajra → Zelox (product) + `zelox-*` → `zelox-*` (crates) + new repo
 
 **Status:** PLANNED (not started). **Owner:** TBD. **Trigger:** run as a dedicated migration branch
 **after** the in-flight streaming perf work (T7_FUSE + jemalloc, branch `throughput/from-json-tape-e2e-verify`)
@@ -7,7 +7,7 @@ merges — so we do not invalidate the `t7jp` image or break the kind/EKS confid
 ## 1. Why
 
 Zelox is a **new product**, not a Sail redistribution. We forked LakeSail/Sail as a starting point but
-have diverged substantially (streaming engine, EO/checkpoint, T7 fusion, memory discipline). The `sail-*`
+have diverged substantially (streaming engine, EO/checkpoint, T7 fusion, memory discipline). The `zelox-*`
 crate namespace and the `vajra` working name both need to become the product identity **Zelox**, in a new
 repository. Per AIM.md this is a synthesize-not-copy product; the rename makes the divergence explicit.
 
@@ -16,9 +16,9 @@ repository. Per AIM.md this is a synthesize-not-copy product; the rename makes t
 | Layer | From | To | Notes |
 |---|---|---|---|
 | Product / brand (docs, UI) | Vajra / vajra | Zelox / zelox | prose + headings |
-| Crate dirs + names | `crates/sail-<x>` / `sail-<x>` | `crates/zelox-<x>` / `zelox-<x>` | 37 crates; `git mv` to keep history |
+| Crate dirs + names | `crates/zelox-<x>` / `zelox-<x>` | `crates/zelox-<x>` / `zelox-<x>` | 37 crates; `git mv` to keep history |
 | Rust lib paths (imports) | `sail_<x>` | `zelox_<x>` | ~8.7k `use` / path refs — the bulk |
-| Binary | `vajra` | `zelox` | `sail-cli` → `zelox-cli`, `[[bin]] name` |
+| Binary | `vajra` | `zelox` | `zelox-cli` → `zelox-cli`, `[[bin]] name` |
 | Runtime env prefix | `ZELOX_*` | `ZELOX_*` | e.g. `ZELOX_T7_FUSE` → `ZELOX_T7_FUSE` |
 | Config env prefix | `ZELOX_*` | `ZELOX_*` | `ZELOX_RUNTIME__…`, `ZELOX_MODE` |
 | Config file namespace | `sail` keys in `application.yaml` | `zelox` | + the loader prefix |
@@ -27,13 +27,13 @@ repository. Per AIM.md this is a synthesize-not-copy product; the rename makes t
 | GitHub repo | (current) | new repo `zelox` | see §7 |
 
 Convention: hyphen form `zelox-<x>` for crate names/dirs/deps; underscore `zelox_<x>` for Rust paths;
-UPPER `ZELOX_` for env. **`sail-build-scripts` → `zelox-build-scripts`** (hyphenated, not `zeloxbuild-`).
+UPPER `ZELOX_` for env. **`zelox-build-scripts` → `zelox-build-scripts`** (hyphenated, not `zeloxbuild-`).
 
 ## 3. Scope (measured 2026-07-20, excl. `target/`,`.git/`)
 
-- 37 `sail-*` crates.
+- 37 `zelox-*` crates.
 - `sail_` (Rust paths): **8,681** occ / 462 files — largest bucket.
-- `sail-` (Cargo deps, dirs): **1,141** / 176 files.
+- `zelox-` (Cargo deps, dirs): **1,141** / 176 files.
 - `ZELOX_`: **376** / 102 · `ZELOX_`: **406** / 107.
 - `vajra`: **1,145** / 162 · `Vajra`: **993** / 200.
 - **Total ≈ 12,700 occurrences / ~500 files.** ⇒ scripted + compiler-verified, never hand-edited.
@@ -50,10 +50,10 @@ UPPER `ZELOX_` for env. **`sail-build-scripts` → `zelox-build-scripts`** (hyph
 
 Order matters: dirs → crate names → deps → Rust paths → env → brand → infra. Compile after each phase.
 
-1. **Crate dirs (history-preserving):** for each `crates/sail-<x>`: `git mv crates/sail-<x> crates/zelox-<x>`.
-2. **Crate names + deps (Cargo):** in every `Cargo.toml`, rename `name = "sail-<x>"` → `"zelox-<x>"` and
-   every `sail-<x> = { … }` / `sail-<x>.workspace` dependency key. Update root `Cargo.toml` members glob.
-   Rename the bin: `sail-cli` → `zelox-cli`, `[[bin]] name = "vajra"` → `"zelox"`.
+1. **Crate dirs (history-preserving):** for each `crates/zelox-<x>`: `git mv crates/zelox-<x> crates/zelox-<x>`.
+2. **Crate names + deps (Cargo):** in every `Cargo.toml`, rename `name = "zelox-<x>"` → `"zelox-<x>"` and
+   every `zelox-<x> = { … }` / `zelox-<x>.workspace` dependency key. Update root `Cargo.toml` members glob.
+   Rename the bin: `zelox-cli` → `zelox-cli`, `[[bin]] name = "vajra"` → `"zelox"`.
 3. **Rust paths:** repo-wide `sail_<x>` → `zelox_<x>` (word-boundary regex; the 8.7k bucket). `cargo build`
    is the verifier — a missed ref fails to compile, so this phase is self-checking.
 4. **Env vars:** `ZELOX_` → `ZELOX_` and `ZELOX_` → `ZELOX_` across code + yaml + scripts. **Add a
@@ -65,7 +65,7 @@ Order matters: dirs → crate names → deps → Rust paths → env → brand �
 7. **Scripts + manifests:** rename script files (`git mv`), k8s resource names, image tags.
 
 **Verification gates (each must pass before merge):** `cargo build --workspace`, `cargo clippy
---all-targets -D warnings`, full test suite, T1 correctness gate, `grep -rI 'sail_\|sail-\|ZELOX_\|vajra'`
+--all-targets -D warnings`, full test suite, T1 correctness gate, `grep -rI 'sail_\|zelox-\|ZELOX_\|vajra'`
 returns only intentional upstream-attribution hits.
 
 ## 6. Infra cutover

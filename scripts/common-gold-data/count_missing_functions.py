@@ -6,7 +6,7 @@ from collections import Counter
 
 
 def analyze_not_implemented_functions():
-    directory_pattern = "crates/sail-spark-connect/tests/gold_data/function/*.json"
+    directory_pattern = "crates/zelox-spark-connect/tests/gold_data/function/*.json"
     json_files = glob.glob(directory_pattern)
 
     not_implemented_functions = []

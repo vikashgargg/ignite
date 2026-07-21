@@ -11,7 +11,7 @@ project_path="$(git rev-parse --show-toplevel)"
 
 scripts_path="${project_path}/scripts/spark-gold-data"
 logs_path="${project_path}/tmp/spark-gold-data"
-output_path="${project_path}/crates/sail-spark-connect/tests/gold_data"
+output_path="${project_path}/crates/zelox-spark-connect/tests/gold_data"
 
 source "${project_path}/scripts/shell-tools/git-patch.sh"
 
@@ -46,6 +46,6 @@ All the files in this directory, including this README file, are auto-generated.
 Please do not modify them manually.
 EOF
 
-cargo run -p sail-gold-test --bin spark-gold-data -- \
+cargo run -p zelox-gold-test --bin spark-gold-data -- \
   --input "${logs_path}" \
   --output "${output_path}"

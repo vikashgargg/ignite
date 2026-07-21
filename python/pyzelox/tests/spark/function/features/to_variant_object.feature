@@ -22,7 +22,7 @@ Feature: to_variant_object
         | {"x":42} |
 
     # cast_to_variant from parquet-variant-compute omits NULL struct fields
-    @sail-bug
+    @zelox-bug
     Scenario: to_variant_object with null field
       When query
         """
@@ -129,7 +129,7 @@ Feature: to_variant_object
         | {"m":{"k":"v"}} |
 
     # parquet-variant omits NULL struct fields
-    @sail-bug
+    @zelox-bug
     Scenario: to_variant_object struct all null fields
       When query
         """
@@ -151,7 +151,7 @@ Feature: to_variant_object
         | {"key":"value"} |
 
     # parquet-variant omits NULL map values
-    @sail-bug
+    @zelox-bug
     Scenario: to_variant_object map with null value
       When query
         """

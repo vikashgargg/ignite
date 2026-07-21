@@ -1,7 +1,7 @@
 # Kerberos Integration Test Infrastructure
 
 This directory contains the Docker-based Kerberos KDC used by the HMS catalog
-integration tests in `crates/sail-catalog-hms/tests/`.
+integration tests in `crates/zelox-catalog-hms/tests/`.
 
 ## Architecture
 
@@ -9,8 +9,8 @@ Three containers run on a shared Docker network:
 
 | Container      | Hostname            | Role                                       |
 |----------------|---------------------|--------------------------------------------|
-| `sail-kerberos-kdc` | `sail-kerberos-kdc` | MIT KDC + admin server, creates principals and keytabs |
-| `sail-krb-hms-*`    | `sail-kerberos-hms` | Apache Hive Metastore 3.1.3 with Kerberos SASL enabled  |
+| `zelox-kerberos-kdc` | `zelox-kerberos-kdc` | MIT KDC + admin server, creates principals and keytabs |
+| `zelox-krb-hms-*`    | `zelox-kerberos-hms` | Apache Hive Metastore 3.1.3 with Kerberos SASL enabled  |
 | *(test runner)*      | *(CI host)*         | Rust test process, acts as the GSSAPI client             |
 
 The test runner (on the CI host) connects to HMS over Thrift using Kerberos
@@ -33,7 +33,7 @@ using their container hostnames.
 ### `localhost` as the service principal hostname
 
 The test uses `hive-metastore/localhost@SAIL.TEST` as the service principal
-instead of the Docker container hostname (`sail-kerberos-hms`). This avoids
+instead of the Docker container hostname (`zelox-kerberos-hms`). This avoids
 the GSSAPI `GSS_C_NT_HOSTBASED_SERVICE` name type performing forward/reverse
 DNS lookups on the container hostname, which would resolve to the CI runner's
 internal FQDN (e.g. `*.internal.cloudapp.net` on Azure) and fail to match

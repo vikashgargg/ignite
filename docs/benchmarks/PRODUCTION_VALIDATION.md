@@ -56,7 +56,7 @@ over a rate stream at **10,000 rows/s for 18 s**:
 ```bash
 curl -sSL -o /tmp/realdata/trips.parquet \
   https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2023-01.parquet
-cargo build -p sail-cli --bin zelox && ./target/debug/zelox server --port 50099 &
+cargo build -p zelox-cli --bin zelox && ./target/debug/zelox server --port 50099 &
 python validate.py zelox > zelox.json     # pyspark[connect]==3.5.3, remote
 python validate.py spark > spark.json     # local[4] JVM reference (Java 8)
 # compare zelox.json vs spark.json for equality

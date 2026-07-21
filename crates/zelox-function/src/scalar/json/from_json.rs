@@ -1906,7 +1906,7 @@ mod from_json_bench {
     use super::*;
 
     // Throughput of the current from_json struct parse path. Run:
-    //   FROMJSON_BENCH=1 cargo test -p sail-function --release from_json_bench -- --nocapture --ignored
+    //   FROMJSON_BENCH=1 cargo test -p zelox-function --release from_json_bench -- --nocapture --ignored
     #[test]
     #[ignore]
     fn bench_from_json_struct() {
@@ -1953,7 +1953,7 @@ mod from_json_bench {
 mod parse_bench {
     // Measure-first (VAJ throughput): serde_json::Value tree per record vs simd-json tape-direct,
     // extracting 3 i64 fields from {"k":..,"ts":..,"v":1} — the streaming windowed-agg's exact parse.
-    // Run: cargo test -p sail-function --release parse_bench -- --ignored --nocapture
+    // Run: cargo test -p zelox-function --release parse_bench -- --ignored --nocapture
     #[test]
     #[ignore]
     fn bench_value_tree_vs_tape() {

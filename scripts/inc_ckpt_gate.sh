@@ -17,7 +17,7 @@ N="${N:-2000}"; BUDGET="${BUDGET:-65536}"   # tiny budget -> force spill -> chun
 CK=/tmp/incckpt_ck
 KPOD=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1)
 [ -n "$KPOD" ] || { echo "FATAL: no kafka container (start zelox_kafka)"; exit 2; }
-[ -x "$BIN" ] || { echo "FATAL: no zelox binary (cargo build -p sail-cli --bin zelox)"; exit 2; }
+[ -x "$BIN" ] || { echo "FATAL: no zelox binary (cargo build -p zelox-cli --bin zelox)"; exit 2; }
 
 docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic incckpt_eo >/dev/null 2>&1; sleep 2
 docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic incckpt_eo --partitions ${PARTS:-4} --replication-factor 1 >/dev/null 2>&1

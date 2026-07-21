@@ -24,7 +24,7 @@ rows/s** for this workload. This is a **debug** build on a laptop; a release bui
 
 ## Reproduce
 ```bash
-cargo build -p sail-cli --bin zelox
+cargo build -p zelox-cli --bin zelox
 RUST_LOG=error ./target/debug/zelox server --port 50099 &
 # pyspark[connect]==3.5.3 client:
 python - <<'PY'

@@ -30,9 +30,9 @@ So parallelism isn't "almost working" — it's architecturally single-stream. Th
 build.
 
 ## Architecture (v2, post-review) — reuse the engine we already have
-**Zelox already ships a distributed shuffle** (`sail-execution`: `ShuffleWriteExec`,
+**Zelox already ships a distributed shuffle** (`zelox-execution`: `ShuffleWriteExec`,
 `ShuffleReadExec`, `RepartitionExec` with `Partitioning::Hash`/`RoundRobinBatch`, job-graph
-planner, task runner, spill). Streaming currently **bypasses** it (`sail-plan/src/lib.rs`
+planner, task runner, spill). Streaming currently **bypasses** it (`zelox-plan/src/lib.rs`
 disables repartition for streaming "so the pipeline runs unbroken").
 
 **Decision: do NOT build a bespoke parallel driver. Make the existing partitioned-execution

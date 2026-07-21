@@ -181,7 +181,7 @@ exceeded **2 GiB** (i32 offset limit). The streaming windowed aggregation over t
   the exact failing operator.
 
 ### Root cause (CONFIRMED via on-instance debug-symbol backtrace)
-The backtrace pinned it to `sail-function/src/scalar/json/from_json.rs:154` inside a
+The backtrace pinned it to `zelox-function/src/scalar/json/from_json.rs:154` inside a
 DataFusion `project_batch`. Chain:
 `maxOffsetsPerTrigger=20000000` → (options.rs aliased it to `max_batch_size`) → the
 Kafka source built a **single 20M-row Arrow RecordBatch** → `from_json` materialized a

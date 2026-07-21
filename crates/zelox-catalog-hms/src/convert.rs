@@ -295,7 +295,7 @@ pub(crate) fn inject_spark_metadata(
 
     parameters.insert(
         FastStr::from_static_str("spark.sql.create.version"),
-        FastStr::from_string(format!("sail-{}", env!("CARGO_PKG_VERSION"))),
+        FastStr::from_string(format!("zelox-{}", env!("CARGO_PKG_VERSION"))),
     );
 
     Ok(())

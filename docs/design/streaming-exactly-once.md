@@ -41,7 +41,7 @@ offset WAL below deliver that; strict exactly-once follows once the sink lands.
 
 Zelox already has the right substrate: the **flow-event marker** stream
 ([streaming-watermark.md](streaming-watermark.md)) and a per-batch checkpoint writer in
-`StreamingQuery::run` (`crates/sail-spark-connect/src/streaming.rs`).
+`StreamingQuery::run` (`crates/zelox-spark-connect/src/streaming.rs`).
 
 ## The missing piece: a micro-batch execution coordinator (key finding 2026-06-10)
 Investigation showed offset commit/restore **cannot be cleanly wired onto the current

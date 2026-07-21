@@ -97,12 +97,12 @@ def _normalize_delta_commit_info_for_snapshot(commit_info: dict) -> dict:
         normalized["inCommitTimestamp"] = "<in_commit_timestamp>"
 
     cv = normalized.get("clientVersion")
-    if isinstance(cv, str) and cv.startswith("sail-delta-lake."):
-        normalized["clientVersion"] = "sail-delta-lake.x.x.x"
+    if isinstance(cv, str) and cv.startswith("zelox-delta-lake."):
+        normalized["clientVersion"] = "zelox-delta-lake.x.x.x"
 
     ei = normalized.get("engineInfo")
-    if isinstance(ei, str) and ei.startswith("sail-delta-lake:"):
-        normalized["engineInfo"] = "sail-delta-lake:x.x.x"
+    if isinstance(ei, str) and ei.startswith("zelox-delta-lake:"):
+        normalized["engineInfo"] = "zelox-delta-lake:x.x.x"
 
     op_metrics = normalized.get("operationMetrics")
     if isinstance(op_metrics, dict):

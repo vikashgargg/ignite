@@ -66,7 +66,7 @@ run() { # $1=rows $2=label
     "SPARK_REMOTE=$SR BOOT=$BOOT TOPIC=events N_EVENTS=$N MAXOFFSETS=500000 OUT=s3://zelox/$LABEL CK=s3://zelox/${LABEL}_ck python3 /tmp/wagg.py" 2>&1 | grep -aoE 'ZELOX_WAGG.*' | tail -1)
   sleep 11
   local SB=0
-  for p in $(kk get pods --no-headers 2>/dev/null | grep -E 'sail-worker' | awk '{print $1}'); do
+  for p in $(kk get pods --no-headers 2>/dev/null | grep -E 'zelox-worker' | awk '{print $1}'); do
     local L; L=$(kk logs "$p" --tail=400 2>/dev/null | grep -aoE 'shuffle_send_batches=[0-9]+' | tail -1 | cut -d= -f2)
     [ -n "$L" ] && SB=$((SB + L))
   done

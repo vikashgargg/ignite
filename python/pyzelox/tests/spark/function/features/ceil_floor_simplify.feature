@@ -128,7 +128,7 @@ Feature: ceil() / floor() — simplify hook (integer identity + idempotence)
 
   Rule: Plan snapshot — simplify removes UDF call for integer input
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN ceil of INT — no spark_ceil in plan
       When query
         """
@@ -138,7 +138,7 @@ Feature: ceil() / floor() — simplify hook (integer identity + idempotence)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN ceil of BIGINT — no spark_ceil in plan, no cast needed
       When query
         """
@@ -148,7 +148,7 @@ Feature: ceil() / floor() — simplify hook (integer identity + idempotence)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN floor of INT — no spark_floor in plan
       When query
         """
@@ -158,7 +158,7 @@ Feature: ceil() / floor() — simplify hook (integer identity + idempotence)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN ceil of DOUBLE — spark_ceil stays in plan
       When query
         """
@@ -168,7 +168,7 @@ Feature: ceil() / floor() — simplify hook (integer identity + idempotence)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN ceil of ceil — idempotence removes outer call
       When query
         """
@@ -178,7 +178,7 @@ Feature: ceil() / floor() — simplify hook (integer identity + idempotence)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN floor of floor — idempotence removes outer call
       When query
         """
@@ -188,7 +188,7 @@ Feature: ceil() / floor() — simplify hook (integer identity + idempotence)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN ceil with negative scale — spark_ceil stays in plan
       When query
         """

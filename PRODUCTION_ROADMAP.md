@@ -101,8 +101,8 @@ The `VARIANT` semi-structured type is Spark 4.0's biggest new type. Required for
 **Functions to implement:** `parse_json`, `try_parse_json`, `is_variant_null`, `variant_get`, `try_variant_get`, `variant_explode`, `variant_explode_outer`, `to_variant_object`, `schema_of_variant_agg`.
 
 **Files:**
-- `crates/sail-plan/src/resolver/data_type.rs` — `DataType::Variant` → internal Struct{value:Binary, metadata:Binary}
-- `crates/sail-plan/src/function/scalar/variant.rs` — all variant functions
+- `crates/zelox-plan/src/resolver/data_type.rs` — `DataType::Variant` → internal Struct{value:Binary, metadata:Binary}
+- `crates/zelox-plan/src/function/scalar/variant.rs` — all variant functions
 - SQL parser — `VARIANT` keyword in type grammar
 
 **Test:**
@@ -119,8 +119,8 @@ spark.sql("SELECT variant_get(parse_json('{\"a\":42}'), '$.a', 'INT')").collect(
 `SELECT * FROM t VERSION AS OF 5` and `TIMESTAMP AS OF '2024-01-01'`.
 
 **Files:**
-- `crates/sail-plan/src/resolver/` — detect `FOR SYSTEM_VERSION AS OF` / `AT VERSION` / `AT TIMESTAMP` on table scan
-- `crates/sail-delta-lake/src/table_format.rs` — pass version/timestamp to `open_table_with_object_store_and_table_config_at_version`
+- `crates/zelox-plan/src/resolver/` — detect `FOR SYSTEM_VERSION AS OF` / `AT VERSION` / `AT TIMESTAMP` on table scan
+- `crates/zelox-delta-lake/src/table_format.rs` — pass version/timestamp to `open_table_with_object_store_and_table_config_at_version`
 - DeltaReadOptions — add `version: Option<i64>`, `timestamp: Option<i64>`
 
 **Test:**
@@ -137,9 +137,9 @@ assert spark.sql("SELECT * FROM t VERSION AS OF 0").collect() == [Row(v=1)]
 `df.groupBy("k").applyInPandas(fn, schema)` — each group lands as a Pandas DataFrame in Python.
 
 **Files:**
-- `crates/sail-spark-connect/src/proto/plan.rs` — handle `ApplyInPandas` / `CoGroupMap` plan nodes
-- `crates/sail-python-udf/src/udf/pyspark_group_map_udf.rs` — already has skeleton, wire execution
-- `crates/sail-plan/src/resolver/query/udf.rs` — GroupedMapUDF logical node
+- `crates/zelox-spark-connect/src/proto/plan.rs` — handle `ApplyInPandas` / `CoGroupMap` plan nodes
+- `crates/zelox-python-udf/src/udf/pyspark_group_map_udf.rs` — already has skeleton, wire execution
+- `crates/zelox-plan/src/resolver/query/udf.rs` — GroupedMapUDF logical node
 
 **Test:**
 ```python
@@ -157,8 +157,8 @@ df.groupBy("k").applyInPandas(normalize, schema="k long, v double").show()
 Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log files from accumulating. Critical for production tables.
 
 **Files:**
-- `crates/sail-delta-lake/src/kernel/checkpoints.rs` — write V2 format (already partially done)
-- `crates/sail-delta-lake/src/kernel/checkpoint_augment.rs` — sidecar metadata
+- `crates/zelox-delta-lake/src/kernel/checkpoints.rs` — write V2 format (already partially done)
+- `crates/zelox-delta-lake/src/kernel/checkpoint_augment.rs` — sidecar metadata
 - Trigger: compact when `_delta_log/` has > 10 JSON files since last checkpoint
 
 ---
@@ -170,8 +170,8 @@ Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log
 **OverwriteIf for Iceberg:** same pattern as Delta fix — route to overwrite plan instead of `not_impl_err!`.
 
 **Files:**
-- `crates/sail-iceberg/src/table_format.rs` — remove `not_impl_err!` for `OverwriteIf` / `OverwritePartitions`
-- `crates/sail-iceberg/src/spec/` — V3 format changes
+- `crates/zelox-iceberg/src/table_format.rs` — remove `not_impl_err!` for `OverwriteIf` / `OverwritePartitions`
+- `crates/zelox-iceberg/src/spec/` — V3 format changes
 - REST catalog: improve sort transform parsing
 
 ---
@@ -243,7 +243,7 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
   workloads toward the full function surface.
 - [ ] **Full CI lane green end-to-end** `P0` — all jobs (clippy ✅, fmt, test, build-linux,
   distributed-scorecard, k8s/macos-scorecard, differential-spark ✅).
-- [ ] **Delta byte-size snapshot refresh** `P1` — ~10 `@sail-only` operation_metrics/merge
+- [ ] **Delta byte-size snapshot refresh** `P1` — ~10 `@zelox-only` operation_metrics/merge
   snapshots fail only on physical Parquet byte sizes (all semantic counters already match
   Spark). Regenerate from Zelox's deterministic output, or match upstream parquet encoding.
 - [ ] **Delta EXPLAIN plan-shape + MERGE-source nullability** `P2` — remaining ~few Delta
@@ -328,7 +328,7 @@ Write `scripts/test_endurance.py`.
 
 Hive Metastore Thrift client for reading catalog tables from existing Hive/Glue deployments.
 
-**Files:** `crates/sail-catalog/src/hms/` (new)
+**Files:** `crates/zelox-catalog/src/hms/` (new)
 
 ---
 
@@ -350,8 +350,8 @@ Planner already accepts it (Sprint 3). Need to wire the executor:
 - State store: RocksDB or in-memory HashMap with eviction
 
 **Files:**
-- `crates/sail-spark-connect/src/streaming/` — state store + window accumulator
-- `crates/sail-plan/src/resolver/query/misc.rs` — emit proper Window LogicalPlan nodes
+- `crates/zelox-spark-connect/src/streaming/` — state store + window accumulator
+- `crates/zelox-plan/src/resolver/query/misc.rs` — emit proper Window LogicalPlan nodes
 
 ---
 

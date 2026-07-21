@@ -31,7 +31,7 @@ Feature: schema_of_variant
         | BOOLEAN |
 
     # parquet-variant-json parses 3.14 as f64 (DOUBLE) instead of Decimal like Spark
-    @sail-bug
+    @zelox-bug
     Scenario: schema_of_variant double
       When query
         """

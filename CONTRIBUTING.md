@@ -21,7 +21,7 @@ Every change is expected to be production-grade and honest:
 - **Tests:** add or update tests; run `cargo test`. Streaming changes cite the feature-matrix cell they
   advance in [`docs/STREAMING_ARCHITECTURE.md`](docs/STREAMING_ARCHITECTURE.md) and meet its done-criteria.
 - **Distributed contract:** a new physical-plan field must round-trip in
-  [`sail-execution/src/codec.rs`](crates/sail-execution/src/codec.rs), or be logged as a single-node gap.
+  [`zelox-execution/src/codec.rs`](crates/zelox-execution/src/codec.rs), or be logged as a single-node gap.
 - **Honest claims:** performance/competitive claims must be **measured head-to-head** with the scale and
   conditions stated, and path-dependence flagged — no estimated or unqualified "beats Spark/Flink" claims.
 - **Docs:** update `CHANGELOG.md` and the relevant knowledge-base docs (CODEMAP / STATUS / BENCHMARKS)

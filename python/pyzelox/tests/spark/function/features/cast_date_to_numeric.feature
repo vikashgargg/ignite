@@ -97,7 +97,7 @@ Feature: CAST date to numeric types returns null
 
   Rule: CAST date to numeric in ANSI mode raises error
 
-    @sail-only
+    @zelox-only
     Scenario: cast date to int in ANSI mode raises error
       Given config spark.sql.ansi.enabled = true
       When query
@@ -107,7 +107,7 @@ Feature: CAST date to numeric types returns null
       Then query error cannot cast date
       Given config spark.sql.ansi.enabled = false
 
-    @sail-only
+    @zelox-only
     Scenario: cast date to double in ANSI mode raises error
       Given config spark.sql.ansi.enabled = true
       When query
@@ -117,7 +117,7 @@ Feature: CAST date to numeric types returns null
       Then query error cannot cast date
       Given config spark.sql.ansi.enabled = false
 
-    @sail-only
+    @zelox-only
     Scenario: cast date to boolean in ANSI mode raises error
       Given config spark.sql.ansi.enabled = true
       When query

@@ -42,9 +42,9 @@ UPDATE table_name [AS alias] SET col = expr [WHERE condition]
 SQL parser recognises the statements. Execution layer has no physical plan. `delta-rs` supports both via `DeltaOps::delete()` and `DeltaOps::update()`.
 
 ### Fix path
-1. Implement `DeleteFromExec` in `sail-execution` using `DeltaOps::delete()`
-2. Implement `UpdateExec` in `sail-execution` using `DeltaOps::update()`
-3. Route from `sail-plan` physical planner
+1. Implement `DeleteFromExec` in `zelox-execution` using `DeltaOps::delete()`
+2. Implement `UpdateExec` in `zelox-execution` using `DeltaOps::update()`
+3. Route from `zelox-plan` physical planner
 4. Remove skips from `test_dml.py`
 
 ---
@@ -99,7 +99,7 @@ udf(lambda x: x, returnType="binary")("str_col")  # expects bytearray(b"1")
 Sail's PyO3 UDF bridge doesn't apply Spark's implicit output type coercion rules when the Python return value doesn't match the declared `returnType`. Spark does a best-effort cast; Sail likely errors or returns the raw value.
 
 ### Fix path
-1. In `sail-python-udf`, after calling the Python fn and converting the result RecordBatch, apply a `CastExec` matching the declared `returnType`
+1. In `zelox-python-udf`, after calling the Python fn and converting the result RecordBatch, apply a `CastExec` matching the declared `returnType`
 2. Handle `None` semantics for BINARY type when input is non-bytes-compatible
 3. Test both `spark.sql.execution.pythonUDF.arrow.enabled=true` and `false`
 
@@ -122,8 +122,8 @@ GROUP BY id
 The `FILTER (WHERE ...)` clause on aggregate functions is parsed but not lowered into a physical aggregate plan. DataFusion supports this via `AggregateExpr::filter`.
 
 ### Fix path
-1. In `sail-plan`, when converting `AggregateFunction` with a `filter` field, pass the filter expression to `DataFusion`'s `AggregateExpr`
-2. Verify `sail-sql-parser` correctly parses the `FILTER (WHERE ...)` syntax
+1. In `zelox-plan`, when converting `AggregateFunction` with a `filter` field, pass the filter expression to `DataFusion`'s `AggregateExpr`
+2. Verify `zelox-sql-parser` correctly parses the `FILTER (WHERE ...)` syntax
 3. Remove skips in `test_group_by.py`
 
 ---
@@ -140,7 +140,7 @@ The `FILTER (WHERE ...)` clause on aggregate functions is parsed but not lowered
 
 ### Fix (complete — Day 9, schema case)
 
-**Schema-specified case** (`sail-data-source/src/formats/json/permissive.rs`):
+**Schema-specified case** (`zelox-data-source/src/formats/json/permissive.rs`):
 - `PermissiveJsonDecoder`: buffers bytes, validates each `\n`-delimited line with `serde_json`
 - Valid lines: parsed normally; malformed lines: row is all-null + raw bytes written to `_corrupt_record` column
 - Modes: `PERMISSIVE` (null row), `DROPMALFORMED` (skip row), `FAILFAST` (return error)
@@ -175,7 +175,7 @@ INSERT OVERWRITE table_name SELECT ...
 
 ### Fix path
 1. Parse `INSERT OVERWRITE` → set `overwrite: true` in the logical plan node
-2. In `sail-execution` writer, use `SaveMode::Overwrite` when `overwrite=true`
+2. In `zelox-execution` writer, use `SaveMode::Overwrite` when `overwrite=true`
 
 ---
 
@@ -197,7 +197,7 @@ These are Databricks-specific spatial types not in open-source Spark. Low priori
 **Count:** 2 tests
 
 ### Fix
-Added `is_external: bool` to `CreateTableOptions`. The resolver in `sail-plan` now sets
+Added `is_external: bool` to `CreateTableOptions`. The resolver in `zelox-plan` now sets
 `is_external = true` only when `LOCATION` is explicitly specified by the user; otherwise
 `is_external = false` (MANAGED). All catalog provider `create_table` implementations
 updated to use `options.is_external`. Tests updated to assert `MANAGED` for no-location tables.
@@ -213,7 +213,7 @@ updated to use `options.is_external`. Tests updated to assert `MANAGED` for no-l
 
 ## Gold Test Results (Rust)
 
-**Ran:** `cargo test -p sail-gold-test`  
+**Ran:** `cargo test -p zelox-gold-test`  
 **Result:** ✅ All passing
 
 Categories covered by gold tests:

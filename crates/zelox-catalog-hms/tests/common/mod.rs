@@ -22,8 +22,8 @@ use tokio::process::Command;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 const KERBEROS_REALM: &str = "SAIL.TEST";
-const KDC_HOSTNAME: &str = "sail-kerberos-kdc";
-const HMS_HOSTNAME: &str = "sail-kerberos-hms";
+const KDC_HOSTNAME: &str = "zelox-kerberos-kdc";
+const HMS_HOSTNAME: &str = "zelox-kerberos-hms";
 const HMS_KEYTAB_PATH: &str = "/opt/hive/conf/hms.service.keytab";
 const CONTAINER_KRB5_CONFIG_PATH: &str = "/etc/krb5.conf";
 const HIVE_SITE_XML_PATH: &str = "/opt/hive/conf/hive-site.xml";
@@ -303,10 +303,10 @@ async fn shared_kerberos_infrastructure() -> &'static SharedKerberosInfrastructu
 
     let suffix = unique_suffix();
     let temp_dir = tempfile::Builder::new()
-        .prefix("sail-kerberos-hms-")
+        .prefix("zelox-kerberos-hms-")
         .tempdir()
         .unwrap_or_else(|error| panic!("create temp dir: {error}"));
-    let network_name = format!("sail-krb-net-{suffix}");
+    let network_name = format!("zelox-krb-net-{suffix}");
     let image = build_kerberos_kdc_image().await;
 
     let kdc_container = image
@@ -314,7 +314,7 @@ async fn shared_kerberos_infrastructure() -> &'static SharedKerberosInfrastructu
         .with_exposed_port(ContainerPort::Udp(KDC_PORT))
         .with_wait_for(WaitFor::message_on_stdout("KDC ready"))
         .with_network(&network_name)
-        .with_container_name(format!("sail-krb-kdc-{suffix}"))
+        .with_container_name(format!("zelox-krb-kdc-{suffix}"))
         .with_hostname(KDC_HOSTNAME)
         .with_env_var("KERBEROS_REALM", KERBEROS_REALM)
         .with_env_var("KDC_HOSTNAME", KDC_HOSTNAME)
@@ -342,7 +342,7 @@ async fn shared_kerberos_infrastructure() -> &'static SharedKerberosInfrastructu
     wait_for_tcp_port(&canonical_host, kdc_port, 60, "Kerberos KDC").await;
 
     let service_principal = format!("hive-metastore/localhost@{KERBEROS_REALM}");
-    let client_principal = format!("sail-test-client@{KERBEROS_REALM}");
+    let client_principal = format!("zelox-test-client@{KERBEROS_REALM}");
 
     exec_checked(
         &kdc_container,
@@ -395,7 +395,7 @@ async fn shared_kerberos_infrastructure() -> &'static SharedKerberosInfrastructu
     let hms_container = GenericImage::new("apache/hive", "3.1.3")
         .with_exposed_port(ContainerPort::Tcp(HIVE_METASTORE_PORT))
         .with_network(&network_name)
-        .with_container_name(format!("sail-krb-hms-{suffix}"))
+        .with_container_name(format!("zelox-krb-hms-{suffix}"))
         .with_hostname(HMS_HOSTNAME)
         .with_env_var("SERVICE_NAME", "metastore")
         .with_env_var("VERBOSE", "true")
@@ -507,7 +507,7 @@ async fn wait_for_tcp_port(host: &str, port: u16, attempts: usize, service_name:
 }
 
 async fn build_kerberos_kdc_image() -> GenericImage {
-    GenericBuildableImage::new("sail-kerberos-kdc", format!("test-{}", std::process::id()))
+    GenericBuildableImage::new("zelox-kerberos-kdc", format!("test-{}", std::process::id()))
         .with_file(kerberos_kdc_fixture_dir(), ".")
         .build_image()
         .await
@@ -684,7 +684,7 @@ fn hive_site_xml(service_principal: &str) -> String {
 <configuration>
   <property>
     <name>javax.jdo.option.ConnectionURL</name>
-    <value>jdbc:derby:;databaseName=/tmp/sail-kerberos-metastore/metastore_db;create=true</value>
+    <value>jdbc:derby:;databaseName=/tmp/zelox-kerberos-metastore/metastore_db;create=true</value>
   </property>
   <property>
     <name>javax.jdo.option.ConnectionDriverName</name>
@@ -728,7 +728,7 @@ fn hive_site_xml(service_principal: &str) -> String {
   </property>
   <property>
     <name>hive.metastore.warehouse.dir</name>
-    <value>/tmp/sail-kerberos-metastore/warehouse</value>
+    <value>/tmp/zelox-kerberos-metastore/warehouse</value>
   </property>
 </configuration>
 "#

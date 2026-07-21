@@ -4,7 +4,7 @@
 //! files to the output directory cannot survive a crash: a micro-batch may write its output
 //! files and then die before its source offsets are committed, so on restart the source replays
 //! the same input and writes the output *again* — leaving duplicate/orphan files that a naive
-//! reader would see (see `crates/sail-data-source/src/formats/file_stream.rs`, which names this
+//! reader would see (see `crates/zelox-data-source/src/formats/file_stream.rs`, which names this
 //! exact "crash-mid-run output-duplicate window").
 //!
 //! Spark closes the window with a transaction log under `<output>/_spark_metadata`: one file per

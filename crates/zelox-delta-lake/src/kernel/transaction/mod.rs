@@ -598,7 +598,7 @@ impl CommitData {
         app_metadata
             .entry("clientVersion".to_string())
             .or_insert_with(|| {
-                Value::String(format!("sail-delta-lake.{}", env!("CARGO_PKG_VERSION")))
+                Value::String(format!("zelox-delta-lake.{}", env!("CARGO_PKG_VERSION")))
             });
         // Merge operationMetrics into the final commitInfo.info.
         // If the caller also provided `operationMetrics` in app metadata, merge both.

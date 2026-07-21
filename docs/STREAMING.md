@@ -35,7 +35,7 @@ Legend: ✅ works · 🟡 partial / per-micro-batch only · ⬜ missing.
 | `foreach` (row writer) | ⬜ | explicitly rejected — use `foreachBatch` |
 | `console` | ⬜ | not implemented |
 
-## Operators (`crates/sail-plan/src/streaming/rewriter.rs`)
+## Operators (`crates/zelox-plan/src/streaming/rewriter.rs`)
 | Operator | Status | Notes |
 |---|---|---|
 | Projection / Filter | ✅ | flow-event schema threaded through |

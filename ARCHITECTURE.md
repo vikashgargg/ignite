@@ -26,40 +26,40 @@ PySpark / SQL client
        │ Spark Connect (gRPC / protobuf)
        ▼
 ┌─────────────────────────────┐
-│  sail-spark-connect         │  Deserialise Relation/Plan proto
+│  zelox-spark-connect         │  Deserialise Relation/Plan proto
 │  (gRPC server — tonic)      │
 └────────────┬────────────────┘
              │ Unresolved logical plan
              ▼
 ┌─────────────────────────────┐
-│  sail-sql-parser            │  nom/chumsky SQL → AST
-│  sail-sql-analyzer          │  Name resolution, type checking
+│  zelox-sql-parser            │  nom/chumsky SQL → AST
+│  zelox-sql-analyzer          │  Name resolution, type checking
 └────────────┬────────────────┘
              │ Resolved AST
              ▼
 ┌─────────────────────────────┐
-│  sail-planner               │  AST → DataFusion LogicalPlan
-│  sail-logical-optimizer     │  40+ optimisation rules
+│  zelox-planner               │  AST → DataFusion LogicalPlan
+│  zelox-logical-optimizer     │  40+ optimisation rules
 │                             │  (predicate pushdown, projection
 │                             │   pruning, join reorder, const fold)
 └────────────┬────────────────┘
              │ Optimised logical plan
              ▼
 ┌─────────────────────────────┐
-│  sail-physical-plan         │  Selects operators:
-│  sail-physical-optimizer    │  HashJoin vs SortMergeJoin,
+│  zelox-physical-plan         │  Selects operators:
+│  zelox-physical-optimizer    │  HashJoin vs SortMergeJoin,
 │                             │  local vs distributed aggregation
 └────────────┬────────────────┘
              │ Physical plan (DAG of stages)
              ▼
 ┌─────────────────────────────┐
-│  sail-execution             │  DataFusion RecordBatch streaming
+│  zelox-execution             │  DataFusion RecordBatch streaming
 │  (DataFusion engine)        │  8192 rows/batch, SIMD via Arrow
 └────────────┬────────────────┘
              │  [if distributed]
              ▼
 ┌─────────────────────────────┐
-│  sail-flight                │  Arrow Flight RPC shuffle between
+│  zelox-flight                │  Arrow Flight RPC shuffle between
 │  (shuffle transport)        │  workers; spills to object store
 └────────────┬────────────────┘
              │ Arrow IPC result batches
@@ -73,41 +73,41 @@ PySpark / SQL client
 
 | Crate | Role |
 |---|---|
-| `sail-cli` | Single binary entrypoint (`zelox`). Clap CLI with `server`, `sql`, `run`, `shell`, `bench`, `cluster`, `flight` subcommands. |
-| `sail-spark-connect` | Spark Connect gRPC server (tonic). Deserialises Spark Connect proto messages. |
-| `sail-sql-parser` | SQL parser (chumsky + custom grammar). Produces an AST from SQL strings. |
-| `sail-sql-analyzer` | Name resolution, type inference, semantic analysis. |
-| `sail-plan` | Converts analysed AST → DataFusion `LogicalPlan`. |
-| `sail-plan-lakehouse` | Lakehouse-specific planning (Delta Lake, Iceberg table routing). |
-| `sail-logical-optimizer` | Rule-based logical optimiser passes. |
-| `sail-physical-plan` | Physical plan selection (join strategy, aggregation mode). |
-| `sail-physical-optimizer` | Physical optimiser rules (e.g., partition pruning). |
-| `sail-execution` | DataFusion execution engine integration. Streams `RecordBatch` chunks. |
-| `sail-flight` | Arrow Flight RPC server + client. Used for shuffle and Flight SQL. |
-| `sail-session` | Session state management (config, temp views, UDF registry). |
-| `sail-catalog` | Catalog abstraction trait. |
-| `sail-catalog-memory` | In-memory catalog (dev/test). |
-| `sail-catalog-system` | Built-in system catalog (`spark_catalog`). |
-| `sail-catalog-iceberg` | Apache Iceberg REST catalog client. |
-| `sail-catalog-hms` | Hive Metastore Thrift client. |
-| `sail-catalog-unity` | Databricks Unity Catalog REST client. |
-| `sail-catalog-glue` | AWS Glue Data Catalog client. |
-| `sail-catalog-onelake` | Microsoft OneLake / Fabric catalog client. |
-| `sail-delta-lake` | Delta Lake read/write via delta-rs. Includes V2 checkpointing, time travel, type widening. |
-| `sail-iceberg` | Apache Iceberg table format operations. Snapshot producer with dynamic partition overwrite (`Operation::OverwritePartitions`), manifest writer with `add_existing()` for retained entries. |
-| `sail-vortex` | Vortex columnar format skeleton. `VortexTableFormat` registered in `TableFormatRegistry`; read/write stubs pending `vortex-datafusion` DataFusion 53.x compat. |
-| `sail-object-store` | Unified storage layer (S3, GCS, Azure, HDFS, local) via `object_store`. |
-| `sail-data-source` | Parquet, ORC, CSV, JSON, Arrow IPC readers/writers. |
-| `sail-python` | Python interpreter embedding (PyO3). |
-| `sail-python-udf` | Python UDF / UDAF / UDTF bridge. Zero-copy Arrow batch passing. |
-| `sail-function` | Built-in Spark SQL functions (matches Spark's function surface). |
-| `sail-common` | Shared types, config, error types. |
-| `sail-common-datafusion` | DataFusion extension helpers shared across crates. |
-| `sail-telemetry` | OpenTelemetry tracing + metrics. |
-| `sail-gold-test` | Gold test harness for SQL compatibility tests. |
-| `sail-sql-macro` | Proc macros for SQL test generation. |
-| `sail-build-scripts` | Shared build.rs utilities (protobuf codegen). |
-| `sail-cache` | Shared caching utilities (moka). |
+| `zelox-cli` | Single binary entrypoint (`zelox`). Clap CLI with `server`, `sql`, `run`, `shell`, `bench`, `cluster`, `flight` subcommands. |
+| `zelox-spark-connect` | Spark Connect gRPC server (tonic). Deserialises Spark Connect proto messages. |
+| `zelox-sql-parser` | SQL parser (chumsky + custom grammar). Produces an AST from SQL strings. |
+| `zelox-sql-analyzer` | Name resolution, type inference, semantic analysis. |
+| `zelox-plan` | Converts analysed AST → DataFusion `LogicalPlan`. |
+| `zelox-plan-lakehouse` | Lakehouse-specific planning (Delta Lake, Iceberg table routing). |
+| `zelox-logical-optimizer` | Rule-based logical optimiser passes. |
+| `zelox-physical-plan` | Physical plan selection (join strategy, aggregation mode). |
+| `zelox-physical-optimizer` | Physical optimiser rules (e.g., partition pruning). |
+| `zelox-execution` | DataFusion execution engine integration. Streams `RecordBatch` chunks. |
+| `zelox-flight` | Arrow Flight RPC server + client. Used for shuffle and Flight SQL. |
+| `zelox-session` | Session state management (config, temp views, UDF registry). |
+| `zelox-catalog` | Catalog abstraction trait. |
+| `zelox-catalog-memory` | In-memory catalog (dev/test). |
+| `zelox-catalog-system` | Built-in system catalog (`spark_catalog`). |
+| `zelox-catalog-iceberg` | Apache Iceberg REST catalog client. |
+| `zelox-catalog-hms` | Hive Metastore Thrift client. |
+| `zelox-catalog-unity` | Databricks Unity Catalog REST client. |
+| `zelox-catalog-glue` | AWS Glue Data Catalog client. |
+| `zelox-catalog-onelake` | Microsoft OneLake / Fabric catalog client. |
+| `zelox-delta-lake` | Delta Lake read/write via delta-rs. Includes V2 checkpointing, time travel, type widening. |
+| `zelox-iceberg` | Apache Iceberg table format operations. Snapshot producer with dynamic partition overwrite (`Operation::OverwritePartitions`), manifest writer with `add_existing()` for retained entries. |
+| `zelox-vortex` | Vortex columnar format skeleton. `VortexTableFormat` registered in `TableFormatRegistry`; read/write stubs pending `vortex-datafusion` DataFusion 53.x compat. |
+| `zelox-object-store` | Unified storage layer (S3, GCS, Azure, HDFS, local) via `object_store`. |
+| `zelox-data-source` | Parquet, ORC, CSV, JSON, Arrow IPC readers/writers. |
+| `zelox-python` | Python interpreter embedding (PyO3). |
+| `zelox-python-udf` | Python UDF / UDAF / UDTF bridge. Zero-copy Arrow batch passing. |
+| `zelox-function` | Built-in Spark SQL functions (matches Spark's function surface). |
+| `zelox-common` | Shared types, config, error types. |
+| `zelox-common-datafusion` | DataFusion extension helpers shared across crates. |
+| `zelox-telemetry` | OpenTelemetry tracing + metrics. |
+| `zelox-gold-test` | Gold test harness for SQL compatibility tests. |
+| `zelox-sql-macro` | Proc macros for SQL test generation. |
+| `zelox-build-scripts` | Shared build.rs utilities (protobuf codegen). |
+| `zelox-cache` | Shared caching utilities (moka). |
 
 ---
 
@@ -165,8 +165,8 @@ zelox mcp-server                     # Spark MCP server
 | `object_store` | 0.13 | Unified S3/GCS/Azure/local storage |
 | `tonic` | 0.14 | gRPC server (Spark Connect protocol) |
 | `pyo3` | 0.28 | Python UDF bridge |
-| `delta-rs` | via sail-delta-lake | Delta Lake table format |
-| `iceberg-rust` | via sail-catalog-iceberg | Apache Iceberg |
+| `delta-rs` | via zelox-delta-lake | Delta Lake table format |
+| `iceberg-rust` | via zelox-catalog-iceberg | Apache Iceberg |
 | `tokio` | 1.52 | Async runtime |
 | `clap` | 4.6 | CLI argument parsing |
 
@@ -186,4 +186,4 @@ zelox mcp-server                     # Spark MCP server
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). The existing sail gold-test suite is the
-primary correctness signal — run it with `cargo test -p sail-gold-test`.
+primary correctness signal — run it with `cargo test -p zelox-gold-test`.

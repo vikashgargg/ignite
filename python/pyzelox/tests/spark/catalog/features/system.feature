@@ -85,7 +85,7 @@ Feature: System catalog queries
       | count |
       | 1     |
 
-  @sail-only
+  @zelox-only
   Scenario: Filter and limit pushdown for system.session.options
     When query
       """
@@ -95,7 +95,7 @@ Feature: System catalog queries
       """
     Then query plan matches snapshot
 
-  @sail-only
+  @zelox-only
   Scenario: Options table queries
     When query
       """

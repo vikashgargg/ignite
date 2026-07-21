@@ -2,8 +2,8 @@
 ---
 name: "test_conditional_overwrite_can_replace_all_rows_replace_where_id__cast0_as_bigint"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: WRITE
   operationMetrics:
@@ -26,8 +26,8 @@ data:
 ---
 name: "test_conditional_overwrite_keeps_nonmatching_rows_replace_where"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: WRITE
   operationMetrics:

@@ -662,7 +662,7 @@
 
 - key: kubernetes.worker_pod_name_prefix
   type: string
-  default: "sail-worker-"
+  default: "zelox-worker-"
   description: |
     The prefix of the name of worker pods.
     This should usually end with a hyphen (`-`).

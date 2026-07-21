@@ -26,23 +26,23 @@ References (consulted, not copied):
 
 | Component | File | Responsibility | Contract |
 |---|---|---|---|
-| FlowEvent model | `sail-common-datafusion/src/streaming/event/` | `Data{batch,retracted}` + `Marker(Watermark/Checkpoint/EndOfData/...)`; encode/decode | Markers never overtake their data; retract row == a prior insert row verbatim |
-| Kafka source | `sail-data-source/src/formats/kafka/reader.rs` | bounded/realtime/unbounded reads; 1 instance per partition (FLIP-27) | Bounded read reaches captured end offsets (replayable); per-partition event-time order |
-| Watermark | `sail-physical-plan/src/streaming/watermark.rs` | emit `Watermark(maxTs−delay)`, monotonic, per-partition | Never regress; delay = bounded out-of-orderness |
+| FlowEvent model | `zelox-common-datafusion/src/streaming/event/` | `Data{batch,retracted}` + `Marker(Watermark/Checkpoint/EndOfData/...)`; encode/decode | Markers never overtake their data; retract row == a prior insert row verbatim |
+| Kafka source | `zelox-data-source/src/formats/kafka/reader.rs` | bounded/realtime/unbounded reads; 1 instance per partition (FLIP-27) | Bounded read reaches captured end offsets (replayable); per-partition event-time order |
+| Watermark | `zelox-physical-plan/src/streaming/watermark.rs` | emit `Watermark(maxTs−delay)`, monotonic, per-partition | Never regress; delay = bounded out-of-orderness |
 | Keyed exchange | `streaming/exchange.rs` | hash-shuffle by key N→M; MIN-merge watermarks at receiver | Same key→same partition; downstream watermark = MIN over inputs (FLIP-182) |
 | Barrier align | `streaming/barrier_align.rs` | N→1 Chandy-Lamport barrier alignment | Collect barrier from all N before forwarding one (EO) |
 | Window agg | `streaming/window_accum.rs` | event-time window agg; append + update(changelog)+allowedLateness | Append: emit-once-on-close. Update: retract+insert, retain until `end+L≤wm`, zero loss within L |
 | Dedup | `streaming/dedup.rs` | keyed dedup with watermark eviction | Exactly-once per key within watermark horizon |
 | Stream join | `streaming/stream_join.rs` | interval/equi join, per-side state | Bounded state via watermark; no spurious drops |
 | Collector | `streaming/collector.rs` | materialize changelog→table (bounded) | Net by row-identity: insert +1, retract −1; survivors = batch-equivalent result |
-| File sink | `sail-data-source` file write + `_spark_metadata` | append-only durable sink + EO commit log | Append-only; cannot represent retractions (see gaps) |
+| File sink | `zelox-data-source` file write + `_spark_metadata` | append-only durable sink + EO commit log | Append-only; cannot represent retractions (see gaps) |
 | Kafka sink | `kafka/sink.rs` | EO Kafka producer (txn) | Transactional; upsert mode = key'd changelog (gap) |
 | Realtime file sink | `RealtimeFileSinkExec` | per-epoch atomic commit (realtime EO) | One atomic object per epoch (F4) |
 | State snapshot | `streaming/state_io.rs` | operator state stage/restore | Write-ahead; commit after output durable |
-| Distributed codec | `sail-execution/src/codec.rs` | (de)serialize physical plan across workers | Every exec field round-trips (else local-cluster/distributed diverges) |
-| Planner | `sail-session/src/planner.rs` | logical streaming node → physical exec | Preserve all node options onto exec |
-| Rewriter | `sail-plan/src/streaming/rewriter.rs` | optimized plan → streaming operators | Thread bounded/checkpoint/realtime/output-mode/lateness |
-| Executor | `sail-spark-connect/.../plan_executor.rs` | writeStream spec → streaming run options | Map trigger/outputMode/options to engine flags |
+| Distributed codec | `zelox-execution/src/codec.rs` | (de)serialize physical plan across workers | Every exec field round-trips (else local-cluster/distributed diverges) |
+| Planner | `zelox-session/src/planner.rs` | logical streaming node → physical exec | Preserve all node options onto exec |
+| Rewriter | `zelox-plan/src/streaming/rewriter.rs` | optimized plan → streaming operators | Thread bounded/checkpoint/realtime/output-mode/lateness |
+| Executor | `zelox-spark-connect/.../plan_executor.rs` | writeStream spec → streaming run options | Map trigger/outputMode/options to engine flags |
 
 ## 2. Feature matrix (operator × output mode × sink × distribution)
 

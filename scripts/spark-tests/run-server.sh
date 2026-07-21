@@ -33,7 +33,7 @@ if [ -z "${CI:-}" ]; then
   # no `pyvenv.cfg` at its required location (one directory above the executable).
   export PYTHONPATH="${VIRTUAL_ENV}/lib/python${python_version}/site-packages"
 
-  cargo run -p sail-cli -- spark server -C "${work_dir}"
+  cargo run -p zelox-cli -- spark server -C "${work_dir}"
 else
   sail spark server -C "${work_dir}"
 fi

@@ -13,7 +13,7 @@ You can build the CLI with the `release` profile in Cargo.
 ```bash
 env \
   RUSTFLAGS="-C target-cpu=native" \
-  cargo build -r -p sail-cli --bins
+  cargo build -r -p zelox-cli --bins
 ```
 
 You can then run the Spark Connect server with the following command.

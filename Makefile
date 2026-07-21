@@ -1,4 +1,4 @@
-# Zelox build targets  (binary: zelox, internal crates: sail-*)
+# Zelox build targets  (binary: zelox, internal crates: zelox-*)
 # Usage: make <target>
 
 .PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean \
@@ -104,7 +104,7 @@ $(SMOKE_PYTHON):
 	@exit 1
 
 dev:
-	$(CARGO) build -p sail-cli
+	$(CARGO) build -p zelox-cli
 	@echo "Binary: $(BINARY)"
 
 check:
@@ -124,7 +124,7 @@ fmt-fix:
 	$(CARGO) fmt --all
 
 release:
-	$(CARGO) build --release -p sail-cli
+	$(CARGO) build --release -p zelox-cli
 	@echo "Binary: $(RELEASE_DIR)/zelox"
 	@ls -lh $(RELEASE_DIR)/zelox
 
@@ -132,10 +132,10 @@ release:
 build-linux:
 	@echo "Building Linux x86_64 musl..."
 	PYO3_CROSS_PYTHON_VERSION=$(PYO3_CROSS_PYTHON_VERSION) \
-		$(CARGO) zigbuild --release -p sail-cli --target x86_64-unknown-linux-musl
+		$(CARGO) zigbuild --release -p zelox-cli --target x86_64-unknown-linux-musl
 	@echo "Building Linux aarch64 musl..."
 	PYO3_CROSS_PYTHON_VERSION=$(PYO3_CROSS_PYTHON_VERSION) \
-		$(CARGO) zigbuild --release -p sail-cli --target aarch64-unknown-linux-musl
+		$(CARGO) zigbuild --release -p zelox-cli --target aarch64-unknown-linux-musl
 	@echo ""
 	@echo "Binaries:"
 	@ls -lh target/x86_64-unknown-linux-musl/release/zelox
@@ -153,11 +153,11 @@ PYTHON_LIB := $(shell $(PYTHON_BIN) -c \
 
 build-macos:
 	@echo "Building macOS x86_64..."
-	$(CARGO) zigbuild --release -p sail-cli --target x86_64-apple-darwin
+	$(CARGO) zigbuild --release -p zelox-cli --target x86_64-apple-darwin
 	@echo "Building macOS aarch64 (native)..."
 	PYO3_PYTHON=$(PYTHON_BIN) \
 	RUSTFLAGS="$(if $(PYTHON_LIB),-L $(PYTHON_LIB))" \
-	$(CARGO) build --release -p sail-cli --target aarch64-apple-darwin
+	$(CARGO) build --release -p zelox-cli --target aarch64-apple-darwin
 	@echo "Creating universal binary..."
 	lipo -create -output target/zelox-universal2-apple-darwin \
 		target/x86_64-apple-darwin/release/zelox \
@@ -174,13 +174,13 @@ bench: bench-sf1
 
 bench-sf1:
 	@echo "Building Zelox release binary..."
-	$(CARGO) build --release -p sail-cli
+	$(CARGO) build --release -p zelox-cli
 	@echo ""
 	$(RELEASE_DIR)/zelox bench --scale-factor 1
 
 bench-sf10:
 	@echo "Building Zelox release binary..."
-	$(CARGO) build --release -p sail-cli
+	$(CARGO) build --release -p zelox-cli
 	@echo ""
 	$(RELEASE_DIR)/zelox bench --scale-factor 10
 

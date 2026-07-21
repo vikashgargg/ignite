@@ -1,4 +1,4 @@
-@sail-only
+@zelox-only
 Feature: array_concat() concatenates arrays (Sail extension)
 
   Note: array_concat is a Sail extension not available in standard Spark.
@@ -6,7 +6,7 @@ Feature: array_concat() concatenates arrays (Sail extension)
 
   Rule: Basic concatenation
 
-    @sail-only
+    @zelox-only
     Scenario: array_concat two integer arrays
       When query
       """
@@ -16,7 +16,7 @@ Feature: array_concat() concatenates arrays (Sail extension)
       | result          |
       | [1, 2, 3, 4, 5] |
 
-    @sail-only
+    @zelox-only
     Scenario: array_concat two string arrays
       When query
       """
@@ -28,7 +28,7 @@ Feature: array_concat() concatenates arrays (Sail extension)
 
   Rule: Empty array handling
 
-    @sail-only
+    @zelox-only
     Scenario: array_concat empty array with typed array
       When query
       """
@@ -38,7 +38,7 @@ Feature: array_concat() concatenates arrays (Sail extension)
       | result    |
       | [1, 2, 3] |
 
-    @sail-only
+    @zelox-only
     Scenario: array_concat typed array with empty array
       When query
       """
@@ -50,7 +50,7 @@ Feature: array_concat() concatenates arrays (Sail extension)
 
   Rule: Null propagation
 
-    @sail-only
+    @zelox-only
     Scenario: array_concat array with null returns null
       When query
       """
@@ -60,7 +60,7 @@ Feature: array_concat() concatenates arrays (Sail extension)
       | result |
       | NULL   |
 
-    @sail-only
+    @zelox-only
     Scenario: array_concat null with array returns null
       When query
       """

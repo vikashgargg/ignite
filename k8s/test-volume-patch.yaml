@@ -27,7 +27,7 @@ spec:
                 {
                   "metadata": {
                     "labels": {
-                      "custom-label": "sail-worker",
+                      "custom-label": "zelox-worker",
                       "environment": "development",
                       "component": "spark-worker"
                     }

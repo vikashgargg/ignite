@@ -23,7 +23,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         AS t(id, name, value)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Delete with DV produces correct results
       When query
         """
@@ -47,7 +47,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         | 4  | Diana | 400   |
         | 5  | Eve   | 500   |
 
-    @sail-only
+    @zelox-only
     Scenario: Multiple DV deletes accumulate correctly
       Given statement
         """
@@ -67,7 +67,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         | 3  | Charlie | 300   |
         | 4  | Diana   | 400   |
 
-    @sail-only
+    @zelox-only
     Scenario: Delete all rows via DV
       Given statement
         """
@@ -80,7 +80,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
       Then query result ordered
         | id | name | value |
 
-    @sail-only
+    @zelox-only
     Scenario: Delete with complex condition
       Given statement
         """
@@ -117,7 +117,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         AS t(id, name)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Read after DV delete filters deleted rows
       Given statement
         """
@@ -133,7 +133,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         | 3  | Gamma |
         | 4  | Delta |
 
-    @sail-only
+    @zelox-only
     Scenario: Aggregation after DV delete
       Given statement
         """
@@ -168,7 +168,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         AS t(id, name, value)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN DELETE on DV table shows DeletionVectorWriterExec
       When query
         """
@@ -177,7 +177,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN SELECT on DV table after delete uses metadata-as-data path
       Given statement
         """
@@ -212,7 +212,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         AS t(id, name, value)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: DV delete creates DV bin file and preserves original parquet
       Given statement
         """
@@ -226,7 +226,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         📄 part-<id>.<codec>.parquet
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Multiple DV deletes create separate DV bin files
       Given statement
         """
@@ -245,7 +245,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         | id | name | value |
         | 2  | Bob  | 200   |
 
-    @sail-only
+    @zelox-only
     Scenario: Delta log after DV delete contains correct commit actions
       Given statement
         """
@@ -280,7 +280,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         AS t(id, val)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Deleting an already-deleted row does not create a new DV file
       Given statement
         """
@@ -313,7 +313,7 @@ Feature: Delta Lake Deletion Vectors (Merge-on-Read)
         | 4  | d   |
         | 5  | e   |
 
-    @sail-only
+    @zelox-only
     Scenario: Delete accumulating several rows then re-deleting already-deleted rows
       Given statement
         """

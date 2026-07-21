@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 WORKERS="${WORKERS:-4}"; ROWS="${ROWS:-4000}"; KEYS="${KEYS:-50}"; PARTS="${PARTS:-8}"
 BIN="$ROOT/target/debug/zelox"; PY="$ROOT/.venvs/smoke/bin/python"
 STAMP="$$_$RANDOM"; INP="/tmp/nm_gate_in_$STAMP"
-[ -x "$BIN" ] || { echo "FATAL: build first: cargo build -p sail-cli --bin zelox"; exit 2; }
+[ -x "$BIN" ] || { echo "FATAL: build first: cargo build -p zelox-cli --bin zelox"; exit 2; }
 rm -rf "$INP"
 
 start_srv() { # $1=gate $2=port

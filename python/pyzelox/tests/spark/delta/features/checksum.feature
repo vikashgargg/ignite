@@ -1,6 +1,6 @@
 Feature: Delta Lake Version Checksum
 
-  @sail-only
+  @zelox-only
   Rule: Delta log writes version checksum files after successful commits
 
     Background:
@@ -56,7 +56,7 @@ Feature: Delta Lake Version Checksum
         """
       Then delta log JSON file 00000000000000000001.crc in delta_log matches snapshot
 
-  @sail-only
+  @zelox-only
   Rule: Delta log checksum writing can be explicitly enabled by table property
 
     Background:
@@ -112,7 +112,7 @@ Feature: Delta Lake Version Checksum
         """
       Then delta log JSON file 00000000000000000001.crc in delta_log matches snapshot
 
-  @sail-only
+  @zelox-only
   Rule: Delta log checksum writing can be disabled by table property
 
     Background:
@@ -165,7 +165,7 @@ Feature: Delta Lake Version Checksum
         📄 00000000000000000001.json
         """
 
-  @sail-only
+  @zelox-only
   Rule: Incremental CRC correctly tracks file counts across multiple commits
 
     Background:
@@ -224,7 +224,7 @@ Feature: Delta Lake Version Checksum
         | path     | value |
         | numFiles | 3     |
 
-  @sail-only
+  @zelox-only
   Rule: Incremental CRC correctly tracks file counts when files are replaced
 
     Background:
@@ -274,7 +274,7 @@ Feature: Delta Lake Version Checksum
         | path     | value |
         | numFiles | 1     |
 
-  @sail-only
+  @zelox-only
   Rule: Broken CRC chain is healed via full-snapshot fallback on next commit
 
     Background:

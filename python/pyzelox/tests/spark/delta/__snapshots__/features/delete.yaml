@@ -627,8 +627,8 @@ data:
 ---
 name: "test_simple_condition"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: DELETE
   operationMetrics:

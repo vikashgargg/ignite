@@ -31,7 +31,7 @@ machine with both engines warm and 4-way parallelism.
 
 ```bash
 # 1. Build release Zelox
-CARGO_PROFILE_RELEASE_LTO=thin cargo build --release -p sail-cli
+CARGO_PROFILE_RELEASE_LTO=thin cargo build --release -p zelox-cli
 
 # 2. Start the server (see scripts/spark-tests/run-server.sh for full env)
 target/release/zelox server -C <pyspark_dir>

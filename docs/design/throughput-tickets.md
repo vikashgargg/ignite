@@ -48,9 +48,9 @@ never pays the raw-value round-trip. ⇒ our Arrow/no-GC edge is being SPENT on 
 **To clearly beat Flink: source-fusion (#1) is required; T7b helps but isn't sufficient alone.**
 
 ## Module map (no exploration needed — from CODEMAP)
-- T1/T2 → `sail-data-source/src/formats/kafka/reader.rs` (`KafkaArrowBuilders`, bounded read loop, offset maps `ends`/`next`, `write_staged_offsets`).
-- T4 → `sail-physical-plan/src/streaming/exchange.rs` (`StreamExchangeExec::distribute`, `concat_batches`).
-- WM_PROF counters → `sail-common-datafusion/src/streaming/event/encoding.rs`.
+- T1/T2 → `zelox-data-source/src/formats/kafka/reader.rs` (`KafkaArrowBuilders`, bounded read loop, offset maps `ends`/`next`, `write_staged_offsets`).
+- T4 → `zelox-physical-plan/src/streaming/exchange.rs` (`StreamExchangeExec::distribute`, `concat_batches`).
+- WM_PROF counters → `zelox-common-datafusion/src/streaming/event/encoding.rs`.
 
 ## Grounding (REFERENCES)
 - §170 — Flink's weakness = per-record deserialize; Zelox's edge = Arrow bulk-columnar (T1).

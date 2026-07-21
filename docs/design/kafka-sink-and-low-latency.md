@@ -1,7 +1,7 @@
 # Design: Kafka sink + record-paced low-latency emission (P0 — close the Flink latency gap)
 
 > Status: **✅ IMPLEMENTED + MEASURED-WON (latency pillar).** `KafkaSinkExec`
-> (`crates/sail-data-source/src/formats/kafka/sink.rs`) = record-paced per-row produce +
+> (`crates/zelox-data-source/src/formats/kafka/sink.rs`) = record-paced per-row produce +
 > transactional EO with per-task `transactional.id` (Flink KafkaSink FLIP-143 parity), wrapped
 > N-way (no funnel) in `ParallelStreamSinkExec`.
 >
@@ -38,7 +38,7 @@
 
 ## Zelox integration points (mapped against the current code)
 - **Source of truth for the flow-event sink pattern:** `RealtimeFileSinkExec`
-  (`crates/sail-data-source/src/streaming_decode.rs`) — consumes the **flow-event** input
+  (`crates/zelox-data-source/src/streaming_decode.rs`) — consumes the **flow-event** input
   (not decoded), reads `Checkpoint{epoch}` barriers in-band to delimit epochs, accumulates an
   epoch's data, and commits per epoch. The Kafka sink is the same shape with Kafka produce +
   flush/commit replacing the Parquet+metadata commit.
@@ -47,7 +47,7 @@
   parallel sinks via `ParallelStreamSinkExec`). Add a `"kafka"` sink branch → `KafkaSinkExec`.
   `writeStream.format("kafka")` resolves through `write_stream.rs` like other formats.
 - **Codec:** add `KafkaSinkExecNode` to `proto/sail/plan/physical.proto` + encode/decode arms
-  in `crates/sail-execution/src/codec.rs` (mirror `RealtimeFileSinkExec`'s arms) so it survives
+  in `crates/zelox-execution/src/codec.rs` (mirror `RealtimeFileSinkExec`'s arms) so it survives
   the driver→worker boundary in distributed mode.
 
 ## `KafkaSinkExec` — operator design

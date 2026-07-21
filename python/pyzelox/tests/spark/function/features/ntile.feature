@@ -246,7 +246,7 @@ Feature: ntile window function comprehensive tests
 
   Rule: Argument type restrictions
 
-    @sail-bug
+    @zelox-bug
     # Sail accepts TINYINT/SMALLINT via auto-coercion — Spark rejects all non-INT types
     Scenario: ntile SMALLINT arg errors (only INT allowed)
       When query
@@ -256,7 +256,7 @@ Feature: ntile window function comprehensive tests
         """
       Then query error .*
 
-    @sail-bug
+    @zelox-bug
     # Sail accepts TINYINT via auto-coercion — Spark rejects all non-INT types
     Scenario: ntile TINYINT arg errors (only INT allowed)
       When query
@@ -266,7 +266,7 @@ Feature: ntile window function comprehensive tests
         """
       Then query error .*
 
-    @sail-bug
+    @zelox-bug
     # Sail accepts BIGINT — Spark only accepts INT
     Scenario: ntile BIGINT arg errors (only INT allowed)
       When query

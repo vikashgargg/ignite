@@ -82,7 +82,7 @@ RUN CARGO_BUILD_JOBS=1 \
     CARGO_PROFILE_RELEASE_DEBUG=false \
     CARGO_PROFILE_RELEASE_OPT_LEVEL=1 \
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 \
-    cargo build --release -p sail-cli --bins --jobs 1 \
+    cargo build --release -p zelox-cli --bins --jobs 1 \
     && cp /app/target/release/zelox /usr/local/bin/zelox
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────

@@ -59,10 +59,10 @@ for r in $(seq 1 "$RUNS"); do
 done
 
 echo "==== [4] wait for profiler dump (${PPROF_SECS}s from worker start) then pull folded stacks ===="
-WORKER=$(kk get pods --no-headers 2>/dev/null | grep -E 'sail-worker' | awk '{print $1}' | head -1)
+WORKER=$(kk get pods --no-headers 2>/dev/null | grep -E 'zelox-worker' | awk '{print $1}' | head -1)
 while [ "$(( $(date +%s) - T0 ))" -lt "$((PPROF_SECS + 8))" ]; do sleep 5; done
 mkdir -p /tmp/kprof; : > /tmp/kprof/all.folded
-for p in $(kk get pods --no-headers 2>/dev/null | grep -E 'sail-worker' | awk '{print $1}'); do
+for p in $(kk get pods --no-headers 2>/dev/null | grep -E 'zelox-worker' | awk '{print $1}'); do
   kk cp "$p:/tmp/prof.folded" "/tmp/kprof/$p.folded" 2>/dev/null && cat "/tmp/kprof/$p.folded" >> /tmp/kprof/all.folded && echo "  pulled $p"
 done
 echo "==== [5] TOP on-CPU leaf functions (definitive shuffle hotspot) ===="

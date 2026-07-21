@@ -216,7 +216,7 @@ Feature: array_min and array_max functions
         | min_val | max_val |
         | 0.0     | 0.0     |
 
-    @sail-only
+    @zelox-only
     Scenario: array_min and array_max with extreme double values (display format differs from Spark)
       When query
         """

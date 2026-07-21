@@ -170,7 +170,7 @@ Full 100M-row run: `CLICKBENCH_FULL=1 SPARK_REMOTE=sc://localhost:50051 python s
 ### Notes
 
 - UDFs require `PYTHONPATH` pointing to a PySpark installation on both the server and client.
-- The binary must be built WITHOUT mimalloc (`default = []` in `sail-cli/Cargo.toml`); mimalloc
+- The binary must be built WITHOUT mimalloc (`default = []` in `zelox-cli/Cargo.toml`); mimalloc
   causes re-entrant allocator recursion when Python UDFs run on Tokio worker threads.
 
 ---

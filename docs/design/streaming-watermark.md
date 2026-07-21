@@ -71,8 +71,8 @@ as a blind rip-out. Until then this doc is the contract; the wall-clock path mus
 - Crash-restore: no window re-fires below `restore_wm_floor` (E5).
 
 ## Files
-- `crates/sail-physical-plan/src/streaming/watermark.rs` — E1, E2 (`WatermarkExec`).
-- `crates/sail-physical-plan/src/streaming/exchange.rs` — E3 (`merge_output_subchannels`).
-- `crates/sail-data-source/src/formats/kafka/reader.rs` — E4 (source `Idle`).
-- `crates/sail-physical-plan/src/streaming/window_accum.rs` — E5 (close-once + EndOfData flush).
-- `crates/sail-plan/src/streaming/rewriter.rs` — wiring (`preserve_partition` → per-partition E1).
+- `crates/zelox-physical-plan/src/streaming/watermark.rs` — E1, E2 (`WatermarkExec`).
+- `crates/zelox-physical-plan/src/streaming/exchange.rs` — E3 (`merge_output_subchannels`).
+- `crates/zelox-data-source/src/formats/kafka/reader.rs` — E4 (source `Idle`).
+- `crates/zelox-physical-plan/src/streaming/window_accum.rs` — E5 (close-once + EndOfData flush).
+- `crates/zelox-plan/src/streaming/rewriter.rs` — wiring (`preserve_partition` → per-partition E1).

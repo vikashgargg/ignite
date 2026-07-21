@@ -1,6 +1,6 @@
 Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
 
-  @sail-only
+  @zelox-only
   Rule: V2 checkpoint with sidecars is created when v2Checkpoint table feature is enabled
 
     Background:
@@ -50,7 +50,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         📄 _last_checkpoint
         """
 
-  @sail-only
+  @zelox-only
   Rule: Table is readable from V2 checkpoint after commit JSON is deleted
 
     Background:
@@ -91,7 +91,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         | 2  |
         | 3  |
 
-  @sail-only
+  @zelox-only
   Rule: Multiple V2 checkpoints are created after repeated writes
 
     Background:
@@ -164,7 +164,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         📄 _last_checkpoint
         """
 
-  @sail-only
+  @zelox-only
   Rule: V2 checkpoint is activated by delta.checkpointPolicy = v2
 
     Background:
@@ -214,7 +214,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         📄 _last_checkpoint
         """
 
-  @sail-only
+  @zelox-only
   Rule: V2 checkpoint correctly replays state with deletes
 
     Background:
@@ -258,7 +258,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         | 3  |
         | 4  |
 
-  @sail-only
+  @zelox-only
   Rule: EXPLAIN shows driver path reading V2 checkpoint
 
     Background:
@@ -293,7 +293,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         """
       Then query plan matches snapshot
 
-  @sail-only
+  @zelox-only
   Rule: EXPLAIN shows metadata-as-data path reading V2 checkpoint with sidecar log replay
 
     Background:
@@ -329,7 +329,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         """
       Then query plan matches snapshot
 
-  @sail-only
+  @zelox-only
   Rule: V2 checkpoint table is readable via metadata-as-data path
 
     Background:
@@ -368,7 +368,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         | 1  | a     |
         | 2  | b     |
 
-  @sail-only
+  @zelox-only
   Rule: V2 checkpoint table with metadata-as-data is readable after JSON log deletion
 
     Background:
@@ -410,7 +410,7 @@ Feature: Delta Lake V2 Checkpoint (Sidecar Checkpoints)
         | 2  |
         | 3  |
 
-  @sail-only
+  @zelox-only
   Rule: Log cleanup writes a classic compat checkpoint before deleting V2 checkpoint era logs
 
     Background:

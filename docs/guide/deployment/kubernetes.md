@@ -136,7 +136,7 @@ kubectl apply -k k8s/
 To connect to the Sail Spark Connect server, you can forward the service port to your local machine.
 
 ```bash
-kubectl -n sail port-forward service/sail-spark-server 50051:50051
+kubectl -n sail port-forward service/zelox-spark-server 50051:50051
 ```
 
 Now you can run Spark jobs using the standalone Spark client.

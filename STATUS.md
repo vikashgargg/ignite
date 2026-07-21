@@ -100,7 +100,7 @@ All AWS torn down to $0 after each run.
 > (8 parallel jobs OOM-killed the final link → cap to 2 on small hosts), the scorecard
 > `SCORECARD_REMOTE_TMP` override (K8s pods mount `/tmp/sail`, not `/tmp/zelox`), and the two
 > `_metadata` tests switched from a client-local `tempfile` dir to the shared `tmp` root so
-> worker pods can see the files. The K8s driver dynamically spawned `sail-worker-*` pods per
+> worker pods can see the files. The K8s driver dynamically spawned `zelox-worker-*` pods per
 > query — true distributed execution.
 
 ---
@@ -309,7 +309,7 @@ CI jobs: `fmt`, `clippy`, `test`, `build-linux`, `distributed-scorecard`,
 | Official Apache Spark test suite ≥ 95% | ✅ **2492/2623 = 95.01%** gold data pass rate |
 | TPC-H SF-100 distributed (10-node K8s) | ⏳ needs hardware run (code ready) |
 | Kafka → Delta 24h endurance test | ⏳ needs infra (code ready) |
-| HMS Thrift client | ✅ `crates/sail-catalog/src/hms/` — Thrift client for Hive/Glue metastore |
+| HMS Thrift client | ✅ `crates/zelox-catalog/src/hms/` — Thrift client for Hive/Glue metastore |
 | Provider-agnostic catalog caching | ✅ table metadata cache with TTL; avoids repeated remote catalog calls |
 
 ---
@@ -321,7 +321,7 @@ CI jobs: `fmt`, `clippy`, `test`, `build-linux`, `distributed-scorecard`,
 | Streaming event-time window execution | ✅ `WatermarkNode` + `WindowAccumNode` + `WindowAccumExec`; tumbling/sliding windows |
 | Streaming stateful deduplication | ✅ `StreamDeduplicateNode` + `StreamDeduplicateExec`; `HashSet<Vec<ScalarValue>>` seen-keys |
 | Theta sketch aggregates | ✅ pure-Rust KMV implementation (K=4096); `ThetaSketchAgg`, `ThetaSketchUnionAgg`, `ThetaSketchDistinctAgg`, `ThetaSketchEstimateFunc`, `HllSketchEstimateFunc` |
-| Vortex data source (skeleton) | ✅ `sail-vortex` crate; `VortexTableFormat` registered in `TableFormatRegistry`; stubs pending `vortex-datafusion` 53.x compat |
+| Vortex data source (skeleton) | ✅ `zelox-vortex` crate; `VortexTableFormat` registered in `TableFormatRegistry`; stubs pending `vortex-datafusion` 53.x compat |
 
 ---
 
@@ -383,7 +383,7 @@ LakeSail is at v0.6.3 (released 2026-05-21). As of Phase 4 Sprint 4.1, Zelox **l
 ## Known Limitations
 
 - **macOS: Apple Silicon only** — `zelox-aarch64-apple-darwin` binary and Apple Container require arm64 (M1/M2/M3/M4). Intel Macs are not supported.
-- **Vortex reads/writes**: `sail-vortex` registered as format skeleton; actual I/O pending `vortex-datafusion` DataFusion 53.x compat
+- **Vortex reads/writes**: `zelox-vortex` registered as format skeleton; actual I/O pending `vortex-datafusion` DataFusion 53.x compat
 - **TPC-H SF-100**: Code ready; hardware run needed (10-node K8s cluster)
 - **Kafka → Delta 24h endurance**: Code ready; dedicated infra needed
 - **Python UDFs**: Require `PYTHONPATH` pointing to PySpark installation on the server

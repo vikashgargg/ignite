@@ -1,4 +1,4 @@
-@sail-only @variant @spark-4
+@zelox-only @variant @spark-4
 Feature: Delta Lake Variant support
 
   Scenario: Write and read a Variant column

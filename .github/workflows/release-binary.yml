@@ -43,7 +43,7 @@ jobs:
           PYO3_PYTHON: python3.12
           # Thin LTO: ~15 min vs ~50 min fat LTO, negligible runtime difference
           CARGO_PROFILE_RELEASE_LTO: thin
-        run: cargo build --release -p sail-cli --target x86_64-unknown-linux-gnu
+        run: cargo build --release -p zelox-cli --target x86_64-unknown-linux-gnu
       - name: Rename binary
         run: cp target/x86_64-unknown-linux-gnu/release/zelox zelox-x86_64-unknown-linux-gnu
       - uses: actions/upload-artifact@v4
@@ -82,7 +82,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "12.0"
           # Thin LTO: ~15 min vs ~50 min fat LTO, negligible runtime difference
           CARGO_PROFILE_RELEASE_LTO: thin
-        run: cargo build --release -p sail-cli --target aarch64-apple-darwin
+        run: cargo build --release -p zelox-cli --target aarch64-apple-darwin
       - name: Rename binary
         run: cp target/aarch64-apple-darwin/release/zelox zelox-aarch64-apple-darwin
       - uses: actions/upload-artifact@v4

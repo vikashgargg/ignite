@@ -5,11 +5,11 @@
 *                                   @vikashgargg
 
 # Streaming engine (Flink-replacement hot path)
-/crates/sail-physical-plan/src/streaming/   @vikashgargg
-/crates/sail-data-source/src/formats/kafka/ @vikashgargg
+/crates/zelox-physical-plan/src/streaming/   @vikashgargg
+/crates/zelox-data-source/src/formats/kafka/ @vikashgargg
 
 # Distributed execution + codec (round-trip contract)
-/crates/sail-execution/             @vikashgargg
+/crates/zelox-execution/             @vikashgargg
 
 # Release, CI/CD, container, and packaging
 /.github/                           @vikashgargg

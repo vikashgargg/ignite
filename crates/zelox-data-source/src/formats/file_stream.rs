@@ -286,7 +286,7 @@ impl FileSourceExec {
         let data_schema = input.schema();
         let output_schema = Arc::new(to_flow_event_schema(&data_schema));
         // One output partition per input file group (whole files — row-group splitting is
-        // disabled for streaming scans, see sail-plan/src/lib.rs). Each partition emits its
+        // disabled for streaming scans, see zelox-plan/src/lib.rs). Each partition emits its
         // files' rows then its own `EndOfData`; the parallel sink writes one file per partition
         // concurrently, and completes only after all-N `EndOfData` (Flink-style per-split
         // readers). Verified safe at whole-file granularity (the row-group-split path that lost

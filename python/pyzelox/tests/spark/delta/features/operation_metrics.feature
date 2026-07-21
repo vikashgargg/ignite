@@ -14,7 +14,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         USING DELTA LOCATION {{ location.sql }}
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Append WRITE reports numFiles, numOutputRows and numOutputBytes
       Given statement
         """
@@ -29,7 +29,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         | operation        |
         | operationMetrics |
 
-    @sail-only
+    @zelox-only
     Scenario: replaceWhere overwrite reports added and removed counters
       Given statement
         """
@@ -64,7 +64,7 @@ Feature: Delta Lake operationMetrics in commitInfo
           (1,'a'),(2,'a'),(3,'b'),(4,'b'),(5,'c')
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Data-predicate DELETE reports numDeletedRows and numCopiedRows
       Given statement
         """
@@ -95,7 +95,7 @@ Feature: Delta Lake operationMetrics in commitInfo
           (1, 2023),(2, 2023),(3, 2024),(4, 2024)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Partition-only DELETE removes whole files without scanning
       Given statement
         """
@@ -124,7 +124,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         AS t(id, value)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: DV DELETE updates an existing deletion vector
       Given statement
         """
@@ -171,7 +171,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         AS src(id, value, flag)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Full MERGE reports detailed target row counters
       Given statement
         """
@@ -190,7 +190,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         | operation        |
         | operationMetrics |
 
-    @sail-only
+    @zelox-only
     Scenario: Conditional MERGE counts source rows without actions
       Given statement
         """
@@ -215,7 +215,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         | operation        |
         | operationMetrics |
 
-    @sail-only
+    @zelox-only
     Scenario: Insert-only MERGE fast-appends without removing files
       Given statement
         """
@@ -229,7 +229,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         | operation        |
         | operationMetrics |
 
-    @sail-only
+    @zelox-only
     Scenario: Insert-only MERGE counts duplicate target matches once per source row
       Given statement
         """
@@ -247,7 +247,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         | operation        |
         | operationMetrics |
 
-    @sail-only
+    @zelox-only
     Scenario: Target-only MERGE actions report zero source rows
       Given statement
         """
@@ -298,7 +298,7 @@ Feature: Delta Lake operationMetrics in commitInfo
         SELECT * FROM VALUES (3,'delete') AS src(id, value)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: MERGE DELETE on DV table reports target deletion vector update counters
       Given statement
         """

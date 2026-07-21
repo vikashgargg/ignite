@@ -2,8 +2,8 @@
 set -euo pipefail
 
 REALM="${KERBEROS_REALM:-SAIL.TEST}"
-KDC_HOSTNAME="${KDC_HOSTNAME:-sail-kerberos-kdc}"
-MASTER_PASSWORD="${KERBEROS_MASTER_PASSWORD:-sail-master-password}"
+KDC_HOSTNAME="${KDC_HOSTNAME:-zelox-kerberos-kdc}"
+MASTER_PASSWORD="${KERBEROS_MASTER_PASSWORD:-zelox-master-password}"
 
 cat > /etc/krb5.conf <<EOF
 [libdefaults]

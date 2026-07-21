@@ -20,10 +20,10 @@ ZELOX_ONLY = doctest.register_optionflag("ZELOX_ONLY")
 
 def pytest_configure(config):
     # Register custom markers.
-    # Note: pytest-bdd converts @sail-only tag to "sail-only" marker (preserves hyphen)
+    # Note: pytest-bdd converts @zelox-only tag to "zelox-only" marker (preserves hyphen)
     config.addinivalue_line(
         "markers",
-        "sail-only: mark test as Sail-only (skipped when running against Spark JVM)",
+        "zelox-only: mark test as Sail-only (skipped when running against Spark JVM)",
     )
     config.addinivalue_line(
         "markers",
@@ -218,10 +218,10 @@ def pytest_collection_modifyitems(session, config, items):  # noqa: ARG001
                     for marker in test.markers:
                         item.add_marker(marker)
 
-    # Mark @sail-bug scenarios as xfail when running against Sail
+    # Mark @zelox-bug scenarios as xfail when running against Sail
     if not is_jvm_spark():
         for item in items:
-            marker = item.get_closest_marker("sail-bug")
+            marker = item.get_closest_marker("zelox-bug")
             if marker:
                 reason = marker.kwargs.get("reason", "Known Sail bug")
                 item.add_marker(pytest.mark.xfail(reason=reason, strict=False))
@@ -240,9 +240,9 @@ def pytest_collection_modifyitems(session, config, items):  # noqa: ARG001
                 for example in item.dtest.examples:
                     if example.options.get(ZELOX_ONLY):
                         example.options[doctest.SKIP] = True
-            # Skip pytest-bdd scenarios with @sail-only tag
+            # Skip pytest-bdd scenarios with @zelox-only tag
             # Note: pytest-bdd preserves the hyphen in marker names
-            elif item.get_closest_marker("sail-only"):
+            elif item.get_closest_marker("zelox-only"):
                 item.add_marker(skip_sail_only)
 
     # Deselect catalog integration tests by default unless user passed -m.

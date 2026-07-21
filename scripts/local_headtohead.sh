@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 N="${N:-10000000}"; K="${K:-10000}"; PORT="${PORT:-50080}"
 BIN="$ROOT/target/release/zelox"; PY="$ROOT/.venvs/smoke/bin/python"
 DIR=/tmp/h2h/events; FLINK_IMG=flink:1.19-scala_2.12
-[ -x "$BIN" ] || { echo "FATAL: need release zelox (cargo build --release -p sail-cli --bin zelox)"; exit 2; }
+[ -x "$BIN" ] || { echo "FATAL: need release zelox (cargo build --release -p zelox-cli --bin zelox)"; exit 2; }
 
 echo "=== gen $N events, $K keys -> $DIR ==="
 rm -rf /tmp/h2h; mkdir -p "$DIR"

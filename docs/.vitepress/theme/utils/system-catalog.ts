@@ -5,7 +5,7 @@ import yaml from "js-yaml";
 
 export const SYSTEM_CATALOG_DATA_PATH = path.join(
   __dirname,
-  "../../../../crates/sail-common-datafusion/data/system/databases.yaml",
+  "../../../../crates/zelox-common-datafusion/data/system/databases.yaml",
 );
 
 export interface SystemColumn {

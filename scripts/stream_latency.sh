@@ -13,7 +13,7 @@ BOOT="${BOOT:-localhost:9092}"; IN_TOPIC="${IN_TOPIC:-lat_in}"; OUT_TOPIC="${OUT
 PORT="${PORT:-50072}"; CK="${CK:-/tmp/lat_ck}"; RATE="${RATE:-20000}"; DURATION_S="${DURATION_S:-60}"
 WORKERS="${WORKERS:-2}"; ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN=""; for c in "$ROOT/target/release/zelox" "$ROOT/target/debug/zelox"; do [ -x "$c" ] && BIN="$c" && break; done
-[ -z "$BIN" ] && { echo "FATAL: build zelox (cargo build --release -p sail-cli)" >&2; exit 2; }
+[ -z "$BIN" ] && { echo "FATAL: build zelox (cargo build --release -p zelox-cli)" >&2; exit 2; }
 PY="$ROOT/.venvs/smoke/bin/python"; [ -x "$PY" ] || { echo "FATAL: .venvs/smoke missing" >&2; exit 2; }
 KPOD=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1); [ -z "$KPOD" ] && { echo "FATAL: no kafka" >&2; exit 2; }
 echo "=== latency: binary=$BIN duration=${DURATION_S}s rate=${RATE}/s ==="

@@ -1854,7 +1854,7 @@ mod offset_key_tests {
 // local Kafka topic and reports rows/sec — used to A/B the bounded read path
 // (now_or_never drain + topic intern + larger batch) without any cloud cost.
 // Run: KAFKA_BENCH=1 BENCH_BOOTSTRAP=localhost:9092 BENCH_TOPIC=repro_under \
-//      BENCH_PARTS=16 cargo test -p sail-data-source --release kafka_read_bench -- --nocapture --ignored
+//      BENCH_PARTS=16 cargo test -p zelox-data-source --release kafka_read_bench -- --nocapture --ignored
 // ---------------------------------------------------------------------------
 #[expect(clippy::expect_used)]
 #[cfg(test)]

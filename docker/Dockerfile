@@ -64,7 +64,7 @@ RUN CARGO_BUILD_JOBS=${CARGO_JOBS:-$(nproc)} \
     CARGO_PROFILE_RELEASE_LTO=off \
     CARGO_PROFILE_RELEASE_DEBUG=${RELEASE_DEBUG} \
     CARGO_PROFILE_RELEASE_STRIP=${RELEASE_STRIP} \
-    cargo build --release -p sail-cli --bins ${CARGO_FEATURES:+--features ${CARGO_FEATURES}} \
+    cargo build --release -p zelox-cli --bins ${CARGO_FEATURES:+--features ${CARGO_FEATURES}} \
     && cp /app/target/release/zelox /usr/local/bin/zelox
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────

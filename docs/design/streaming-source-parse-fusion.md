@@ -34,7 +34,7 @@ The streaming Kafka source is **NOT a plain `TableScan`** in the rewriter — it
 watermark work — see CODEMAP "Watermark/source wiring"). The fusion rule must hook the wrapped node.
 
 ## Mechanism (options)
-- **A. Streaming-rewriter rule** (`sail-plan/src/streaming/rewriter.rs`): detect `Projection[from_json(
+- **A. Streaming-rewriter rule** (`zelox-plan/src/streaming/rewriter.rs`): detect `Projection[from_json(
   col(value), schema) → d.*]` directly above the wrapped Kafka source; rewrite to a fused
   `KafkaSourceExec{ parse: Some(ParseSpec{ value_col, schema, options }) }`; drop the from_json
   projection. ← recommended (keeps from_json semantics in one place).
@@ -44,7 +44,7 @@ watermark work — see CODEMAP "Watermark/source wiring"). The fusion rule must 
 - Add `parse: Option<ParseSpec>` (value column index + target `Fields` + `SparkFromJsonOptions` + tz).
 - When `Some`: the read loop, instead of a `value` BinaryBuilder, drives T7a `ColBuilder`s over the
   parsed value bytes per message; emits the parsed struct columns (+ partition/timestamp for watermark).
-- **Codec round-trip** (`sail-execution/src/codec.rs` + `physical.proto`): `ParseSpec` must serialize, or
+- **Codec round-trip** (`zelox-execution/src/codec.rs` + `physical.proto`): `ParseSpec` must serialize, or
   log a single-node-only gap. (Distributed-aware rule.)
 - **Gated `ZELOX_FUSE_PARSE`** default-off until EKS-validated (zero regression risk while iterating).
 

@@ -41,7 +41,7 @@ a substitute for a third-party penetration test (still outstanding — see
 | D2 | Low | 3 unmaintained transitive crates (json, paste, proc-macro-error) | accepted |
 
 ### F1 — Non-constant-time token comparison (Medium)
-`crates/sail-spark-connect/src/entrypoint.rs:57` compares the presented Bearer
+`crates/zelox-spark-connect/src/entrypoint.rs:57` compares the presented Bearer
 token with `provided == expected` (plain `String` equality, short-circuits on
 first differing byte). This leaks token bytes via response-timing to an attacker
 who can make many requests.

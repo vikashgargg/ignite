@@ -250,8 +250,8 @@ Feature: abs comprehensive tests
         | result |
         | 0.001  |
 
-    @sail-bug
-    # Tagged @sail-bug purely for Spark-compat tracking — Sail's behaviour here
+    @zelox-bug
+    # Tagged @zelox-bug purely for Spark-compat tracking — Sail's behaviour here
     # is arguably MORE correct mathematically. Divergence lives in CAST, not abs:
     # JVM applies half-up rounding during CAST to DECIMAL(38,0) and rounds 37
     # nines up to 10^37; Sail preserves precision and returns 37 nines. Whether
@@ -267,7 +267,7 @@ Feature: abs comprehensive tests
         | result                                  |
         | 10000000000000000000000000000000000000  |
 
-    @sail-bug
+    @zelox-bug
     # Same root cause as the scenario above (CAST rounding) — JVM rounds
     # 38 nines up to 10^38 and errors on overflow; Sail keeps 38 nines.
     Scenario: abs DECIMAL 38,0 exceeds range errors
@@ -323,13 +323,13 @@ Feature: abs comprehensive tests
         | result                |
         | -9223372036854775808  |
 
-    @sail-bug
+    @zelox-bug
     # Sail promotes the literal to BIGINT; JVM keeps INT and wraps to MIN.
     # Root cause: Sail's SQL parses `-2147483648` as unary-minus + positive
     # literal; the positive side overflows INT32 (max 2147483647) and gets
     # widened to BIGINT. Spark has a special rule that recognises the whole
     # `-INT32_MIN` (and `-LONG_MIN`) literal and keeps the narrow type.
-    # Fix path: `sail-sql-analyzer` (or parser) — add constant-folding rule
+    # Fix path: `zelox-sql-analyzer` (or parser) — add constant-folding rule
     # for `UnaryMinus(IntegerLiteral(N))` that narrows when `-N` fits in a
     # smaller signed type. Affects every expression with negative-MIN
     # literals, not just abs.
@@ -400,7 +400,7 @@ Feature: abs comprehensive tests
         | result |
         | 5.5    |
 
-    @sail-bug
+    @zelox-bug
     Scenario: abs whitespace-padded numeric string
       Given config spark.sql.ansi.enabled = false
       When query
@@ -411,7 +411,7 @@ Feature: abs comprehensive tests
         | result |
         | 5.0    |
 
-    @sail-bug
+    @zelox-bug
     Scenario: abs non-numeric string returns NULL under ANSI false
       Given config spark.sql.ansi.enabled = false
       When query
@@ -422,7 +422,7 @@ Feature: abs comprehensive tests
         | result |
         | NULL   |
 
-    @sail-bug
+    @zelox-bug
     Scenario: abs empty string returns NULL under ANSI false
       Given config spark.sql.ansi.enabled = false
       When query
@@ -457,14 +457,14 @@ Feature: abs comprehensive tests
     # abs preserves the Arrow interval unit, but Sail widens Spark subranges
     # (DAY, HOUR TO MINUTE, ...) to DAY TO SECOND at the type layer — this
     # happens even without abs (e.g. SELECT INTERVAL '-5' DAY returns DAY TO
-    # SECOND). The scenarios below are tagged @sail-bug but blocked on the
+    # SECOND). The scenarios below are tagged @zelox-bug but blocked on the
     # Sail-wide interval subrange handling, not on abs itself.
     # Fix path: preserve Spark subrange (DAY, HOUR, DAY TO SECOND, …) as
     # `Field` metadata when converting Spark→Arrow, restore on the return
-    # trip in `sail-spark-connect`. Also requires analyzer changes in
-    # `sail-sql-analyzer`. Affects every expression returning intervals.
+    # trip in `zelox-spark-connect`. Also requires analyzer changes in
+    # `zelox-sql-analyzer`. Affects every expression returning intervals.
 
-    @sail-bug
+    @zelox-bug
     Scenario: abs negative INTERVAL DAY
       When query
         """
@@ -474,7 +474,7 @@ Feature: abs comprehensive tests
         | result           |
         | INTERVAL '5' DAY |
 
-    @sail-bug
+    @zelox-bug
     Scenario: abs positive INTERVAL DAY
       When query
         """
@@ -484,7 +484,7 @@ Feature: abs comprehensive tests
         | result           |
         | INTERVAL '5' DAY |
 
-    @sail-bug
+    @zelox-bug
     Scenario: abs zero INTERVAL DAY
       When query
         """
@@ -503,7 +503,7 @@ Feature: abs comprehensive tests
         | result                              |
         | INTERVAL '1 02:03:04' DAY TO SECOND |
 
-    @sail-bug
+    @zelox-bug
     Scenario: abs negative INTERVAL HOUR TO MINUTE
       When query
         """
@@ -611,7 +611,7 @@ Feature: abs comprehensive tests
         | NULL        |
         | -2147483648 |
 
-    @sail-bug
+    @zelox-bug
     # Vectorized abs path is correct — same root cause as the scalar interval
     # scenarios in `Rule: Interval values`: Sail widens Spark interval subranges
     # to DAY TO SECOND at the type layer. The vectorized kernel succeeds; the
@@ -796,7 +796,7 @@ Feature: abs comprehensive tests
         """
       Then query plan matches snapshot
 
-  @sail-only
+  @zelox-only
   Rule: cross-nesting with other UDFs
     # Verifies abs simplify/output_ordering composes correctly with other
     # planner hooks already on main (e.g. ceil/floor).
@@ -815,7 +815,7 @@ Feature: abs comprehensive tests
         """
       Then query plan matches snapshot
 
-  @sail-only
+  @zelox-only
   Rule: constant folding (DataFusion EvaluateScalarsAsConst)
     # Locks DataFusion's general optimizer behavior on constant inputs.
     # These folds happen via DataFusion's EvaluateScalarsAsConst rule
@@ -837,7 +837,7 @@ Feature: abs comprehensive tests
         """
       Then query plan matches snapshot
 
-  @sail-only
+  @zelox-only
   Rule: idempotence simplify (abs(abs(x)) = abs(x))
     # SparkAbs::simplify detects nested abs calls and collapses them.
     # Uses downcast_ref::<Self>() + ansi_mode check so only same-mode

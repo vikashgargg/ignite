@@ -19,22 +19,22 @@ For other installation methods, see the [OpenAPI Generator CLI Installation Guid
 
 ## Configuration
 
-Generator configuration is defined in `crates/sail-catalog-iceberg/spec/openapi-generator-config.yaml`.
+Generator configuration is defined in `crates/zelox-catalog-iceberg/spec/openapi-generator-config.yaml`.
 
 ## Generating the REST Client
 
-The REST client is auto-generated from the [Iceberg REST Catalog OpenAPI spec](https://github.com/lakehq/sail/blob/main/crates/sail-catalog-iceberg/spec/iceberg-rest-catalog.yaml).
+The REST client is auto-generated from the [Iceberg REST Catalog OpenAPI spec](https://github.com/lakehq/sail/blob/main/crates/zelox-catalog-iceberg/spec/iceberg-rest-catalog.yaml).
 
 To regenerate the client code, run the generation script from the repository root:
 
 ```bash
-./crates/sail-catalog-iceberg/spec/generate-client.sh
+./crates/zelox-catalog-iceberg/spec/generate-client.sh
 ```
 
 Or from the spec directory:
 
 ```bash
-cd crates/sail-catalog-iceberg/spec
+cd crates/zelox-catalog-iceberg/spec
 ./generate-client.sh
 ```
 

@@ -425,7 +425,7 @@ counts / duplicated rows) with NO error, on ANY file format, and is invisible to
 scan with `FileScanConfigBuilder::from(cfg).with_partitioned_by_file_group(true)`. This is DF54's own
 opt-out: it disables the shared work source so each partition reads only its assigned file group —
 exactly the fixed one-group-per-task model a distributed scheduler already assigns. (Zelox:
-`sail-execution/src/task_runner/core.rs::rewrite_parquet_adapters`.)
+`zelox-execution/src/task_runner/core.rs::rewrite_parquet_adapters`.)
 
 ## 9. Task placement across workers — even-spread vs fill-first (fetched 2026-07-08; cite for scheduling)
 The scheduler decision "which worker gets each of a stage's N task partitions" determines whether a

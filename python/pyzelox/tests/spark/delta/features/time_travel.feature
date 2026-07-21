@@ -1,6 +1,6 @@
 Feature: Delta Lake SQL time travel
 
-  @sail-only
+  @zelox-only
   Rule: SQL time travel works for named and direct Delta reads
 
     Background:
@@ -81,7 +81,7 @@ Feature: Delta Lake SQL time travel
         """
       Then query error Invalid time travel spec
 
-  @sail-only
+  @zelox-only
   Rule: Delta time travel honors in-commit timestamps
 
     Background:

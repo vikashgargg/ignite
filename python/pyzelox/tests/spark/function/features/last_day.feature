@@ -484,7 +484,7 @@ Feature: last_day comprehensive tests
 
   Rule: Plan snapshot — filter pushdown on Parquet (preimage)
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN literal Date filter on Parquet — baseline
       Given variable location for temporary directory explain_last_day_baseline
       Given final statement
@@ -510,7 +510,7 @@ Feature: last_day comprehensive tests
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN last_day filter on Parquet shows preimage pushdown
       Given variable location for temporary directory explain_last_day_pushdown
       Given final statement
@@ -536,7 +536,7 @@ Feature: last_day comprehensive tests
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN last_day with mid-month literal does NOT rewrite
       Given variable location for temporary directory explain_last_day_unsat
       Given final statement
@@ -559,7 +559,7 @@ Feature: last_day comprehensive tests
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN last_day less or equal rewrites to upper-bound predicate
       Given variable location for temporary directory explain_last_day_lte
       Given final statement
@@ -583,7 +583,7 @@ Feature: last_day comprehensive tests
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN last_day not equal rewrites to disjunction over the gap month
       Given variable location for temporary directory explain_last_day_neq
       Given final statement

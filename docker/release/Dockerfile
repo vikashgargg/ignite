@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry/ \
         release|bench) echo "release" ;; \
         *) echo "${RUST_PROFILE}" ;; \
     esac) && \
-    cargo build -p sail-cli --profile ${RUST_PROFILE} --bins && \
+    cargo build -p zelox-cli --profile ${RUST_PROFILE} --bins && \
     cp /app/target/${RUST_TARGET_SUBDIR}/sail /usr/local/bin
 
 FROM python:3.14-slim

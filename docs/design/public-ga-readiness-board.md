@@ -87,7 +87,7 @@ Model: SLSA provenance + cosign keyless signing + Trivy image scan + cargo-deny/
 
 | ID | Pri | Status | Ticket / Acceptance criteria | OSS ref |
 |---|---|---|---|---|
-| **ZELOX-O1** | P1 | EXISTS-partial | Logs = DONE (structured `log`+env_logger). **Prometheus `/metrics`** for streaming operators (throughput, watermark lag, checkpoint duration, spill bytes, backpressure) — currently a roadmap gap. AC: `/metrics` scrapeable; Grafana dashboard shipped. | Flink metrics, sail-telemetry OTEL |
+| **ZELOX-O1** | P1 | EXISTS-partial | Logs = DONE (structured `log`+env_logger). **Prometheus `/metrics`** for streaming operators (throughput, watermark lag, checkpoint duration, spill bytes, backpressure) — currently a roadmap gap. AC: `/metrics` scrapeable; Grafana dashboard shipped. | Flink metrics, zelox-telemetry OTEL |
 | **ZELOX-O2** | P2 | TODO | OTEL traces across stages + exemplars; SLO doc (availability, p99 latency). | OpenTelemetry |
 
 ## E7 — Testing / correctness at prod-grade · **P1**

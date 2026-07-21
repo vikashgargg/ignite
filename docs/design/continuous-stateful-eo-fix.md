@@ -152,7 +152,7 @@ immutable Arrow state chunks (our F5/inc-ckpt substrate) — O(delta) checkpoint
    as one); restore replays the union. Gate: **C7** continuous 4-part + crash → EO PASS.
 4. **T-EO-4** — remove/neutralize the single-instance per-partition-WM workaround on the realtime path
    (kept for non-parallel sources). Gate: **C6** continuous 4-part → 0 dups (exact).
-5. **T-EO-5** — codec round-trip for any new physical-plan fields (`sail-execution/src/codec.rs`).
+5. **T-EO-5** — codec round-trip for any new physical-plan fields (`zelox-execution/src/codec.rs`).
 6. **T-EO-6** — scale/skew validation: C6/C7 at PARTS=8 + scrambled order; then the honest **EKS
    multi-node** run (the KB notes full exact-zero historically needed EKS) before claiming Flink-class.
 
@@ -246,7 +246,7 @@ T-EO-3.5 added `withIdleness` to the IN-PROCESS `StreamExchangeExec` N→M merge
 and passed the full gate GREEN (no regression) — but it did NOT close the completeness edge. Instrumented
 (`STREAM_EXCH_MERGE` log): that merge **fires 0 times** for the multi-instance realtime windowed-agg on the
 gate's `--mode local-cluster` path. So the watermark merge for this query is NOT the in-process exchange —
-it is the **distributed shuffle path** (`sail-execution/src/stream_service/client.rs` + `plan/shuffle_write.rs`)
+it is the **distributed shuffle path** (`zelox-execution/src/stream_service/client.rs` + `plan/shuffle_write.rs`)
 and/or the window operator's own multi-input handling (`window_accum.rs`: "one instance per input partition,
 broadcast watermark"). The in-process idleness is correct + kept (it helps single-node/in-process exchange
 plans), but the **completeness fix for the gate's distributed path must add idleness to the DISTRIBUTED

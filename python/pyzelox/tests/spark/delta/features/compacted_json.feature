@@ -1,6 +1,6 @@
 Feature: Delta Lake Compacted JSON (Log Compaction)
 
-  @sail-only
+  @zelox-only
   Rule: Automatic log compaction creates compacted JSON files at the configured interval
 
     Background:
@@ -53,7 +53,7 @@ Feature: Delta Lake Compacted JSON (Log Compaction)
         | 2  | two   |
         | 3  | three |
 
-  @sail-only
+  @zelox-only
   Rule: Metadata-as-data read path works correctly with auto-compacted JSON
 
     Background:
@@ -95,7 +95,7 @@ Feature: Delta Lake Compacted JSON (Log Compaction)
         | 2  | two   |
         | 3  | three |
 
-  @sail-only
+  @zelox-only
   Rule: Compaction and checkpoint coexist correctly
 
     Background:
@@ -160,7 +160,7 @@ Feature: Delta Lake Compacted JSON (Log Compaction)
         | 3  |
         | 4  |
 
-  @sail-only
+  @zelox-only
   Rule: Table is still readable after individual commits covered by compaction are deleted
 
     Background:

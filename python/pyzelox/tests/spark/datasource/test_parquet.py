@@ -446,7 +446,7 @@ def test_parquet_read_partitioned_directory_type_inference(spark, tmp_path, prov
 
 
 # TODO: remove this test once the FIXME above `rewrite_listing_partitions`
-# in `crates/sail-data-source/src/listing.rs` is addressed and the
+# in `crates/zelox-data-source/src/listing.rs` is addressed and the
 # Spark-parity test above starts passing.
 @pytest.mark.parametrize("provide_schema", [True, False])
 def test_parquet_read_partitioned_directory_type_inference_string_only(spark, tmp_path, provide_schema):
@@ -520,7 +520,7 @@ def test_parquet_read_multi_level_partitioned_directory(spark, tmp_path, provide
 
 
 # TODO: remove this test once the FIXME above `rewrite_listing_partitions`
-# in `crates/sail-data-source/src/listing.rs` is addressed and the
+# in `crates/zelox-data-source/src/listing.rs` is addressed and the
 # Spark-parity test above starts passing.
 @pytest.mark.parametrize("provide_schema", [True, False])
 def test_parquet_read_multi_level_partitioned_directory_string_only(spark, tmp_path, provide_schema):

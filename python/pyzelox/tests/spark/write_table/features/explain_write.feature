@@ -1,6 +1,6 @@
 Feature: EXPLAIN statement for write operations
 
-  @sail-only
+  @zelox-only
   Scenario: EXPLAIN CREATE TABLE AS SELECT shows physical plan with catalog command
     Given variable location for temporary directory explain_ctas
     Given final statement
@@ -16,7 +16,7 @@ Feature: EXPLAIN statement for write operations
       """
     Then query plan matches snapshot
 
-  @sail-only
+  @zelox-only
   Scenario: EXPLAIN INSERT INTO shows physical plan with catalog command
     Given variable location for temporary directory explain_insert
     Given final statement

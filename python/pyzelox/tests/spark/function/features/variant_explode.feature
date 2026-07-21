@@ -3,7 +3,7 @@ Feature: variant_explode and variant_explode_outer
 
   Rule: variant_explode analysis and schema
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN variant_explode shows physical plan
       When query
         """
@@ -13,7 +13,7 @@ Feature: variant_explode and variant_explode_outer
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN variant_explode_outer shows physical plan
       When query
         """

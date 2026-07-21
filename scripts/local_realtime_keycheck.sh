@@ -9,7 +9,7 @@ N="${N:-2000000}"; WORKERS="${WORKERS:-2}"; KEYS="${KEYS:-1000}"; PORT="${PORT:-
 TOPIC="rtkey_${N}_${WORKERS}"; OUT="/tmp/rtk_out_${N}_${WORKERS}"; CK="/tmp/rtk_ck_${N}_${WORKERS}"
 BIN="$ROOT/target/debug/zelox"; PY="$ROOT/.venvs/smoke/bin/python"
 BOOT="${BOOT:-localhost:9092}"
-[ -x "$BIN" ] || { echo "FATAL: need $BIN (cargo build -p sail-cli --bin zelox)"; exit 2; }
+[ -x "$BIN" ] || { echo "FATAL: need $BIN (cargo build -p zelox-cli --bin zelox)"; exit 2; }
 KP=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1); [ -n "$KP" ] || { echo "FATAL: no kafka container"; exit 2; }
 rm -rf "$OUT" "$CK"
 echo "=== [1] topic $TOPIC + produce N=$N keys=$KEYS (+closers) ==="

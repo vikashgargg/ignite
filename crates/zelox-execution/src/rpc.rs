@@ -103,7 +103,7 @@ const CLIENT_MAX_HEADER_LIST_SIZE: u32 = 1024 * 1024;
 /// transport becomes round-trip-latency-bound and INVARIANT to batch size (measured: in-process
 /// exchange 3.07M vs Flight 1.55M ev/s = a flat 2×, unchanged by 16k→64k batch rows). Flink avoids
 /// this with large credit-based network buffers (REFERENCES: credit-based backpressure); our own
-/// server already sets `http2_adaptive_window` (sail-server builder.rs). Give the shuffle-read client
+/// server already sets `http2_adaptive_window` (zelox-server builder.rs). Give the shuffle-read client
 /// a large fixed receive window so many batches stay in-flight and the send saturates bandwidth.
 const CLIENT_HTTP2_STREAM_WINDOW: u32 = 8 * 1024 * 1024; // 8 MiB per stream
 const CLIENT_HTTP2_CONNECTION_WINDOW: u32 = 16 * 1024 * 1024; // 16 MiB per connection

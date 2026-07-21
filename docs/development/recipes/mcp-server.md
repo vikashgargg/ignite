@@ -34,7 +34,7 @@ To work around this, you can run the Python script directly.
 2. In another terminal, run `hatch shell` to enter the `default` Hatch environment. Then run the following command to start the MCP server.
    ```bash
    env FASTMCP_LOG_LEVEL=INFO \
-     python crates/sail-cli/src/python/spark_mcp_server.py \
+     python crates/zelox-cli/src/python/spark_mcp_server.py \
      --spark-remote sc://127.0.0.1:50051
    ```
 

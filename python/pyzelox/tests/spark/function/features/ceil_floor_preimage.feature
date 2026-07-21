@@ -138,7 +138,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
 
   Rule: Plan snapshot — filter pushdown on in-memory VALUES
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN WHERE ceil(col) > N
       When query
         """
@@ -151,7 +151,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN WHERE floor(col) <= N
       When query
         """
@@ -164,7 +164,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN WHERE floor(col) = N — preimage rewrites to range
       When query
         """
@@ -177,7 +177,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN floor with non-integer RHS — preimage returns None, no rewrite
       When query
         """
@@ -186,7 +186,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN floor != N — rewrites to disjunction v < N OR v >= N+1
       When query
         """
@@ -201,7 +201,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
   Rule: Plan snapshot — filter pushdown on Parquet (preimage)
 
     # Baseline: a pure literal predicate that PruningPredicate CAN reason about.
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN SELECT from Parquet with literal filter — baseline for compare
       Given variable location for temporary directory explain_literal_filter
       Given final statement
@@ -228,7 +228,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
       Then query plan matches snapshot
 
     # ceil: no preimage → UDF predicate stays per-row, no pruning_predicate.
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN SELECT from Parquet with ceil filter shows pushdown
       Given variable location for temporary directory explain_ceil_pushdown
       Given final statement
@@ -254,7 +254,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
       Then query plan matches snapshot
 
     # floor: has preimage → `floor(v) <= 1` rewrites to `v < 2` → pruning_predicate populated.
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN SELECT from Parquet with floor filter shows pushdown
       Given variable location for temporary directory explain_floor_pushdown
       Given final statement
@@ -280,7 +280,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
       Then query plan matches snapshot
 
     # floor equality: `floor(v) = 1` rewrites to `v >= 1 AND v < 2` → pruning_predicate populated.
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN floor filter on Parquet with equality shows preimage pushdown
       Given variable location for temporary directory explain_floor_eq_pushdown
       Given final statement
@@ -307,7 +307,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
       Then query plan matches snapshot
 
     # Non-integer RHS: preimage returns None → no rewrite, UDF stays per-row.
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN floor filter on Parquet with non-integer RHS does not rewrite
       Given variable location for temporary directory explain_floor_nonint
       Given final statement
@@ -332,7 +332,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
 
     # floor !=: DataFusion derives complement of Range [N, N+1) → `v < N OR v >= N+1`
     # → pruning_predicate populated with both bounds.
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN floor filter on Parquet with != rewrites to disjunction
       Given variable location for temporary directory explain_floor_neq
       Given final statement
@@ -358,7 +358,7 @@ Feature: ceil() / floor() — preimage hook (filter pushdown)
       Then query plan matches snapshot
 
     # Mixed literal + UDF: DF derives pruning only from the literal part.
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN combined literal + UDF filter — DF predicate splitting visible
       Given variable location for temporary directory explain_combined_filter
       Given final statement

@@ -13,11 +13,11 @@ only stage where Zelox's **no-JVM Arrow zero-copy network shuffle** can *structu
 JVM-serialized shuffle — but that only manifests **multi-node** (single-node exchange is in-memory).
 
 ## 1. The two big de-riskers (code-traced 2026-07-07)
-1. **Arrow Flight transport ALREADY EXISTS + is tested.** `sail-execution/src/stream_service/`:
+1. **Arrow Flight transport ALREADY EXISTS + is tested.** `zelox-execution/src/stream_service/`:
    `FlightServiceClient` + `FlightRecordBatchStream` (`client.rs`), `TaskStreamFlightServer` + `do_get`
    + `Ticket` (`server.rs`), `test_arrow_flight_shuffle_roundtrip` (`tests.rs`). The **batch** shuffle
    already moves Arrow `RecordBatch` streams cross-node zero-copy over Flight. **Reuse it.**
-2. **FlowEvents ALREADY ⟷ RecordBatches.** `sail-common-datafusion/.../event/encoding.rs`:
+2. **FlowEvents ALREADY ⟷ RecordBatches.** `zelox-common-datafusion/.../event/encoding.rs`:
    `EncodedFlowEventStream::encode(FlowEvent) -> RecordBatch` (data AND markers — Watermark/Checkpoint/
    Idle/EndOfData — encoded into a special-schema batch with `_marker`/`_retracted` columns);
    `DecodedFlowEventStream` reverses it. So a streaming sub-channel's `FlowEvent` stream **is** a
@@ -28,12 +28,12 @@ barriers) already serializes to Arrow RecordBatches, and Flight already carries 
 streams zero-copy. This is the no-JVM structural edge, already built for batch.
 
 ## 2. What's actually missing (the real work)
-Today the streaming path is **single-process**: `StreamExchangeExec` (`sail-physical-plan/.../
+Today the streaming path is **single-process**: `StreamExchangeExec` (`zelox-physical-plan/.../
 streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the deploy is ONE pod
 (`--mode local-cluster --workers 4`). BF2 must run streaming on the **existing** distributed mode:
 
 - **T-BF2.1 — Multi-pod streaming topology. RESOLVED (2026-07-07): the distributed mode ALREADY
-  EXISTS.** `sail-cli/src/runner.rs`: three modes `local | local-cluster | kubernetes-cluster`;
+  EXISTS.** `zelox-cli/src/runner.rs`: three modes `local | local-cluster | kubernetes-cluster`;
   **`kubernetes-cluster`** is a real distributed multi-pod mode (`Cluster`/`ClusterRole::Worker` worker
   pods, Flight shuffle, K8s Lease-based scheduler-HA leader election). BUT: **every benchmark (batch AND
   streaming) ran `local-cluster` single-pod** (`k8s/eks/zelox-sf100.yaml`: "local-cluster on the single
@@ -89,7 +89,7 @@ streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the dep
 ## 4b. Experiment 1 result (kind, 2026-07-07) — distributed execution CONFIRMED (batch); streaming pending
 Deployed `k8s/sail.yaml` (kubernetes-cluster driver, `zelox:t7fuse`) on kind. A trivial distributed
 query (`spark.range(0,1e6,1,8).sum`) returned the correct result **and the driver dynamically launched
-5 worker pods** (`sail-worker-*-1..5`) — so kubernetes-cluster worker-pod launch + cross-pod Flight
+5 worker pods** (`zelox-worker-*-1..5`) — so kubernetes-cluster worker-pod launch + cross-pod Flight
 shuffle + correct result are **PROVEN on kind**. The hard part (distributed worker launch + Flight
 shuffle) works. **Still UNOBSERVED:** the STREAMING windowed-agg cross-pod behavior — the streaming run
 was blocked by kind Kafka data-path friction (topic empty: producer BOOT namespace, slow single-broker
@@ -103,7 +103,7 @@ fall-back / route cross-pod? That single observation scopes T-BF2.2.
 Seeded a small `events` topic (400k rows, 8 parts, exact `{"k","ts","v"}` scheme) **in the driver's
 namespace** (`zelox`), skipping the flaky producer BOOT path, then ran the bounded windowed-agg
 (`trigger(availableNow=True)`) against the kubernetes-cluster driver. Observed:
-- **The driver launched 5 worker pods for the STREAMING job** (`sail-worker-nwfrntow45-1..5`, all
+- **The driver launched 5 worker pods for the STREAMING job** (`zelox-worker-nwfrntow45-1..5`, all
   Running) — so worker-pod launch happens for streaming, not just batch.
 - **BUT the entire windowed-agg ran on ONE worker.** Worker 1's log shows `F5_PEAK p0..p7` — **all 8
   window partitions on a single pod**; workers 2–5 started their server, did **zero** window work, and

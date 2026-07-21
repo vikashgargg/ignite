@@ -1,6 +1,6 @@
 Feature: CREATE TABLE default location
 
-  @sail-only
+  @zelox-only
   Scenario: CREATE TABLE uses database location as the default table location
     Given variable db_location for temporary directory create_table_db_loc
     Given final statement
@@ -35,7 +35,7 @@ Feature: CREATE TABLE default location
         📄 part-<id>.<codec>.parquet
       """
 
-  @sail-only
+  @zelox-only
   Scenario: CREATE TABLE AS SELECT uses database location as the default table location
     Given variable db_location for temporary directory create_table_ctas_db_loc
     Given final statement
@@ -72,7 +72,7 @@ Feature: CREATE TABLE default location
         📄 part-<id>.<codec>.parquet
       """
 
-  @sail-only
+  @zelox-only
   Scenario: CREATE TABLE encodes special characters in table name using U+ hex format
     Given variable db_location for temporary directory create_table_special_char_db
     Given final statement
@@ -107,7 +107,7 @@ Feature: CREATE TABLE default location
         📄 part-<id>.<codec>.parquet
       """
 
-  @sail-only
+  @zelox-only
   Scenario: CREATE TABLE uses warehouse directory when database has no location
     Given variable warehouse for temporary directory create_table_fallback_warehouse
     Given config spark.sql.warehouse.dir = {{ warehouse.string }}

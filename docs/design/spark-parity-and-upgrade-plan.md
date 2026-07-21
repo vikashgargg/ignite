@@ -72,20 +72,20 @@ combination, which de-risks our upgrade. Plan:
 ## 2c. DataFusion 54 migration — progress + precise remaining map (branch upgrade/datafusion54-arrow583)
 
 **DONE (committed 94253edb):** Arrow 58.3 (green); Cargo pins 53.1→54.0 + `avro` dropped from
-datafusion-common (`arrow-avro` auto-added); **sail-common-datafusion** + **sail-cache** fully migrated
+datafusion-common (`arrow-avro` auto-added); **zelox-common-datafusion** + **zelox-cache** fully migrated
 (`TableScopedPath` re-key + new `cache_limit`/`update_cache_limit`/`drop_table_entries`, ported from LakeSail
 v0.6.5); **ALL 254 `as_any` trait-impl overrides removed** (DF54 made `Any` a supertrait; downcasting now via
 inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downcast_ref`**.
 
 **WORKSPACE LIB COMPILES GREEN ON DF54** (`cargo build --workspace` = 0 errors). Landed the full remaining map:
 - *Mechanical (done):* `partition_statistics -> Result<Arc<Statistics>>` (delta relaxed_tz/scan_by_adds + 6 in
-  sail-physical-plan: merge_cardinality_check, monotonic_id, repartition, spark_partition_id, streaming
+  zelox-physical-plan: merge_cardinality_check, monotonic_id, repartition, spark_partition_id, streaming
   filter/limit — deref-clone `Arc` where the body mutates or calls `with_fetch`); `PartitionedFile.table_reference:
   None` + `extensions: Default::default()` (DF54 changed `extensions` from `Option<Arc<dyn Any>>` to
   `FileExtensions`); `CastColumnExpr → CastExpr::new_with_target_field` (iceberg expr_adapter, mirroring DF's own
   `schema_rewriter`).
 - *Semantic (done):* logical `Cast`/`TryCast` construction → `Cast::new(expr, data_type)` (still takes `DataType`,
-  converts to `field: FieldRef` internally) across sail-function (3) + sail-plan (window/aggregate/misc/time_travel/
+  converts to `field: FieldRef` internally) across zelox-function (3) + zelox-plan (window/aggregate/misc/time_travel/
   read/stat) + delta metadata_predicate destructure `Cast { expr, field }` using `field.data_type()`; reading
   `cast.data_type` → `cast.field.data_type()` (values.rs); `PruningStatistics::row_counts(&self)` arg-drop —
   delta impl reworked to **container-level** (per-Add `num_records`, column-independent, removed dead per-column
@@ -97,7 +97,7 @@ inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downca
   downcast on `dyn ExecutionPlan`/`TableProvider`/`DataSource`/`DataSink`/`FileSource`/`PhysicalExpr`/UDFs — driven
   by exact compiler spans so arrow-array `.as_any()` was never touched) + **177 now-unused `use std::any::Any`**
   imports cleaned.
-- **sail-execution/codec.rs (the distributed round-trip — highest care):** DF54 merged `&TaskContext` + `&dyn
+- **zelox-execution/codec.rs (the distributed round-trip — highest care):** DF54 merged `&TaskContext` + `&dyn
   PhysicalExtensionCodec` into **`PhysicalPlanDecodeContext::new(task_ctx, codec)`** for every decode
   (`parse_protobuf_file_scan_config` / `parse_physical_sort_exprs` / `parse_protobuf_partitioning`); every
   serialize (`serialize_file_scan_config` / `serialize_physical_sort_exprs`) now takes `(items, codec,

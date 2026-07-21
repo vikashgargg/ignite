@@ -75,7 +75,7 @@ Feature: Semi join support
   # See https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-join.html
   Rule: RIGHT SEMI JOIN with ON condition
 
-    @sail-only
+    @zelox-only
     Scenario: right semi join keeps matching rows from the right side
       Given statement
         """
@@ -100,7 +100,7 @@ Feature: Semi join support
 
   Rule: RIGHT ANTI JOIN with ON condition
 
-    @sail-only
+    @zelox-only
     Scenario: right anti join keeps non-matching rows from the right side
       Given statement
         """

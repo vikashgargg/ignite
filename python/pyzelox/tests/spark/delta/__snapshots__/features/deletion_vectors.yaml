@@ -2,8 +2,8 @@
 ---
 name: "test_delta_log_after_dv_delete_contains_correct_commit_actions"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: DELETE
   operationMetrics:

@@ -21,12 +21,12 @@
 ## Breaking changes to handle (from the 54.0.0 notes)
 - **`ExecutionPlan::apply_expressions()` reverted** → no action (it was never in 53.1.0's stable surface we use).
 - **`ScalarSubqueryExec` gated behind a session property** → opt-in; set the session flag if we want the perf path.
-- **Higher-order UDF wrapping refactored to a concrete struct** → check our UDF registrations (`sail-function`) still compile.
+- **Higher-order UDF wrapping refactored to a concrete struct** → check our UDF registrations (`zelox-function`) still compile.
 - **Arrow major bump** (54 tracks a newer arrow-rs than 53) → the largest ripple: Zelox touches Arrow pervasively (arrays, compute, IPC for Flight shuffle, parquet). `datafusion-proto` (our `codec.rs`) and the flow-event encoding must compile against the new arrow. **Verify the exact arrow version from `datafusion 54.0.0`'s `Cargo.toml` before starting.**
 
 ## Upgrade approach (low-risk, staged)
 1. **Branch + bump** all `datafusion*` pins 53.1.0 → 54.0.0 in workspace `Cargo.toml`; `cargo update`; resolve the arrow version bump.
-2. **Compile-fix** the workspace crate-by-crate (expect changes in: `sail-execution/codec.rs` via datafusion-proto; `sail-function` UDF wrappers; any `ExecutionPlan`/`PlanProperties` API drift; arrow array/compute signature changes).
+2. **Compile-fix** the workspace crate-by-crate (expect changes in: `zelox-execution/codec.rs` via datafusion-proto; `zelox-function` UDF wrappers; any `ExecutionPlan`/`PlanProperties` API drift; arrow array/compute signature changes).
 3. **Re-run the full gates**: 105/105 multi-mode scorecard; differential-trust 124/124 vs Spark; clippy `-D warnings`; the streaming suite (6/6 + EO + the new Kafka-sink latency/EO tests).
 4. **Re-benchmark** TPC-H SF-1/SF-100 + ClickBench to quantify the 54.0.0 scan/repartition gains (expect modest but real batch speedups; the RepartitionExec coalesce should help distributed throughput).
 5. **Then exploit**: enable `ScalarSubqueryExec`; adopt `BinaryView` in the Kafka source; wire the Extension Type Registry for Zelox-native types.

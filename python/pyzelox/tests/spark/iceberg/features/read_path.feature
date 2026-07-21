@@ -22,7 +22,7 @@ Feature: Iceberg read path (driver vs metadata-as-data)
         SELECT * FROM VALUES (1, 'a', 10), (2, 'b', 20)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN SELECT with default options uses driver file scan
       When query
         """
@@ -53,7 +53,7 @@ Feature: Iceberg read path (driver vs metadata-as-data)
         SELECT * FROM VALUES (1, 'a', 10), (2, 'b', 20)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN SELECT with metadataAsDataRead true uses manifest scan
       Then iceberg metadata contains
         | path       | value |
@@ -72,7 +72,7 @@ Feature: Iceberg read path (driver vs metadata-as-data)
         DROP TABLE IF EXISTS iceberg_metadata_partitioned
         """
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN for partitioned table with metadata-as-data enabled
       Given statement template
         """
@@ -121,7 +121,7 @@ Feature: Iceberg read path (driver vs metadata-as-data)
         SELECT * FROM VALUES (1, 'a', 10), (2, 'b', 20), (3, 'c', 30)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: SELECT through metadata-as-data path returns all rows
       When query
         """
@@ -133,7 +133,7 @@ Feature: Iceberg read path (driver vs metadata-as-data)
         | 2  | b    | 20    |
         | 3  | c    | 30    |
 
-    @sail-only
+    @zelox-only
     Scenario: Filter and projection work on metadata-as-data path
       When query
         """
@@ -173,7 +173,7 @@ Feature: Iceberg read path (driver vs metadata-as-data)
           (5, 'c', 50)
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Identity-partition equality predicate is honored, not dropped
       When query
         """
@@ -214,7 +214,7 @@ Feature: Iceberg read path (driver vs metadata-as-data)
           (6, TIMESTAMP '2024-01-03 11:00:00', 'day3-b')
         """
 
-    @sail-only
+    @zelox-only
     Scenario: Day-transform timestamp range predicate is honored, not dropped
       When query
         """

@@ -2,8 +2,8 @@
 ---
 name: "test_apply_not_matched_by_source_updates_and_insert_expressions"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: MERGE
   operationMetrics:
@@ -2742,8 +2742,8 @@ data:
 ---
 name: "test_insertonly_merge_appends_new_rows_and_produces_no_remove_actions"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: MERGE
   operationMetrics:
@@ -2781,8 +2781,8 @@ data:
 ---
 name: "test_matched_deletes_use_deletion_vectors_while_unmatched_rows_are_inserted"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: MERGE
   operationMetrics:
@@ -2824,8 +2824,8 @@ data:
 ---
 name: "test_rows_missing_from_the_source_are_deleted_after_updates"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: MERGE
   operationMetrics:
@@ -2873,8 +2873,8 @@ data:
 ---
 name: "test_specific_not_matched_inserts_run_before_the_default_clause"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: MERGE
   operationMetrics:
@@ -2921,8 +2921,8 @@ data:
 ---
 name: "test_update_and_delete_matched_rows_while_inserting_unmatched_rows"
 data:
-  clientVersion: sail-delta-lake.x.x.x
-  engineInfo: sail-delta-lake:x.x.x
+  clientVersion: zelox-delta-lake.x.x.x
+  engineInfo: zelox-delta-lake:x.x.x
   isBlindAppend: false
   operation: MERGE
   operationMetrics:

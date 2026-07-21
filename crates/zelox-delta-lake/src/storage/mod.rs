@@ -284,7 +284,7 @@ async fn read_commit_entry(storage: &dyn ObjectStore, version: i64) -> DeltaResu
         }
         Err(err) => {
             error!(
-                target: "sail-delta-lake",
+                target: "zelox-delta-lake",
                 "failed to read commit entry (version={version}): {err}"
             );
             Err(err.into())

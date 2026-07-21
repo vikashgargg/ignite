@@ -26,7 +26,7 @@ RUN CARGO_BUILD_JOBS=$(nproc) \
     CARGO_PROFILE_RELEASE_LTO=off \
     CARGO_PROFILE_RELEASE_STRIP=false \
     CARGO_PROFILE_RELEASE_DEBUG=line-tables-only \
-    cargo build --release -p sail-cli --bins \
+    cargo build --release -p zelox-cli --bins \
     && cp /app/target/release/zelox /usr/local/bin/zelox
 
 FROM python:${PYTHON_VERSION}-slim

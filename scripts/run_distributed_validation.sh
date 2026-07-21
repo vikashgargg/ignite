@@ -108,7 +108,7 @@ kind delete cluster --name "$KIND_CLUSTER" 2>/dev/null || true
 # ─── PHASE 3: Apple Container build ──────────────────────────────────────────
 section "PHASE 3: Apple Container build (--cpus 4 --memory 8g)"
 
-log "Starting Apple Container builder with 8 GB (required to avoid OOM during aws-sdk-glue + sail-catalog-hms parallel compile)..."
+log "Starting Apple Container builder with 8 GB (required to avoid OOM during aws-sdk-glue + zelox-catalog-hms parallel compile)..."
 container builder stop 2>/dev/null || true
 sleep 3
 container builder start --cpus 4 --memory 8g --dns 8.8.8.8 2>&1 | tee -a "$LOG_DIR/container-build.log"

@@ -116,7 +116,7 @@ jobs:
         env:
           # Genuine cross-compile: PyO3 needs the target Python version hint here.
           PYO3_CROSS_PYTHON_VERSION: "3.11"
-        run: cargo zigbuild --release -p sail-cli --target ${{ matrix.target }}
+        run: cargo zigbuild --release -p zelox-cli --target ${{ matrix.target }}
       - name: Show binary size
         run: |
           ls -lh target/${{ matrix.target }}/release/zelox
@@ -161,7 +161,7 @@ jobs:
           PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
           RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
           LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
-        run: cargo build --release -p sail-cli
+        run: cargo build --release -p zelox-cli
 
       - name: Set up smoke venv
         run: |
@@ -274,7 +274,7 @@ jobs:
           RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
           LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
           CARGO_PROFILE_RELEASE_LTO: thin
-        run: cargo build --release -p sail-cli
+        run: cargo build --release -p zelox-cli
 
       - name: Set up reference venv (Apache Spark 3.5, JVM)
         run: |
@@ -452,7 +452,7 @@ jobs:
       - name: Build release binary (Apple Silicon)
         env:
           PYO3_PYTHON: python3.12
-        run: cargo build --release -p sail-cli
+        run: cargo build --release -p zelox-cli
 
       - name: Set up smoke venv
         run: |
@@ -546,7 +546,7 @@ jobs:
           PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
           RUSTFLAGS: "-L native=${{ env.pythonLocation }}/lib"
           LD_LIBRARY_PATH: ${{ env.pythonLocation }}/lib
-        run: cargo build --release -p sail-cli
+        run: cargo build --release -p zelox-cli
 
       - name: Set up Python venv
         run: |
@@ -622,7 +622,7 @@ jobs:
       - name: Build aarch64-apple-darwin
         env:
           PYO3_PYTHON: python3.12
-        run: cargo build --release -p sail-cli
+        run: cargo build --release -p zelox-cli
       - name: Show binary size
         run: ls -lh target/release/zelox
       - uses: actions/upload-artifact@v4

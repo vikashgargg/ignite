@@ -39,7 +39,7 @@ for c in "$ROOT/target/release/zelox" "$ROOT/target/debug/zelox"; do
   [ -x "$c" ] && BIN="$c" && break
 done
 if [ -z "$BIN" ]; then
-  echo "FATAL: no zelox binary. Build one: cargo build --release -p sail-cli" >&2; exit 2
+  echo "FATAL: no zelox binary. Build one: cargo build --release -p zelox-cli" >&2; exit 2
 fi
 PY="$ROOT/.venvs/smoke/bin/python"
 [ -x "$PY" ] || { echo "FATAL: Spark-Connect venv missing at .venvs/smoke (see scripts/dist_streaming_smoke.py header)" >&2; exit 2; }

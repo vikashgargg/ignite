@@ -106,7 +106,7 @@ LakeSail is the best existing open-source Spark replacement. They are shipping f
                             │  Spark Connect gRPC / TLS + JWT
                             ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  ZELOX SERVER  (sail-spark-connect)                                      │
+│  ZELOX SERVER  (zelox-spark-connect)                                      │
 │  ├─ Auth middleware: JWT bearer / mTLS / API-key                         │
 │  ├─ Session manager: per-user isolation, resource quotas                 │
 │  ├─ Readiness + liveness probes (Kubernetes-native)                      │
@@ -140,7 +140,7 @@ LakeSail is the best existing open-source Spark replacement. They are shipping f
                │
                ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  STORAGE  (sail-object-store + sail-data-source)                         │
+│  STORAGE  (zelox-object-store + zelox-data-source)                         │
 │  S3 · GCS · ADLS · HDFS · Local                                          │
 │  Parquet · Delta Lake · Iceberg · ORC · CSV · JSON · Avro               │
 │  Delta CDF · Iceberg time travel · Unity Catalog · Glue · HMS            │
@@ -302,12 +302,12 @@ All Sprint 4–6 items are done. The "catch-up" phase is complete.
 7. ✅ **bitmap_and_agg / variant_explode** — DataSketches HLL-compatible
 8. ✅ **dbt integration guide** — `docs/integrations/dbt.md`
 9. ✅ **95.01% Spark test suite** — 2492/2623 gold data pass rate
-10. ✅ **HMS Thrift client** — `crates/sail-catalog/src/hms/`
+10. ✅ **HMS Thrift client** — `crates/zelox-catalog/src/hms/`
 11. ✅ **Catalog caching** — TTL-based table metadata cache
 12. ✅ **Event-time window executor** — `WatermarkNode` + `WindowAccumNode` + `WindowAccumExec`
 13. ✅ **Stateful deduplication** — `StreamDeduplicateExec`; `HashSet<Vec<ScalarValue>>` across micro-batches
 14. ✅ **Theta sketch aggregates** — pure-Rust KMV (K=4096); `ThetaSketchAgg`, `ThetaSketchUnionAgg`
-15. ✅ **Vortex data source skeleton** — `sail-vortex` crate registered in `TableFormatRegistry`
+15. ✅ **Vortex data source skeleton** — `zelox-vortex` crate registered in `TableFormatRegistry`
 
 ### Next: Phase 4
 

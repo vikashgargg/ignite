@@ -172,7 +172,7 @@ engine-core wins that flow straight into Zelox's batch *and* streaming without u
 
 **Decision:** schedule as a **dedicated upgrade sprint**, not folded into a feature P0. It's a major
 version bump (breaking physical-plan/expr APIs + a likely Arrow bump) that ripples through the custom
-crates (`sail-physical-plan`, `sail-execution` codec, `sail-iceberg`, `sail-delta`) and needs the full
+crates (`zelox-physical-plan`, `zelox-execution` codec, `zelox-iceberg`, `zelox-delta`) and needs the full
 regression (105/105 differential scorecard, TPC-H/DS, streaming all-in-one, the EO crash gates) before
 shipping. Doing it mid-feature would risk destabilizing the verified baseline. Track breaking changes
 from the DataFusion 54 upgrade guide. Sources: datafusion.apache.org/blog (54.0.0),

@@ -324,7 +324,7 @@ Feature: year
         | result |
         | 2024   |
 
-    @sail-bug
+    @zelox-bug
     Scenario: year of year-only string
       When query
         """
@@ -334,7 +334,7 @@ Feature: year
         | result |
         | 2024   |
 
-    @sail-bug
+    @zelox-bug
     Scenario: year of invalid string returns NULL when ANSI is off
       Given config spark.sql.ansi.enabled = false
       When query
@@ -345,7 +345,7 @@ Feature: year
         | result |
         | NULL   |
 
-    @sail-bug
+    @zelox-bug
     Scenario: year of empty string returns NULL when ANSI is off
       Given config spark.sql.ansi.enabled = false
       When query
@@ -366,7 +366,7 @@ Feature: year
 
   Rule: Arity errors
 
-    @sail-only
+    @zelox-only
     Scenario: year with zero arguments raises error
       When query
         """
@@ -374,7 +374,7 @@ Feature: year
         """
       Then query error (?i).*year.*requires 1 argument.*
 
-    @sail-only
+    @zelox-only
     Scenario: year with two arguments raises error
       When query
         """
@@ -384,7 +384,7 @@ Feature: year
 
   Rule: Type errors
 
-    @sail-only
+    @zelox-only
     Scenario: year of integer raises type mismatch error
       When query
         """
@@ -393,7 +393,7 @@ Feature: year
       Then query error (?i).*year.*date.*timestamp.*
 
   Rule: Preimage — plan snapshots (VALUES, in-memory)
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN WHERE year(col) = 2023 rewrites to date range (no UDF in plan)
       When query
         """
@@ -404,7 +404,7 @@ Feature: year
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN WHERE year(col) <= 2022 rewrites to upper-bound date predicate
       When query
         """
@@ -415,7 +415,7 @@ Feature: year
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN WHERE year(col) != 2023 rewrites to disjunction
       When query
         """
@@ -426,7 +426,7 @@ Feature: year
         """
       Then query plan matches snapshot
 
-    @sail-only
+    @zelox-only
     Scenario: EXPLAIN WHERE year(col) = 9999 also rewrites (NaiveDate supports year 10000)
       When query
         """
