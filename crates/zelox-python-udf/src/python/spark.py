@@ -385,20 +385,85 @@ class StructConverter(Converter):
         )
 
 
-if pyspark.__version__.startswith(("3.", "4.0.")):
+try:
+    # PySpark 4.2 removed the per-column conversion methods from
+    # ArrowStreamPandasUDFSerializer (arrow_to_pandas / _create_array /
+    # _create_struct_array) and relocated that logic into standalone conversion
+    # helpers in pyspark.sql.conversion.
+    from pyspark.sql.conversion import (
+        ArrowArrayToPandasConversion as _ArrowArrayToPandasConversion,
+    )
+    from pyspark.sql.conversion import (
+        PandasToArrowConversion as _PandasToArrowConversion,
+    )
+    from pyspark.sql.types import StructField as _StructField
+    from pyspark.sql.types import StructType as _StructType
+except ImportError:
+    _ArrowArrayToPandasConversion = None
+    _PandasToArrowConversion = None
+
+
+if _ArrowArrayToPandasConversion is not None:
+    # PySpark 4.2+. Route arrow<->pandas conversion through the relocated helpers,
+    # sourcing the exact configuration the serializer was constructed with so the
+    # UDF sees identical timezone / struct-in-pandas / cast semantics.
 
     def _arrow_column_to_pandas(column: pa.Array, serializer: ArrowStreamPandasUDFSerializer):
-        return serializer.arrow_to_pandas(column)
+        return _ArrowArrayToPandasConversion.convert(
+            column,
+            from_arrow_type(column.type),
+            timezone=serializer._timezone,  # noqa: SLF001
+            struct_in_pandas=serializer._struct_in_pandas,  # noqa: SLF001
+            ndarray_as_list=serializer._ndarray_as_list,  # noqa: SLF001
+        )
+
+    def _pandas_to_arrow_array(
+        data, data_type, serializer: ArrowStreamPandasUDFSerializer
+    ) -> pa.Array:
+        # `data_type` may be a PyArrow DataType (arrow-batch wrappers, which compare
+        # against the arrow type directly) or a Spark DataType (the 4.2 pandas UDF
+        # wrappers now yield the Spark return type). Normalise both.
+        if isinstance(data_type, pa.DataType):
+            spark_field_type = from_arrow_type(data_type)
+            target_arrow_type = data_type
+        else:
+            spark_field_type = data_type
+            target_arrow_type = None
+        # PandasToArrowConversion works on a whole RecordBatch; wrap the single
+        # column in a one-field struct, convert, then take the column back out.
+        schema = _StructType([_StructField("_0", spark_field_type, True)])
+        batch = _PandasToArrowConversion.convert(
+            [data],
+            schema,
+            timezone=serializer._timezone,  # noqa: SLF001
+            safecheck=serializer._safecheck,  # noqa: SLF001
+            arrow_cast=serializer._arrow_cast,  # noqa: SLF001
+            assign_cols_by_name=serializer._assign_cols_by_name,  # noqa: SLF001
+            int_to_decimal_coercion_enabled=serializer._int_to_decimal_coercion_enabled,  # noqa: SLF001
+        )
+        array = batch.column(0)
+        # When the caller passed an arrow type, preserve its exact contract (the
+        # arrow -> spark -> arrow round-trip can widen e.g. string -> large_string).
+        if target_arrow_type is not None and array.type != target_arrow_type:
+            array = array.cast(target_arrow_type, safe=serializer._safecheck)  # noqa: SLF001
+        return array
+
 else:
+    if pyspark.__version__.startswith(("3.", "4.0.")):
 
-    def _arrow_column_to_pandas(column: pa.Array, serializer: ArrowStreamPandasUDFSerializer):
-        return serializer.arrow_to_pandas(column, 0)
+        def _arrow_column_to_pandas(column: pa.Array, serializer: ArrowStreamPandasUDFSerializer):
+            return serializer.arrow_to_pandas(column)
+    else:
 
+        def _arrow_column_to_pandas(column: pa.Array, serializer: ArrowStreamPandasUDFSerializer):
+            return serializer.arrow_to_pandas(column, 0)
 
-def _pandas_to_arrow_array(data, data_type: pa.DataType, serializer: ArrowStreamPandasUDFSerializer) -> pa.Array:
-    if serializer._struct_in_pandas == "dict" and pa.types.is_struct(data_type):  # noqa: SLF001
-        return serializer._create_struct_array(data, data_type)  # noqa: SLF001
-    return serializer._create_array(data, data_type, arrow_cast=serializer._arrow_cast)  # noqa: SLF001
+    def _pandas_to_arrow_array(
+        data, data_type: pa.DataType, serializer: ArrowStreamPandasUDFSerializer
+    ) -> pa.Array:
+        if serializer._struct_in_pandas == "dict" and pa.types.is_struct(data_type):  # noqa: SLF001
+            return serializer._create_struct_array(data, data_type)  # noqa: SLF001
+        return serializer._create_array(data, data_type, arrow_cast=serializer._arrow_cast)  # noqa: SLF001
 
 
 def _arrow_columns_to_python(args: list[pa.Array], *, binary_as_bytes: bool = True) -> tuple:
