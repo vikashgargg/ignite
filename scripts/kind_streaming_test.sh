@@ -37,7 +37,7 @@ echo "TOPIC_CHECK events=$TOT expected=$N"
 
 echo "==== [3] Zelox ($TAG, scaled) + client ===="
 ECR_DUMMY=local  # image is loaded into kind as zelox:$TAG; replace the whole ref
-sed -e "s#__ECR__/zelox:eo-multipart#zelox:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
+sed -E -e "s#__ECR__/zelox:[A-Za-z0-9._-]+#zelox:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
 # ensure the loaded local image is used (never pulled) + bounded-complete flush (Flink-parity)
 kk patch deploy zelox-stream --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null 2>&1
 [ "${COMPLETE:-1}" = "1" ] && kk set env deploy/zelox-stream ZELOX_COMPLETE_ON_END=1 >/dev/null 2>&1

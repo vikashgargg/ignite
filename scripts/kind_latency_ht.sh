@@ -70,7 +70,7 @@ PY" 2>&1 | grep -a LATENCY_RESULT | sed "s/^/[$1] /"
 }
 
 echo "==== [2] ZELOX ($TAG) realtime passthrough ===="
-sed -e "s#__ECR__/zelox:eo-multipart#zelox:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
+sed -E -e "s#__ECR__/zelox:[A-Za-z0-9._-]+#zelox:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
 kk wait --for=condition=available --timeout=300s deployment/zelox-stream
 kk apply -f k8s/stream/zelox-client.yaml
 kk wait --for=condition=ready --timeout=300s pod/zelox-client

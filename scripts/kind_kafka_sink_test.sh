@@ -28,7 +28,7 @@ echo "TOPIC_CHECK sink_in=$TOT expected=$N"
 
 echo "==== [3] Zelox ($TAG) + client ===="
 ECR="$(aws ecr describe-repositories --region ap-south-1 --repository-name zelox --query 'repositories[0].repositoryUri' --output text | tr -d '[:space:]')"; REG="${ECR%/zelox}"
-sed -e "s#__ECR__/zelox:eo-multipart#zelox:$TAG#g" k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
+sed -E -e "s#__ECR__/zelox:[A-Za-z0-9._-]+#zelox:$TAG#g" k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
 kk patch deploy zelox-stream --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null 2>&1
 kk wait --for=condition=available --timeout=300s deployment/zelox-stream
 scale_kind < k8s/stream/zelox-client.yaml | kk apply -f -
