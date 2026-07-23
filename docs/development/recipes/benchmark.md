@@ -18,9 +18,9 @@ python -m pyzelox.examples.spark.tpch \
   --query 1
 ```
 
-You need to run this in a Python virtual environment with PySail and PySpark installed.
+You need to run this in a Python virtual environment with PyZelox and PySpark installed.
 If you are in the project source directory, you can use Hatch to set up the environment.
-Run `hatch run maturin develop` to build and install PySail for the default Hatch environment,
+Run `hatch run maturin develop` to build and install PyZelox for the default Hatch environment,
 and then run `hatch shell` to enter the environment.
 
 `BENCHMARK_PATH` is the absolute path of the [DataFusion benchmarks repository](https://github.com/apache/datafusion-benchmarks).

@@ -248,12 +248,12 @@ fn get_otlp_protocol(protocol: &OtlpProtocol) -> Protocol {
 
 fn get_resource(resource: &ResourceOptions) -> Resource {
     Resource::builder()
-        .with_service_name(format!("sail.{}", resource.kind))
+        .with_service_name(format!("zelox.{}", resource.kind))
         .build()
 }
 
 fn get_instrumentation_scope() -> InstrumentationScope {
-    InstrumentationScope::builder("sail")
+    InstrumentationScope::builder("zelox")
         .with_version(env!("CARGO_PKG_VERSION"))
         .build()
 }

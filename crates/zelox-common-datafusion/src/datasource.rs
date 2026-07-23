@@ -26,7 +26,7 @@ pub const MERGE_ROW_INDEX_COLUMN: &str = "__zelox_file_row_index";
 
 /// Row-level operation type column appended to expanded row-level write output.
 ///
-/// This is internal Sail metadata. Format writers may use it to route rows,
+/// This is internal Zelox metadata. Format writers may use it to route rows,
 /// collect operation metrics, or produce low-level delete artifacts, but must
 /// remove it before persisting user data.
 /// Value is one of the [`RowLevelOperationType`] integer constants.
@@ -76,7 +76,7 @@ impl OptionLayer {
 /// Internal row intent tag for row-level write plans.
 ///
 /// The numeric values are not table-format protocol values. They are stable
-/// within Sail physical plans so logical expansion and format writers can share
+/// within Zelox physical plans so logical expansion and format writers can share
 /// a compact representation of per-row intent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]

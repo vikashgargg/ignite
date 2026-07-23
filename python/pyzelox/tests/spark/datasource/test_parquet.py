@@ -25,7 +25,7 @@ def test_parquet_read_write_basic(spark, sample_df, tmp_path):
 
 
 def test_parquet_read_write_compressed(spark, sample_df, sample_pandas_df, tmp_path):
-    # Test reading a compressed Parquet file written by Sail
+    # Test reading a compressed Parquet file written by Zelox
     path = str(tmp_path / "parquet_compressed_zstd")
     sample_df.write.option("compression", "zstd(4)").parquet(path, mode="overwrite")
     read_df = spark.read.parquet(path)
@@ -226,7 +226,7 @@ def test_parquet_read_uppercase_extension(spark, sample_df, tmp_path):
 
 # -----------------------------------------------------------------------------
 # Case-insensitive extension matching for Parquet, plus partition-aware reads.
-# Sail reads every non-hidden file in a directory regardless of extension case
+# Zelox reads every non-hidden file in a directory regardless of extension case
 # (matching Spark). The tests below cover that across single files,
 # directories, partitioned trees, mixed case, schema-shape variations, and
 # user-supplied globs.
@@ -339,7 +339,7 @@ def test_parquet_read_uppercase_extension_partitioned_directory(spark, tmp_path)
 def test_parquet_read_uppercase_extension_partitioned_directory_with_schema(spark, tmp_path):
     # Same as the previous test but with an explicit schema that includes
     # the partition column. Spark recognizes `part` as a partition column
-    # from the directory structure even when a schema is supplied; Sail
+    # from the directory structure even when a schema is supplied; Zelox
     # should match that so users migrating from Spark don't see a regression.
     df_in = spark.createDataFrame(
         [(1, "a", "x"), (2, "b", "x"), (3, "c", "y")],
@@ -450,7 +450,7 @@ def test_parquet_read_partitioned_directory_type_inference(spark, tmp_path, prov
 # Spark-parity test above starts passing.
 @pytest.mark.parametrize("provide_schema", [True, False])
 def test_parquet_read_partitioned_directory_type_inference_string_only(spark, tmp_path, provide_schema):
-    # Pins Sail's current behavior: every partition column comes back as
+    # Pins Zelox's current behavior: every partition column comes back as
     # STRING regardless of the underlying values. Once partition type
     # inference matches Spark, this test should be deleted in favor of the
     # `test_parquet_read_partitioned_directory_type_inference` above.
@@ -479,9 +479,9 @@ def test_parquet_read_partitioned_directory_type_inference_string_only(spark, tm
     assert type_by_name["float_part"] == "string"
     assert type_by_name["string_part"] == "string"
     rows = df.collect()
-    # Note: Sail's writer drops trailing zeros when stringifying a DOUBLE
+    # Note: Zelox's writer drops trailing zeros when stringifying a DOUBLE
     # partition value (`3.0` → `"3"`). Spark would write `"3.0"`. Pinned
-    # against Sail's current behavior.
+    # against Zelox's current behavior.
     assert rows == [
         Row(id=1, val="a", int_part="2024", float_part="1.5", string_part="alpha"),
         Row(id=2, val="b", int_part="2024", float_part="2.5", string_part="beta"),
@@ -524,7 +524,7 @@ def test_parquet_read_multi_level_partitioned_directory(spark, tmp_path, provide
 # Spark-parity test above starts passing.
 @pytest.mark.parametrize("provide_schema", [True, False])
 def test_parquet_read_multi_level_partitioned_directory_string_only(spark, tmp_path, provide_schema):
-    # Pins Sail's current behavior: every partition column comes back as
+    # Pins Zelox's current behavior: every partition column comes back as
     # STRING regardless of the underlying values. Once partition type
     # inference matches Spark, this test should be deleted in favor of the
     # `test_parquet_read_multi_level_partitioned_directory` above.

@@ -5,7 +5,7 @@ rank: 1
 
 # Delta Lake
 
-You can use the `delta` format in Sail to work with [Delta Lake](https://delta.io/).
+You can use the `delta` format in Zelox to work with [Delta Lake](https://delta.io/).
 You can use the Spark DataFrame API or Spark SQL to read and write Delta tables.
 
 ## Topics

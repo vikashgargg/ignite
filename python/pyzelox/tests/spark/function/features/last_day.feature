@@ -156,7 +156,7 @@ Feature: last_day comprehensive tests
   Rule: Timestamp implicit coercion to Date
 
     # Spark implicitly casts Timestamp / Timestamp_NTZ to Date before applying
-    # last_day. Regression test for issue #1735 — Sail previously rejected
+    # last_day. Regression test for issue #1735 — Zelox previously rejected
     # these types at plan time.
 
     Scenario: last_day accepts TIMESTAMP input (Spark casts to Date)

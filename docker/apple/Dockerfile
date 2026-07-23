@@ -1,4 +1,4 @@
-# Zelox — Apple Container image  (वज्र: Sanskrit for thunderbolt)
+# Zelox — Apple Container image
 #
 # Apple Container (the `container` CLI on macOS 26 / Tahoe) reads this file
 # the same way Docker does — the format is identical.  The ENTRYPOINT/CMD
@@ -25,7 +25,7 @@
 #    container to use 8.8.8.8 before starting the build.
 
 ARG PYTHON_VERSION=3.12
-ARG PYSPARK_VERSION=4.0.0
+ARG PYSPARK_VERSION=4.2.0
 ARG RUST_VERSION=1.95.0
 
 # ── Stage 1: Rust builder ─────────────────────────────────────────────────────

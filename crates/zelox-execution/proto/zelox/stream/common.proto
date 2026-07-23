@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sail.stream;
+package zelox.stream;
 
 message TaskStreamTicket {
   uint64 job_id = 1;

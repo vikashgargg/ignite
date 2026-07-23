@@ -45,7 +45,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 # ---------------------------------------------------------------------------
 # Override the parent's autouse spark_doctest fixture so it does not
-# start a default in-memory-catalog Sail server.
+# start a default in-memory-catalog Zelox server.
 # ---------------------------------------------------------------------------
 
 
@@ -176,10 +176,10 @@ def _wait_for_port(host: str, port: int, timeout: float) -> None:
 
 
 def _wait_for_hms_catalog(remote_url: str, timeout: float) -> None:
-    """Block until Sail can successfully list HMS databases.
+    """Block until Zelox can successfully list HMS databases.
 
     We intentionally probe with ``SHOW DATABASES`` instead of an HMS-only
-    ping. This verifies the full harness path (Sail Spark Connect server,
+    ping. This verifies the full harness path (Zelox Spark Connect server,
     catalog wiring, and HMS) rather than just metastore socket readiness.
     """
     from pyzelox.tests.spark.conftest import (
@@ -207,10 +207,10 @@ def _wait_for_hms_catalog(remote_url: str, timeout: float) -> None:
             if spark is not None:
                 spark.stop()
 
-    raise TimeoutError(f"Sail HMS catalog did not become queryable within {timeout}s; last error: {last_error}")
+    raise TimeoutError(f"Zelox HMS catalog did not become queryable within {timeout}s; last error: {last_error}")
 
 
-def _run_sail_hms_server(
+def _run_zelox_hms_server(
     hms_endpoint: str,
     extra_env: dict[str, str] | None = None,
 ) -> Generator[str, None, None]:
@@ -218,7 +218,7 @@ def _run_sail_hms_server(
     # after the root conftest's pytest_configure has set up the environment.
     from pyzelox.spark import SparkConnectServer
 
-    catalogs_config = f'[{{name="sail", type="hms", uris=["{hms_endpoint}"]}}]'
+    catalogs_config = f'[{{name="zelox", type="hms", uris=["{hms_endpoint}"]}}]'
     env = {
         "ZELOX_CATALOG__LIST": catalogs_config,
         **(extra_env or {}),
@@ -295,7 +295,7 @@ def hms_s3_minio_container(
 
 @pytest.fixture(scope="session")
 def hms_s3_endpoint(hms_s3_minio_container: DockerContainer) -> str:
-    """Return the host-visible MinIO endpoint used by Sail and Spark."""
+    """Return the host-visible MinIO endpoint used by Zelox and Spark."""
     host = hms_s3_minio_container.get_container_host_ip()
     port = hms_s3_minio_container.get_exposed_port(_MINIO_PORT)
     return f"http://{host}:{port}"
@@ -338,7 +338,7 @@ def _hms_s3_bucket(
 
 @pytest.fixture(scope="session")
 def hms_s3_env(hms_s3_endpoint: str, _hms_s3_bucket: None) -> dict[str, str]:
-    """Return AWS-compatible environment for Sail's S3 object-store client."""
+    """Return AWS-compatible environment for Zelox's S3 object-store client."""
     del _hms_s3_bucket
     return {
         "AWS_ACCESS_KEY_ID": _MINIO_USER,
@@ -410,7 +410,7 @@ def hms_s3_metastore_endpoint(hms_s3_container: DockerContainer) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Sail server configured with HMS catalog
+# Zelox server configured with HMS catalog
 # ---------------------------------------------------------------------------
 
 
@@ -419,13 +419,13 @@ def hms_s3_remote(
     hms_s3_metastore_endpoint: str,
     hms_s3_env: dict[str, str],
 ) -> Generator[str, None, None]:
-    """Start a separate Sail server configured for HMS plus MinIO-backed S3."""
-    yield from _run_sail_hms_server(hms_s3_metastore_endpoint, hms_s3_env)
+    """Start a separate Zelox server configured for HMS plus MinIO-backed S3."""
+    yield from _run_zelox_hms_server(hms_s3_metastore_endpoint, hms_s3_env)
 
 
 @pytest.fixture(scope="module")
 def hms_s3_spark(hms_s3_remote: str) -> Generator[SparkSession, None, None]:
-    """Create a Spark Connect session connected to Sail's S3 HMS lane."""
+    """Create a Spark Connect session connected to Zelox's S3 HMS lane."""
     from pyzelox.tests.spark.conftest import (
         configure_spark_session,
         patch_spark_connect_session,

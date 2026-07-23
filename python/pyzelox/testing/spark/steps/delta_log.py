@@ -353,7 +353,7 @@ def delta_log_assert(
 ):
     """Delta log assertions: snapshot whole/subset, or assert specific paths."""
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     obj = _delta_log_compute(which, variables, delta_log_cache)
 
@@ -390,7 +390,7 @@ def delta_log_json_file_matches_snapshot(
     snapshot: SnapshotAssertion,
 ) -> None:
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     location = variables.get(location_var)
     assert location is not None, f"Variable {location_var!r} not found"
@@ -414,7 +414,7 @@ def delta_log_json_file_contains(
     ``value`` is a JSON-encoded expected value.
     """
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     location = variables.get(location_var)
     assert location is not None, f"Variable {location_var!r} not found"
@@ -595,7 +595,7 @@ def delta_log_add_partition_values_uses_physical_name(
 ) -> None:
     """Assert column-mapped add.partitionValues keys use physical names."""
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     location = variables.get(location_var)
     assert location is not None, f"Variable {location_var!r} not found"
@@ -630,7 +630,7 @@ def checkpoint_parquet_contains_add_fields(
 ) -> None:
     """Assert fields inside the checkpoint ``add`` struct match expected values."""
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     location = variables.get(location_var)
     assert location is not None, f"Variable {location_var!r} not found"
@@ -676,7 +676,7 @@ def checkpoint_parquet_contains_physical_partition_value(
 ) -> None:
     """Assert partitionValues_parsed uses a column mapping physical field name."""
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     location = variables.get(location_var)
     assert location is not None, f"Variable {location_var!r} not found"
@@ -722,7 +722,7 @@ def checkpoint_parquet_contains_physical_stats_value(
 ) -> None:
     """Assert stats_parsed uses a column mapping physical field name."""
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     assert stats_kind in {"minValues", "maxValues", "nullCount"}
     location = variables.get(location_var)
@@ -762,7 +762,7 @@ def checkpoint_parquet_add_missing_field(
 ) -> None:
     """Assert the checkpoint ``add`` struct does not have a direct sub-field."""
     if is_jvm_spark():
-        pytest.skip("Delta log assertions are Sail-only")
+        pytest.skip("Delta log assertions are Zelox-only")
 
     location = variables.get(location_var)
     assert location is not None, f"Variable {location_var!r} not found"

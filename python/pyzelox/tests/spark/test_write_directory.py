@@ -20,7 +20,7 @@ def test_insert_overwrite_directory(spark, tmpdir):
     assert_frame_equal(actual, expected)
 
     if not is_jvm_spark():
-        pytest.skip("overwrite for existing data is not supported in Sail yet")
+        pytest.skip("overwrite for existing data is not supported in Zelox yet")
 
     spark.sql(f"""
         INSERT OVERWRITE DIRECTORY '{escape_sql_string_literal(location)}' USING JSON

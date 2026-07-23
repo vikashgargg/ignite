@@ -3,7 +3,7 @@ Compare a Zelox ClickBench result against LakeSail's published numbers.
 
 Both files are ClickBench-format JSON ([[r1,r2,r3], ...] under "result", or a
 bare list). Reports per-query hot (best-of-3) times, the Zelox/LakeSail ratio,
-totals, and a verdict — since Zelox shares sail's DataFusion core, per-query
+totals, and a verdict — since Zelox shares zelox's DataFusion core, per-query
 times within ~±25% (and total within ~±15%) means "matching / correctly
 implemented"; large systematic divergence flags a fork regression to investigate.
 

@@ -40,11 +40,11 @@ impl TryFrom<&[u8]> for QueryHandle {
     }
 }
 
-pub struct SailFlightSqlState {
+pub struct ZeloxFlightSqlState {
     streams: HashMap<QueryHandle, SendableRecordBatchStream>,
 }
 
-impl SailFlightSqlState {
+impl ZeloxFlightSqlState {
     pub fn new() -> Self {
         Self {
             streams: HashMap::new(),
@@ -60,7 +60,7 @@ impl SailFlightSqlState {
     }
 }
 
-impl Default for SailFlightSqlState {
+impl Default for ZeloxFlightSqlState {
     fn default() -> Self {
         Self::new()
     }

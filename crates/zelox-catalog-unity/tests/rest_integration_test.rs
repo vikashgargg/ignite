@@ -141,7 +141,7 @@ async fn setup_catalog(
     let catalog = RuntimeAwareCatalogProvider::try_new(
         || {
             UnityCatalogProvider::new(
-                "sail".to_string(),
+                "zelox".to_string(),
                 &Some(DEFAULT_CATALOG.to_string()),
                 &Some(rest_url.clone()),
                 &None,
@@ -232,7 +232,7 @@ async fn test_create_schema() {
         .iter()
         .any(|(k, v)| k == "created_at" && !v.is_empty()));
 
-    assert_eq!(catalog, "sail".to_string());
+    assert_eq!(catalog, "zelox".to_string());
     assert_eq!(database, Vec::<String>::from(full_namespace.clone()));
     assert_eq!(comment, Some("test comment".to_string()));
     assert_eq!(location, Some("s3://bucket/path".to_string()));
@@ -334,7 +334,7 @@ async fn test_get_schema() {
         Namespace::try_from(vec![DEFAULT_CATALOG.to_string(), "apple".to_string()]).unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     assert!(unity_catalog.get_database(&namespace).await.is_err());
@@ -394,7 +394,7 @@ async fn test_list_schemas() {
         Namespace::try_from(vec![DEFAULT_CATALOG.to_string(), "ios".to_string()]).unwrap();
     let ns1_properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     let ns2 = Namespace::try_from(vec!["macos".to_string()]).unwrap();
@@ -584,7 +584,7 @@ async fn test_create_table() {
     .unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     unity_catalog
@@ -702,7 +702,7 @@ async fn test_create_table() {
     assert_eq!(properties.get("table_type"), Some(&"EXTERNAL".to_string()));
 
     assert_eq!(table.name, "t1".to_string());
-    assert_eq!(table.catalog, Some("sail".to_string()));
+    assert_eq!(table.catalog, Some("zelox".to_string()));
     assert_eq!(table.database, Vec::<String>::from(full_ns.clone()));
     assert_eq!(comment, Some("peow".to_string()));
     assert_eq!(constraints, vec![]);
@@ -904,7 +904,7 @@ async fn test_create_table() {
     };
 
     assert_eq!(table.name, "t2".to_string());
-    assert_eq!(table.catalog, Some("sail".to_string()));
+    assert_eq!(table.catalog, Some("zelox".to_string()));
     assert_eq!(table.database, Vec::<String>::from(full_ns.clone()));
     assert_eq!(comment, Some("test table".to_string()));
     assert!(constraints.is_empty());
@@ -982,7 +982,7 @@ async fn test_get_table() {
     .unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     unity_catalog
@@ -1085,7 +1085,7 @@ async fn test_get_table() {
     assert_eq!(properties.get("team"), Some(&"data-eng".to_string()));
 
     assert_eq!(table_ns.name, "t2".to_string());
-    assert_eq!(table_ns.catalog, Some("sail".to_string()));
+    assert_eq!(table_ns.catalog, Some("zelox".to_string()));
     assert_eq!(table_ns.database, Vec::<String>::from(full_ns.clone()));
     assert_eq!(comment, Some("test table".to_string()));
     assert!(constraints.is_empty());
@@ -1239,7 +1239,7 @@ async fn test_list_tables() {
             let TableKind::Table { format, .. } = &table.kind else {
                 panic!("Expected TableKind::Table");
             };
-            assert_eq!(table.catalog, Some("sail".to_string()));
+            assert_eq!(table.catalog, Some("zelox".to_string()));
             assert_eq!(table.database, Vec::<String>::from(full_ns.clone()));
             assert_eq!(format, "delta");
         }

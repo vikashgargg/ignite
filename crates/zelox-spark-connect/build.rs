@@ -111,6 +111,20 @@ fn build_spark_config() -> Result<(), Box<dyn std::error::Error>> {
         if entry.key == "spark.sql.execution.pandas.convertToArrowArraySafely" {
             entry.default_value = Some("false".to_string())
         }
+        // The PySpark 4.2 Connect client parses the local-relation chunking configs with a bare
+        // `int(...)` (see `pyspark/sql/connect/session.py`, `createDataFrame`), so a byte-string
+        // default such as "3GB" raises `ValueError: invalid literal for int() with base 10`.
+        // Real Spark resolves these `bytesConf` entries to a byte count before returning them over
+        // Connect; `spark_config.json` records the human-readable doc form instead. Emit the
+        // resolved byte counts so the client can parse them.
+        if entry.key == "spark.sql.session.localRelationSizeLimit" {
+            // 3 GiB
+            entry.default_value = Some("3221225472".to_string())
+        }
+        if entry.key == "spark.sql.session.localRelationChunkSizeLimit" {
+            // 2000 MiB
+            entry.default_value = Some("2097152000".to_string())
+        }
     });
 
     // The JVM Spark Connect client reads spark.connect.session.planCompression.threshold

@@ -13,11 +13,11 @@ Feature: Unity Catalog schema (database) operations
       """
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.test_create_schema'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.test_create_schema'
       """
     Then query result
       | name                                  | catalog | description  | locationUri |
-      | sail_test_catalog.test_create_schema  | sail    | test comment | NULL        |
+      | zelox_test_catalog.test_create_schema  | zelox    | test comment | NULL        |
 
   Scenario: Create duplicate schema fails
     Given statement
@@ -62,11 +62,11 @@ Feature: Unity Catalog schema (database) operations
       """
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.ine_keep_meta_unity'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.ine_keep_meta_unity'
       """
     Then query result
       | name                                  | catalog | description      | locationUri |
-      | sail_test_catalog.ine_keep_meta_unity | sail    | original comment | NULL        |
+      | zelox_test_catalog.ine_keep_meta_unity | zelox    | original comment | NULL        |
 
   Scenario: Create schema with LOCATION
     Given statement
@@ -81,11 +81,11 @@ Feature: Unity Catalog schema (database) operations
       """
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.schema_with_location_unity'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.schema_with_location_unity'
       """
     Then query result
       | name                                       | catalog | description   | locationUri      |
-      | sail_test_catalog.schema_with_location_unity | sail    | with location | s3://bucket/path |
+      | zelox_test_catalog.schema_with_location_unity | zelox    | with location | s3://bucket/path |
 
   Scenario: Non-existent schema does not appear in listing
     When query
@@ -99,7 +99,7 @@ Feature: Unity Catalog schema (database) operations
     Given statement
       """
       CREATE SCHEMA get_schema_unity
-      WITH DBPROPERTIES (owner = 'Lake', community = 'Sail')
+      WITH DBPROPERTIES (owner = 'Lake', community = 'Zelox')
       """
     Given final statement
       """
@@ -107,11 +107,11 @@ Feature: Unity Catalog schema (database) operations
       """
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.get_schema_unity'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.get_schema_unity'
       """
     Then query result
       | name                              | catalog | description | locationUri |
-      | sail_test_catalog.get_schema_unity | sail    | NULL        | NULL        |
+      | zelox_test_catalog.get_schema_unity | zelox    | NULL        | NULL        |
 
   Scenario: List multiple schemas
     Given statement
@@ -132,18 +132,18 @@ Feature: Unity Catalog schema (database) operations
       """
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.list_ios_unity'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.list_ios_unity'
       """
     Then query result
       | name                            | catalog | description | locationUri |
-      | sail_test_catalog.list_ios_unity | sail    | NULL        | NULL        |
+      | zelox_test_catalog.list_ios_unity | zelox    | NULL        | NULL        |
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.list_macos_unity'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.list_macos_unity'
       """
     Then query result
       | name                              | catalog | description | locationUri |
-      | sail_test_catalog.list_macos_unity | sail    | NULL        | NULL        |
+      | zelox_test_catalog.list_macos_unity | zelox    | NULL        | NULL        |
 
   Scenario: Drop existing schema removes it
     Given statement
@@ -259,7 +259,7 @@ Feature: Unity Catalog schema (database) operations
       """
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.empty_drop_unity'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.empty_drop_unity'
       """
     Then query result
       | name | catalog | description | locationUri |
@@ -275,8 +275,8 @@ Feature: Unity Catalog schema (database) operations
       """
     When query
       """
-      SHOW SCHEMAS LIKE 'sail_test_catalog.minimal_schema_unity'
+      SHOW SCHEMAS LIKE 'zelox_test_catalog.minimal_schema_unity'
       """
     Then query result
       | name                                  | catalog | description | locationUri |
-      | sail_test_catalog.minimal_schema_unity | sail    | NULL        | NULL        |
+      | zelox_test_catalog.minimal_schema_unity | zelox    | NULL        | NULL        |

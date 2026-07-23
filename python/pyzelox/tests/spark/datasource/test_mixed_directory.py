@@ -31,7 +31,7 @@ def _row_as_sorted_items(row):
 # Expected rows (header=false, no schema): every line of every non-hidden
 # file becomes a row, every value as a string.
 #
-# TODO: Sail's CSV parser treats a leading `"` as an opening quote and
+# TODO: Zelox's CSV parser treats a leading `"` as an opening quote and
 # strips it (so the JSON files' second comma-separated piece surfaces as
 # `value:"a"}`). Spark KEEPS the leading quote and emits `"value":"a"}`
 # verbatim. This is a separate parity gap from the case-insensitive /
@@ -90,13 +90,13 @@ def test_csv_no_schema_with_header_collect(spark, mixed_files_dir):
     assert actual == _HEADER_TRUE_EXPECTED_VALUES
 
 
-# TODO: Sail strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
+# TODO: Zelox strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
 def test_csv_schema_no_header_show(spark, mixed_files_dir):
     df = spark.read.format("csv").schema("k STRING, v STRING").option("header", "false").load(str(mixed_files_dir))
     df.show()  # smoke test
 
 
-# TODO: Sail strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
+# TODO: Zelox strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
 def test_csv_schema_no_header_collect(spark, mixed_files_dir):
     df = spark.read.format("csv").schema("k STRING, v STRING").option("header", "false").load(str(mixed_files_dir))
     rows = df.collect()
@@ -118,13 +118,13 @@ def test_csv_schema_no_header_collect(spark, mixed_files_dir):
     assert sorted(rows, key=_safe_sort_key) == expected
 
 
-# TODO: Sail strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
+# TODO: Zelox strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
 def test_csv_schema_with_header_show(spark, mixed_files_dir):
     df = spark.read.format("csv").schema("k STRING, v STRING").option("header", "true").load(str(mixed_files_dir))
     df.show()  # smoke test
 
 
-# TODO: Sail strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
+# TODO: Zelox strips a leading `"` from a CSV field; Spark keeps it (e.g. `value:"A"}` vs `"value":"A"}`).
 def test_csv_schema_with_header_collect(spark, mixed_files_dir):
     df = spark.read.format("csv").schema("k STRING, v STRING").option("header", "true").load(str(mixed_files_dir))
     rows = df.collect()

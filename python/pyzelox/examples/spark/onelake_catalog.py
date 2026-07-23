@@ -36,8 +36,8 @@ def main():
     os.environ["ZELOX_CATALOG__LIST"] = '[{type="onelake", name="onelake", url="duckrun/data.Lakehouse"}]'
     os.environ["ZELOX_CATALOG__DEFAULT_CATALOG"] = "onelake"
 
-    # Start Sail server
-    print("Starting Sail server...")
+    # Start Zelox server
+    print("Starting Zelox server...")
     server = SparkConnectServer("127.0.0.1", 0)
     server.start(background=True)
     _, port = server.listening_address

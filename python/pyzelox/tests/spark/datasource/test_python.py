@@ -1,7 +1,7 @@
 """
 Tests for Python DataSource integration.
 
-These tests verify the Python DataSource API works correctly with Sail,
+These tests verify the Python DataSource API works correctly with Zelox,
 including both Arrow RecordBatch and tuple-based paths.
 """
 

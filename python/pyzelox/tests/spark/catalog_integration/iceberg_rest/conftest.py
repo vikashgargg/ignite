@@ -17,8 +17,8 @@ from testcontainers.core.waiting_utils import wait_for_logs
 
 from pyzelox.tests.spark.catalog_integration.conftest import (
     create_spark_session,
-    start_sail_server,
-    stop_sail_server,
+    start_zelox_server,
+    stop_zelox_server,
 )
 
 if TYPE_CHECKING:
@@ -145,11 +145,11 @@ def iceberg_rest_endpoint(iceberg_rest_container: DockerContainer) -> str:
 
 @pytest.fixture(scope="module")
 def iceberg_spark(iceberg_rest_endpoint: str) -> Generator[SparkSession, None, None]:
-    """Start Sail server with Iceberg REST catalog and create a Spark session."""
-    catalog_config = f'[{{name="sail", type="iceberg-rest", uri="{iceberg_rest_endpoint}"}}]'
-    server, remote, saved_env = start_sail_server(catalog_list=catalog_config)
+    """Start Zelox server with Iceberg REST catalog and create a Spark session."""
+    catalog_config = f'[{{name="zelox", type="iceberg-rest", uri="{iceberg_rest_endpoint}"}}]'
+    server, remote, saved_env = start_zelox_server(catalog_list=catalog_config)
     spark = create_spark_session(remote, "iceberg_rest_catalog_test")
     yield spark
     with contextlib.suppress(Exception):
         spark.stop()
-    stop_sail_server(server, saved_env)
+    stop_zelox_server(server, saved_env)

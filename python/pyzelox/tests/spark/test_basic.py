@@ -314,7 +314,7 @@ def test_write_csv(spark, simple_df, tmpdir, infer_schema):
     )
 
 
-@pytest.mark.skipif(is_jvm_spark(), reason="Sail only")
+@pytest.mark.skipif(is_jvm_spark(), reason="Zelox only")
 def test_explode(spark):
     assert_frame_equal(
         spark.createDataFrame(
@@ -389,7 +389,7 @@ def test_sql_with_clause(spark, df, df_view):
     )
 
 
-@pytest.mark.skipif(is_jvm_spark(), reason="Sail only")
+@pytest.mark.skipif(is_jvm_spark(), reason="Zelox only")
 def test_sql_parameters(spark):
     actual = spark.sql("SELECT 1 AS text WHERE $1 > 'a'", ["b"]).toPandas()
     expected = pd.DataFrame({"text": [1]}).astype({"text": "int32"})

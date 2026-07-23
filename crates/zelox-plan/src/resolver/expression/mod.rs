@@ -91,7 +91,7 @@ impl NamedExpr {
 
 impl PlanResolver<'_> {
     #[async_recursion]
-    /// Resolves a Sail spec expression into a named expression.
+    /// Resolves a Zelox spec expression into a named expression.
     ///
     /// Dispatches to type-specific resolvers based on the expression variant (e.g., Cast, Literal,
     /// Function). Returns a `NamedExpr` containing the resolved expression and display name(s)
@@ -452,14 +452,14 @@ mod tests {
         let mut state = SessionStateBuilder::new().build();
         let catalog_manager = CatalogManager::try_new(CatalogManagerOptions {
             catalogs: HashMap::from([(
-                "sail".to_string(),
+                "zelox".to_string(),
                 Arc::new(MemoryCatalogProvider::new(
-                    "sail".to_string(),
+                    "zelox".to_string(),
                     vec![Arc::from("default")].try_into()?,
                     None,
                 )) as Arc<dyn CatalogProvider>,
             )]),
-            default_catalog: "sail".to_string(),
+            default_catalog: "zelox".to_string(),
             default_database: vec!["default".to_string()],
             global_temporary_database: vec!["global_temp".to_string()],
         })?;

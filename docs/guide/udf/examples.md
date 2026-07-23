@@ -5,7 +5,7 @@ rank: 1
 
 # Examples
 
-This page provides examples for all types of PySpark UDFs supported by Sail.
+This page provides examples for all types of PySpark UDFs supported by Zelox.
 For more information about the API, please refer to the Spark documentation and user guide.
 
 <!--@include: ../_common/spark-session.md-->

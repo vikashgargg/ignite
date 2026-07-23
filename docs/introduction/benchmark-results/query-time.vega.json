@@ -8,8 +8,8 @@
       "url": "_data/query-time-spark.json"
     },
     {
-      "name": "table-sail",
-      "url": "_data/query-time-sail.json"
+      "name": "table-zelox",
+      "url": "_data/query-time-zelox.json"
     }
   ],
   "scales": [
@@ -19,7 +19,7 @@
       "domain": {
         "fields": [
           { "data": "table-spark", "field": "query" },
-          { "data": "table-sail", "field": "query" }
+          { "data": "table-zelox", "field": "query" }
         ]
       },
       "range": "width",
@@ -31,7 +31,7 @@
       "domain": {
         "fields": [
           { "data": "table-spark", "field": "time" },
-          { "data": "table-sail", "field": "time" }
+          { "data": "table-zelox", "field": "time" }
         ]
       },
       "range": "height",
@@ -40,7 +40,7 @@
     {
       "name": "color",
       "type": "ordinal",
-      "domain": ["Spark", "Sail"],
+      "domain": ["Spark", "Zelox"],
       "range": ["#E25A1C", "#3762E0"]
     }
   ],
@@ -82,7 +82,7 @@
     },
     {
       "type": "rect",
-      "from": { "data": "table-sail" },
+      "from": { "data": "table-zelox" },
       "encode": {
         "enter": {
           "x": {
@@ -93,7 +93,7 @@
           "width": { "signal": "w" },
           "y": { "scale": "yscale", "value": 0 },
           "y2": { "scale": "yscale", "field": "time" },
-          "fill": { "scale": "color", "value": "Sail" }
+          "fill": { "scale": "color", "value": "Zelox" }
         }
       }
     },

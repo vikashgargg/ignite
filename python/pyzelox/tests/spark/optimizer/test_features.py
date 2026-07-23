@@ -8,7 +8,7 @@ from pytest_bdd import scenarios
 from pyzelox.spark import SparkConnectServer
 from pyzelox.testing.spark.utils.common import is_jvm_spark
 
-pytestmark = pytest.mark.skipif(is_jvm_spark(), reason="Sail only")
+pytestmark = pytest.mark.skipif(is_jvm_spark(), reason="Zelox only")
 
 
 @pytest.fixture(scope="module")

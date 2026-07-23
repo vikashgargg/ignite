@@ -13,7 +13,7 @@ use crate::worker::run_worker;
 #[command(
     version,
     name = "zelox",
-    about = "Zelox (वज्र) — thunderbolt-fast, single-binary Spark engine",
+    about = "Zelox — a unified batch + streaming engine for Spark workloads, no JVM",
     long_about = "Zelox is a drop-in replacement for Apache Spark: 5-10x faster, \
                   no JVM required, single static binary. Runs your existing PySpark code \
                   unchanged via the Spark Connect protocol. Apple Container + Kubernetes native."

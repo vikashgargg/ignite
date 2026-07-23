@@ -3,7 +3,7 @@ import pytest
 from pyzelox.testing.spark.utils.common import is_jvm_spark
 
 if is_jvm_spark():
-    pytest.skip("Sail streaming tests", allow_module_level=True)
+    pytest.skip("Zelox streaming tests", allow_module_level=True)
 
 
 def test_streaming_query(spark):
@@ -16,7 +16,7 @@ def test_streaming_query(spark):
         assert isinstance(query.runId, str)
         assert query.isActive
         assert isinstance(query.status.get("message"), str)
-        # Sail does not report progress yet
+        # Zelox does not report progress yet
         assert query.lastProgress is None
         assert query.recentProgress == []
         assert query.exception() is None

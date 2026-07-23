@@ -7,7 +7,7 @@ rank: 1
 
 <!--@include: ../_common/support.md-->
 
-Deploying Sail in cluster environments (e.g. Kubernetes) typically involves launching Sail applications inside containers. This guide presents various methods to build Docker images for Sail.
+Deploying Zelox in cluster environments (e.g. Kubernetes) typically involves launching Zelox applications inside containers. This guide presents various methods to build Docker images for Zelox.
 
 <PageList :data="data" :prefix="['guide', 'deployment', 'docker-images']" />
 

@@ -21,18 +21,18 @@ df.write.mode("overwrite").parquet("hdfs://namenode:9000/user/data")
 ## Kerberos Authentication
 
 ::: info
-Kerberos authentication for HDFS is supported and tested with Sail.
+Kerberos authentication for HDFS is supported and tested with Zelox.
 :::
 
 ### Prerequisites
 
 - A **Kerberos-enabled HDFS cluster** configured with Kerberos authentication. See [Apache Hadoop Secure Mode](https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/SecureMode.html) for details.
 - A valid **keytab file** for the principal that will access HDFS.
-- A **`krb5.conf` file** on the Sail server host. See [MIT Kerberos Documentation](https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html) for details.
+- A **`krb5.conf` file** on the Zelox server host. See [MIT Kerberos Documentation](https://web.mit.edu/kerberos/krb5-latest/doc/admin/conf_files/krb5_conf.html) for details.
 
-### Starting the Sail Server
+### Starting the Zelox Server
 
-Authenticate with Kerberos before starting the Sail server.
+Authenticate with Kerberos before starting the Zelox server.
 
 ```python
 import subprocess
@@ -45,20 +45,20 @@ subprocess.run([
     "username@YOUR.REALM"
 ], check=True)
 
-# start the Sail server
+# start the Zelox server
 server = SparkConnectServer(ip="0.0.0.0", port=50051)
 server.start(background=False)
 ```
 
 ::: tip
-The Sail server runs in local mode by default. The server process uses a single Kerberos ticket from `kinit`.
+The Zelox server runs in local mode by default. The server process uses a single Kerberos ticket from `kinit`.
 
-If running Sail in cluster mode (e.g. on Kubernetes), each worker instance requires its own Kerberos authentication via `kinit`.
+If running Zelox in cluster mode (e.g. on Kubernetes), each worker instance requires its own Kerberos authentication via `kinit`.
 :::
 
 ### Client Connection
 
-The client does not need Kerberos authentication. The Sail server handles HDFS authentication.
+The client does not need Kerberos authentication. The Zelox server handles HDFS authentication.
 
 ```python
 from pyspark.sql import SparkSession

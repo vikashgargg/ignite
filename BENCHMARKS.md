@@ -1,4 +1,4 @@
-# Zelox (वज्र) Benchmark Results
+# Zelox Benchmark Results
 
 > Last updated: 2026-07-02
 > Tag: **v0.6.0-alpha**
@@ -69,7 +69,7 @@ Full 100M-row run: `CLICKBENCH_FULL=1 SPARK_REMOTE=sc://localhost:50051 python s
 
 ```
 ======================================================================
-  Zelox (वज्र) TPC-H Benchmark  —  Scale Factor 1  (release + LTO)
+  Zelox TPC-H Benchmark  —  Scale Factor 1  (release + LTO)
 ======================================================================
   Q         Time      Rows  Status
   ----  --------  --------  ------

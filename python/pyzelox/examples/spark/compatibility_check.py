@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 
 from pyzelox.spark.utils._function_support import (
-    check_sail_pyspark_compatibility,
+    check_zelox_pyspark_compatibility,
     format_output,
 )
 
@@ -31,7 +31,7 @@ def setup_logging(level: int = logging.INFO) -> None:
 def main() -> None:
     setup_logging()
     parser = argparse.ArgumentParser(
-        description="Scan Python files for PySpark function usage and cross-reference it with sail docs for compatibility."
+        description="Scan Python files for PySpark function usage and cross-reference it with zelox docs for compatibility."
     )
     parser.add_argument(
         "directory",
@@ -54,7 +54,7 @@ def main() -> None:
 
     logger.info("Scanning: %s", base_dir)
 
-    counts = check_sail_pyspark_compatibility(base_dir)
+    counts = check_zelox_pyspark_compatibility(base_dir)
     logger.info("Scan complete.")
 
     print(format_output(counts, args.output))

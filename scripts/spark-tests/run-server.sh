@@ -13,7 +13,7 @@ python_version="$(python -c 'import sys; print("%s.%s" % (sys.version_info.major
 
 echo "Python environment: ${VIRTUAL_ENV}"
 echo "Python version: ${python_version}"
-echo "Sail working directory: ${work_dir}"
+echo "Zelox working directory: ${work_dir}"
 
 export PYARROW_IGNORE_TIMEZONE="1"
 # We use a fixed default parallelism to ensure deterministic execution plans
@@ -26,7 +26,7 @@ export ZELOX_CATALOG__LIST='[{name="spark_catalog", type="memory", initial_datab
 
 if [ -z "${CI:-}" ]; then
   export PYO3_PYTHON="${VIRTUAL_ENV}/bin/python"
-  export RUST_LOG="${RUST_LOG:-sail=debug}"
+  export RUST_LOG="${RUST_LOG:-zelox=debug}"
   export RUST_BACKTRACE="${RUST_BACKTRACE:-full}"
   # We have to set `PYTHONPATH` even if we are using the virtual environment.
   # This is because the Python executable is the Rust program itself, and there is
@@ -35,5 +35,5 @@ if [ -z "${CI:-}" ]; then
 
   cargo run -p zelox-cli -- spark server -C "${work_dir}"
 else
-  sail spark server -C "${work_dir}"
+  zelox spark server -C "${work_dir}"
 fi

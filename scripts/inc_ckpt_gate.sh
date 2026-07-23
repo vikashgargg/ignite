@@ -27,7 +27,7 @@ INC="${INC:-1}"
 start() {
   if [ "$INC" = "1" ]; then INCENV="ZELOX_INC_CKPT=1"; else INCENV="ZELOX_INC_CKPT_OFF=1"; fi
   # RUST_LOG overridable for observability (default warn = quiet). Set e.g.
-  # RUST_LOG=info,sail_execution=debug,sail_physical_plan=debug to capture the finalized streaming
+  # RUST_LOG=info,zelox_execution=debug,zelox_physical_plan=debug to capture the finalized streaming
   # physical plan (DisplayableExecutionPlan, debug!) + per-operator logs — local-cluster workers are
   # in-process threads so their stderr lands in the same server log.
   RUST_LOG="${RUST_LOG:-warn}" env $INCENV ZELOX_STREAMING_STATE_BUDGET_BYTES="$BUDGET" ZELOX_WM_PARTITIONS="${PARTS:-4}" \

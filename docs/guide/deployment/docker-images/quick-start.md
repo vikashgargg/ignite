@@ -7,11 +7,11 @@ rank: 1
 
 <!--@include: ../_common/support.md-->
 
-You can quickly experiment with Sail by building the Docker image from the Sail Python package.
+You can quickly experiment with Zelox by building the Docker image from the Zelox Python package.
 
 ::: warning
 This method is not suitable for production deployments.
-Please follow [this guide](./production.md) for more information about building the Sail Docker image from source.
+Please follow [this guide](./production.md) for more information about building the Zelox Docker image from source.
 :::
 
 In an empty directory, create a `Dockerfile` with the following content.
@@ -25,7 +25,7 @@ In an empty directory, create a `Dockerfile` with the following content.
 In the same directory, run the following command to build the Docker image.
 
 ```bash-vue
-docker build -t sail:latest --build-arg PYZELOX_VERSION={{ libVersion }} .
+docker build -t zelox:latest --build-arg PYZELOX_VERSION={{ libVersion }} .
 ```
 
 <script setup>

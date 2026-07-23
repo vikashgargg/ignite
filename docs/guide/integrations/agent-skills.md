@@ -5,7 +5,7 @@ rank: 2
 
 # Agent Skills
 
-The `sail spark run` command can be used as a CLI tool that enables your LLM agents to execute PySpark scripts via Sail's highly efficient compute engine.
+The `zelox spark run` command can be used as a CLI tool that enables your LLM agents to execute PySpark scripts via Zelox's highly efficient compute engine.
 By exposing this command as an agent skill, the agent can perform data processing tasks using the familiar PySpark API while enjoying lightning-fast performance.
 
 Here is an example skill definition.

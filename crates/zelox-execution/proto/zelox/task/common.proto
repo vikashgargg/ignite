@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sail.task;
+package zelox.task;
 
 message TaskDefinition {
   bytes plan = 1;

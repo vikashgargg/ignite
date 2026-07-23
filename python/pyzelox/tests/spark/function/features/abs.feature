@@ -251,13 +251,13 @@ Feature: abs comprehensive tests
         | 0.001  |
 
     @zelox-bug
-    # Tagged @zelox-bug purely for Spark-compat tracking — Sail's behaviour here
+    # Tagged @zelox-bug purely for Spark-compat tracking — Zelox's behaviour here
     # is arguably MORE correct mathematically. Divergence lives in CAST, not abs:
     # JVM applies half-up rounding during CAST to DECIMAL(38,0) and rounds 37
-    # nines up to 10^37; Sail preserves precision and returns 37 nines. Whether
-    # to "fix" this (align with Spark) or keep Sail's precise behaviour is a
+    # nines up to 10^37; Zelox preserves precision and returns 37 nines. Whether
+    # to "fix" this (align with Spark) or keep Zelox's precise behaviour is a
     # policy call. Out of scope for `abs` either way — fix path is the decimal
-    # CAST kernel (arrow-rs `cast_decimal` semantics or a Sail-side override).
+    # CAST kernel (arrow-rs `cast_decimal` semantics or a Zelox-side override).
     Scenario: abs DECIMAL 38,0 near max
       When query
         """
@@ -269,7 +269,7 @@ Feature: abs comprehensive tests
 
     @zelox-bug
     # Same root cause as the scenario above (CAST rounding) — JVM rounds
-    # 38 nines up to 10^38 and errors on overflow; Sail keeps 38 nines.
+    # 38 nines up to 10^38 and errors on overflow; Zelox keeps 38 nines.
     Scenario: abs DECIMAL 38,0 exceeds range errors
       When query
         """
@@ -324,8 +324,8 @@ Feature: abs comprehensive tests
         | -9223372036854775808  |
 
     @zelox-bug
-    # Sail promotes the literal to BIGINT; JVM keeps INT and wraps to MIN.
-    # Root cause: Sail's SQL parses `-2147483648` as unary-minus + positive
+    # Zelox promotes the literal to BIGINT; JVM keeps INT and wraps to MIN.
+    # Root cause: Zelox's SQL parses `-2147483648` as unary-minus + positive
     # literal; the positive side overflows INT32 (max 2147483647) and gets
     # widened to BIGINT. Spark has a special rule that recognises the whole
     # `-INT32_MIN` (and `-LONG_MIN`) literal and keeps the narrow type.
@@ -370,13 +370,13 @@ Feature: abs comprehensive tests
       Then query error .*\[ARITHMETIC_OVERFLOW\].*
 
   Rule: String coercion under ANSI=false
-    # Sail now coerces STRING → DOUBLE (via `coerce_types` in spark_abs), but
+    # Zelox now coerces STRING → DOUBLE (via `coerce_types` in spark_abs), but
     # the inserted CAST does not honour `spark.sql.ansi.enabled`. Under
     # ANSI=false, Spark returns NULL for unparseable strings (`'hello'`, `''`,
-    # whitespace-only `'   '`); Sail errors in both modes. Whitespace-padded
+    # whitespace-only `'   '`); Zelox errors in both modes. Whitespace-padded
     # numeric strings (`'  -5  '`) ARE parseable by Java's Double.parseDouble
     # and Spark accepts them — they are not in the "unparseable" set.
-    # Fix path: make Sail's CAST ANSI-aware (propagate `plan_config.ansi_mode`
+    # Fix path: make Zelox's CAST ANSI-aware (propagate `plan_config.ansi_mode`
     # into `CastOptions { safe: !ansi }` when wrapping the coerced expr).
     # Affects every UDF that coerces STRING → numeric, not just abs.
 
@@ -454,11 +454,11 @@ Feature: abs comprehensive tests
         | Infinity |
 
   Rule: Interval values
-    # abs preserves the Arrow interval unit, but Sail widens Spark subranges
+    # abs preserves the Arrow interval unit, but Zelox widens Spark subranges
     # (DAY, HOUR TO MINUTE, ...) to DAY TO SECOND at the type layer — this
     # happens even without abs (e.g. SELECT INTERVAL '-5' DAY returns DAY TO
     # SECOND). The scenarios below are tagged @zelox-bug but blocked on the
-    # Sail-wide interval subrange handling, not on abs itself.
+    # Zelox-wide interval subrange handling, not on abs itself.
     # Fix path: preserve Spark subrange (DAY, HOUR, DAY TO SECOND, …) as
     # `Field` metadata when converting Spark→Arrow, restore on the return
     # trip in `zelox-spark-connect`. Also requires analyzer changes in
@@ -613,7 +613,7 @@ Feature: abs comprehensive tests
 
     @zelox-bug
     # Vectorized abs path is correct — same root cause as the scalar interval
-    # scenarios in `Rule: Interval values`: Sail widens Spark interval subranges
+    # scenarios in `Rule: Interval values`: Zelox widens Spark interval subranges
     # to DAY TO SECOND at the type layer. The vectorized kernel succeeds; the
     # rendered/expected interval format diverges.
     # Fix path: preserve subrange in Spark→Arrow Field metadata.

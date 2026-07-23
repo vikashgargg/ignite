@@ -13,7 +13,7 @@ from pyspark.sql import SparkSession
 from pyzelox.testing.spark.utils.common import is_jvm_spark, pyspark_version
 
 # This doctest option flag is used to annotate tests involving
-# extended Spark features supported by Sail.
+# extended Spark features supported by Zelox.
 # The test will be skipped when running on JVM Spark.
 ZELOX_ONLY = doctest.register_optionflag("ZELOX_ONLY")
 
@@ -23,7 +23,7 @@ def pytest_configure(config):
     # Note: pytest-bdd converts @zelox-only tag to "zelox-only" marker (preserves hyphen)
     config.addinivalue_line(
         "markers",
-        "zelox-only: mark test as Sail-only (skipped when running against Spark JVM)",
+        "zelox-only: mark test as Zelox-only (skipped when running against Spark JVM)",
     )
     config.addinivalue_line(
         "markers",
@@ -218,12 +218,12 @@ def pytest_collection_modifyitems(session, config, items):  # noqa: ARG001
                     for marker in test.markers:
                         item.add_marker(marker)
 
-    # Mark @zelox-bug scenarios as xfail when running against Sail
+    # Mark @zelox-bug scenarios as xfail when running against Zelox
     if not is_jvm_spark():
         for item in items:
             marker = item.get_closest_marker("zelox-bug")
             if marker:
-                reason = marker.kwargs.get("reason", "Known Sail bug")
+                reason = marker.kwargs.get("reason", "Known Zelox bug")
                 item.add_marker(pytest.mark.xfail(reason=reason, strict=False))
 
     # Skip @spark-4 scenarios on PySpark < 4.x (e.g., Variant type not supported)
@@ -234,7 +234,7 @@ def pytest_collection_modifyitems(session, config, items):  # noqa: ARG001
                 item.add_marker(skip_spark4)
 
     if is_jvm_spark():
-        skip_sail_only = pytest.mark.skip(reason="Sail-only feature, not supported by Spark")
+        skip_zelox_only = pytest.mark.skip(reason="Zelox-only feature, not supported by Spark")
         for item in items:
             if isinstance(item, DoctestItem):
                 for example in item.dtest.examples:
@@ -243,7 +243,7 @@ def pytest_collection_modifyitems(session, config, items):  # noqa: ARG001
             # Skip pytest-bdd scenarios with @zelox-only tag
             # Note: pytest-bdd preserves the hyphen in marker names
             elif item.get_closest_marker("zelox-only"):
-                item.add_marker(skip_sail_only)
+                item.add_marker(skip_zelox_only)
 
     # Deselect catalog integration tests by default unless user passed -m.
     # This allows slower catalog tests outside dedicated directories to use

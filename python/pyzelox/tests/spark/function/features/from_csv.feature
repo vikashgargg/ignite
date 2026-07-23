@@ -3,7 +3,7 @@ Feature: from_csv column display name matches Spark
   Spark renders `from_csv` as a UnaryExpression: only the input column
   appears in the column display name, and the schema and options arguments
   are dropped. The same convention applies to `any_value`, `first_value`,
-  and `last_value`, which share Sail's unary display-name match arm.
+  and `last_value`, which share Zelox's unary display-name match arm.
 
   Scenario: from_csv with a schema string
     When query

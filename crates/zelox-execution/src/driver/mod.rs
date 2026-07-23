@@ -10,7 +10,7 @@ pub(super) mod worker_pool;
 
 #[expect(clippy::allow_attributes)]
 mod gen {
-    tonic::include_proto!("sail.driver");
+    tonic::include_proto!("zelox.driver");
 
     pub const FILE_DESCRIPTOR_SET: &[u8] =
         tonic::include_file_descriptor_set!("zelox_driver_descriptor");

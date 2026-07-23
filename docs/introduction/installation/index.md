@@ -5,33 +5,33 @@ rank: 3
 
 # Installation
 
-To quickly get started, you can install Sail from PyPI using `pip`.
+To quickly get started, you can install Zelox from PyPI using `pip`.
 
 ```bash-vue
 pip install "pyzelox=={{ libVersion }}"
 ```
 
-You can refer to the [Deployment Guide](/guide/deployment/) for more information about deploying Sail.
+You can refer to the [Deployment Guide](/guide/deployment/) for more information about deploying Zelox.
 
 ## Installation from Source
 
-You can install Sail from source when performance is important or when deploying Sail to production.
-Sail can be distributed as a Docker image or a standalone binary, in addition to being available as a Python package.
+You can install Zelox from source when performance is important or when deploying Zelox to production.
+Zelox can be distributed as a Docker image or a standalone binary, in addition to being available as a Python package.
 
 ### Building the Docker Image
 
-You can build the Sail Docker image for deployment in a containerized environment such as Kubernetes.
+You can build the Zelox Docker image for deployment in a containerized environment such as Kubernetes.
 More information can be found in the [Docker Images](/guide/deployment/docker-images/) guide.
 
 ### Building the Standalone Binary
 
-You can build and run the Sail CLI as a standalone binary.
+You can build and run the Zelox CLI as a standalone binary.
 Please refer to the [Standalone Binary](/development/recipes/standalone-binary) developer guide for more information.
 
 ### Building the Python Package
 
 When the pre-built wheels is not available for your platform, the `pip install` command downloads the source distribution
-and builds Sail from source.
+and builds Zelox from source.
 
 ::: details
 
@@ -43,9 +43,9 @@ You need the following build tools for building the Python package from source.
 Installation from source may take 10 - 30 minutes, and the actual build time depends on your system configuration.
 You can pass the `-v` option to the `pip install` command to get more insights into the build process.
 
-Sometimes, you may want to build Sail from source even when the pre-built wheels are available.
-This can be useful when you want to have Sail optimized for your hardware architecture.
-For example, the following command builds Sail with all features of the current CPU enabled.
+Sometimes, you may want to build Zelox from source even when the pre-built wheels are available.
+This can be useful when you want to have Zelox optimized for your hardware architecture.
+For example, the following command builds Zelox with all features of the current CPU enabled.
 
 ```bash-vue
 env RUSTFLAGS="-C target-cpu=native" pip install "pyzelox=={{ libVersion }}" -v --no-binary pyzelox

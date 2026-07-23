@@ -5,23 +5,23 @@ rank: 3
 
 # Arrow Flight SQL
 
-Sail supports the [Arrow Flight SQL](https://arrow.apache.org/docs/format/FlightSql.html) protocol, which allows clients to execute SQL queries and retrieve results using the high-performance Arrow Flight RPC framework.
+Zelox supports the [Arrow Flight SQL](https://arrow.apache.org/docs/format/FlightSql.html) protocol, which allows clients to execute SQL queries and retrieve results using the high-performance Arrow Flight RPC framework.
 
-You can start an Arrow Flight SQL server powered by Sail and then connect to it using any Arrow Flight SQL client.
+You can start an Arrow Flight SQL server powered by Zelox and then connect to it using any Arrow Flight SQL client.
 
 ## Starting the Server
 
-### Using the Sail CLI
+### Using the Zelox CLI
 
-You can start the server using the `sail` command.
+You can start the server using the `zelox` command.
 
 ```bash
-sail flight server --ip 127.0.0.1 --port 32010
+zelox flight server --ip 127.0.0.1 --port 32010
 ```
 
-### Using the Sail Python API
+### Using the Zelox Python API
 
-You can also start the server programmatically using the Sail Python API.
+You can also start the server programmatically using the Zelox Python API.
 
 ```python
 from pyzelox.flight import FlightSqlServer

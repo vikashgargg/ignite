@@ -32,16 +32,16 @@ def pytest_configure(config):
         "yamlsnapshot: add metadata to customize the YAML snapshot",
     )
 
-    configure_sail_environment()
+    configure_zelox_environment()
 
 
-def configure_sail_environment():
-    """Configure environment variables for PySail tests."""
+def configure_zelox_environment():
+    """Configure environment variables for PyZelox tests."""
 
     module = "pyzelox._native"
 
     if module in sys.modules:
-        msg = "The PySail native module should not be imported before configuring the environment."
+        msg = "The PyZelox native module should not be imported before configuring the environment."
         raise RuntimeError(msg)
 
     # Set the default parallelism to a fixed value regardless of the

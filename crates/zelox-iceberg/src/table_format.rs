@@ -355,7 +355,7 @@ impl TableFormat for IcebergTableFormat {
     }
 
     // TODO: Implement row-level DELETE/UPDATE/MERGE for this format. Expanded
-    // inputs should consume Sail row intent tags to decide which rows rewrite
+    // inputs should consume Zelox row intent tags to decide which rows rewrite
     // data files and which rows produce low-level delete artifacts, then strip
     // all internal metadata before writing user data.
 }

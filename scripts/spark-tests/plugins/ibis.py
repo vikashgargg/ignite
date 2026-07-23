@@ -74,7 +74,7 @@ def pytest_configure(config):
     TestConf.data_volume = data_volume
     TestConf.parquet_dir = property(lambda _: data_volume)
     # Skip the ``docker compose cp`` step in ``ServiceBackendTest.preload``.
-    # Sail runs locally, so test data is already on the filesystem.
+    # Zelox runs locally, so test data is already on the filesystem.
     TestConf.preload = lambda _self: None
     # Override the data_dir fixture in ibis.conftest so that tests
     # resolve test data from our location instead of the default

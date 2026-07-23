@@ -67,7 +67,7 @@ jobs:
 
       - name: Build VitePress Site
         env:
-          ZELOX_SITE_URL: "https://${{ inputs.stage == 'prod' && 'docs' || 'docs.dev' }}.lakesail.com/sail/${{ inputs.version }}/"
+          ZELOX_SITE_URL: "https://docs.zelox.club/${{ inputs.version }}/"
           # The Fathom Analytics script will not be added if the site ID is not set.
           ZELOX_FATHOM_SITE_ID: ${{ vars.FATHOM_SITE_ID }}
           # The Apollo.io script will not be added if the app ID is not set.

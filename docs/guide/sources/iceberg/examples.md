@@ -83,9 +83,9 @@ df = spark.read.format("iceberg").option("timestampAsOf", "2025-01-02T03:04:05.6
 df = spark.read.format("iceberg").option("branch", "main").load(path)
 ```
 
-Time travel is not available for Spark SQL in Sail yet, but we plan to support it soon.
+Time travel is not available for Spark SQL in Zelox yet, but we plan to support it soon.
 
 ## More Features
 
-We will continue adding more examples for advanced Iceberg features as they become available in Sail.
-In the meantime, feel free to reach out to us on [Slack](https://lakesail.com/slack) or [GitHub Discussions](https://github.com/lakehq/zelox/discussions) if you have questions!
+We will continue adding more examples for advanced Iceberg features as they become available in Zelox.
+In the meantime, feel free to reach out to us on [GitHub Discussions](https://github.com/vikashgargg/zelox/discussions) if you have questions!

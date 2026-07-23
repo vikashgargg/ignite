@@ -5,7 +5,7 @@ rank: 1
 
 # Memory Catalog
 
-The memory catalog provider in Sail stores table metadata in memory for the duration of your session. This is a useful default choice if you do not need persistent table metadata across sessions.
+The memory catalog provider in Zelox stores table metadata in memory for the duration of your session. This is a useful default choice if you do not need persistent table metadata across sessions.
 
 A memory catalog can be configured using the following options.
 
@@ -17,5 +17,5 @@ A memory catalog can be configured using the following options.
 ## Examples
 
 ```bash
-export ZELOX_CATALOG__LIST='[{type="memory", name="sail", initial_database=["dev", "analytics"], initial_database_comment="Development analytics database"}]'
+export ZELOX_CATALOG__LIST='[{type="memory", name="zelox", initial_database=["dev", "analytics"], initial_database_comment="Development analytics database"}]'
 ```

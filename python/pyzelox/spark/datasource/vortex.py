@@ -1,4 +1,4 @@
-"""Vortex data source for Sail, backed by the ``vortex-data`` Python library.
+"""Vortex data source for Zelox, backed by the ``vortex-data`` Python library.
 
 Supports ``spark.read.format("vortex")`` with filter pushdown and
 zero-copy Arrow RecordBatch yield.
@@ -141,7 +141,7 @@ def _tuple_to_vortex_expr(t: tuple) -> object | None:
     if op == "in":
         values = t[2]
         if not values:
-            return None  # Empty In list — let Sail post-filter
+            return None  # Empty In list — let Zelox post-filter
         expr = None
         for v in values:
             eq = col == v
@@ -149,7 +149,7 @@ def _tuple_to_vortex_expr(t: tuple) -> object | None:
         return expr
 
     # String predicates — Vortex doesn't have native string functions,
-    # so we reject these (return None) and let Sail post-filter.
+    # so we reject these (return None) and let Zelox post-filter.
     return None
 
 
@@ -159,7 +159,7 @@ def _tuple_to_vortex_expr(t: tuple) -> object | None:
 
 
 def _normalize_schema(schema: pa.Schema) -> pa.Schema:
-    """Normalize Arrow schema types for Sail compatibility.
+    """Normalize Arrow schema types for Zelox compatibility.
 
     Vortex may report Utf8View in the schema but produce Utf8/BinaryView
     as Binary in batches. Normalize view types to their non-view equivalents
@@ -295,7 +295,7 @@ class VortexDataSource(DataSource):
     Supported filter pushdown: EqualTo, GreaterThan, GreaterThanOrEqual,
     LessThan, LessThanOrEqual, In, Not.
     String predicates (StartsWith, EndsWith, Contains) and null predicates
-    (IsNull, IsNotNull) are rejected and applied by Sail post-read.
+    (IsNull, IsNotNull) are rejected and applied by Zelox post-read.
     """
 
     @classmethod

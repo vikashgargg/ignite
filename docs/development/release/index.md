@@ -11,7 +11,7 @@ This guide is for the project maintainers.
 
 ## Overview
 
-We use Git tags to automate the release of Sail Python packages and the Sail documentation site.
+We use Git tags to automate the release of Zelox Python packages and the Zelox documentation site.
 Pushing tags to the GitHub repository triggers GitHub Actions workflows for the release process.
 
 ::: info
@@ -76,7 +76,7 @@ It must be the same as the version defined in the source code, otherwise the rel
 ::: info
 The Python version specifier is different from the [semantic versioning](https://semver.org/) scheme,
 though the two schemes are compatible to some extent.
-We follow the `<major>.<minor>.<patch>` aspects of semantic versioning when releasing Sail versions.
+We follow the `<major>.<minor>.<patch>` aspects of semantic versioning when releasing Zelox versions.
 :::
 
 After the GitHub Actions workflow is triggered by the tag push and the Python package build is successful,
@@ -92,17 +92,17 @@ Manually triggered workflow runs publish the Python package to Test PyPI.
 `docs/latest`
 
 : This publishes the documentation site for the latest version. The published site is available at the URL
-`/sail/latest/`.
+`/zelox/latest/`.
 
 `docs/v<version>`
 
 : This publishes the documentation site for an older version. `<version>` is the version specifier
 in the format `<major>.<minor>`, which covers all patch versions with the same major and minor versions.
-The published site is available at the URL `/sail/<version>/`.
+The published site is available at the URL `/zelox/<version>/`.
 Note that we do not publish the versioned site for the latest version.
-Also, since we do not maintain sites for older `0.<minor>` versions, this release tag will be used only after Sail 1.0.
+Also, since we do not maintain sites for older `0.<minor>` versions, this release tag will be used only after Zelox 1.0.
 
 ::: info
-The documentation site at the URL `/sail/main/` is published when the `main` branch is updated.
+The documentation site at the URL `/zelox/main/` is published when the `main` branch is updated.
 There is no corresponding release tag for this site.
 :::

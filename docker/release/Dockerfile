@@ -32,7 +32,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 
-RUN git clone --depth 1 --branch "${RELEASE_TAG}" https://github.com/lakehq/sail.git .
+RUN git clone --depth 1 --branch "${RELEASE_TAG}" https://github.com/vikashgargg/zelox.git .
 
 RUN --mount=type=cache,target=/root/.cargo/registry/ \
     --mount=type=cache,target=/root/.cargo/git/ \
@@ -43,7 +43,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry/ \
         *) echo "${RUST_PROFILE}" ;; \
     esac) && \
     cargo build -p zelox-cli --profile ${RUST_PROFILE} --bins && \
-    cp /app/target/${RUST_TARGET_SUBDIR}/sail /usr/local/bin
+    cp /app/target/${RUST_TARGET_SUBDIR}/zelox /usr/local/bin
 
 FROM python:3.14-slim
 
@@ -51,6 +51,6 @@ ARG PYSPARK_VERSION
 
 RUN python3 -m pip install --no-cache-dir "pyspark-client==${PYSPARK_VERSION}"
 
-COPY --from=builder /usr/local/bin/sail /usr/local/bin
+COPY --from=builder /usr/local/bin/zelox /usr/local/bin
 
-ENTRYPOINT ["/usr/local/bin/sail"]
+ENTRYPOINT ["/usr/local/bin/zelox"]

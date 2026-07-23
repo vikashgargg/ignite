@@ -1,25 +1,35 @@
 # Zelox — Modern Spark Replacement
 
-> Sanskrit: **वज्र** (zelox) — *thunderbolt, indestructible, irresistible force*  
-> The same word that gave English "zelox" also means diamond: unbreakable AND fastest thing in the sky.
+> A Rust-native unified batch + streaming engine, forked from
+> [Sail](https://github.com/lakehq/sail) and grown into its own product.
 
 ---
 
-## 0. Why Zelox, Not "Zelox"
+## 0. Name and identity
 
-The product needs a name that is:
-- **Memorable** — one word, globally pronounceable
-- **Meaningful** — connotes speed + indestructibility
-- **Distinctive** — no collision with other tech projects
-- **Sanskrit** — roots in Indian tradition, unique in the data stack space
+The project is **Zelox** — from Greek ζῆλος (*zêlos*: zeal, relentless pursuit)
+plus **-x** for exactness. The two halves name the two things this engine refuses
+to trade against each other: speed and exactly-once correctness.
 
-**Zelox** (वज्र) wins on all four:
-- Sanskrit for thunderbolt — the fastest natural phenomenon
-- Also means diamond — indestructible, zero GC pauses, memory-safe
-- Vedic: Indra's weapon, the ultimate tool
-- No major tech product uses this name today
+**Name-collision status (checked 2026-07-22).** "Zelox" is *not* an unclaimed
+name. Unrelated businesses already use it — Zelox Entertainment (games, India),
+Zelox Industries (property software, Kenya), a CPqD fraud-detection SaaS in
+Brazil, a dissolved UK finance entity, and a pharmaceutical tablet. **No collision
+exists in our actual category**: no data engine, PyPI package, or big-data
+infrastructure project uses the name. The nearest software neighbour is `zelos`
+(a binary-emulation platform) — one letter apart, different domain.
 
-**Product positioning:** `zelox` CLI, `zelox-pyspark` PyPI package, `zelox/zelox` Docker image.
+Implication: the name is clear for technical use and package namespaces, but it
+is **not** a clean trademark in the abstract. If Zelox is ever commercialised,
+get a trademark search done in the relevant classes first — this note is a
+developer's web check, not legal advice.
+
+Zelox started as a fork of Sail (LakeSail, Inc., Apache-2.0) and is now an
+independent product with its own scope — notably Flink-class streaming, which
+Sail does not target. See [`NOTICE`](NOTICE) for attribution and the
+[README lineage section](README.md#lineage) for the full relationship.
+
+**Product surface:** `zelox` CLI, `zelox-pyspark` PyPI package, `zelox/zelox` Docker image.
 
 ---
 
@@ -380,20 +390,6 @@ spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
 - 10-core ARM, 32–128 GB unified memory, ~$1,000
 - Runs TPC-H SF-100 with 32 GB RAM — comparable to a 16-core cloud VM at $3/hr
 - `zelox bench --scale-factor 100` — one command, real numbers, local
-
----
-
-## 9. Sanskrit Name Decision Matrix
-
-| Name | Meaning | Pronunciation | Uniqueness | Recommendation |
-|------|---------|---------------|------------|----------------|
-| **Zelox** | Thunderbolt + Diamond | VAJ-ra | High | ⭐ **CHOSEN** |
-| Sphuling | Spark (literal) | SPHU-ling | Very High | Runner-up |
-| Ulka | Meteor / Fireball | UL-ka | High | Short, catchy |
-| Archis | Flame / Ray | AR-chis | Medium | Less distinctive |
-| Agni | Fire | AG-ni | Low (used widely) | Too common |
-
-**Zelox** wins: indestructible speed. Databricks has "Photon" (light). We have "Zelox" (thunderbolt that moves faster than light in Vedic texts).
 
 ---
 

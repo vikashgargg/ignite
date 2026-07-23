@@ -31,7 +31,7 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     try:
         from pyspark.sql import SparkSession
     except ImportError:
-        print("ERROR: pyspark not installed. Run: pip install pyspark[connect]==4.0.0")
+        print("ERROR: pyspark not installed. Run: pip install pyspark[connect]==4.2.0")
         return 1
 
     remote = f"sc://{args.host}:{args.port}"

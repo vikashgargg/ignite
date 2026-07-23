@@ -53,7 +53,7 @@ def _load_spark_module() -> None:
         try:
             import importlib.resources as _ir  # noqa: PLC0415
 
-            ref = _ir.files("sail_python_udf").joinpath("spark.py")  # type: ignore[attr-defined]
+            ref = _ir.files("zelox_python_udf").joinpath("spark.py")  # type: ignore[attr-defined]
             source = ref.read_text(encoding="utf-8")
         except Exception:
             raise RuntimeError(

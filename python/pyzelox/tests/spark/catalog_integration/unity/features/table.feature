@@ -29,7 +29,7 @@ Feature: Unity Catalog table operations
       """
     Then query result
       | database                           | tableName | isTemporary |
-      | sail_test_catalog.unity_table_test | t1        | false       |
+      | zelox_test_catalog.unity_table_test | t1        | false       |
 
   Scenario: Create duplicate table fails
     Given statement
@@ -66,7 +66,7 @@ Feature: Unity Catalog table operations
       """
     Then query result
       | database                           | tableName | isTemporary |
-      | sail_test_catalog.unity_table_test | ine_t     | false       |
+      | zelox_test_catalog.unity_table_test | ine_t     | false       |
 
   Scenario: Create a partitioned table
     Given statement
@@ -88,7 +88,7 @@ Feature: Unity Catalog table operations
       """
     Then query result
       | database                           | tableName | isTemporary |
-      | sail_test_catalog.unity_table_test | t2        | false       |
+      | zelox_test_catalog.unity_table_test | t2        | false       |
 
   Scenario: Describe existing table shows columns
     Given statement
@@ -110,7 +110,7 @@ Feature: Unity Catalog table operations
       """
     Then query result
       | database                           | tableName | isTemporary |
-      | sail_test_catalog.unity_table_test | get_t     | false       |
+      | zelox_test_catalog.unity_table_test | get_t     | false       |
 
   Scenario: Describe non-existent table raises error
     When query
@@ -138,8 +138,8 @@ Feature: Unity Catalog table operations
       """
     Then query result
       | database                           | tableName | isTemporary |
-      | sail_test_catalog.unity_table_test | list_t1   | false       |
-      | sail_test_catalog.unity_table_test | list_t2   | false       |
+      | zelox_test_catalog.unity_table_test | list_t1   | false       |
+      | zelox_test_catalog.unity_table_test | list_t2   | false       |
 
   Scenario: List tables in empty schema returns no rows
     Given statement
@@ -264,7 +264,7 @@ Feature: Unity Catalog table operations
       """
     Then query result
       | database                           | tableName | isTemporary |
-      | sail_test_catalog.unity_table_test | opts_t    | false       |
+      | zelox_test_catalog.unity_table_test | opts_t    | false       |
 
   Scenario: Create table with primitive numeric and boolean types
     Given statement
@@ -354,4 +354,4 @@ Feature: Unity Catalog table operations
       """
     Then query result
       | database                           | tableName | isTemporary |
-      | sail_test_catalog.unity_table_test | sib_b     | false       |
+      | zelox_test_catalog.unity_table_test | sib_b     | false       |

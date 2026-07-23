@@ -309,7 +309,7 @@ def test_udt(spark):  # noqa: ARG001
     assert schema.toDDL() == "col PYTHONUSERDEFINED"
 
 
-@pytest.mark.xfail(reason="GeometryType not yet implemented in Sail")
+@pytest.mark.xfail(reason="GeometryType not yet implemented in Zelox")
 def test_geometry(spark):  # noqa: ARG001
     schema = T.StructType(
         [
@@ -320,7 +320,7 @@ def test_geometry(spark):  # noqa: ARG001
     assert schema.toDDL() == "col GEOMETRY"
 
 
-@pytest.mark.xfail(reason="GeographyType not yet implemented in Sail")
+@pytest.mark.xfail(reason="GeographyType not yet implemented in Zelox")
 def test_geography(spark):  # noqa: ARG001
     schema = T.StructType(
         [

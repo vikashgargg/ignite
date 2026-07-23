@@ -24,7 +24,7 @@ use datafusion::execution::context::TaskContext;
 use datafusion_common::{DataFusionError, Result};
 use url::Url;
 
-pub const WRITE_RELATIVE_PROP: &str = "sail.iceberg.write_relative_paths";
+pub const WRITE_RELATIVE_PROP: &str = "zelox.iceberg.write_relative_paths";
 
 pub enum WritePathMode {
     Absolute,

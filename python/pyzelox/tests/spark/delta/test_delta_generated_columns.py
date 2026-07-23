@@ -7,7 +7,7 @@ import pytest
 
 from pyzelox.testing.spark.utils.common import is_jvm_spark
 
-pytestmark = pytest.mark.skipif(is_jvm_spark(), reason="Sail only - Delta generated-column path writes")
+pytestmark = pytest.mark.skipif(is_jvm_spark(), reason="Zelox only - Delta generated-column path writes")
 
 
 def _create_empty_generated_column_table(table_path: Path) -> None:

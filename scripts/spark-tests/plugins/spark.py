@@ -105,7 +105,7 @@ def spark_doctest_session(doctest_namespace, request):
 
 # Here we patch test utilities to ignore row order in PySpark tests.
 # This may result in false positives in some tests where the result is expected to be sorted.
-# Such tests should be ported to the PySail test suite where the patch is not applied.
+# Such tests should be ported to the PyZelox test suite where the patch is not applied.
 
 
 def normalize_pandas_data_frame(df):
@@ -118,9 +118,9 @@ def normalize_pandas_data_frame(df):
 def normalize_datetime_dtypes(df):
     """Normalize datetime column dtypes from nanosecond to microsecond resolution.
 
-    Sail uses microsecond precision for timestamps (per Spark specification).
+    Zelox uses microsecond precision for timestamps (per Spark specification).
     In Pandas 2.0-2.1, Python datetime objects and ``pd.Timestamp.apply()``
-    produce ``datetime64[ns]`` dtype, while Sail's ``toPandas()`` returns
+    produce ``datetime64[ns]`` dtype, while Zelox's ``toPandas()`` returns
     ``datetime64[us]``. This normalization ensures that dtype comparisons in
     ``assert_frame_equal`` do not fail due to this precision difference.
     """
@@ -324,7 +324,7 @@ SKIPPED_SPARK_TESTS = [
         reason="Slow test not working yet",
     ),
     # The following tests rely on direct JVM access (RDD API, Java gateway),
-    # which is not supported by Sail.
+    # which is not supported by Zelox.
     TestMarker(
         keywords=["pyspark.sql.dataframe.DataFrame.rdd"],
         reason="JVM-dependent test",
@@ -336,8 +336,8 @@ SKIPPED_SPARK_TESTS = [
     # We skip all the streaming tests since some of them are slow,
     # and some of them test behaviors that are tied to the specific JVM implementation
     # of Spark Structured Streaming.
-    # Sail implements the streaming API but comes with its own extensions and behaviors.
-    # So we write our own streaming tests in the PySail test suite.
+    # Zelox implements the streaming API but comes with its own extensions and behaviors.
+    # So we write our own streaming tests in the PyZelox test suite.
     TestMarker(
         keywords=["test_assert_data_frame_equal_not_support_streaming"],
         reason="Streaming test",
@@ -375,7 +375,7 @@ SKIPPED_SPARK_TESTS = [
     ),
     TestMarker(
         keywords=["pyspark.sql.catalog.Catalog.listCatalogs"],
-        reason="Sail exposes an additional 'system' catalog that Spark does not have; ported to PySail test suite",
+        reason="Zelox exposes an additional 'system' catalog that Spark does not have; ported to PyZelox test suite",
     ),
 ]
 

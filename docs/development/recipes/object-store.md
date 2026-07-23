@@ -37,7 +37,7 @@ Before starting the Spark Connect server, you need to configure the object store
 ### S3 (MinIO)
 
 You need to create the bucket manually by visiting the MinIO console at <http://localhost:19001/>.
-Log in with the credentials configured in `compose.yml` (username: `sail`, password: `password`).
+Log in with the credentials configured in `compose.yml` (username: `zelox`, password: `password`).
 
 ### Azure Storage (Azurite)
 
@@ -69,7 +69,7 @@ The environment variables must match the configuration in `compose.yml` and the 
 
 ```bash
 env \
-  AWS_ACCESS_KEY_ID="sail" \
+  AWS_ACCESS_KEY_ID="zelox" \
   AWS_SECRET_ACCESS_KEY="password" \
   AWS_ENDPOINT="http://localhost:19000" \
   AWS_VIRTUAL_HOSTED_STYLE_REQUEST="false" \
@@ -79,7 +79,7 @@ env \
   AZURE_STORAGE_ENDPOINT="http://localhost:10000/devstoreaccount1" \
   AZURE_STORAGE_USE_EMULATOR="true" \
   GOOGLE_SKIP_SIGNATURE="true" \
-  HADOOP_USER_NAME="sail" \
+  HADOOP_USER_NAME="zelox" \
   hatch run scripts/spark-tests/run-server.sh
 ```
 

@@ -61,7 +61,7 @@ hatch run pytest --pyargs pyzelox
 
 ### Testing with an External Spark Connect Server
 
-By default, a Sail Spark Connect server is launched in the same process as the tests.
+By default, a Zelox Spark Connect server is launched in the same process as the tests.
 To run the tests against a server launched externally, set the `SPARK_REMOTE` environment variable.
 
 ```bash
@@ -116,7 +116,7 @@ hatch run test.spark-3.5.7:pytest --pyargs pyzelox
 You can also run the tests against a JVM-based Spark Connect server
 by specifying a `local` Spark remote URL.
 This is useful to ensure that the tests are written correctly to reflect the Spark behavior.
-Note that tests written for extended features of Sail will be skipped in this case.
+Note that tests written for extended features of Zelox will be skipped in this case.
 
 ```bash
 env SPARK_REMOTE="local" \

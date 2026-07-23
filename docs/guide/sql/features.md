@@ -9,17 +9,17 @@ This page presents a high-level overview of supported Spark SQL features.
 
 ## Literals
 
-Sail supports all the Spark SQL literal syntax. Please refer to the [Literals](./literals/) guide for more details.
+Zelox supports all the Spark SQL literal syntax. Please refer to the [Literals](./literals/) guide for more details.
 
 ## Data Types
 
-Sail supports all Spark SQL data types.
+Zelox supports all Spark SQL data types.
 
 ## Expressions
 
-Sail supports most Spark SQL expression syntax, including unary and binary operators, predicates, `CASE` clause etc.
+Zelox supports most Spark SQL expression syntax, including unary and binary operators, predicates, `CASE` clause etc.
 
-Sail supports most common Spark SQL functions. The effort to reach full function parity with Spark is tracked in
+Zelox supports most common Spark SQL functions. The effort to reach full function parity with Spark is tracked in
 the [GitHub issue](https://github.com/lakehq/sail/issues/398).
 
 ## Statements
@@ -56,7 +56,7 @@ The following table lists the supported clauses in the `SELECT` statement.
 | `TABLESAMPLE`                     | :white_check_mark: |
 | `TRANSFORM`                       | :construction:     |
 
-The `EXPLAIN` statement is also supported, but the output shows the Sail logical and physical plan.
+The `EXPLAIN` statement is also supported, but the output shows the Zelox logical and physical plan.
 
 The `DESCRIBE QUERY` statement is not supported yet.
 
@@ -112,7 +112,7 @@ But some extensions support these statements for lakehouse tables (e.g., Delta L
 | `TRUNCATE TABLE`        | :construction:     |
 | `USE DATABASE`          | :white_check_mark: |
 
-Currently, Sail only supports in-memory catalog, which means the databases and tables are available only within the
+Currently, Zelox only supports in-memory catalog, which means the databases and tables are available only within the
 session.
 Remote catalog support is in our roadmap.
 

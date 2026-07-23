@@ -1,5 +1,5 @@
 # ruff: noqa: PLR2004, PT018, S608, TC002
-"""Spark -> Sail roundtrip tests through a shared HMS metastore.
+"""Spark -> Zelox roundtrip tests through a shared HMS metastore.
 
 All tests use the MinIO-backed S3 warehouse to avoid Docker bind-mount
 permission issues on CI.
@@ -21,7 +21,7 @@ from pyzelox.tests.spark.hms.conftest import (
 pytestmark = pytest.mark.catalog_integration
 
 
-def _assert_sail_describes_spark_table(
+def _assert_zelox_describes_spark_table(
     hms_s3_spark: SparkSession,
     table_fqn: str,
     *,
@@ -34,12 +34,12 @@ def _assert_sail_describes_spark_table(
     assert properties.get("Location")
 
 
-def test_spark_creates_sail_reads_parquet(
+def test_spark_creates_zelox_reads_parquet(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Reference Spark creates a managed Parquet table; Sail reads it back."""
+    """Reference Spark creates a managed Parquet table; Zelox reads it back."""
     table_fqn = f"{hms_s3_database}.roundtrip_parquet"
 
     reference_spark_s3.sql(
@@ -57,24 +57,24 @@ def test_spark_creates_sail_reads_parquet(
     ref_rows = reference_spark_s3.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
     assert len(ref_rows) == 2, f"Reference Spark expected 2 rows, got {len(ref_rows)}"
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
 
-    assert len(sail_rows) == 2, f"Sail expected 2 rows, got {len(sail_rows)}"
-    assert sail_rows[0].id == 1 and sail_rows[0].name == "alice"
-    assert sail_rows[1].id == 2 and sail_rows[1].name == "bob"
-    sail_properties = _describe_extended_properties(hms_s3_spark, table_fqn)
-    assert "interop.owner=spark" in sail_properties.get("Table Properties", "")
-    assert "spark.sql." not in sail_properties.get("Table Properties", "")
+    assert len(zelox_rows) == 2, f"Zelox expected 2 rows, got {len(zelox_rows)}"
+    assert zelox_rows[0].id == 1 and zelox_rows[0].name == "alice"
+    assert zelox_rows[1].id == 2 and zelox_rows[1].name == "bob"
+    zelox_properties = _describe_extended_properties(hms_s3_spark, table_fqn)
+    assert "interop.owner=spark" in zelox_properties.get("Table Properties", "")
+    assert "spark.sql." not in zelox_properties.get("Table Properties", "")
     assert _describe_column_comments(hms_s3_spark, table_fqn)["id"] == "identifier"
 
 
-def test_spark_creates_sail_reads_schema_matrix_parquet(
+def test_spark_creates_zelox_reads_schema_matrix_parquet(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Reference Spark writes tricky supported Parquet types; Sail restores schema and values."""
+    """Reference Spark writes tricky supported Parquet types; Zelox restores schema and values."""
     table_fqn = f"{hms_s3_database}.roundtrip_schema_matrix"
 
     reference_spark_s3.sql(
@@ -137,18 +137,18 @@ def test_spark_creates_sail_reads_schema_matrix_parquet(
         """
     )
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
     _assert_schema_matrix_shape(hms_s3_spark, table_fqn)
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
-    _assert_schema_matrix_rows(sail_rows)
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    _assert_schema_matrix_rows(zelox_rows)
 
 
-def test_spark_creates_sail_reads_timestamp_types_parquet(
+def test_spark_creates_zelox_reads_timestamp_types_parquet(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Reference Spark writes timestamp LTZ/NTZ columns; Sail restores schema and values."""
+    """Reference Spark writes timestamp LTZ/NTZ columns; Zelox restores schema and values."""
     table_fqn = f"{hms_s3_database}.roundtrip_timestamp_types"
 
     reference_spark_s3.sql(
@@ -182,12 +182,12 @@ def test_spark_creates_sail_reads_timestamp_types_parquet(
     assert [(r.id, r.ts_ltz, r.ts_ntz) for r in rows] == [(1, "2024-01-02 03:04:05", "2024-01-02 03:04:05")]
 
 
-def test_spark_creates_sail_reads_parquet_with_explicit_location(
+def test_spark_creates_zelox_reads_parquet_with_explicit_location(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Reference Spark creates an external Parquet table with S3 LOCATION; Sail reads it back."""
+    """Reference Spark creates an external Parquet table with S3 LOCATION; Zelox reads it back."""
     table_fqn = f"{hms_s3_database}.roundtrip_location_parquet"
     location = f"s3://hms-warehouse/{hms_s3_database}/roundtrip_location_parquet"
 
@@ -197,19 +197,19 @@ def test_spark_creates_sail_reads_parquet_with_explicit_location(
     ref_rows = reference_spark_s3.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
     assert len(ref_rows) == 2, f"Reference Spark expected 2 rows, got {len(ref_rows)}"
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
-    assert len(sail_rows) == 2, f"Sail expected 2 rows, got {len(sail_rows)}"
-    assert sail_rows[0].id == 1 and sail_rows[0].name == "alice"
-    assert sail_rows[1].id == 2 and sail_rows[1].name == "bob"
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    assert len(zelox_rows) == 2, f"Zelox expected 2 rows, got {len(zelox_rows)}"
+    assert zelox_rows[0].id == 1 and zelox_rows[0].name == "alice"
+    assert zelox_rows[1].id == 2 and zelox_rows[1].name == "bob"
 
 
-def test_spark_creates_sail_reads_parquet_with_relative_location(
+def test_spark_creates_zelox_reads_parquet_with_relative_location(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Reference Spark resolves relative LOCATION against the database path; Sail reads it back."""
+    """Reference Spark resolves relative LOCATION against the database path; Zelox reads it back."""
     table_fqn = f"{hms_s3_database}.roundtrip_relative_location_parquet"
 
     reference_spark_s3.sql(
@@ -220,39 +220,39 @@ def test_spark_creates_sail_reads_parquet_with_relative_location(
     ref_rows = reference_spark_s3.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
     assert len(ref_rows) == 2, f"Reference Spark expected 2 rows, got {len(ref_rows)}"
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
-    assert len(sail_rows) == 2, f"Sail expected 2 rows, got {len(sail_rows)}"
-    assert sail_rows[0].id == 1 and sail_rows[0].name == "alice"
-    assert sail_rows[1].id == 2 and sail_rows[1].name == "bob"
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    assert len(zelox_rows) == 2, f"Zelox expected 2 rows, got {len(zelox_rows)}"
+    assert zelox_rows[0].id == 1 and zelox_rows[0].name == "alice"
+    assert zelox_rows[1].id == 2 and zelox_rows[1].name == "bob"
 
 
-def test_spark_alters_datasource_table_sail_still_reads_path_metadata(
+def test_spark_alters_datasource_table_zelox_still_reads_path_metadata(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Spark alter-table preserves datasource path metadata; Sail still restores it."""
+    """Spark alter-table preserves datasource path metadata; Zelox still restores it."""
     table_fqn = f"{hms_s3_database}.roundtrip_altered_parquet"
 
     reference_spark_s3.sql(f"CREATE TABLE {table_fqn} (id INT, name STRING) USING PARQUET")
     reference_spark_s3.sql(f"INSERT INTO {table_fqn} VALUES (1, 'alice'), (2, 'bob')")
     reference_spark_s3.sql(f"ALTER TABLE {table_fqn} SET TBLPROPERTIES ('interop_note' = 'spark_altered')")
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
     properties = _describe_extended_properties(hms_s3_spark, table_fqn)
     assert "interop_note=spark_altered" in properties.get("Table Properties", "")
     assert "spark.sql." not in properties.get("Table Properties", "")
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
-    assert [(r.id, r.name) for r in sail_rows] == [(1, "alice"), (2, "bob")]
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    assert [(r.id, r.name) for r in zelox_rows] == [(1, "alice"), (2, "bob")]
 
 
-def test_spark_alters_datasource_table_location_sail_reads_new_path(
+def test_spark_alters_datasource_table_location_zelox_reads_new_path(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Spark ALTER TABLE SET LOCATION updates datasource path metadata for Sail."""
+    """Spark ALTER TABLE SET LOCATION updates datasource path metadata for Zelox."""
     table_fqn = f"{hms_s3_database}.roundtrip_altered_location_parquet"
     old_location = f"s3://hms-warehouse/{hms_s3_database}/alter_location_old"
     new_location = f"s3://hms-warehouse/{hms_s3_database}/alter_location_new"
@@ -262,19 +262,19 @@ def test_spark_alters_datasource_table_location_sail_reads_new_path(
     reference_spark_s3.sql(f"ALTER TABLE {table_fqn} SET LOCATION '{new_location}'")
     reference_spark_s3.sql(f"INSERT INTO {table_fqn} VALUES (2, 'new')")
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
     properties = _describe_extended_properties(hms_s3_spark, table_fqn)
     assert properties.get("Location") == new_location
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
-    assert [(r.id, r.name) for r in sail_rows] == [(2, "new")]
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    assert [(r.id, r.name) for r in zelox_rows] == [(2, "new")]
 
 
-def test_spark_catalog_api_creates_table_sail_reads_external_table(
+def test_spark_catalog_api_creates_table_zelox_reads_external_table(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Spark catalog API createTable metadata is readable from Sail."""
+    """Spark catalog API createTable metadata is readable from Zelox."""
     table = "roundtrip_catalog_api_external"
     table_fqn = f"{hms_s3_database}.{table}"
     location = f"s3://hms-warehouse/{hms_s3_database}/{table}"
@@ -292,17 +292,17 @@ def test_spark_catalog_api_creates_table_sail_reads_external_table(
     )
     reference_spark_s3.sql(f"INSERT INTO {table_fqn} VALUES (1, 'alice'), (2, 'bob')")
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
-    sail_rows = hms_s3_spark.sql(f"SELECT id, name FROM {table_fqn} ORDER BY id").collect()
-    assert [(r.id, r.name) for r in sail_rows] == [(1, "alice"), (2, "bob")]
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
+    zelox_rows = hms_s3_spark.sql(f"SELECT id, name FROM {table_fqn} ORDER BY id").collect()
+    assert [(r.id, r.name) for r in zelox_rows] == [(1, "alice"), (2, "bob")]
 
 
-def test_spark_dataframe_writer_creates_table_sail_reads_external_table(
+def test_spark_dataframe_writer_creates_table_zelox_reads_external_table(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Spark DataFrameWriter saveAsTable metadata is readable from Sail."""
+    """Spark DataFrameWriter saveAsTable metadata is readable from Zelox."""
     table = "roundtrip_dataframe_writer"
     table_fqn = f"{hms_s3_database}.{table}"
     location = f"s3://hms-warehouse/{hms_s3_database}/{table}"
@@ -312,17 +312,17 @@ def test_spark_dataframe_writer_creates_table_sail_reads_external_table(
         path=location,
     )
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
-    sail_rows = hms_s3_spark.sql(f"SELECT id, name FROM {table_fqn} ORDER BY id").collect()
-    assert [(r.id, r.name) for r in sail_rows] == [(1, "alice"), (2, "bob")]
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
+    zelox_rows = hms_s3_spark.sql(f"SELECT id, name FROM {table_fqn} ORDER BY id").collect()
+    assert [(r.id, r.name) for r in zelox_rows] == [(1, "alice"), (2, "bob")]
 
 
-def test_spark_creates_sail_reads_mixed_complex_partitioned_parquet(
+def test_spark_creates_zelox_reads_mixed_complex_partitioned_parquet(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Spark writes mixed complex partitioned schema; Sail reads nested values and partitions."""
+    """Spark writes mixed complex partitioned schema; Zelox reads nested values and partitions."""
     table_fqn = f"{hms_s3_database}.roundtrip_mixed_complex_partitioned"
     location = f"s3://hms-warehouse/{hms_s3_database}/roundtrip_mixed_complex_partitioned"
 
@@ -387,7 +387,7 @@ def test_spark_creates_sail_reads_mixed_complex_partitioned_parquet(
         """
     )
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="EXTERNAL")
     props = _describe_extended_properties(hms_s3_spark, table_fqn)
     assert props.get("Type") == "EXTERNAL"
     assert props.get("Provider", "").lower() == "parquet"
@@ -414,12 +414,12 @@ def test_spark_creates_sail_reads_mixed_complex_partitioned_parquet(
     ] == [(1, True, "l1", 1, 3, 2.5, "retail", "2024-01-02")]
 
 
-def test_spark_creates_sail_reads_date_and_binary_parquet(
+def test_spark_creates_zelox_reads_date_and_binary_parquet(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Spark writes DATE and BINARY values; Sail restores exact values."""
+    """Spark writes DATE and BINARY values; Zelox restores exact values."""
     table_fqn = f"{hms_s3_database}.roundtrip_date_binary"
 
     reference_spark_s3.sql(f"CREATE TABLE {table_fqn} (id INT, day DATE, payload BINARY) USING PARQUET")
@@ -431,7 +431,7 @@ def test_spark_creates_sail_reads_date_and_binary_parquet(
         """
     )
 
-    _assert_sail_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
+    _assert_zelox_describes_spark_table(hms_s3_spark, table_fqn, table_type="MANAGED")
     rows = hms_s3_spark.sql(
         f"SELECT id, CAST(day AS STRING) AS day, hex(payload) AS payload_hex FROM {table_fqn} ORDER BY id"
     ).collect()

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sail.streaming;
+package zelox.streaming;
 
 message FlowMarker {
   oneof Kind {

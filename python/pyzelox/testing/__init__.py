@@ -1,1 +1,1 @@
-"""Testing utilities for Sail."""
+"""Testing utilities for Zelox."""

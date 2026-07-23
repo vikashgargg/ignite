@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sail.driver;
+package zelox.driver;
 
 message RegisterWorkerRequest {
   uint64 worker_id = 1;

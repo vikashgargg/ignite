@@ -57,7 +57,7 @@
 ... SELECT
 ...   try_add(INTERVAL '1' YEAR, INTERVAL '2' YEAR) as result
 ... """)
->>> # INTERVAL '3' YEAR            <-- sail
+>>> # INTERVAL '3' YEAR            <-- zelox
 >>> # INTERVAL '3-0' YEAR TO MONTH <-- PySpark
 
 >>> spark.conf.set("spark.sql.session.timeZone", "UTC")

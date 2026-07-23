@@ -8,9 +8,9 @@ use datafusion_expr::expr::ScalarFunction;
 use datafusion_expr::{ExprSchemable, ScalarUDF};
 use zelox_common::spec;
 use zelox_function::scalar::higher_order::{
-    SailArrayAggregate, SailArrayExists, SailArrayFilter, SailArrayForAll, SailArraySort,
-    SailArrayTransform, SailArrayZipWith, SailMapFilter, SailMapTransformKeys,
-    SailMapTransformValues, SailMapZipWith,
+    ZeloxArrayAggregate, ZeloxArrayExists, ZeloxArrayFilter, ZeloxArrayForAll, ZeloxArraySort,
+    ZeloxArrayTransform, ZeloxArrayZipWith, ZeloxMapFilter, ZeloxMapTransformKeys,
+    ZeloxMapTransformValues, ZeloxMapZipWith,
 };
 
 use crate::error::{PlanError, PlanResult};
@@ -122,7 +122,7 @@ impl PlanResolver<'_> {
         cleanup_lambda_params(&schema_params, state);
         let phys_expr = self.create_simplified_physical_expr(body_expr, &lambda_schema)?;
 
-        let udf = SailArrayFilter::new(phys_expr, params, array_type.clone());
+        let udf = ZeloxArrayFilter::new(phys_expr, params, array_type.clone());
         let func_expr = make_scalar_udf_expr(udf, vec![array_expr]);
         Ok(NamedExpr::new(vec!["filter".to_string()], func_expr))
     }
@@ -163,7 +163,7 @@ impl PlanResolver<'_> {
         } else {
             DataType::List(result_field)
         };
-        let udf = SailArrayTransform::new(phys_expr, params, return_type.clone());
+        let udf = ZeloxArrayTransform::new(phys_expr, params, return_type.clone());
         let func_expr = make_scalar_udf_expr(udf, vec![array_expr]);
         Ok(NamedExpr::new(vec!["transform".to_string()], func_expr))
     }
@@ -191,7 +191,7 @@ impl PlanResolver<'_> {
         cleanup_lambda_params(&schema_params, state);
         let phys_expr = self.create_simplified_physical_expr(body_expr, &lambda_schema)?;
 
-        let udf = SailArrayExists::new(phys_expr, param);
+        let udf = ZeloxArrayExists::new(phys_expr, param);
         let func_expr = make_scalar_udf_expr(udf, vec![array_expr]);
         Ok(NamedExpr::new(vec!["exists".to_string()], func_expr))
     }
@@ -219,7 +219,7 @@ impl PlanResolver<'_> {
         cleanup_lambda_params(&schema_params, state);
         let phys_expr = self.create_simplified_physical_expr(body_expr, &lambda_schema)?;
 
-        let udf = SailArrayForAll::new(phys_expr, param);
+        let udf = ZeloxArrayForAll::new(phys_expr, param);
         let func_expr = make_scalar_udf_expr(udf, vec![array_expr]);
         Ok(NamedExpr::new(vec!["forall".to_string()], func_expr))
     }
@@ -286,7 +286,7 @@ impl PlanResolver<'_> {
             (None, String::new(), acc_type)
         };
 
-        let udf = SailArrayAggregate::new(
+        let udf = ZeloxArrayAggregate::new(
             merge_phys,
             acc_param,
             elem_param,
@@ -335,7 +335,7 @@ impl PlanResolver<'_> {
         } else {
             DataType::List(result_field)
         };
-        let udf = SailArrayZipWith::new(phys_expr, params, return_type);
+        let udf = ZeloxArrayZipWith::new(phys_expr, params, return_type);
         let func_expr = make_scalar_udf_expr(udf, vec![arr1_expr, arr2_expr]);
         Ok(NamedExpr::new(vec!["zip_with".to_string()], func_expr))
     }
@@ -369,7 +369,7 @@ impl PlanResolver<'_> {
 
         let return_type = build_map_type(new_key_type, val_type, false);
         let udf =
-            SailMapTransformKeys::new(phys_expr, params[0].clone(), params[1].clone(), return_type);
+            ZeloxMapTransformKeys::new(phys_expr, params[0].clone(), params[1].clone(), return_type);
         let func_expr = make_scalar_udf_expr(udf, vec![map_expr]);
         Ok(NamedExpr::new(
             vec!["transform_keys".to_string()],
@@ -405,7 +405,7 @@ impl PlanResolver<'_> {
         let phys_expr = self.create_simplified_physical_expr(body_expr, &lambda_schema)?;
 
         let return_type = build_map_type(key_type, new_val_type, false);
-        let udf = SailMapTransformValues::new(
+        let udf = ZeloxMapTransformValues::new(
             phys_expr,
             params[0].clone(),
             params[1].clone(),
@@ -442,7 +442,7 @@ impl PlanResolver<'_> {
         let phys_expr = self.create_simplified_physical_expr(body_expr, &lambda_schema)?;
 
         let return_type = map_type.clone();
-        let udf = SailMapFilter::new(phys_expr, params[0].clone(), params[1].clone(), return_type);
+        let udf = ZeloxMapFilter::new(phys_expr, params[0].clone(), params[1].clone(), return_type);
         let func_expr = make_scalar_udf_expr(udf, vec![map_expr]);
         Ok(NamedExpr::new(vec!["map_filter".to_string()], func_expr))
     }
@@ -480,7 +480,7 @@ impl PlanResolver<'_> {
         let phys_expr = self.create_simplified_physical_expr(body_expr, &lambda_schema)?;
 
         let return_type = build_map_type(key1_type, result_val_type, false);
-        let udf = SailMapZipWith::new(
+        let udf = ZeloxMapZipWith::new(
             phys_expr,
             params[0].clone(),
             params[1].clone(),
@@ -517,7 +517,7 @@ impl PlanResolver<'_> {
         cleanup_lambda_params(&schema_params, state);
         let phys_expr = self.create_simplified_physical_expr(body_expr, &lambda_schema)?;
 
-        let udf = SailArraySort::new(phys_expr, params, array_type.clone());
+        let udf = ZeloxArraySort::new(phys_expr, params, array_type.clone());
         let func_expr = make_scalar_udf_expr(udf, vec![array_expr]);
         Ok(NamedExpr::new(vec!["array_sort".to_string()], func_expr))
     }

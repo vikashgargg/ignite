@@ -18,7 +18,7 @@ Feature: Glue catalog database operations
       """
     Then query result
       | name           | catalog | description  | locationUri      |
-      | test_create_db | sail    | test comment | s3://bucket/path |
+      | test_create_db | zelox    | test comment | s3://bucket/path |
     When query
       """
       DESCRIBE DATABASE EXTENDED test_create_db
@@ -63,7 +63,7 @@ Feature: Glue catalog database operations
       """
     Then query result
       | name   | catalog | description | locationUri |
-      | ine_db | sail    | original    | NULL        |
+      | ine_db | zelox    | original    | NULL        |
 
   Scenario: Non-existent database does not appear in listing
     When query
@@ -91,7 +91,7 @@ Feature: Glue catalog database operations
       """
     Then query result
       | name        | catalog | description          | locationUri          |
-      | get_test_db | sail    | Get test description | s3://bucket/get-test |
+      | get_test_db | zelox    | Get test description | s3://bucket/get-test |
 
   Scenario: Drop non-existent database fails
     Given statement with error .*
@@ -156,21 +156,21 @@ Feature: Glue catalog database operations
       """
     Then query result
       | name        | catalog | description | locationUri |
-      | list_db_one | sail    | NULL        | NULL        |
+      | list_db_one | zelox    | NULL        | NULL        |
     When query
       """
       SHOW DATABASES LIKE 'list_db_two'
       """
     Then query result
       | name        | catalog | description | locationUri |
-      | list_db_two | sail    | NULL        | NULL        |
+      | list_db_two | zelox    | NULL        | NULL        |
     When query
       """
       SHOW DATABASES LIKE 'list_other_db'
       """
     Then query result
       | name          | catalog | description | locationUri |
-      | list_other_db | sail    | NULL        | NULL        |
+      | list_other_db | zelox    | NULL        | NULL        |
 
   Scenario: Database with only properties and no location is retrievable
     Given statement

@@ -19,7 +19,7 @@ impl<'a> ProtoBuilder<'a> {
         let protos = self
             .files
             .iter()
-            .map(|file| format!("proto/sail/{}/{}", self.package, file))
+            .map(|file| format!("proto/zelox/{}/{}", self.package, file))
             .collect::<Vec<_>>();
 
         let proto_paths = protos.iter().map(|s| s.as_str()).collect::<Vec<_>>();

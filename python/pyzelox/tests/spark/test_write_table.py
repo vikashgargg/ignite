@@ -131,7 +131,7 @@ def test_save_as_table(spark, tmp_path):
         df.select("id").write.saveAsTable("t2", mode="append")
 
     if is_jvm_spark():
-        # The "overwrite" mode is not supported in Sail yet.
+        # The "overwrite" mode is not supported in Zelox yet.
         df.write.saveAsTable("t2", mode="overwrite", path=location)
         actual = spark.sql("SELECT * FROM t2").toPandas()
         assert_frame_equal(actual, expected(1))
@@ -244,7 +244,7 @@ def test_write_to(spark, tmp_path):
     actual = spark.sql("SELECT * FROM t3").toPandas()
     assert_frame_equal(actual, expected(2))
 
-    pytest.skip("replace and overwrite are not supported in Sail yet")
+    pytest.skip("replace and overwrite are not supported in Zelox yet")
 
     df.writeTo("t3").option("location", location).replace()
     actual = spark.sql("SELECT * FROM t3").toPandas()

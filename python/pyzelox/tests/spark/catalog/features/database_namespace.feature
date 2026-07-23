@@ -15,7 +15,7 @@ Feature: Database, schema, and namespace aliases
       """
     Then query result
       | name   | catalog | description | locationUri |
-      | <name> | sail    | <comment>   | NULL        |
+      | <name> | zelox    | <comment>   | NULL        |
     When query
       """
       DESCRIBE <describe_keyword> EXTENDED <name>

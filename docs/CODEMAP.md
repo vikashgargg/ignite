@@ -3,7 +3,7 @@
 **Read this first to orient** (instead of grepping). One line per key module: path ↔
 responsibility ↔ key types. Keep it current when modules move. Deep streaming contracts live in
 [docs/STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md). Zelox = no-JVM Rust Spark(batch)+Flink(streaming)
-on Arrow + DataFusion (fork of LakeSail/Sail).
+on Arrow + DataFusion (fork of LakeSail/Zelox).
 
 ## Request flow (Spark Connect → result)
 

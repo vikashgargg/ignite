@@ -1,6 +1,6 @@
 apiVersion: v2
 name: zelox
-description: Zelox — thunderbolt-fast, single-binary Spark engine. Drop-in PySpark replacement via Spark Connect, no JVM required.
+description: Zelox — a unified batch + streaming engine for Spark workloads, no JVM. Drop-in PySpark replacement via Spark Connect, no JVM required.
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

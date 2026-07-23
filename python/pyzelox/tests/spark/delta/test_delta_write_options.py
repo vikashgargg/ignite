@@ -1,5 +1,5 @@
 """
-Test Delta Lake write options (write_batch_size, target_file_size) in Sail.
+Test Delta Lake write options (write_batch_size, target_file_size) in Zelox.
 """
 
 from pyspark.sql.types import Row

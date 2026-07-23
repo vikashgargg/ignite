@@ -243,7 +243,7 @@ and redirect the sequence:
      they PIPELINE instead of the window starving on a blocking upstream. This directly attacks
      `input_wait`.
   3. **Kafka read/decode profile** — quantify the read path (librdkafka fetch + Arrow decode) with the
-     now-fixed WM_PROF (RUST_LOG must include `sail_physical_plan::streaming::window_accum=info`).
+     now-fixed WM_PROF (RUST_LOG must include `zelox_physical_plan::streaming::window_accum=info`).
 - **PREREQUISITE (measure-first, prod-grade):** before building BF2/BF3, get a CLEAN per-stage EKS
   profile (non-crash, 100M, correct RUST_LOG) to rank source_read vs exchange vs input_wait — pick the
   lever from the ranked number, NOT a guess (the T7 lesson). BF2 vs BF3 priority = whichever the profile

@@ -8,7 +8,7 @@ __all__ = [
 
 
 class SparkConnectServer:
-    """The Spark Connect server that uses Sail as the computation engine."""
+    """The Spark Connect server that uses Zelox as the computation engine."""
 
     def __init__(self, ip: str = "127.0.0.1", port: int = 0) -> None:
         """Create a new Spark Connect server.

@@ -11,7 +11,7 @@ use crate::spec::expression::{
 use crate::spec::literal::Literal;
 use crate::spec::{DataType, FunctionDefinition, Identifier};
 
-/// Unresolved logical plan node for Sail.
+/// Unresolved logical plan node for Zelox.
 /// As a starting point, the definition matches the structure of the `Relation` message
 /// in the Spark Connect protocol, but enum variants are added to include write commands
 /// and plan analysis requests in Spark Connect. There are additional variants to

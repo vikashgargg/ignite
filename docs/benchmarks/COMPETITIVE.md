@@ -62,7 +62,7 @@ memory at scale.** All reproducible (`scripts/`, `k8s/eks/`, `docs/SCALE_TESTING
   transparent benchmarking.**
 
 ## Direct Zelox-vs-LakeSail check (ClickBench, shared core) — ✅ MATCHING
-Because Zelox is forked from sail, the honest correctness check is: does Zelox
+Because Zelox is forked from Sail, the honest correctness check is: does Zelox
 match LakeSail on the **identical** ClickBench harness? **Measured 2026-06-06 on a
 real c6a.4xlarge** (same instance class, local `hits.parquet`, single-node, best-of-3):
 

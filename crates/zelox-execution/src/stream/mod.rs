@@ -4,5 +4,5 @@ pub mod reader;
 pub mod writer;
 
 pub mod gen {
-    tonic::include_proto!("sail.stream");
+    tonic::include_proto!("zelox.stream");
 }

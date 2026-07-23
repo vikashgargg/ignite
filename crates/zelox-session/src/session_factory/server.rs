@@ -223,7 +223,7 @@ impl ServerSessionFactory {
     fn apply_execution_parquet_config(&mut self, config: &mut SessionConfig) {
         let parquet = &mut config.options_mut().execution.parquet;
 
-        parquet.created_by = concat!("sail version ", env!("CARGO_PKG_VERSION")).into();
+        parquet.created_by = concat!("zelox version ", env!("CARGO_PKG_VERSION")).into();
         parquet.enable_page_index = self.config.parquet.enable_page_index;
         parquet.pruning = self.config.parquet.pruning;
         parquet.skip_metadata = self.config.parquet.skip_metadata;

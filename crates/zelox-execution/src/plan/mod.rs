@@ -9,7 +9,7 @@ pub(crate) use shuffle_write::ShuffleWriteExec;
 pub(crate) use stage_input::StageInputExec;
 
 pub(crate) mod gen {
-    tonic::include_proto!("sail.plan");
+    tonic::include_proto!("zelox.plan");
 }
 
 /// The way in which a shuffle stream is consumed by downstream tasks.

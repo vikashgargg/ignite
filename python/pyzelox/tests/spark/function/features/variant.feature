@@ -357,11 +357,11 @@ Feature: Variant type functions (parse_json, is_variant_null, variant_get)
     Scenario: Parse JSON object displays correctly
       When query
         """
-        SELECT parse_json('{"name":"sail"}') AS result
+        SELECT parse_json('{"name":"zelox"}') AS result
         """
       Then query result
         | result          |
-        | {"name":"sail"} |
+        | {"name":"zelox"} |
 
     Scenario: Parse empty object
       When query

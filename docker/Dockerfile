@@ -8,7 +8,7 @@
 #   docker run -p 50051:50051 zelox:latest
 
 ARG PYTHON_VERSION=3.12
-ARG PYSPARK_VERSION=4.0.0
+ARG PYSPARK_VERSION=4.2.0
 ARG RUST_VERSION=1.95.0
 
 # ── Stage 1: Rust builder ─────────────────────────────────────────────────────

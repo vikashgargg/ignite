@@ -587,7 +587,7 @@ mod tests {
 
     #[test]
     fn test_two_arg_returns_variant() -> Result<()> {
-        let variant = variant_scalar_from_json(serde_json::json!({"name": "sail"}))?;
+        let variant = variant_scalar_from_json(serde_json::json!({"name": "zelox"}))?;
         let args = build_args(ColumnarValue::Scalar(variant), "$.name", None);
 
         let udf = SparkVariantGet::new(false);
@@ -612,7 +612,7 @@ mod tests {
                 datafusion_common::DataFusionError::Execution("expected BinaryArray".into())
             })?;
         let v = Variant::try_new(metadata_arr.value(0), value_arr.value(0))?;
-        assert_eq!(v, Variant::from("sail"));
+        assert_eq!(v, Variant::from("zelox"));
         Ok(())
     }
 

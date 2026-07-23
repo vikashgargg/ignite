@@ -17,8 +17,8 @@ from testcontainers.core.waiting_utils import wait_for_logs
 
 from pyzelox.tests.spark.catalog_integration.conftest import (
     create_spark_session,
-    start_sail_server,
-    stop_sail_server,
+    start_zelox_server,
+    stop_zelox_server,
 )
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from pyspark.sql import SparkSession
 
-DEFAULT_CATALOG = "sail_test_catalog"
+DEFAULT_CATALOG = "zelox_test_catalog"
 
 
 @pytest.fixture(scope="module")
@@ -127,9 +127,9 @@ def unity_spark(
     unity_rest_url: str,
     _create_unity_catalog: None,
 ) -> Generator[SparkSession, None, None]:
-    """Start Sail server with Unity catalog and create a Spark session."""
-    catalog_config = f'[{{name="sail", type="unity", uri="{unity_rest_url}", default_catalog="{DEFAULT_CATALOG}"}}]'
-    server, remote, saved_env = start_sail_server(
+    """Start Zelox server with Unity catalog and create a Spark session."""
+    catalog_config = f'[{{name="zelox", type="unity", uri="{unity_rest_url}", default_catalog="{DEFAULT_CATALOG}"}}]'
+    server, remote, saved_env = start_zelox_server(
         catalog_list=catalog_config,
         extra_env={"UNITY_ALLOW_HTTP_URL": "true"},
     )
@@ -137,4 +137,4 @@ def unity_spark(
     yield spark
     with contextlib.suppress(Exception):
         spark.stop()
-    stop_sail_server(server, saved_env)
+    stop_zelox_server(server, saved_env)

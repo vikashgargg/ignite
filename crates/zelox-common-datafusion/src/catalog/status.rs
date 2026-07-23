@@ -47,7 +47,7 @@ pub enum TableKind {
         properties: Vec<(String, String)>,
         /// Whether the table is external. When `false` the table is managed.
         ///
-        /// This flag is purely informational at present: Sail always creates
+        /// This flag is purely informational at present: Zelox always creates
         /// tables as external (`EXTERNAL=TRUE`, `table_type = EXTERNAL_TABLE`)
         /// and does not differentiate managed vs external behavior for
         /// operations like `DROP TABLE` (metadata-only; data is preserved). The flag

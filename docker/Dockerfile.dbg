@@ -2,7 +2,7 @@
 # LTO off) but keeps symbols + line tables so a panic prints a real backtrace with
 # Zelox frames (the normal release profile has strip=true). Diagnostic image only.
 ARG PYTHON_VERSION=3.12
-ARG PYSPARK_VERSION=4.0.0
+ARG PYSPARK_VERSION=4.2.0
 ARG RUST_VERSION=1.95.0
 
 FROM python:${PYTHON_VERSION}-slim AS builder

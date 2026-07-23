@@ -15,7 +15,7 @@ spec:
       command: ["/bin/sh", "-c"]
       args:
         - |
-          pip install --quiet "setuptools<81" pyspark==3.5.3 grpcio grpcio-status protobuf googleapis-common-protos pandas pyarrow duckdb
+          pip install --quiet "setuptools<81" pyspark-client==4.2.0 grpcio grpcio-status protobuf googleapis-common-protos pandas pyarrow duckdb
           echo CLIENT_READY
           sleep infinity
       # TPC-DS/H data is generated client-side (DuckDB -> pandas -> createDataFrame), so the client

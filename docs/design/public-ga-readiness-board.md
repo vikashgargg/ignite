@@ -102,7 +102,7 @@ Model: SLSA provenance + cosign keyless signing + Trivy image scan + cargo-deny/
 
 | ID | Pri | Status | Ticket / Acceptance criteria | OSS ref |
 |---|---|---|---|---|
-| **ZELOX-G1** | P0 | TODO | **NOTICE** file — Apache-2.0 attribution incl. the **LakeSail/Sail fork lineage** + DataFusion/Arrow. AC: legally correct attribution present. | Apache projects |
+| **ZELOX-G1** | P0 | TODO | **NOTICE** file — Apache-2.0 attribution incl. the **LakeSail/Zelox fork lineage** + DataFusion/Arrow. AC: legally correct attribution present. | Apache projects |
 | **ZELOX-G2** | P1 | TODO | **CHANGELOG.md** (Keep a Changelog + SemVer), auto-updated by release-please or the existing release-notes script. AC: every release has an entry. | keepachangelog.com |
 | **ZELOX-G3** | P1 | TODO | **CODEOWNERS** + **PR template** + **issue templates** (bug/feature/question, YAML forms). AC: new PR/issue shows the template. | github community standards |
 | **ZELOX-G4** | P2 | TODO | MAINTAINERS.md + GOVERNANCE.md + support/roadmap in README; "Community Standards" 100% green. | CNCF projects |

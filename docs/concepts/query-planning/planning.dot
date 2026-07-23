@@ -25,7 +25,7 @@ digraph planning {
   }
 
   input [label="{SQL}|{DataFrame}", shape=record];
-  spec [label="Sail Spec"];
+  spec [label="Zelox Spec"];
 
   subgraph logical_plan {
     label="Logical Plan";

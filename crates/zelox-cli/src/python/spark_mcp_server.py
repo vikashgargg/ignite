@@ -36,11 +36,11 @@ def configure_logging():
     when creating the MCP server.
     """
     uvicorn.config.LOGGING_CONFIG["handlers"]["default"] = {
-        "class": "_sail_cli_native_logging.NativeHandler",
+        "class": "_zelox_cli_native_logging.NativeHandler",
         "formatter": "default",
     }
     uvicorn.config.LOGGING_CONFIG["handlers"]["access"] = {
-        "class": "_sail_cli_native_logging.NativeHandler",
+        "class": "_zelox_cli_native_logging.NativeHandler",
         "formatter": "default",
     }
 
@@ -50,7 +50,7 @@ def override_default_logging_config():
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(message)s",
-        handlers=[sys.modules["_sail_cli_native_logging"].NativeHandler()],
+        handlers=[sys.modules["_zelox_cli_native_logging"].NativeHandler()],
         force=True,
     )
 
@@ -73,7 +73,7 @@ def create_spark_mcp_server(host: str, port: int, spark_remote: str):
         logger.info("Stopping Spark session")
         spark.stop()
 
-    mcp = FastMCP("Sail MCP server for Spark SQL", lifespan=lifespan, host=host, port=port)
+    mcp = FastMCP("Zelox MCP server for Spark SQL", lifespan=lifespan, host=host, port=port)
 
     @mcp.tool()
     def list_local_directories(path: str, ctx: Context) -> str:  # noqa: ARG001
@@ -335,7 +335,7 @@ def main():
     """The Spark MCP server entrypoint (for development purposes only).
 
     This is used when running the Python script directly during development.
-    It is not used by the Sail CLI to start the MCP server.
+    It is not used by the Zelox CLI to start the MCP server.
     """
     import argparse
 

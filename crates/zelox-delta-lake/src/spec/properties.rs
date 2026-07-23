@@ -126,7 +126,7 @@ where
 
 const DEFAULT_LOG_RETENTION_SECS: u64 = 30 * 24 * 60 * 60;
 const DEFAULT_DELETED_FILE_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
-// Sail aligns with Spark/Delta's default of checkpointing every 10 committed versions.
+// Zelox aligns with Spark/Delta's default of checkpointing every 10 committed versions.
 const DEFAULT_CHECKPOINT_INTERVAL: NonZeroU64 =
     NonZeroU64::new(10).expect("non-zero checkpoint interval");
 
@@ -271,7 +271,7 @@ fn canonicalize_table_property_key(key: &str) -> Option<&'static str> {
 ///
 /// Known modeled aliases are canonicalized to the exact Delta table property name. Any other key
 /// with a `delta.` prefix is treated as a pass-through table property so newer protocol features
-/// can still be persisted without first teaching Sail about them.
+/// can still be persisted without first teaching Zelox about them.
 pub fn route_table_property_key(key: &str) -> Option<String> {
     if let Some(canonical) = canonicalize_table_property_key(key) {
         return Some(canonical.to_string());

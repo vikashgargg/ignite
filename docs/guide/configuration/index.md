@@ -5,8 +5,8 @@ rank: 11
 
 # Configuration
 
-Sail comes with a configuration system that affects its behavior.
-The Sail configuration is complementary to the Spark configuration.
+Zelox comes with a configuration system that affects its behavior.
+The Zelox configuration is complementary to the Spark configuration.
 
 The complete list of configuration options can be found in the [Reference](/reference/configuration/).
 
@@ -27,11 +27,11 @@ The value types are `string`, `number`, `boolean`, `array`, and `map`.
 Some configuration options may further restrict the allowed values of a given type.
 For example, an option may be defined to have `number` values but only accept unsigned integers, so `1.0` would be invalid for this option, even though `1.0` is a `number`.
 
-As a Sail user, you usually care about the **string representation** of the value. This leads to the following section, which shows how to set configuration options via environment variables.
+As a Zelox user, you usually care about the **string representation** of the value. This leads to the following section, which shows how to set configuration options via environment variables.
 
 ## Environment Variables
 
-You can set configuration options via **environment variables** when running the Sail CLI or using the PySail library.
+You can set configuration options via **environment variables** when running the Zelox CLI or using the PyZelox library.
 
 To map a configuration key to an environment variable, use the following steps:
 
@@ -54,20 +54,20 @@ The examples are shown in a shell script.
 
 ```bash
 # Set `mode` to "local".
-# The quotes (`""`) are part of the shell syntax and are not seen by Sail.
+# The quotes (`""`) are part of the shell syntax and are not seen by Zelox.
 export ZELOX_MODE="local"
 
 # Set `mode` to "local" using a quoted string.
-# The outer quotes (`''`) are part of the shell syntax and are not seen by Sail.
+# The outer quotes (`''`) are part of the shell syntax and are not seen by Zelox.
 # The inner quotes (`""`) are part of the string representation of the
-# configuration value and are seen by Sail.
+# configuration value and are seen by Zelox.
 export ZELOX_MODE='"local"'
 
 # Set `cluster.worker_task_slots` to 16.
-# The quotes (`""`) are part of the shell syntax and are not seen by Sail.
+# The quotes (`""`) are part of the shell syntax and are not seen by Zelox.
 export ZELOX_CLUSTER__WORKER_TASK_SLOTS="16"
 
 # Set multiple configuration options at once.
-# The quotes (`''`) are part of the shell syntax and are not seen by Sail.
+# The quotes (`''`) are part of the shell syntax and are not seen by Zelox.
 export ZELOX_CLUSTER='{ worker_task_slots = 16, worker_max_count = 2 }'
 ```

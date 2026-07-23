@@ -21,7 +21,7 @@ use tokio::net::TcpStream;
 use tokio::process::Command;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
-const KERBEROS_REALM: &str = "SAIL.TEST";
+const KERBEROS_REALM: &str = "ZELOX.TEST";
 const KDC_HOSTNAME: &str = "zelox-kerberos-kdc";
 const HMS_HOSTNAME: &str = "zelox-kerberos-hms";
 const HMS_KEYTAB_PATH: &str = "/opt/hive/conf/hms.service.keytab";

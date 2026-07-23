@@ -11,8 +11,8 @@ from testcontainers.core.waiting_utils import wait_for_logs
 
 from pyzelox.tests.spark.catalog_integration.conftest import (
     create_spark_session,
-    start_sail_server,
-    stop_sail_server,
+    start_zelox_server,
+    stop_zelox_server,
 )
 
 if TYPE_CHECKING:
@@ -42,9 +42,9 @@ def moto_endpoint(moto_container: DockerContainer) -> str:
 
 @pytest.fixture(scope="module")
 def glue_spark(moto_endpoint: str) -> Generator[SparkSession, None, None]:
-    """Start Sail server with Glue catalog and create a Spark session."""
-    catalog_config = f'[{{name="sail", type="glue", region="us-east-1", endpoint_url="{moto_endpoint}"}}]'
-    server, remote, saved_env = start_sail_server(
+    """Start Zelox server with Glue catalog and create a Spark session."""
+    catalog_config = f'[{{name="zelox", type="glue", region="us-east-1", endpoint_url="{moto_endpoint}"}}]'
+    server, remote, saved_env = start_zelox_server(
         catalog_list=catalog_config,
         extra_env={
             "AWS_ACCESS_KEY_ID": "testing",
@@ -55,4 +55,4 @@ def glue_spark(moto_endpoint: str) -> Generator[SparkSession, None, None]:
     yield spark
     with contextlib.suppress(Exception):
         spark.stop()
-    stop_sail_server(server, saved_env)
+    stop_zelox_server(server, saved_env)

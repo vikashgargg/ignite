@@ -17,7 +17,7 @@ digraph architecture {
   }
 
   subgraph server {
-    label="Sail Server";
+    label="Zelox Server";
     cluster=true;
     subgraph session {
       label="Session";
@@ -67,7 +67,7 @@ digraph architecture {
   spark_connect_client -> driver_event_loop [label="gRPC\n(Spark Connect)", dir=both, ltail="pyspark_client", lhead="server"];
   driver_event_loop:s -> spark_connect_client:s [style=dashed, dir=both, ltail="server", lhead="pyspark_client"];
 
-  driver_event_loop -> worker_event_loop_1 [dir=both, ltail="server", lhead="worker_1", label="gRPC\n(Sail)"];
+  driver_event_loop -> worker_event_loop_1 [dir=both, ltail="server", lhead="worker_1", label="gRPC\n(Zelox)"];
   driver_event_loop -> worker_event_loop_n [dir=both, ltail="server", lhead="worker_n"];
   driver_event_loop -> ellipsis [style=invis];
 

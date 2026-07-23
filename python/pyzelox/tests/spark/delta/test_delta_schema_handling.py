@@ -1,5 +1,5 @@
 """
-Test Delta Lake schema handling (mergeSchema, overwriteSchema, evolution) in Sail.
+Test Delta Lake schema handling (mergeSchema, overwriteSchema, evolution) in Zelox.
 """
 
 import json

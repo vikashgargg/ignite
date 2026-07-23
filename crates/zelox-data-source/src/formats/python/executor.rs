@@ -79,7 +79,7 @@ pub struct WriteResult {
 
 /// Abstract executor for Python datasource operations.
 ///
-/// This trait provides the abstraction layer between Sail's execution engine
+/// This trait provides the abstraction layer between Zelox's execution engine
 /// and Python datasource implementations. The MVP uses `InProcessExecutor`,
 /// but the trait is designed for future `RemoteExecutor` implementation.
 #[async_trait]

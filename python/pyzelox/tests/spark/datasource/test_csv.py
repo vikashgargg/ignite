@@ -69,9 +69,9 @@ def test_csv_read_write_compressed(spark, sample_df, sample_pandas_df, tmp_path,
             key=safe_sort_key,
         )
 
-    # Test reading a compressed CSV file written by Sail
-    sail_dir = f"csv_compressed_gzip_{infer_schema}"
-    path = str(tmp_path / sail_dir)
+    # Test reading a compressed CSV file written by Zelox
+    zelox_dir = f"csv_compressed_gzip_{infer_schema}"
+    path = str(tmp_path / zelox_dir)
     sample_df.write.option("header", "true").option("compression", "gzip").csv(path, mode="overwrite")
     read_df = (
         spark.read.format("csv")
@@ -82,13 +82,13 @@ def test_csv_read_write_compressed(spark, sample_df, sample_pandas_df, tmp_path,
     )
     assert sample_df.count() == read_df.count()
     assert sorted(read_df.collect(), key=safe_sort_key) == expected_rows
-    assert len(list((tmp_path / sail_dir).glob("*.csv.gz"))) > 0
+    assert len(list((tmp_path / zelox_dir).glob("*.csv.gz"))) > 0
 
     # Compression type not explicitly set.
     read_df = spark.read.format("csv").option("header", "true").option("inferSchema", infer_schema).load(path)
     assert sample_df.count() == read_df.count()
     assert sorted(read_df.collect(), key=safe_sort_key) == expected_rows
-    assert len(list((tmp_path / sail_dir).glob("*.csv.gz"))) > 0
+    assert len(list((tmp_path / zelox_dir).glob("*.csv.gz"))) > 0
 
     # Test reading a compressed CSV file written by Pandas.
     pandas_dir_1 = f"csv_compressed_gzip_pandas_1_{infer_schema}"
@@ -349,7 +349,7 @@ def test_csv_read_uppercase_extension_compressed(spark, tmp_path, infer_schema):
 # -----------------------------------------------------------------------------
 # Case-insensitive extension matching when an explicit schema is supplied.
 #
-# Sail reads every non-hidden file in a directory regardless of extension
+# Zelox reads every non-hidden file in a directory regardless of extension
 # case (matching Spark). The tests below cover the schema-provided path
 # across single files, directories, mixed case, compression, and
 # schema-shape variations.

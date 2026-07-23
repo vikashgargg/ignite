@@ -516,7 +516,7 @@ zelox (binary)
 
 | Week | Theme | Key deliverables |
 |---|---|---|
-| **W1** | Foundation | Fork sail → zelox, CI pipeline, binary rename, PLAN.md |
+| **W1** | Foundation | Fork zelox → zelox, CI pipeline, binary rename, PLAN.md |
 | **W2** | Cross-compile | `cargo-zigbuild`, musl + universal macOS builds, install.sh, binary size < 80 MB |
 | **W3** | Spark compat audit | Full Spark 4.0 proto surface audit, compatibility test harness setup |
 | **W4** | Compat gaps batch 1 | Fix top-10 SQL compatibility failures (from W3 triage) |
@@ -603,7 +603,7 @@ W3: compat audit
 
 | Day | Done |
 |---|---|
-| Day 1 | Fork sail → vikashgargg/zelox; Rust 1.95 installed; `cargo check` passing; binary renamed `zelox`; CLI restructured; ARCHITECTURE.md; GitHub Actions CI (zelox-ci.yml); install.sh; README updated; committed + pushed `phase1/foundation` |
+| Day 1 | Fork zelox → vikashgargg/zelox; Rust 1.95 installed; `cargo check` passing; binary renamed `zelox`; CLI restructured; ARCHITECTURE.md; GitHub Actions CI (zelox-ci.yml); install.sh; README updated; committed + pushed `phase1/foundation` |
 
 ### Week 2 (Current)
 
@@ -666,10 +666,10 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 
 ## 9. Key Technical Decisions
 
-### D1 — Fork sail rather than build from scratch
+### D1 — Fork zelox rather than build from scratch
 **Decision:** Fork `lakehq/sail` as the foundation.  
-**Reason:** Sail already has Spark Connect proto impl, SQL parser, DataFusion integration, PyO3 UDF bridge, Delta Lake, Iceberg, catalog integrations — roughly 12–18 months of work already done.  
-**Trade-off:** Inherits sail's naming conventions and some zelox-specific abstractions. We rename only the binary/CLI; internal crates keep `zelox-` prefix to enable upstreaming patches.
+**Reason:** Zelox already has Spark Connect proto impl, SQL parser, DataFusion integration, PyO3 UDF bridge, Delta Lake, Iceberg, catalog integrations — roughly 12–18 months of work already done.  
+**Trade-off:** Inherits zelox's naming conventions and some zelox-specific abstractions. We rename only the binary/CLI; internal crates keep `zelox-` prefix to enable upstreaming patches.
 
 ### D2 — Keep `zelox-` prefix on internal crates
 **Decision:** Internal crates stay `zelox-*`; only the binary is named `zelox`.  
@@ -702,7 +702,7 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 
 | Risk | Probability | Impact | Mitigation |
 |---|---|---|---|
-| SQL compatibility gaps in edge cases | High | Medium | Sail gold-test suite + official PySpark test suite in CI |
+| SQL compatibility gaps in edge cases | High | Medium | Zelox gold-test suite + official PySpark test suite in CI |
 | Python UDF ecosystem (complex cloudpickle) | Medium | High | Test against top-50 PyPI ML libraries; fail gracefully with clear error |
 | iceberg-rust API instability | Medium | Medium | Pin version; contribute upstream; fallback to REST-only if needed |
 | musl + PyO3 linking issues | Low | High | Test musl build in CI from Day 2; catch early |

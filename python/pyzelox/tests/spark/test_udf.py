@@ -7,7 +7,7 @@ from pyspark.sql.functions import udf
 def arrow(spark, request):
     # The PySpark UDF Arrow mode is buggy since it may produce results
     # different from the non-Arrow mode (e.g. type casting support).
-    # Some of the issues are not seen in Sail, so we can write tests and
+    # Some of the issues are not seen in Zelox, so we can write tests and
     # make sure that both modes produce the same results.
     value = "true" if request.param else "false"
     spark.conf.set("spark.sql.execution.pythonUDF.arrow.enabled", value)

@@ -56,7 +56,7 @@ When adding functions (`ScalarUDF` or `AggregateUDF`), physical expressions (`Ph
 
 ### Test Style
 
-Most functionalities in Sail can be described via SQL, and we prefer BDD tests in `.feature` files (Gherkin syntax) for them.
+Most functionalities in Zelox can be described via SQL, and we prefer BDD tests in `.feature` files (Gherkin syntax) for them.
 Such tests are loaded and executed in `pytest`.
 We describe scenarios with `Given`, `When`, and `Then`. We assert user-facing outcomes rather than internal states.
 

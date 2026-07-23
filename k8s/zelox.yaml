@@ -26,7 +26,7 @@ spec:
     spec:
       serviceAccountName: zelox-user
       volumes:
-        - name: tmp-sail
+        - name: tmp-zelox
           hostPath:
             path: /private/tmp/zelox
             type: DirectoryOrCreate
@@ -43,7 +43,7 @@ spec:
             - containerPort: 50051
           imagePullPolicy: IfNotPresent
           volumeMounts:
-            - name: tmp-sail
+            - name: tmp-zelox
               mountPath: /private/tmp/zelox
             - name: tmp-zelox-alt
               mountPath: /tmp/zelox
@@ -70,7 +70,7 @@ spec:
               value: zelox-user
             - name: ZELOX_KUBERNETES__WORKER_POD_TEMPLATE
               value: >-
-                {"spec":{"volumes":[{"name":"tmp-sail","hostPath":{"path":"/private/tmp/zelox","type":"DirectoryOrCreate"}},{"name":"tmp-zelox-alt","hostPath":{"path":"/tmp/zelox","type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"tmp-sail","mountPath":"/private/tmp/zelox"},{"name":"tmp-zelox-alt","mountPath":"/tmp/zelox"}]}]}}
+                {"spec":{"volumes":[{"name":"tmp-zelox","hostPath":{"path":"/private/tmp/zelox","type":"DirectoryOrCreate"}},{"name":"tmp-zelox-alt","hostPath":{"path":"/tmp/zelox","type":"DirectoryOrCreate"}}],"containers":[{"name":"worker","volumeMounts":[{"name":"tmp-zelox","mountPath":"/private/tmp/zelox"},{"name":"tmp-zelox-alt","mountPath":"/tmp/zelox"}]}]}}
 ---
 apiVersion: v1
 kind: Service

@@ -55,7 +55,7 @@ echo "TOPIC_CHECK $TOPIC=$TOT OK"
 pkill -9 -f 'target/(debug|release)/zelox' 2>/dev/null; sleep 1
 # ZELOX_COMPLETE_ON_END=1 = bounded-complete flush (Flink scan.bounded.mode parity) so the FINAL window
 # flushes and Σ counts == N EXACT (default = Spark availableNow, drops the last window).
-ZELOX_COMPLETE_ON_END=1 ZELOX_WM_PROF=1 RUST_LOG="warn,sail_physical_plan::streaming::window_accum=info" \
+ZELOX_COMPLETE_ON_END=1 ZELOX_WM_PROF=1 RUST_LOG="warn,zelox_physical_plan::streaming::window_accum=info" \
   AWS_ENDPOINT="$AWS_ENDPOINT" AWS_ENDPOINT_URL="$AWS_ENDPOINT_URL" AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
   AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" AWS_ALLOW_HTTP="$AWS_ALLOW_HTTP" AWS_REGION="$AWS_REGION" \
   "$BIN" server --ip 127.0.0.1 --port "$PORT" --mode local-cluster --workers "$WORKERS" >/tmp/e2e_srv.log 2>&1 &

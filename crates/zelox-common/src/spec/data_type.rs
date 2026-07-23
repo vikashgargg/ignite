@@ -26,10 +26,10 @@ pub const VARIANT_EXTENSION_NAME: &str = "arrow.parquet.variant";
 /// (e.g. extension type keys).
 pub const SPARK_METADATA_JSON_KEY: &str = "SPARK::metadata::json";
 
-/// Sail metadata key for Spark UDT information stored in Arrow field metadata.
+/// Zelox metadata key for Spark UDT information stored in Arrow field metadata.
 ///
-/// This is internal to Sail and should not be exposed as Spark column metadata.
-pub const ZELOX_SPARK_UDT_METADATA_KEY: &str = "SAIL::spark::udt";
+/// This is internal to Zelox and should not be exposed as Spark column metadata.
+pub const ZELOX_SPARK_UDT_METADATA_KEY: &str = "ZELOX::spark::udt";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SparkUdtMetadata {
@@ -97,7 +97,7 @@ impl std::fmt::Display for EdgeInterpolationAlgorithm {
     }
 }
 
-/// Native Sail data types that convert to Arrow types.
+/// Native Zelox data types that convert to Arrow types.
 /// Types directly match to [`arrow_schema::DataType`] variants when there is a corresponding type.
 /// Additionally, custom data types are supported for cases not covered by Arrow.
 ///

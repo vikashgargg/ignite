@@ -16,7 +16,7 @@ if is_jvm_spark():
 
 @pytest.fixture(scope="module", autouse=True)
 def person_table(spark):
-    spark.sql("CREATE TABLE person (id INT, name STRING DEFAULT 'Sail', age INT)")
+    spark.sql("CREATE TABLE person (id INT, name STRING DEFAULT 'Zelox', age INT)")
     yield
     spark.sql("DROP TABLE person")
 
@@ -59,14 +59,14 @@ def test_insert_using_implicit_default(spark):
     spark.sql("INSERT INTO person (id, age) VALUES (401, 99), (402, 2), (403, 9000)")
     actual = spark.sql("SELECT * FROM person WHERE id IN (401, 402, 403)").toPandas()
     expected = pd.DataFrame(
-        {"id": [401, 402, 403], "name": ["Sail", "Sail", "Sail"], "age": [99, 2, 9000]},
+        {"id": [401, 402, 403], "name": ["Zelox", "Zelox", "Zelox"], "age": [99, 2, 9000]},
     ).astype({"id": "int32", "name": "str", "age": "int32"})
     assert_frame_equal(actual, expected)
 
     spark.sql("INSERT INTO person (age, id) VALUES (100, 404), (3, 405), (9001, 406)")
     actual = spark.sql("SELECT * FROM person WHERE id IN (404, 405, 406)").toPandas()
     expected = pd.DataFrame(
-        {"id": [404, 405, 406], "name": ["Sail", "Sail", "Sail"], "age": [100, 3, 9001]},
+        {"id": [404, 405, 406], "name": ["Zelox", "Zelox", "Zelox"], "age": [100, 3, 9001]},
     ).astype({"id": "int32", "name": "str", "age": "int32"})
     assert_frame_equal(actual, expected)
 
@@ -81,7 +81,7 @@ def test_insert_with_full_table_name(spark):
 
 
 def test_delete_entire_table(spark):
-    spark.sql("CREATE TABLE meow (id INT, name STRING DEFAULT 'Sail', age INT)")
+    spark.sql("CREATE TABLE meow (id INT, name STRING DEFAULT 'Zelox', age INT)")
     try:
         spark.sql("INSERT INTO meow VALUES (601, 'Shehab', 99), (602, 'Alice', 2), (603, 'Bob', 9000)")
         spark.sql("DELETE FROM meow")

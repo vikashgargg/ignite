@@ -185,5 +185,5 @@ zelox mcp-server                     # Spark MCP server
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The existing sail gold-test suite is the
+See [CONTRIBUTING.md](CONTRIBUTING.md). The existing zelox gold-test suite is the
 primary correctness signal — run it with `cargo test -p zelox-gold-test`.

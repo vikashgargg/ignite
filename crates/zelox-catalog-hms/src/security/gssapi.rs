@@ -185,7 +185,7 @@ fn load_gssapi_library_impl(name: impl AsRef<OsStr>) -> CatalogResult<bindings::
 fn libgssapi() -> CatalogResult<&'static bindings::GSSAPI> {
     LIBGSSAPI.as_ref().ok_or_else(|| {
         CatalogError::External(
-            "Failed to load Kerberos runtime library. Install the GSSAPI runtime and run kinit before starting Sail."
+            "Failed to load Kerberos runtime library. Install the GSSAPI runtime and run kinit before starting Zelox."
                 .to_string(),
         )
     })

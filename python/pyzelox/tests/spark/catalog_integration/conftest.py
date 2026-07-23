@@ -1,7 +1,7 @@
 """Shared fixtures for catalog integration tests.
 
 Each sub-directory (glue/, iceberg_rest/, unity/) provides fixtures that
-spin up the relevant infrastructure containers and a dedicated Sail server.
+spin up the relevant infrastructure containers and a dedicated Zelox server.
 
 These tests are marked with ``@pytest.mark.catalog_integration`` and are
 **deselected by default**. To run them, pass ``-m catalog_integration``::
@@ -29,11 +29,11 @@ CATALOG_SPARK_FIXTURES = {
 }
 
 
-def start_sail_server(
+def start_zelox_server(
     catalog_list: str,
     extra_env: dict[str, str] | None = None,
 ) -> tuple[SparkConnectServer, str, dict[str, str | None]]:
-    """Start a Sail Spark Connect server with the given catalog configuration.
+    """Start a Zelox Spark Connect server with the given catalog configuration.
 
     Returns ``(server, remote_url, saved_env)`` where *saved_env* contains
     the original environment values so the caller can restore them later.
@@ -59,11 +59,11 @@ def start_sail_server(
     return server, f"sc://localhost:{port}", saved
 
 
-def stop_sail_server(
+def stop_zelox_server(
     server: SparkConnectServer,
     saved_env: dict[str, str | None],
 ) -> None:
-    """Stop a Sail server and restore the environment."""
+    """Stop a Zelox server and restore the environment."""
     server.stop()
     for key, old_value in saved_env.items():
         if old_value is None:

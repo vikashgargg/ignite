@@ -5,7 +5,7 @@ rank: 6
 
 # System Catalog
 
-Sail provides a system catalog that exposes internal system information as virtual tables.
+Zelox provides a system catalog that exposes internal system information as virtual tables.
 You can query these tables to inspect the state of the system, such as sessions, jobs, and workers.
 
 The system catalog is available under the name `system`.

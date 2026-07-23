@@ -9,7 +9,7 @@ This page presents an overview of the data types available in Spark.
 The name of the data type is shown in **bold font**.
 
 In JVM Spark, these data types correspond directly to Java types or classes.
-However, since Sail is powered by Arrow, you may consider this page more of a discussion about "logical" data types. For how these data types are represented in Arrow, you can continue to the [Compatibility](./compatibility.md) guide.
+However, since Zelox is powered by Arrow, you may consider this page more of a discussion about "logical" data types. For how these data types are represented in Arrow, you can continue to the [Compatibility](./compatibility.md) guide.
 
 ## Numeric Types
 

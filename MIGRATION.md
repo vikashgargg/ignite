@@ -247,7 +247,7 @@ spark = SparkSession.builder \
 ## FAQ
 
 **Q: Do I need to change my `pyspark` version?**  
-A: No. Zelox is compatible with `pyspark[connect]==4.0.0`. Client-side PySpark is unchanged.
+A: No. Zelox is compatible with `pyspark[connect]==4.2.0`. Client-side PySpark is unchanged.
 
 **Q: Does it work with existing Delta Lake tables?**  
 A: Yes. Zelox uses `delta-rs` to read/write Delta Lake tables in the same format as Spark.

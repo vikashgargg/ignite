@@ -5,7 +5,7 @@ rank: 2
 
 # Iceberg REST Catalog
 
-The Iceberg REST catalog provider in Sail allows you to connect to an external catalog that exposes the [Iceberg REST Catalog API](https://iceberg.apache.org/rest-catalog-spec/).
+The Iceberg REST catalog provider in Zelox allows you to connect to an external catalog that exposes the [Iceberg REST Catalog API](https://iceberg.apache.org/rest-catalog-spec/).
 
 An Iceberg REST catalog can be configured using the following options:
 
@@ -22,11 +22,11 @@ See [Common Options](./index.md#common-options) for caching configuration.
 ## Examples
 
 ```bash
-export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com"}]'
+export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="zelox", uri="https://catalog.example.com"}]'
 
 # OAuth authentication
-export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com", warehouse="s3://data/warehouse", oauth_access_token="..."}]'
+export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="zelox", uri="https://catalog.example.com", warehouse="s3://data/warehouse", oauth_access_token="..."}]'
 
 # Bearer token authentication
-export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="sail", uri="https://catalog.example.com", warehouse="s3://data/warehouse", bearer_access_token="..."}]'
+export ZELOX_CATALOG__LIST='[{type="iceberg-rest", name="zelox", uri="https://catalog.example.com", warehouse="s3://data/warehouse", bearer_access_token="..."}]'
 ```

@@ -227,7 +227,7 @@ async fn test_get_namespace() {
     let namespace = Namespace::try_from(vec!["apple".to_string(), "ios".to_string()]).unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     assert!(rest_catalog.get_database(&namespace).await.is_err());
@@ -272,7 +272,7 @@ async fn test_list_namespaces() {
         Namespace::try_from(vec!["test_list_namespace".to_string(), "ios".to_string()]).unwrap();
     let ns1_properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     let ns2 =
@@ -336,7 +336,7 @@ async fn test_list_empty_namespaces() {
     .unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     assert!(rest_catalog.list_databases(Some(&ns_apple)).await.is_err());
@@ -372,7 +372,7 @@ async fn test_list_root_namespaces() {
     .unwrap();
     let ns1_properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     let ns2 = Namespace::try_from(vec![
@@ -438,7 +438,7 @@ async fn test_list_empty_multi_level_namespaces() {
     .unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     assert!(rest_catalog.list_databases(Some(&ns_apple)).await.is_err());
@@ -533,7 +533,7 @@ async fn test_create_table() {
     .unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     rest_catalog
@@ -909,7 +909,7 @@ async fn test_get_table() {
     .unwrap();
     let properties = vec![
         ("owner".to_string(), "Lake".to_string()),
-        ("community".to_string(), "Sail".to_string()),
+        ("community".to_string(), "Zelox".to_string()),
     ];
 
     rest_catalog

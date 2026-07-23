@@ -4,7 +4,7 @@ title: Hive Metastore
 
 # Hive Metastore Development Notes
 
-This page documents the current HMS implementation and test strategy in Sail for contributors and maintainers.
+This page documents the current HMS implementation and test strategy in Zelox for contributors and maintainers.
 
 ## Maintainer Summary
 
@@ -34,7 +34,7 @@ The Kerberos HMS ignored integration test target is:
 cargo test -p zelox-catalog-hms --test kerberos_integration_tests -- --ignored
 ```
 
-When this target is green, it means Sail successfully:
+When this target is green, it means Zelox successfully:
 
 - boots a local MIT KDC and Kerberized Hive Metastore container
 - obtains client credentials with `kinit`
@@ -45,7 +45,7 @@ When this target is green, it means Sail successfully:
 
 This is strong evidence that the Kerberos transport and basic HMS metadata path work end to end.
 
-It is not evidence that Sail supports:
+It is not evidence that Zelox supports:
 
 - Hive ACID transaction APIs
 - non-Apache HMS distributions
@@ -96,7 +96,7 @@ Relevant workflow locations:
 - `.github/workflows/build.yml`
 - `.github/workflows/rust-tests.yml`
 
-The Rust test workflow installs Kerberos runtime/client packages before running ignored tests so the host-side `kinit` step and Sail's dynamic GSSAPI loading both work in CI.
+The Rust test workflow installs Kerberos runtime/client packages before running ignored tests so the host-side `kinit` step and Zelox's dynamic GSSAPI loading both work in CI.
 
 ## Harness Layout
 
@@ -122,7 +122,7 @@ Supported contract:
 
 - HMS endpoint list via `uris` (`host:port` or `thrift://host:port`, including comma-flattened entries)
 - endpoint-ordered failover with a per-endpoint connect timeout that defaults to `5s` and can be overridden with `connect_timeout_secs`
-- DNS is re-resolved when Sail builds a new connection for an endpoint instead of pinning the startup-resolved address forever
+- DNS is re-resolved when Zelox builds a new connection for an endpoint instead of pinning the startup-resolved address forever
 - Kerberos principal configured with `auth = "kerberos"` and `kerberos_service_principal`
 - minimum Kerberos SASL QOP via `min_sasl_qop` (`auth`, `auth_int`, `auth_conf`)
 - `_HOST` expansion for the principal based on the currently selected endpoint
@@ -138,7 +138,7 @@ Out of scope for the current implementation:
 
 - transactional HMS methods such as `open_txns`, `lock`, `heartbeat`, `allocate_table_write_ids`, or compaction APIs
 - Hortonworks or other distribution-specific compatibility promises
-- automatic keytab management inside Sail
+- automatic keytab management inside Zelox
 
 ## Regenerating GSSAPI Bindings
 

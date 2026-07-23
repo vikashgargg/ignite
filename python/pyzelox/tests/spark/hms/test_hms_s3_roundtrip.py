@@ -17,7 +17,7 @@ pytestmark = pytest.mark.catalog_integration
 _S3_WAREHOUSE_PREFIX = "s3://hms-warehouse"
 
 
-def _assert_sail_describes_s3_managed_table(
+def _assert_zelox_describes_s3_managed_table(
     hms_s3_spark: SparkSession,
     table_fqn: str,
     location_prefix: str,
@@ -44,7 +44,7 @@ def _assert_reference_describes_s3_table(
         assert location.startswith(location_prefix)
 
 
-def test_s3_spark_creates_sail_reads_managed_parquet(
+def test_s3_spark_creates_zelox_reads_managed_parquet(
     reference_spark_s3: SparkSession,
     hms_s3_spark: SparkSession,
     hms_s3_database: str,
@@ -56,22 +56,22 @@ def test_s3_spark_creates_sail_reads_managed_parquet(
     reference_spark_s3.sql(f"CREATE TABLE {table_fqn} (id INT, name STRING) USING PARQUET")
     reference_spark_s3.sql(f"INSERT INTO {table_fqn} VALUES (1, 'spark'), (2, 's3')")
 
-    _assert_sail_describes_s3_managed_table(hms_s3_spark, table_fqn, location_prefix)
+    _assert_zelox_describes_s3_managed_table(hms_s3_spark, table_fqn, location_prefix)
     rows = hms_s3_spark.sql(f"SELECT id, name FROM {table_fqn} ORDER BY id").collect()
     assert [(row.id, row.name) for row in rows] == [(1, "spark"), (2, "s3")]
 
 
-def test_s3_sail_creates_spark_reads_external_parquet(
+def test_s3_zelox_creates_spark_reads_external_parquet(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    table = "sail_external_parquet"
+    table = "zelox_external_parquet"
     table_fqn = f"{hms_s3_database}.{table}"
     location_prefix = f"{_S3_WAREHOUSE_PREFIX}/{hms_s3_database}"
 
     hms_s3_spark.sql(f"CREATE TABLE {table_fqn} (id INT, name STRING) USING PARQUET")
-    hms_s3_spark.sql(f"INSERT INTO {table_fqn} VALUES (10, 'sail'), (11, 'spark')")
+    hms_s3_spark.sql(f"INSERT INTO {table_fqn} VALUES (10, 'zelox'), (11, 'spark')")
 
     _assert_reference_describes_s3_table(
         reference_spark_s3,
@@ -81,4 +81,4 @@ def test_s3_sail_creates_spark_reads_external_parquet(
         "EXTERNAL",
     )
     rows = reference_spark_s3.sql(f"SELECT id, name FROM {table_fqn} ORDER BY id").collect()
-    assert [(row.id, row.name) for row in rows] == [(10, "sail"), (11, "spark")]
+    assert [(row.id, row.name) for row in rows] == [(10, "zelox"), (11, "spark")]

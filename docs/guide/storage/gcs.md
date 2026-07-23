@@ -5,7 +5,7 @@ rank: 6
 
 # Google Cloud Storage
 
-Sail supports reading from and writing to Google Cloud Storage (GCS) buckets.
+Zelox supports reading from and writing to Google Cloud Storage (GCS) buckets.
 
 ## URI Format
 
@@ -13,11 +13,11 @@ Google Cloud Storage uses the `gs://` URI scheme.
 
 ## Configuration
 
-You can use environment variables to configure GCS in Sail.
+You can use environment variables to configure GCS in Zelox.
 Some configuration options can be set using different environment variables.
 
 ::: warning
-The environment variables to configure GCS are experimental and may change in future versions of Sail.
+The environment variables to configure GCS are experimental and may change in future versions of Zelox.
 :::
 
 - `GOOGLE_SERVICE_ACCOUNT`, `GOOGLE_SERVICE_ACCOUNT_PATH`

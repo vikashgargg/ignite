@@ -215,9 +215,9 @@ use zelox_function::scalar::variant::spark_json_to_variant::SparkJsonToVariantUd
 use zelox_function::scalar::variant::spark_schema_of_variant::SparkSchemaOfVariantUdf;
 use zelox_function::scalar::variant::spark_to_variant_object::SparkToVariantObjectUdf;
 use zelox_function::scalar::higher_order::{
-    HofEncodeParts, SailArrayAggregate, SailArrayExists, SailArrayFilter, SailArrayForAll,
-    SailArraySort, SailArrayTransform, SailArrayZipWith, SailMapFilter, SailMapTransformKeys,
-    SailMapTransformValues, SailMapZipWith,
+    HofEncodeParts, ZeloxArrayAggregate, ZeloxArrayExists, ZeloxArrayFilter, ZeloxArrayForAll,
+    ZeloxArraySort, ZeloxArrayTransform, ZeloxArrayZipWith, ZeloxMapFilter, ZeloxMapTransformKeys,
+    ZeloxMapTransformValues, ZeloxMapZipWith,
 };
 use zelox_function::scalar::variant::spark_variant_explode::SparkVariantExplodeUdf;
 use zelox_function::scalar::variant::spark_variant_get::SparkVariantGet;
@@ -3197,27 +3197,27 @@ impl PhysicalExtensionCodec for RemoteExecutionCodec {
         } else if let Some(func) = node.inner().downcast_ref::<SparkAbs>() {
             let ansi_mode = func.ansi_mode();
             UdfKind::SparkAbs(gen::SparkAbsUdf { ansi_mode })
-        } else if let Some(f) = node_inner.downcast_ref::<SailArrayFilter>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxArrayFilter>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailArrayTransform>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxArrayTransform>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailArrayExists>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxArrayExists>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailArrayForAll>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxArrayForAll>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailArrayAggregate>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxArrayAggregate>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailArrayZipWith>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxArrayZipWith>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailArraySort>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxArraySort>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailMapTransformKeys>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxMapTransformKeys>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailMapTransformValues>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxMapTransformValues>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailMapFilter>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxMapFilter>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
-        } else if let Some(f) = node_inner.downcast_ref::<SailMapZipWith>() {
+        } else if let Some(f) = node_inner.downcast_ref::<ZeloxMapZipWith>() {
             UdfKind::HigherOrder(self.encode_higher_order_udf(node.name(), f.encode_parts())?)
         } else {
             return Ok(());
@@ -3551,7 +3551,7 @@ impl RemoteExecutionCodec {
             return_type,
             finish_expr,
         } = udf;
-        // A fresh context supplies built-in functions; Sail UDFs nested in the
+        // A fresh context supplies built-in functions; Zelox UDFs nested in the
         // lambda body are decoded recursively through `self`. Column refs carry
         // their own (name, index), so an empty schema is sufficient.
         let ctx = datafusion::prelude::SessionContext::new();
@@ -3580,19 +3580,19 @@ impl RemoteExecutionCodec {
         };
         let udf = match name.as_str() {
             "zelox_array_filter" => {
-                ScalarUDF::from(SailArrayFilter::new(lambda, param_names.clone(), rt()?))
+                ScalarUDF::from(ZeloxArrayFilter::new(lambda, param_names.clone(), rt()?))
             }
             "zelox_array_transform" => {
-                ScalarUDF::from(SailArrayTransform::new(lambda, param_names.clone(), rt()?))
+                ScalarUDF::from(ZeloxArrayTransform::new(lambda, param_names.clone(), rt()?))
             }
             "zelox_array_zip_with" => {
-                ScalarUDF::from(SailArrayZipWith::new(lambda, param_names.clone(), rt()?))
+                ScalarUDF::from(ZeloxArrayZipWith::new(lambda, param_names.clone(), rt()?))
             }
             "zelox_array_sort" => {
-                ScalarUDF::from(SailArraySort::new(lambda, param_names.clone(), rt()?))
+                ScalarUDF::from(ZeloxArraySort::new(lambda, param_names.clone(), rt()?))
             }
-            "zelox_array_exists" => ScalarUDF::from(SailArrayExists::new(lambda, p(0)?)),
-            "zelox_array_forall" => ScalarUDF::from(SailArrayForAll::new(lambda, p(0)?)),
+            "zelox_array_exists" => ScalarUDF::from(ZeloxArrayExists::new(lambda, p(0)?)),
+            "zelox_array_forall" => ScalarUDF::from(ZeloxArrayForAll::new(lambda, p(0)?)),
             "zelox_array_aggregate" => {
                 let finish = match finish_expr {
                     Some(bytes) => Some(parse_physical_expr(
@@ -3603,7 +3603,7 @@ impl RemoteExecutionCodec {
                     )?),
                     None => None,
                 };
-                ScalarUDF::from(SailArrayAggregate::new(
+                ScalarUDF::from(ZeloxArrayAggregate::new(
                     lambda,
                     p(0)?,
                     p(1)?,
@@ -3613,16 +3613,16 @@ impl RemoteExecutionCodec {
                 ))
             }
             "zelox_map_transform_keys" => {
-                ScalarUDF::from(SailMapTransformKeys::new(lambda, p(0)?, p(1)?, rt()?))
+                ScalarUDF::from(ZeloxMapTransformKeys::new(lambda, p(0)?, p(1)?, rt()?))
             }
             "zelox_map_transform_values" => {
-                ScalarUDF::from(SailMapTransformValues::new(lambda, p(0)?, p(1)?, rt()?))
+                ScalarUDF::from(ZeloxMapTransformValues::new(lambda, p(0)?, p(1)?, rt()?))
             }
             "zelox_map_filter" => {
-                ScalarUDF::from(SailMapFilter::new(lambda, p(0)?, p(1)?, rt()?))
+                ScalarUDF::from(ZeloxMapFilter::new(lambda, p(0)?, p(1)?, rt()?))
             }
             "zelox_map_zip_with" => {
-                ScalarUDF::from(SailMapZipWith::new(lambda, p(0)?, p(1)?, p(2)?, rt()?))
+                ScalarUDF::from(ZeloxMapZipWith::new(lambda, p(0)?, p(1)?, p(2)?, rt()?))
             }
             other => return plan_err!("unknown higher-order UDF: {other}"),
         };

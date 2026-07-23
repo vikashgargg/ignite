@@ -937,7 +937,7 @@ fn map_read_protocol_error(err: TransactionError) -> DeltaTableError {
         TransactionError::CommitConflict(CommitConflictError::UnsupportedReaderVersion(
             version,
         )) => DeltaTableError::Unsupported(format!(
-            "Sail Delta Lake does not support reader version {version}"
+            "Zelox Delta Lake does not support reader version {version}"
         )),
         other => DeltaTableError::Transaction(other),
     }

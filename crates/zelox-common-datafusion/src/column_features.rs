@@ -16,7 +16,7 @@
 //! Some engine keys happen to coincide with a format's on-disk name today
 //! (for example `delta.generationExpression` is both the engine key and the
 //! Delta on-disk key). That coincidence is not load-bearing and future keys
-//! should prefer the `sail.column.*` prefix to keep the layers distinct.
+//! should prefer the `zelox.column.*` prefix to keep the layers distinct.
 
 use std::collections::HashMap;
 

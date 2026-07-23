@@ -53,7 +53,7 @@ def test_multiply(spark):
     assert spark.sql("SELECT 3 * 2 AS result").collect() == [Row(result=6)]
     assert spark.sql("SELECT 2L * 2L AS result").collect() == [Row(result=4)]
     if not is_jvm_spark():
-        pytest.skip("the following tests are not supported in Sail yet")
+        pytest.skip("the following tests are not supported in Zelox yet")
     assert spark.sql("SELECT INTERVAL '3:15' HOUR TO MINUTE * 3 AS result").collect() == [
         Row(result=datetime.timedelta(seconds=35100))
     ]
@@ -64,7 +64,7 @@ def test_divide(spark):
     assert spark.sql("SELECT 3 / 2 AS result").collect() == [Row(result=1.5)]
     assert spark.sql("SELECT 2L / 2L AS result").collect() == [Row(result=1.0)]
     assert spark.sql("SELECT 6 / Decimal(3) AS result").collect() == [Row(result=Decimal("2.00000000000"))]
-    # TODO: In the following tests, the expected values differ when running on JVM Spark and Sail.
+    # TODO: In the following tests, the expected values differ when running on JVM Spark and Zelox.
     assert spark.sql("SELECT Decimal(6) / 3 AS result").collect() == [
         Row(result=any_of(Decimal("2.000000"), Decimal("2.00000000000")))
     ]
@@ -81,7 +81,7 @@ def test_divide(spark):
         Row(result=any_of(Decimal("0.666667"), Decimal("0.66666")))
     ]
     if not is_jvm_spark():
-        pytest.skip("the following tests are not supported in Sail yet")
+        pytest.skip("the following tests are not supported in Zelox yet")
     assert spark.sql("SELECT INTERVAL '3:15' HOUR TO MINUTE / 3 AS result").collect() == [
         Row(result=datetime.timedelta(seconds=3900))
     ]
@@ -91,7 +91,7 @@ def test_div(spark):
     assert spark.sql("SELECT 3 div 2 AS result").collect() == [Row(result=1)]
     assert spark.sql("SELECT -5.9 div 1").collect() == [Row(result=-5)]
     if not is_jvm_spark():
-        pytest.skip("the following tests are not supported in Sail yet")
+        pytest.skip("the following tests are not supported in Zelox yet")
     assert spark.sql("SELECT INTERVAL '10' DAY div INTERVAL '3' DAY AS result").collect() == [Row(result=3)]
     assert spark.sql("SELECT INTERVAL '1-1' YEAR TO MONTH div INTERVAL '-1' MONTH AS result").collect() == [
         Row(result=-13)

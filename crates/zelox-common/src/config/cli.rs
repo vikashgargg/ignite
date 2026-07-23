@@ -22,7 +22,7 @@ impl CliConfig {
 pub struct CliConfigEnv;
 
 impl CliConfigEnv {
-    /// Turn Sail CLI into a Python interpreter.
+    /// Turn Zelox CLI into a Python interpreter.
     /// This allows the embedded Python interpreter to fork child Python processes.
     pub const RUN_PYTHON: &'static str = "ZELOX_INTERNAL__RUN_PYTHON";
 }

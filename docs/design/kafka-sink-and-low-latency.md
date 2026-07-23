@@ -46,7 +46,7 @@
   (which already threads `STREAM_REALTIME_INTERVAL_OPTION`, checkpoint location, and N-way
   parallel sinks via `ParallelStreamSinkExec`). Add a `"kafka"` sink branch → `KafkaSinkExec`.
   `writeStream.format("kafka")` resolves through `write_stream.rs` like other formats.
-- **Codec:** add `KafkaSinkExecNode` to `proto/sail/plan/physical.proto` + encode/decode arms
+- **Codec:** add `KafkaSinkExecNode` to `proto/zelox/plan/physical.proto` + encode/decode arms
   in `crates/zelox-execution/src/codec.rs` (mirror `RealtimeFileSinkExec`'s arms) so it survives
   the driver→worker boundary in distributed mode.
 

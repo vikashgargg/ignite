@@ -64,7 +64,7 @@ use crate::storage::get_object_store_from_context;
 
 /// Counts internal row intent tags before they are stripped from writer input.
 ///
-/// These counters are derived from Sail metadata columns only. The metadata is
+/// These counters are derived from Zelox metadata columns only. The metadata is
 /// removed before data batches are validated against the persisted table schema.
 #[derive(Debug, Default, Clone, Copy)]
 struct MergeRowMetrics {

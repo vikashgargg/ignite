@@ -14,7 +14,7 @@ to use this environment (`.venvs/default`) for Python development.
 
 ::: info
 
-1. For the Sail project, all Hatch environments are configured to use `pip` as the package installer for local development,
+1. For the Zelox project, all Hatch environments are configured to use `pip` as the package installer for local development,
    so pip environment variables such as `PIP_INDEX_URL` still work.
    However, it is recommended to also set `uv` environment variables such as `UV_INDEX_URL`, since Hatch
    uses `uv` as the package installer for internal environments (e.g. when doing static analysis

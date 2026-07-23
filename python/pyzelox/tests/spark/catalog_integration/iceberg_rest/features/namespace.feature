@@ -18,7 +18,7 @@ Feature: Iceberg REST catalog namespace (database) operations
       """
     Then query result
       | name           | catalog | description | locationUri |
-      | test_create_ns | sail    | NULL        | NULL        |
+      | test_create_ns | zelox    | NULL        | NULL        |
 
   Scenario: Create duplicate namespace fails
     Given statement
@@ -69,7 +69,7 @@ Feature: Iceberg REST catalog namespace (database) operations
       """
     Then query result
       | name                | catalog | description | locationUri |
-      | ine_keep_ns_iceberg | sail    | NULL        | NULL        |
+      | ine_keep_ns_iceberg | zelox    | NULL        | NULL        |
 
   Scenario: Listing child namespaces of an empty parent returns no rows
     Given statement
@@ -99,7 +99,7 @@ Feature: Iceberg REST catalog namespace (database) operations
     Given statement
       """
       CREATE DATABASE get_ns_iceberg
-      WITH DBPROPERTIES (owner = 'Lake', community = 'Sail')
+      WITH DBPROPERTIES (owner = 'Lake', community = 'Zelox')
       """
     Given final statement
       """
@@ -111,7 +111,7 @@ Feature: Iceberg REST catalog namespace (database) operations
       """
     Then query result
       | name           | catalog | description | locationUri |
-      | get_ns_iceberg | sail    | NULL        | NULL        |
+      | get_ns_iceberg | zelox    | NULL        | NULL        |
 
   Scenario: Multiple namespaces all appear in listing
     Given statement
@@ -136,14 +136,14 @@ Feature: Iceberg REST catalog namespace (database) operations
       """
     Then query result
       | name     | catalog | description | locationUri |
-      | ns_apple | sail    | NULL        | NULL        |
+      | ns_apple | zelox    | NULL        | NULL        |
     When query
       """
       SHOW DATABASES LIKE 'ns_ios'
       """
     Then query result
       | name   | catalog | description | locationUri |
-      | ns_ios | sail    | NULL        | NULL        |
+      | ns_ios | zelox    | NULL        | NULL        |
 
   Scenario: List multiple namespaces
     Given statement
@@ -168,14 +168,14 @@ Feature: Iceberg REST catalog namespace (database) operations
       """
     Then query result
       | name        | catalog | description | locationUri |
-      | list_ns_one | sail    | NULL        | NULL        |
+      | list_ns_one | zelox    | NULL        | NULL        |
     When query
       """
       SHOW DATABASES LIKE 'list_ns_two'
       """
     Then query result
       | name        | catalog | description | locationUri |
-      | list_ns_two | sail    | NULL        | NULL        |
+      | list_ns_two | zelox    | NULL        | NULL        |
 
   Scenario: Listing with pattern matching returns empty when no match
     When query
@@ -200,7 +200,7 @@ Feature: Iceberg REST catalog namespace (database) operations
       """
     Then query result
       | name         | catalog | description | locationUri |
-      | root_test_ns | sail    | NULL        | NULL        |
+      | root_test_ns | zelox    | NULL        | NULL        |
 
   Scenario: Drop existing namespace removes it
     Given statement

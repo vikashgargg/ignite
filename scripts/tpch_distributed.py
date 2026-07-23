@@ -30,7 +30,7 @@ Environment Variables:
     TPCH_PASS_THRESHOLD Minimum queries that must pass (default: 22)
 
 Requirements:
-    pip install pyspark[connect]==4.0.0 duckdb pandas pyarrow
+    pip install pyspark[connect]==4.2.0 duckdb pandas pyarrow
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ except ImportError:
 try:
     from pyspark.sql import SparkSession
 except ImportError:
-    print("ERROR: pyspark not installed. Run: pip install pyspark[connect]==4.0.0")
+    print("ERROR: pyspark not installed. Run: pip install pyspark[connect]==4.2.0")
     sys.exit(1)
 
 SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "sc://localhost:50051")

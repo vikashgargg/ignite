@@ -46,7 +46,7 @@ def large_dataset(spark):
     spark.catalog.dropTempView("large_dataset")
 
 
-@pytest.mark.skipif(is_jvm_spark(), reason="Sail local-cluster mode only")
+@pytest.mark.skipif(is_jvm_spark(), reason="Zelox local-cluster mode only")
 class TestLocalClusterExecution:
     def test_basic_query_execution(self, spark):
         """Test basic query execution in local-cluster mode."""

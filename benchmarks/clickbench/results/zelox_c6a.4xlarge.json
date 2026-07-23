@@ -3,7 +3,7 @@
   "date": "2026-06-06",
   "machine": "c6a.4xlarge",
   "cluster_size": 1,
-  "comment": "Zelox v0.6.0-alpha released x86_64-unknown-linux-gnu binary, `zelox server` default local mode (16 threads), single node, full hits.parquet (99.99M rows, 14779976446 bytes) on local gp3 disk, Spark Connect client (pyspark 3.5.3), best-of-3. Identical harness to ClickHouse/ClickBench/sail; run on the same c6a.4xlarge instance class LakeSail published.",
+  "comment": "Zelox v0.6.0-alpha released x86_64-unknown-linux-gnu binary, `zelox server` default local mode (16 threads), single node, full hits.parquet (99.99M rows, 14779976446 bytes) on local gp3 disk, Spark Connect client (pyspark 3.5.3), best-of-3. Identical harness to ClickHouse/ClickBench/Sail; run on the same c6a.4xlarge instance class LakeSail published.",
   "tags": ["Rust", "DataFusion", "column-oriented", "Spark-compatible"],
   "load_time": 0,
   "data_size": 14779976446,

@@ -41,7 +41,7 @@ class TestDeltaAdvancedFeatures:
         with crc_path.open("w", encoding="utf-8") as f:
             json.dump(crc_obj, f, separators=(",", ":"))
 
-    @pytest.mark.skipif(is_jvm_spark(), reason="Sail only - Delta Lake time travel")
+    @pytest.mark.skipif(is_jvm_spark(), reason="Zelox only - Delta Lake time travel")
     def test_delta_feature_time_travel_by_version(self, spark, tmp_path):
         """Test Delta Lake time travel functionality by version."""
         delta_path = tmp_path / "delta_table"
@@ -75,7 +75,7 @@ class TestDeltaAdvancedFeatures:
         expected_v1 = [Row(id=1, value="v0"), Row(id=2, value="v1")]
         assert v1_df.collect() == expected_v1
 
-    @pytest.mark.skipif(is_jvm_spark(), reason="Sail only - Delta Lake time travel")
+    @pytest.mark.skipif(is_jvm_spark(), reason="Zelox only - Delta Lake time travel")
     def test_delta_feature_time_travel_by_timestamp(self, spark, tmp_path):
         """Test Delta Lake time travel functionality by timestamp."""
         delta_path = tmp_path / "delta_table"
@@ -119,7 +119,7 @@ class TestDeltaAdvancedFeatures:
         v2_df = spark.read.format("delta").option("timestampAsOf", ts2).load(delta_table_path)
         assert v2_df.collect() == [Row(id=3, value="v2")]
 
-    @pytest.mark.skipif(is_jvm_spark(), reason="Sail only - Delta Lake in-commit timestamps")
+    @pytest.mark.skipif(is_jvm_spark(), reason="Zelox only - Delta Lake in-commit timestamps")
     def test_delta_feature_time_travel_uses_in_commit_timestamp_not_json_mtime(self, spark, tmp_path):
         delta_path = tmp_path / "delta_ict_table"
         delta_table_path = str(delta_path)

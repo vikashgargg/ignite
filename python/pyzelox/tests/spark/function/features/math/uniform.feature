@@ -1,7 +1,7 @@
 Feature: uniform() generates random numbers within a range
 
   # IMPLEMENTATION NOTE:
-  # Sail uses `SparkXorShiftRandom` (a port of Apache Spark's XORShiftRandom),
+  # Zelox uses `SparkXorShiftRandom` (a port of Apache Spark's XORShiftRandom),
   # so for the same seed the produced values are bit-for-bit identical to
   # Spark JVM — including the first-row value, float/double truncation, and
   # multi-row sequences.

@@ -49,12 +49,12 @@ def moto_endpoint(moto_container: DockerContainer) -> str:
 
 @pytest.fixture(scope="module")
 def glue_remote(moto_endpoint: str) -> Generator[str, None, None]:
-    """Start Sail server configured with Glue catalog as the default."""
-    # Configure Sail with Glue as the default catalog (TOML inline table format)
+    """Start Zelox server configured with Glue catalog as the default."""
+    # Configure Zelox with Glue as the default catalog (TOML inline table format)
     # Using Glue as the sole catalog to work around Figment env var parsing limitations
-    catalogs_config = f'[{{name="sail", type="glue", region="us-east-1", endpoint_url="{moto_endpoint}"}}]'
+    catalogs_config = f'[{{name="zelox", type="glue", region="us-east-1", endpoint_url="{moto_endpoint}"}}]'
 
-    # Set environment variables for Sail configuration
+    # Set environment variables for Zelox configuration
     old_catalogs = os.environ.get("ZELOX_CATALOG__LIST")
     old_aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
     old_aws_secret = os.environ.get("AWS_SECRET_ACCESS_KEY")
@@ -93,7 +93,7 @@ def glue_remote(moto_endpoint: str) -> Generator[str, None, None]:
 
 @pytest.fixture(scope="module")
 def glue_spark(glue_remote: str) -> Generator[SparkSession, None, None]:
-    """Create a Spark session connected to Sail with Glue catalog as default."""
+    """Create a Spark session connected to Zelox with Glue catalog as default."""
     spark = SparkSession.builder.remote(glue_remote).appName("glue_test").getOrCreate()
     configure_spark_session(spark)
     patch_spark_connect_session(spark)

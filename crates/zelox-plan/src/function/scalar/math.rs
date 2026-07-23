@@ -43,7 +43,7 @@ use crate::function::common::{ScalarFunction, ScalarFunctionInput};
 ///   - Otherwise, the result type matches left.
 ///
 /// All of the above conditions should be handled by the DataFusion.
-/// If there is a discrepancy in parity, check the link below and adjust Sail's logic accordingly:
+/// If there is a discrepancy in parity, check the link below and adjust Zelox's logic accordingly:
 ///   https://github.com/apache/datafusion/blob/a28f2834c6969a0c0eb26165031f8baa1e1156a5/datafusion/expr-common/src/type_coercion/binary.rs#L194
 fn spark_plus(input: ScalarFunctionInput) -> PlanResult<Expr> {
     let ScalarFunctionInput {
@@ -95,7 +95,7 @@ fn spark_plus(input: ScalarFunctionInput) -> PlanResult<Expr> {
 ///   - Otherwise, the result type matches left.
 ///
 /// All of the above conditions should be handled by the DataFusion.
-/// If there is a discrepancy in parity, check the link below and adjust Sail's logic accordingly:
+/// If there is a discrepancy in parity, check the link below and adjust Zelox's logic accordingly:
 ///   https://github.com/apache/datafusion/blob/a28f2834c6969a0c0eb26165031f8baa1e1156a5/datafusion/expr-common/src/type_coercion/binary.rs#L194
 fn spark_minus(input: ScalarFunctionInput) -> PlanResult<Expr> {
     let ScalarFunctionInput {
@@ -144,7 +144,7 @@ fn spark_minus(input: ScalarFunctionInput) -> PlanResult<Expr> {
 ///   - In all other cases the result is a DOUBLE.
 ///
 /// All of the above conditions should be handled by the DataFusion.
-/// If there is a discrepancy in parity, check the link below and adjust Sail's logic accordingly:
+/// If there is a discrepancy in parity, check the link below and adjust Zelox's logic accordingly:
 ///   https://github.com/apache/datafusion/blob/a28f2834c6969a0c0eb26165031f8baa1e1156a5/datafusion/expr-common/src/type_coercion/binary.rs#L194
 fn spark_multiply(input: ScalarFunctionInput) -> PlanResult<Expr> {
     let ScalarFunctionInput {
@@ -271,7 +271,7 @@ fn make_safe_divisor(
 ///   - In all other cases, a DOUBLE.
 ///
 /// All of the above conditions should be handled by the DataFusion.
-/// If there is a discrepancy in parity, check the link below and adjust Sail's logic accordingly:
+/// If there is a discrepancy in parity, check the link below and adjust Zelox's logic accordingly:
 ///   https://github.com/apache/datafusion/blob/a28f2834c6969a0c0eb26165031f8baa1e1156a5/datafusion/expr-common/src/type_coercion/binary.rs#L194
 fn spark_divide(input: ScalarFunctionInput) -> PlanResult<Expr> {
     let ScalarFunctionInput {

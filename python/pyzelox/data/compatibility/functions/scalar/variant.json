@@ -44,6 +44,6 @@
     "module": "pyspark.sql.functions",
     "function": "variant_to_json",
     "status": "supported",
-    "note": "This is Sail exclusive (not available in PySpark or Spark SQL)."
+    "note": "This is Zelox exclusive (not available in PySpark or Spark SQL)."
   }
 ]

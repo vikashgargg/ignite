@@ -12,7 +12,7 @@ from pyzelox.tests.spark.iceberg.utils import create_sql_catalog, pyiceberg_to_p
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="not working on Windows")
-def test_pyiceberg_read_after_sail_overwrite(spark, tmp_path):
+def test_pyiceberg_read_after_zelox_overwrite(spark, tmp_path):
     catalog = create_sql_catalog(tmp_path)
     identifier = "default.cross_overwrite"
     schema = Schema(
@@ -44,7 +44,7 @@ def test_pyiceberg_read_after_sail_overwrite(spark, tmp_path):
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="not working on Windows")
-def test_pyiceberg_read_after_sail_append(spark, tmp_path):
+def test_pyiceberg_read_after_zelox_append(spark, tmp_path):
     catalog = create_sql_catalog(tmp_path)
     identifier = "default.cross_append"
     schema = Schema(
@@ -81,7 +81,7 @@ def test_pyiceberg_read_after_sail_append(spark, tmp_path):
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="not working on Windows")
-def test_static_table_read_after_sail_overwrite(spark, tmp_path):
+def test_static_table_read_after_zelox_overwrite(spark, tmp_path):
     catalog = create_sql_catalog(tmp_path)
     identifier = "default.static_overwrite"
     schema = Schema(
@@ -115,7 +115,7 @@ def test_static_table_read_after_sail_overwrite(spark, tmp_path):
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="not working on Windows")
-def test_static_table_read_after_sail_append(spark, tmp_path):
+def test_static_table_read_after_zelox_append(spark, tmp_path):
     catalog = create_sql_catalog(tmp_path)
     identifier = "default.static_append"
     schema = Schema(
@@ -148,7 +148,7 @@ def test_static_table_read_after_sail_append(spark, tmp_path):
 
 
 @pytest.mark.skipif(platform.system() == "Windows", reason="not working on Windows")
-def test_static_table_read_multiple_sail_writes(spark, tmp_path):
+def test_static_table_read_multiple_zelox_writes(spark, tmp_path):
     catalog = create_sql_catalog(tmp_path)
     identifier = "default.static_multiple"
     schema = Schema(

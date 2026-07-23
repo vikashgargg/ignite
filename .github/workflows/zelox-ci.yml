@@ -166,7 +166,7 @@ jobs:
       - name: Set up smoke venv
         run: |
           python3.12 -m venv .venvs/smoke
-          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.2.0" setuptools
 
       - name: Start zelox in local-cluster mode
         env:
@@ -284,7 +284,7 @@ jobs:
       - name: Set up candidate venv (pyspark Spark Connect)
         run: |
           python3.12 -m venv .venvs/smoke
-          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.2.0" setuptools
 
       - name: Run reference (real Apache Spark)
         working-directory: scripts/diff_test
@@ -359,7 +359,7 @@ jobs:
       - name: Set up smoke venv
         run: |
           python3.12 -m venv .venvs/smoke
-          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.2.0" setuptools
 
       - name: Prepare shared scratch directories
         run: mkdir -p /tmp/zelox /tmp/zelox /private/tmp/zelox
@@ -457,7 +457,7 @@ jobs:
       - name: Set up smoke venv
         run: |
           python3.12 -m venv .venvs/smoke
-          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" setuptools
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.2.0" setuptools
 
       - name: Start zelox in local-cluster mode
         env:
@@ -551,7 +551,7 @@ jobs:
       - name: Set up Python venv
         run: |
           python3.12 -m venv .venvs/smoke
-          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.0.0" duckdb pandas pyarrow setuptools
+          .venvs/smoke/bin/pip install --quiet "pyspark[connect]==4.2.0" duckdb pandas pyarrow setuptools
 
       - name: Start zelox in local-cluster mode
         env:

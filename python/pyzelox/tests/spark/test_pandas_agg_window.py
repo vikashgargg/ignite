@@ -31,7 +31,7 @@ def test_registered_pandas_grouped_agg_udf_as_window_function(spark):
     assert_frame_equal(actual, expected)
 
 
-@pytest.mark.skipif(is_jvm_spark(), reason="Sail only: error message differs from JVM Spark")
+@pytest.mark.skipif(is_jvm_spark(), reason="Zelox only: error message differs from JVM Spark")
 def test_registered_pandas_scalar_udf_rejected_as_window_function(spark):
     @pandas_udf("string", PandasUDFType.SCALAR)
     def my_upper(s):

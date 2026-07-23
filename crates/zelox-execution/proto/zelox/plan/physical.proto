@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package sail.plan;
+package zelox.plan;
 
 // All DataFusion data structures are represented as opaque bytes.
 // The encoding and decoding of these data structures are handled
@@ -125,11 +125,11 @@ message ExtendedScalarUdf {
 // map_zip_with). The lambda body is a serialized physical expression so the
 // UDF can be reconstructed on remote workers.
 message HigherOrderUdf {
-  string name = 1;                  // e.g. "sail_array_transform"
+  string name = 1;                  // e.g. "zelox_array_transform"
   bytes lambda_expr = 2;            // serialized physical expr (via try_encode_message)
   repeated string param_names = 3;  // ordered; layout known per name
   optional bytes return_type = 4;   // serialized DataType; absent for exists/forall
-  optional bytes finish_expr = 5;   // only for sail_array_aggregate
+  optional bytes finish_expr = 5;   // only for zelox_array_aggregate
 }
 
 message ExtendedStreamUdf {

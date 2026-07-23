@@ -5,16 +5,16 @@ rank: 25
 
 # Running Ibis Tests
 
-You can run Ibis unit tests with the Spark backend connected to the Sail server.
+You can run Ibis unit tests with the Spark backend connected to the Zelox server.
 
 ::: info
 The Ibis tests are not run in GitHub pull requests yet since the setup is not fully working.
-But you can run them locally to work on missing Ibis features in Sail.
+But you can run them locally to work on missing Ibis features in Zelox.
 :::
 
 ## Running the Spark Connect Server
 
-Use the following command to build and run the Sail Spark Connect server in the `test-ibis` environment.
+Use the following command to build and run the Zelox Spark Connect server in the `test-ibis` environment.
 
 ```bash
 hatch run test-ibis:scripts/spark-tests/run-server.sh

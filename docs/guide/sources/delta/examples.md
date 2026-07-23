@@ -100,7 +100,7 @@ df = spark.read.format("delta").option("versionAsOf", "0").load(path)
 df = spark.read.format("delta").option("timestampAsOf", "2025-01-02T03:04:05.678").load(path)
 ```
 
-Time travel is not available for Spark SQL in Sail yet, but we plan to support it soon.
+Time travel is not available for Spark SQL in Zelox yet, but we plan to support it soon.
 
 ## Column Mapping
 
@@ -115,5 +115,5 @@ Existing Delta tables with column mapping can be read as usual.
 
 ## More Features
 
-We will continue adding more examples for advanced Delta Lake features as they become available in Sail.
-In the meantime, feel free to reach out to us on [Slack](https://lakesail.com/slack) or [GitHub Discussions](https://github.com/lakehq/zelox/discussions) if you have questions!
+We will continue adding more examples for advanced Delta Lake features as they become available in Zelox.
+In the meantime, feel free to reach out to us on [GitHub Discussions](https://github.com/vikashgargg/zelox/discussions) if you have questions!

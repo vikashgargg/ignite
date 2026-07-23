@@ -66,7 +66,7 @@ pub struct SparkDayTimeIntervalType {
 }
 
 impl SparkDayTimeIntervalType {
-    pub const NAME: &'static str = "sail.spark.dayTime.interval";
+    pub const NAME: &'static str = "zelox.spark.dayTime.interval";
 }
 
 impl ExtensionType for SparkDayTimeIntervalType {
@@ -115,7 +115,7 @@ pub struct SparkYearMonthIntervalType {
 }
 
 impl SparkYearMonthIntervalType {
-    pub const NAME: &'static str = "sail.spark.yearMonth.interval";
+    pub const NAME: &'static str = "zelox.spark.yearMonth.interval";
 }
 
 impl ExtensionType for SparkYearMonthIntervalType {

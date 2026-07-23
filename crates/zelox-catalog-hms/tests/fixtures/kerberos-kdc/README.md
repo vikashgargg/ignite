@@ -32,7 +32,7 @@ using their container hostnames.
 
 ### `localhost` as the service principal hostname
 
-The test uses `hive-metastore/localhost@SAIL.TEST` as the service principal
+The test uses `hive-metastore/localhost@ZELOX.TEST` as the service principal
 instead of the Docker container hostname (`zelox-kerberos-hms`). This avoids
 the GSSAPI `GSS_C_NT_HOSTBASED_SERVICE` name type performing forward/reverse
 DNS lookups on the container hostname, which would resolve to the CI runner's
@@ -70,7 +70,7 @@ This option was added in MIT Kerberos 1.18.
 
 The client's `krb5.conf` includes `[domain_realm]` entries mapping Azure CI
 domains (`.internal.cloudapp.net`, `.cloudapp.net`) and local domains
-(`localhost`, `.local`) to `SAIL.TEST`. This ensures that even if any hostname
+(`localhost`, `.local`) to `ZELOX.TEST`. This ensures that even if any hostname
 leaks through the canonicalization safeguards, the Kerberos library maps it to
 our test realm instead of attempting a cross-realm TGT lookup.
 

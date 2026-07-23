@@ -20,7 +20,7 @@ impl ContextPropagationHeader {
 
 /// Common span attribute names.
 /// The name either follow the OpenTelemetry semantic conventions,
-/// or is specific to Sail.
+/// or is specific to Zelox.
 pub struct SpanAttribute;
 
 impl SpanAttribute {

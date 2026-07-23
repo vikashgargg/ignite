@@ -1,5 +1,11 @@
 # Continuous multi-partition stateful exactly-once — the Flink-class fix
 
+> **RESOLVED (2026-07-04).** The crash-EO-at-scale residual investigated below was closed by
+> **aligned checkpoint barriers** (`73d645a1`, Flink ABS) — the barrier-aligned atomic commit this
+> document concludes was necessary. Merged in `cfae68f1` and EKS-confirmed at 100M events in
+> `623517f3` (dup=0, sum exact, clean == crash). **The "genuinely broken at scale" findings below are
+> the pre-fix investigation record — retained for the root-cause trail, not current status.**
+
 Branch: `streaming/continuous-stateful-eo` · **Status: ✅ DONE (2026-07-03) — C6 + C7 GREEN by default.**
 Gate cells closed: **C6** (continuous 4-partition, no-dup) + **C7** (continuous 4-partition + crash, EO)
 in `scripts/correctness_gate.sh` — promoted XFAIL→GREEN; full gate GREEN (6/6, no regression).

@@ -11,7 +11,7 @@ use arrow_flight::flight_service_server::FlightServiceServer;
 use zelox_common::config::AppConfig;
 use zelox_common::runtime::RuntimeHandle;
 use zelox_server::{ServerBuilder, ServerBuilderOptions};
-use service::SailFlightSqlService;
+use service::ZeloxFlightSqlService;
 use session::create_flight_session_manager;
 use tokio::net::TcpListener;
 
@@ -25,7 +25,7 @@ where
     F: Future<Output = ()>,
 {
     let session_manager = create_flight_session_manager(config, runtime)?;
-    let service = SailFlightSqlService::new(session_manager);
+    let service = ZeloxFlightSqlService::new(session_manager);
     let flight_service = FlightServiceServer::new(service);
 
     let builder = ServerBuilder::new("flight_sql", ServerBuilderOptions::default())?

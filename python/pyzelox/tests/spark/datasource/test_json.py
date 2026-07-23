@@ -64,7 +64,7 @@ def test_json_read_uppercase_extension(spark, tmp_path):
 
 
 # -----------------------------------------------------------------------------
-# Case-insensitive extension matching for JSON. Sail reads every non-hidden
+# Case-insensitive extension matching for JSON. Zelox reads every non-hidden
 # file regardless of extension case (matching Spark). The tests below cover
 # the schema-provided path across single files, directories, mixed case, and
 # compression.

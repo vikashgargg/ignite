@@ -30,7 +30,7 @@ openapi-generator generate \
   --input-spec crates/zelox-catalog-iceberg/spec/iceberg-rest-catalog.yaml \
   --output crates/zelox-catalog-iceberg/src/generated_rest_temp \
   --skip-validate-spec \
-  --schema-mappings Type=sail_iceberg::spec::Type,StructType=sail_iceberg::spec::StructType,ListType=sail_iceberg::spec::ListType,MapType=sail_iceberg::spec::MapType,StructField=sail_iceberg::spec::NestedFieldRef
+  --schema-mappings Type=zelox_iceberg::spec::Type,StructType=zelox_iceberg::spec::StructType,ListType=zelox_iceberg::spec::ListType,MapType=zelox_iceberg::spec::MapType,StructField=zelox_iceberg::spec::NestedFieldRef
 
 echo "==> Flattening generated code to src/..."
 

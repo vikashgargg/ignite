@@ -152,7 +152,7 @@
     "module": "pyspark.sql.functions",
     "function": "try_aes_encrypt",
     "status": "supported",
-    "note": "This is Sail exclusive (not available in PySpark or Spark SQL)."
+    "note": "This is Zelox exclusive (not available in PySpark or Spark SQL)."
   },
   {
     "module": "pyspark.sql.functions",

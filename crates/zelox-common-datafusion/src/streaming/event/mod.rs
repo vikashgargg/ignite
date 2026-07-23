@@ -6,7 +6,7 @@ pub mod stream;
 use datafusion::arrow::array::{BooleanArray, BooleanBuilder, RecordBatch};
 
 pub(crate) mod gen {
-    tonic::include_proto!("sail.streaming");
+    tonic::include_proto!("zelox.streaming");
 }
 
 /// An event in a streaming data flow.

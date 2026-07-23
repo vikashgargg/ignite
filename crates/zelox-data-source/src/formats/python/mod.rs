@@ -1,8 +1,8 @@
-//! Python data source support for Sail.
+//! Python data source support for Zelox.
 //!
 //! This module provides the infrastructure for Python-defined data sources,
 //! enabling users to implement custom data sources in Python while leveraging
-//! Sail's distributed execution.
+//! Zelox's distributed execution.
 //!
 //! # Architecture
 //!

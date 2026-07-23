@@ -31,7 +31,7 @@ def _run(endpoint: str, spark: SparkSession):
       /_/
 
 Using Python version {python_version} ({build_number}, {build_date})
-Client connected to the Sail Spark Connect server at {endpoint}
+Client connected to the Zelox Spark Connect server at {endpoint}
 SparkSession available as 'spark'."""
     code.interact(local=namespace, banner=banner, exitmsg="")
 

@@ -1,7 +1,7 @@
 """Integration tests for the JDBC data source using testcontainers.
 
 A PostgreSQL container is started once per session and torn down at the end.
-All tests run against the container using the Sail Spark Connect server.
+All tests run against the container using the Zelox Spark Connect server.
 """
 
 from __future__ import annotations

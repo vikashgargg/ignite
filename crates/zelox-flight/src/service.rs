@@ -28,27 +28,27 @@ use tokio::sync::Mutex;
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::metrics::{MetricsRecordingContext, MetricsRecordingStream, StatementType};
-use crate::state::{QueryHandle, SailFlightSqlState};
+use crate::state::{QueryHandle, ZeloxFlightSqlState};
 
-pub struct SailFlightSqlService {
+pub struct ZeloxFlightSqlService {
     session_manager: SessionManager,
     config: Arc<PlanConfig>,
     metrics: Option<Arc<MetricRegistry>>,
-    state: Arc<Mutex<SailFlightSqlState>>,
+    state: Arc<Mutex<ZeloxFlightSqlState>>,
 }
 
-impl SailFlightSqlService {
+impl ZeloxFlightSqlService {
     pub fn new(session_manager: SessionManager) -> Self {
         let config = Arc::new(PlanConfig::default());
         let metrics = global_metrics().map(|m| m.registry);
         if metrics.is_some() {
             info!("OpenTelemetry metrics enabled for Flight SQL service");
         }
-        SailFlightSqlService {
+        ZeloxFlightSqlService {
             session_manager,
             config,
             metrics,
-            state: Arc::new(Mutex::new(SailFlightSqlState::new())),
+            state: Arc::new(Mutex::new(ZeloxFlightSqlState::new())),
         }
     }
 
@@ -67,8 +67,8 @@ impl SailFlightSqlService {
 }
 
 #[tonic::async_trait]
-impl FlightSqlService for SailFlightSqlService {
-    type FlightService = SailFlightSqlService;
+impl FlightSqlService for ZeloxFlightSqlService {
+    type FlightService = ZeloxFlightSqlService;
 
     async fn do_handshake(
         &self,

@@ -1,5 +1,5 @@
 # ruff: noqa: PLR2004, PT018, S608, TC002
-"""Sail -> Spark roundtrip tests through a shared HMS metastore.
+"""Zelox -> Spark roundtrip tests through a shared HMS metastore.
 
 All tests use the MinIO-backed S3 warehouse to avoid Docker bind-mount
 permission issues on CI.
@@ -32,7 +32,7 @@ def _assert_reference_spark_table(
     *,
     table_type: str,
 ) -> None:
-    """Assert Spark restores Sail-written HMS metadata as a data-source table."""
+    """Assert Spark restores Zelox-written HMS metadata as a data-source table."""
     spark_table = _reference_catalog_table(reference_spark, database, table)
 
     assert spark_table.tableType().name() == table_type
@@ -44,12 +44,12 @@ def _assert_reference_spark_table(
 # ---------------------------------------------------------------------------
 
 
-def test_sail_creates_spark_reads_parquet(
+def test_zelox_creates_spark_reads_parquet(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail creates an external Parquet table; reference Spark reads it back."""
+    """Zelox creates an external Parquet table; reference Spark reads it back."""
     table = "roundtrip_parquet"
     table_fqn = f"{hms_s3_database}.{table}"
 
@@ -60,13 +60,13 @@ def test_sail_creates_spark_reads_parquet(
           name STRING
         )
         USING PARQUET
-        TBLPROPERTIES ('interop.owner' = 'sail')
+        TBLPROPERTIES ('interop.owner' = 'zelox')
         """
     )
     hms_s3_spark.sql(f"INSERT INTO {table_fqn} VALUES (1, 'alice'), (2, 'bob')")
 
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
-    assert len(sail_rows) == 2, f"Sail expected 2 rows, got {len(sail_rows)}"
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    assert len(zelox_rows) == 2, f"Zelox expected 2 rows, got {len(zelox_rows)}"
 
     _assert_reference_spark_table(
         reference_spark_s3,
@@ -82,17 +82,17 @@ def test_sail_creates_spark_reads_parquet(
     ref_properties = _describe_extended_properties(reference_spark_s3, table_fqn)
     assert ref_properties.get("Type") == "EXTERNAL"
     assert ref_properties.get("Provider", "").lower() == "parquet"
-    assert "interop.owner=sail" in ref_properties.get("Table Properties", "")
+    assert "interop.owner=zelox" in ref_properties.get("Table Properties", "")
     assert "spark.sql." not in ref_properties.get("Table Properties", "")
     assert _describe_column_comments(reference_spark_s3, table_fqn)["id"] == "identifier"
 
 
-def test_sail_creates_spark_reads_schema_matrix_parquet(
+def test_zelox_creates_spark_reads_schema_matrix_parquet(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail writes tricky supported Parquet types; Spark restores schema and values."""
+    """Zelox writes tricky supported Parquet types; Spark restores schema and values."""
     table = "roundtrip_schema_matrix"
     table_fqn = f"{hms_s3_database}.{table}"
 
@@ -167,12 +167,12 @@ def test_sail_creates_spark_reads_schema_matrix_parquet(
     _assert_schema_matrix_rows(ref_rows)
 
 
-def test_sail_creates_spark_reads_timestamp_types_parquet(
+def test_zelox_creates_spark_reads_timestamp_types_parquet(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail writes timestamp LTZ/NTZ columns; Spark restores schema and values."""
+    """Zelox writes timestamp LTZ/NTZ columns; Spark restores schema and values."""
     table = "roundtrip_timestamp_types"
     table_fqn = f"{hms_s3_database}.{table}"
 
@@ -213,12 +213,12 @@ def test_sail_creates_spark_reads_timestamp_types_parquet(
     assert [(r.id, r.ts_ltz, r.ts_ntz) for r in rows] == [(1, "2024-01-02 03:04:05", "2024-01-02 03:04:05")]
 
 
-def test_sail_creates_spark_reads_parquet_with_explicit_location(
+def test_zelox_creates_spark_reads_parquet_with_explicit_location(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail creates an external Parquet table with S3 LOCATION; Spark reads it back."""
+    """Zelox creates an external Parquet table with S3 LOCATION; Spark reads it back."""
     table = "roundtrip_location_parquet"
     table_fqn = f"{hms_s3_database}.{table}"
     location = f"s3://hms-warehouse/{hms_s3_database}/roundtrip_location_parquet"
@@ -226,8 +226,8 @@ def test_sail_creates_spark_reads_parquet_with_explicit_location(
     hms_s3_spark.sql(f"CREATE TABLE {table_fqn} (id INT, name STRING) USING PARQUET LOCATION '{location}'")
     hms_s3_spark.sql(f"INSERT INTO {table_fqn} VALUES (1, 'alice'), (2, 'bob')")
 
-    sail_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
-    assert len(sail_rows) == 2, f"Sail expected 2 rows, got {len(sail_rows)}"
+    zelox_rows = hms_s3_spark.sql(f"SELECT * FROM {table_fqn} ORDER BY id").collect()
+    assert len(zelox_rows) == 2, f"Zelox expected 2 rows, got {len(zelox_rows)}"
 
     _assert_reference_spark_table(
         reference_spark_s3,
@@ -241,12 +241,12 @@ def test_sail_creates_spark_reads_parquet_with_explicit_location(
     assert ref_rows[1].id == 2 and ref_rows[1].name == "bob"
 
 
-def test_sail_unsets_table_properties_spark_observes_metadata_change(
+def test_zelox_unsets_table_properties_spark_observes_metadata_change(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail ALTER TABLE UNSET TBLPROPERTIES updates HMS metadata for Spark."""
+    """Zelox ALTER TABLE UNSET TBLPROPERTIES updates HMS metadata for Spark."""
     table = "roundtrip_unset_properties"
     table_fqn = f"{hms_s3_database}.{table}"
 
@@ -266,12 +266,12 @@ def test_sail_unsets_table_properties_spark_observes_metadata_change(
     assert "spark.sql." not in table_properties
 
 
-def test_sail_creates_external_table_via_catalog_api(
+def test_zelox_creates_external_table_via_catalog_api(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail creates an external table via spark.catalog API; Spark reads it back as EXTERNAL."""
+    """Zelox creates an external table via spark.catalog API; Spark reads it back as EXTERNAL."""
     table = "roundtrip_catalog_api_external"
     table_fqn = f"{hms_s3_database}.{table}"
     location = f"s3://hms-warehouse/{hms_s3_database}/{table}"
@@ -299,12 +299,12 @@ def test_sail_creates_external_table_via_catalog_api(
     assert ref_properties.get("Provider", "").lower() == "parquet"
 
 
-def test_sail_dataframe_writer_creates_spark_readable_external_table(
+def test_zelox_dataframe_writer_creates_spark_readable_external_table(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail DataFrame writer creates HMS metadata that Spark can read."""
+    """Zelox DataFrame writer creates HMS metadata that Spark can read."""
     table = "roundtrip_dataframe_writer"
     table_fqn = f"{hms_s3_database}.{table}"
     location = f"s3://hms-warehouse/{hms_s3_database}/{table}"
@@ -327,12 +327,12 @@ def test_sail_dataframe_writer_creates_spark_readable_external_table(
     assert [(row.id, row.name) for row in rows] == [(1, "alice"), (2, "bob")]
 
 
-def test_sail_creates_spark_reads_mixed_complex_partitioned_parquet(
+def test_zelox_creates_spark_reads_mixed_complex_partitioned_parquet(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail writes mixed complex partitioned schema; Spark reads nested values and partitions."""
+    """Zelox writes mixed complex partitioned schema; Spark reads nested values and partitions."""
     table = "roundtrip_mixed_complex_partitioned"
     table_fqn = f"{hms_s3_database}.{table}"
 
@@ -428,12 +428,12 @@ def test_sail_creates_spark_reads_mixed_complex_partitioned_parquet(
     ] == [(1, True, "l1", 1, 3, 2.5, "retail", "2024-01-02")]
 
 
-def test_sail_creates_spark_reads_date_and_binary_parquet(
+def test_zelox_creates_spark_reads_date_and_binary_parquet(
     hms_s3_spark: SparkSession,
     reference_spark_s3: SparkSession,
     hms_s3_database: str,
 ) -> None:
-    """Sail writes DATE and BINARY values; Spark restores exact values."""
+    """Zelox writes DATE and BINARY values; Spark restores exact values."""
     table = "roundtrip_date_binary"
     table_fqn = f"{hms_s3_database}.{table}"
 

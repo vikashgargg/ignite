@@ -93,7 +93,7 @@ impl GlobalState {
     /// Gets the global state instance, initializing it if necessary.
     ///
     /// The global state is not supposed to be initialized or accessed
-    /// if the current Python interpreter uses the Sail CLI entrypoint.
+    /// if the current Python interpreter uses the Zelox CLI entrypoint.
     /// Otherwise, an error will be raised due to conflicting telemetry
     /// initialization.
     ///

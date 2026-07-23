@@ -109,7 +109,7 @@ Feature: schema_of_variant
     Scenario: schema_of_variant object with multiple fields
       When query
         """
-        SELECT schema_of_variant(parse_json('{"name":"sail","age":5,"active":true}')) AS result
+        SELECT schema_of_variant(parse_json('{"name":"zelox","age":5,"active":true}')) AS result
         """
       Then query result
         | result                                             |

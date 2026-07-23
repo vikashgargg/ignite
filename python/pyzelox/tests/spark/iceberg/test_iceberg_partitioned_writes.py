@@ -109,7 +109,7 @@ def _build_sample_rows() -> List[Tuple[int, str, dt.datetime, dt.date]]:  # noqa
     ],
 )
 @pytest.mark.skipif(platform.system() == "Windows", reason="may not work on Windows")
-def test_partitioned_write_then_sail_read(
+def test_partitioned_write_then_zelox_read(
     spark, tmp_path, table_name, spec, predicate_column, predicate_value, expected_numbers
 ):
     catalog = create_sql_catalog(tmp_path)

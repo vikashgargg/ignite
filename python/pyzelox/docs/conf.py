@@ -9,7 +9,7 @@ from sphinxcontrib.serializinghtml import JSONHTMLBuilder
 if TYPE_CHECKING:
     from sphinx.application import Sphinx
 
-project = "Sail"
+project = "Zelox"
 copyright = "Zelox"  # noqa: A001
 author = "Zelox"
 

@@ -31,7 +31,7 @@ Feature: CAST and type constructors with NaN and Infinity (issue #630)
         | NaN    |
 
     @zelox-bug
-    # Sail does not trim spaces before parsing NaN
+    # Zelox does not trim spaces before parsing NaN
     Scenario: FLOAT NaN with spaces
       When query
         """
@@ -116,7 +116,7 @@ Feature: CAST and type constructors with NaN and Infinity (issue #630)
         | -Infinity |
 
     @zelox-bug
-    # Sail does not trim spaces before parsing Infinity
+    # Zelox does not trim spaces before parsing Infinity
     Scenario: DOUBLE Infinity with spaces
       When query
         """

@@ -57,7 +57,7 @@ def _write_metadata_only_log(table_path: Path) -> None:
 )
 def test_read_metadata_only_table_without_add_actions(spark, tmp_path: Path, read_mode: str):
     if is_jvm_spark():
-        pytest.skip("Sail-only: metadata-only Delta log replay behavior is Sail-specific")
+        pytest.skip("Zelox-only: metadata-only Delta log replay behavior is Zelox-specific")
 
     table_path = tmp_path / "delta_metadata_only"
     _write_metadata_only_log(table_path)

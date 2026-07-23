@@ -1,5 +1,5 @@
 # ruff: noqa: RUF002
-"""Minimal HMS smoke tests – Sail can connect to HMS and list databases."""
+"""Minimal HMS smoke tests – Zelox can connect to HMS and list databases."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ pytestmark = pytest.mark.catalog_integration
 
 
 def test_hms_list_default_database(hms_s3_spark):
-    """Sail connected to HMS should see at least the ``default`` database.
+    """Zelox connected to HMS should see at least the ``default`` database.
 
-    This is the smallest meaningful smoke assertion: verify that the Sail
+    This is the smallest meaningful smoke assertion: verify that the Zelox
     server can talk to the HMS container and that ``SHOW DATABASES``
     returns the built-in ``default`` database that every Hive Metastore
     creates on first startup.

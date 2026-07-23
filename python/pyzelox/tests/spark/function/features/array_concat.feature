@@ -1,7 +1,7 @@
 @zelox-only
-Feature: array_concat() concatenates arrays (Sail extension)
+Feature: array_concat() concatenates arrays (Zelox extension)
 
-  Note: array_concat is a Sail extension not available in standard Spark.
+  Note: array_concat is a Zelox extension not available in standard Spark.
   Use concat() for Spark-compatible array concatenation.
 
   Rule: Basic concatenation

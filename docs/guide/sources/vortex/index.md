@@ -5,7 +5,7 @@ rank: 5
 
 # Vortex Data Source
 
-Sail provides a columnar data source exposed under the `vortex` format name.
+Zelox provides a columnar data source exposed under the `vortex` format name.
 The implementation is based on the Python `vortex-data` library and supports
 filter pushdown with zero-copy Arrow data reads.
 

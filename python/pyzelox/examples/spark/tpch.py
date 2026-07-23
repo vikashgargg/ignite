@@ -34,7 +34,7 @@ class TpchBenchmark:
                 path = Path(self.data_path) / table
                 df = spark.read.format("delta").load(str(path))
             elif self.format == "iceberg":
-                # Iceberg requires file:// URL for local paths (especially with Sail)
+                # Iceberg requires file:// URL for local paths (especially with Zelox)
                 path = Path(self.data_path) / table
                 uri = path.resolve().as_uri() + "/"
                 df = spark.read.format("iceberg").load(uri)

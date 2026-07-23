@@ -5,7 +5,7 @@ rank: 4
 
 # JDBC Data Source
 
-Sail provides a database connector exposed under the `jdbc` format name for API parity with vanilla PySpark.
+Zelox provides a database connector exposed under the `jdbc` format name for API parity with vanilla PySpark.
 The implementation is based on the Python `connectorx` library.
 No actual JDBC driver or JVM is involved.
 

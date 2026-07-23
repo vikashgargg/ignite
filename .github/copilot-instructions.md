@@ -1,4 +1,4 @@
-Sail is a unified and distributed multimodal computation framework.
+Zelox is a unified and distributed multimodal computation framework.
 It is a drop-in replacement for Apache Spark via the Spark Connect protocol.
 It aims to unify batch, streaming, and AI workloads, offering high performance and low infrastructure costs.
 It is written in Rust and Python, and is built using technologies such as Apache Arrow, Apache DataFusion, Tokio, and PyO3.
@@ -11,7 +11,7 @@ It is written in Rust and Python, and is built using technologies such as Apache
   - `zelox-catalog`: Catalog interface and common utilities.
   - `zelox-catalog-*`: Catalog implementations.
   - `zelox-cli`: Command-line interface entry point.
-  - `zelox-common`: Sail configuration, query plan specification, and utilities.
+  - `zelox-common`: Zelox configuration, query plan specification, and utilities.
   - `zelox-common-datafusion`: DataFusion utilities.
   - `zelox-data-source`: Data source implementations.
   - `zelox-delta-lake`: Delta Lake integration.
@@ -31,7 +31,7 @@ It is written in Rust and Python, and is built using technologies such as Apache
   - `zelox-server`: gRPC server utilities and actor implementation.
   - `zelox-session`: Session management.
   - `zelox-spark-connect`: Spark Connect protocol implementation.
-  - `zelox-sql-*`: Sail SQL parser and analyzer.
+  - `zelox-sql-*`: Zelox SQL parser and analyzer.
   - `zelox-telemetry`: OpenTelemetry integration.
 - `docs/`: Documentation site built with VitePress.
 - `python/`: Source code for the `pyzelox` Python package.

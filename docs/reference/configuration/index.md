@@ -5,10 +5,10 @@ next: false
 
 # Configuration
 
-This page lists all the available configuration options for Sail.
+This page lists all the available configuration options for Zelox.
 
 ::: warning
-The Sail configuration system is not stable yet.
+The Zelox configuration system is not stable yet.
 
 For options with the ⚠ note, breaking changes can happen across versions **without notice**.
 

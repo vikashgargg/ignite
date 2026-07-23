@@ -40,7 +40,7 @@ impl<'a> ProtoBuilder<'a> {
         let protos = self
             .files
             .iter()
-            .map(|file| format!("proto/sail/{}/{}", self.package, file))
+            .map(|file| format!("proto/zelox/{}/{}", self.package, file))
             .collect::<Vec<_>>();
 
         for p in &protos {
@@ -82,7 +82,7 @@ impl<'a> ProtoBuilder<'a> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=build.rs");
     ProtoBuilder::new("plan", &["physical.proto"])
-        .boxed_fields(&[".sail.plan.ExtendedPhysicalPlanNode.NodeKind.delta_writer"])
+        .boxed_fields(&[".zelox.plan.ExtendedPhysicalPlanNode.NodeKind.delta_writer"])
         .build()?;
     ProtoBuilder::new("stream", &["common.proto"]).build()?;
     ProtoBuilder::new("task", &["common.proto"]).build()?;
@@ -90,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_service()
         .build()?;
     ProtoBuilder::new("worker", &["service.proto"])
-        .skip_debug(&["sail.worker.RunTaskRequest"])
+        .skip_debug(&["zelox.worker.RunTaskRequest"])
         .with_service()
         .build()?;
     Ok(())

@@ -1,7 +1,7 @@
 # ClickBench — Zelox in LakeSail's exact harness
 
-This reproduces the **ClickHouse/ClickBench `sail` harness**
-(<https://github.com/ClickHouse/ClickBench/tree/main/sail>) for Zelox, so Zelox
+This reproduces the **ClickHouse/ClickBench `zelox` harness**
+(<https://github.com/ClickHouse/ClickBench/tree/main/zelox>) for Zelox, so Zelox
 and LakeSail numbers are **directly comparable**. Because Zelox is forked from
 `lakehq/sail` and both speak Spark Connect, the only difference is the server the
 client connects to — the query set, data, and run protocol are identical.
@@ -15,7 +15,7 @@ client connects to — the query set, data, and run protocol are identical.
 ## Files
 | File | Purpose |
 |---|---|
-| `queries.sql` | The 43 ClickBench queries (Spark-Connect dialect; identical to sail). |
+| `queries.sql` | The 43 ClickBench queries (Spark-Connect dialect; identical to zelox). |
 | `run.py` | Runner — Spark Connect → Zelox, best-of-3, emits ClickBench JSON. |
 | `compare.py` | Per-query Zelox-vs-LakeSail diff + verdict. |
 | `results/lakesail_c6a.4xlarge.json` | LakeSail's **published** numbers (verbatim), the reference. |

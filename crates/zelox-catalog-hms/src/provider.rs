@@ -83,7 +83,7 @@ fn build_drop_table_request(purge: bool) -> DropTableRequest {
     });
 
     DropTableRequest {
-        // Sail treats HMS DROP TABLE as metadata-only and never requests
+        // Zelox treats HMS DROP TABLE as metadata-only and never requests
         // physical data deletion via the HMS delete_data flag.
         delete_data: false,
         environment_context,
@@ -256,7 +256,7 @@ fn catalog_auth_mode(
                 return Err(CatalogError::InvalidArgument(
                     "Kerberos auth was requested but the GSSAPI runtime library is not available. \
                      Install the Kerberos runtime (e.g. libgssapi-krb5-2 on Debian, krb5-libs on RHEL) \
-                     and run kinit before starting Sail."
+                     and run kinit before starting Zelox."
                         .to_string(),
                 ));
             }

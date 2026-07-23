@@ -288,7 +288,7 @@ pub enum PrimitiveType {
     /// Arbitrary-length byte array.
     Binary,
     /// Semi-structured data encoded using the Parquet Variant encoding.
-    /// TODO(V3): Iceberg models variant as a nested logical type; Sail currently keeps it as a primitive wrapper.
+    /// TODO(V3): Iceberg models variant as a nested logical type; Zelox currently keeps it as a primitive wrapper.
     Variant,
     /// Geometry encoded as Well-Known Binary.
     Geometry {

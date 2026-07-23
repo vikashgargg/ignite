@@ -85,7 +85,7 @@
       - Zone offset: It should be in the format '(+|-)HH:mm', for example '-08:00' or '+01:00'.
         Also 'UTC' and 'Z' are supported as aliases of '+00:00'.
     Other short names like 'CST' are not recommended to use because they can be ambiguous.
-    Defaults to the Sail configuration option `session.time_zone` (to be implemented).
+    Defaults to the Zelox configuration option `session.time_zone` (to be implemented).
   default:
     value: ""
     parser: crate::options::parsers::parse_string
@@ -311,7 +311,7 @@
 - key: column_name_of_corrupt_record
   description: |
     Allows renaming the new field having malformed string created by `PERMISSIVE` mode.
-    Defaults to the Sail configuration option `sql.column_name_of_corrupt_record` (to be implemented).
+    Defaults to the Zelox configuration option `sql.column_name_of_corrupt_record` (to be implemented).
   default:
     value: ""
     parser: crate::options::parsers::parse_string
@@ -585,7 +585,7 @@
 - key: ignore_null_fields
   description: |
     Whether to ignore null fields when generating JSON objects.
-    Defaults to the Sail configuration option `json_generator.ignore_null_fields` (to be implemented).
+    Defaults to the Zelox configuration option `json_generator.ignore_null_fields` (to be implemented).
   supported: false
   rust_type: bool
   scopes:
@@ -605,7 +605,7 @@
 - key: use_unsafe_row
   description: |
     Whether to use UnsafeRow to represent struct result in the JSON parser.
-    Defaults to the Sail configuration option `json.use_unsafe_row` (to be implemented).
+    Defaults to the Zelox configuration option `json.use_unsafe_row` (to be implemented).
   default:
     value: ""
     parser: crate::options::parsers::parse_string

@@ -1,6 +1,6 @@
-//! Python bindings for PySail.
+//! Python bindings for PyZelox.
 //!
-//! This module allows Python to interact with the Sail computation engine
+//! This module allows Python to interact with the Zelox computation engine
 //! by binding the Rust functions and types to Python.
 mod cli;
 mod flight;

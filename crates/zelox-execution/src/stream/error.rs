@@ -46,7 +46,7 @@ impl From<Status> for TaskStreamError {
         if status.code() == Code::Internal {
             let details = status.get_error_details();
             if let Some(info) = details.error_info() {
-                if let ("task stream", "sail", Some(cause)) = (
+                if let ("task stream", "zelox", Some(cause)) = (
                     info.reason.as_str(),
                     info.domain.as_str(),
                     info.metadata.get("cause"),
@@ -69,7 +69,7 @@ impl From<TaskStreamError> for Status {
         }
 
         let mut details = ErrorDetails::new();
-        details.set_error_info("task stream", "sail", metadata);
+        details.set_error_info("task stream", "zelox", metadata);
 
         Status::with_error_details(Code::Internal, "task stream error", details)
     }

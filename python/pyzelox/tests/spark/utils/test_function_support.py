@@ -1,18 +1,18 @@
 from inspect import cleandoc
 
 from pyzelox.spark.utils._function_support import (
-    check_sail_pyspark_compatibility,
-    load_sail_support_data,
+    check_zelox_pyspark_compatibility,
+    load_zelox_support_data,
 )
 
 
-def test_load_sail_support_data():
-    support_data = load_sail_support_data()
+def test_load_zelox_support_data():
+    support_data = load_zelox_support_data()
     assert support_data[("pyspark.sql.functions", "count")] == "supported"
     assert support_data[("pyspark.sql.DataFrame", "join")] == "supported"
 
 
-def test_check_sail_pyspark_compatibility(tmp_path):
+def test_check_zelox_pyspark_compatibility(tmp_path):
     code = cleandoc(
         """
         from pyspark.sql import SparkSession
@@ -34,4 +34,4 @@ def test_check_sail_pyspark_compatibility(tmp_path):
         ("pyspark.sql.session.SparkSession", "getOrCreate", "unknown"): 1,
         ("pyspark.sql.session.SparkSession", "range", "supported"): 1,
     }
-    assert check_sail_pyspark_compatibility(tmp_path) == expected
+    assert check_zelox_pyspark_compatibility(tmp_path) == expected

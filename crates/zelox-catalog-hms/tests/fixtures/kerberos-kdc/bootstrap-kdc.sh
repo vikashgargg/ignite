@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REALM="${KERBEROS_REALM:-SAIL.TEST}"
+REALM="${KERBEROS_REALM:-ZELOX.TEST}"
 KDC_HOSTNAME="${KDC_HOSTNAME:-zelox-kerberos-kdc}"
 SERVICE_PRINCIPAL="${1:?missing service principal}"
 CLIENT_PRINCIPAL="${2:?missing client principal}"

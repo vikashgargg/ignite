@@ -1,4 +1,4 @@
-//! Higher-order array/map function UDFs for Sail.
+//! Higher-order array/map function UDFs for Zelox.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -82,10 +82,10 @@ fn eval_transform(
 }
 
 // ============================================================
-// SailArrayFilter
+// ZeloxArrayFilter
 // ============================================================
 #[derive(Debug)]
-pub struct SailArrayFilter {
+pub struct ZeloxArrayFilter {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     param_names: Vec<String>,
@@ -93,7 +93,7 @@ pub struct SailArrayFilter {
     signature: Signature,
 }
 
-impl SailArrayFilter {
+impl ZeloxArrayFilter {
     pub fn new(
         lambda_expr: Arc<dyn PhysicalExpr>,
         param_names: Vec<String>,
@@ -109,7 +109,7 @@ impl SailArrayFilter {
     }
 }
 
-impl SailArrayFilter {
+impl ZeloxArrayFilter {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -120,19 +120,19 @@ impl SailArrayFilter {
     }
 }
 
-impl PartialEq for SailArrayFilter {
+impl PartialEq for ZeloxArrayFilter {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailArrayFilter {}
-impl std::hash::Hash for SailArrayFilter {
+impl Eq for ZeloxArrayFilter {}
+impl std::hash::Hash for ZeloxArrayFilter {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailArrayFilter {
+impl ScalarUDFImpl for ZeloxArrayFilter {
     fn name(&self) -> &str {
         "zelox_array_filter"
     }
@@ -244,10 +244,10 @@ fn array_filter_generic<O: OffsetSizeTrait>(
 }
 
 // ============================================================
-// SailArrayTransform
+// ZeloxArrayTransform
 // ============================================================
 #[derive(Debug)]
-pub struct SailArrayTransform {
+pub struct ZeloxArrayTransform {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     param_names: Vec<String>,
@@ -255,7 +255,7 @@ pub struct SailArrayTransform {
     signature: Signature,
 }
 
-impl SailArrayTransform {
+impl ZeloxArrayTransform {
     pub fn new(
         lambda_expr: Arc<dyn PhysicalExpr>,
         param_names: Vec<String>,
@@ -271,7 +271,7 @@ impl SailArrayTransform {
     }
 }
 
-impl SailArrayTransform {
+impl ZeloxArrayTransform {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -282,19 +282,19 @@ impl SailArrayTransform {
     }
 }
 
-impl PartialEq for SailArrayTransform {
+impl PartialEq for ZeloxArrayTransform {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailArrayTransform {}
-impl std::hash::Hash for SailArrayTransform {
+impl Eq for ZeloxArrayTransform {}
+impl std::hash::Hash for ZeloxArrayTransform {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailArrayTransform {
+impl ScalarUDFImpl for ZeloxArrayTransform {
     fn name(&self) -> &str {
         "zelox_array_transform"
     }
@@ -382,17 +382,17 @@ fn array_transform_generic<O: OffsetSizeTrait>(
 }
 
 // ============================================================
-// SailArrayExists
+// ZeloxArrayExists
 // ============================================================
 #[derive(Debug)]
-pub struct SailArrayExists {
+pub struct ZeloxArrayExists {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     param_name: String,
     signature: Signature,
 }
 
-impl SailArrayExists {
+impl ZeloxArrayExists {
     pub fn new(lambda_expr: Arc<dyn PhysicalExpr>, param_name: String) -> Self {
         Self {
             id: next_hof_id(),
@@ -403,7 +403,7 @@ impl SailArrayExists {
     }
 }
 
-impl SailArrayExists {
+impl ZeloxArrayExists {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -414,19 +414,19 @@ impl SailArrayExists {
     }
 }
 
-impl PartialEq for SailArrayExists {
+impl PartialEq for ZeloxArrayExists {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailArrayExists {}
-impl std::hash::Hash for SailArrayExists {
+impl Eq for ZeloxArrayExists {}
+impl std::hash::Hash for ZeloxArrayExists {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailArrayExists {
+impl ScalarUDFImpl for ZeloxArrayExists {
     fn name(&self) -> &str {
         "zelox_array_exists"
     }
@@ -490,17 +490,17 @@ fn array_exists_generic<O: OffsetSizeTrait>(
 }
 
 // ============================================================
-// SailArrayForAll
+// ZeloxArrayForAll
 // ============================================================
 #[derive(Debug)]
-pub struct SailArrayForAll {
+pub struct ZeloxArrayForAll {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     param_name: String,
     signature: Signature,
 }
 
-impl SailArrayForAll {
+impl ZeloxArrayForAll {
     pub fn new(lambda_expr: Arc<dyn PhysicalExpr>, param_name: String) -> Self {
         Self {
             id: next_hof_id(),
@@ -511,7 +511,7 @@ impl SailArrayForAll {
     }
 }
 
-impl SailArrayForAll {
+impl ZeloxArrayForAll {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -522,19 +522,19 @@ impl SailArrayForAll {
     }
 }
 
-impl PartialEq for SailArrayForAll {
+impl PartialEq for ZeloxArrayForAll {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailArrayForAll {}
-impl std::hash::Hash for SailArrayForAll {
+impl Eq for ZeloxArrayForAll {}
+impl std::hash::Hash for ZeloxArrayForAll {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailArrayForAll {
+impl ScalarUDFImpl for ZeloxArrayForAll {
     fn name(&self) -> &str {
         "zelox_array_forall"
     }
@@ -598,10 +598,10 @@ fn array_forall_generic<O: OffsetSizeTrait>(
 }
 
 // ============================================================
-// SailArrayAggregate
+// ZeloxArrayAggregate
 // ============================================================
 #[derive(Debug)]
-pub struct SailArrayAggregate {
+pub struct ZeloxArrayAggregate {
     id: u64,
     merge_expr: Arc<dyn PhysicalExpr>,
     acc_param: String,
@@ -612,7 +612,7 @@ pub struct SailArrayAggregate {
     signature: Signature,
 }
 
-impl SailArrayAggregate {
+impl ZeloxArrayAggregate {
     pub fn new(
         merge_expr: Arc<dyn PhysicalExpr>,
         acc_param: String,
@@ -634,7 +634,7 @@ impl SailArrayAggregate {
     }
 }
 
-impl SailArrayAggregate {
+impl ZeloxArrayAggregate {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.merge_expr.clone(),
@@ -649,19 +649,19 @@ impl SailArrayAggregate {
     }
 }
 
-impl PartialEq for SailArrayAggregate {
+impl PartialEq for ZeloxArrayAggregate {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailArrayAggregate {}
-impl std::hash::Hash for SailArrayAggregate {
+impl Eq for ZeloxArrayAggregate {}
+impl std::hash::Hash for ZeloxArrayAggregate {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailArrayAggregate {
+impl ScalarUDFImpl for ZeloxArrayAggregate {
     fn name(&self) -> &str {
         "zelox_array_aggregate"
     }
@@ -779,10 +779,10 @@ fn array_aggregate_generic<O: OffsetSizeTrait>(
 }
 
 // ============================================================
-// SailArrayZipWith
+// ZeloxArrayZipWith
 // ============================================================
 #[derive(Debug)]
-pub struct SailArrayZipWith {
+pub struct ZeloxArrayZipWith {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     param_names: Vec<String>,
@@ -790,7 +790,7 @@ pub struct SailArrayZipWith {
     signature: Signature,
 }
 
-impl SailArrayZipWith {
+impl ZeloxArrayZipWith {
     pub fn new(
         lambda_expr: Arc<dyn PhysicalExpr>,
         param_names: Vec<String>,
@@ -806,7 +806,7 @@ impl SailArrayZipWith {
     }
 }
 
-impl SailArrayZipWith {
+impl ZeloxArrayZipWith {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -817,19 +817,19 @@ impl SailArrayZipWith {
     }
 }
 
-impl PartialEq for SailArrayZipWith {
+impl PartialEq for ZeloxArrayZipWith {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailArrayZipWith {}
-impl std::hash::Hash for SailArrayZipWith {
+impl Eq for ZeloxArrayZipWith {}
+impl std::hash::Hash for ZeloxArrayZipWith {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailArrayZipWith {
+impl ScalarUDFImpl for ZeloxArrayZipWith {
     fn name(&self) -> &str {
         "zelox_array_zip_with"
     }
@@ -976,10 +976,10 @@ fn array_zip_with_generic<O: OffsetSizeTrait>(
 }
 
 // ============================================================
-// SailArraySort
+// ZeloxArraySort
 // ============================================================
 #[derive(Debug)]
-pub struct SailArraySort {
+pub struct ZeloxArraySort {
     id: u64,
     lambda_expr: Arc<dyn datafusion_physical_expr::PhysicalExpr>,
     param_names: Vec<String>,
@@ -987,7 +987,7 @@ pub struct SailArraySort {
     signature: Signature,
 }
 
-impl SailArraySort {
+impl ZeloxArraySort {
     pub fn new(
         lambda_expr: Arc<dyn datafusion_physical_expr::PhysicalExpr>,
         param_names: Vec<String>,
@@ -1003,7 +1003,7 @@ impl SailArraySort {
     }
 }
 
-impl SailArraySort {
+impl ZeloxArraySort {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -1014,19 +1014,19 @@ impl SailArraySort {
     }
 }
 
-impl PartialEq for SailArraySort {
+impl PartialEq for ZeloxArraySort {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailArraySort {}
-impl std::hash::Hash for SailArraySort {
+impl Eq for ZeloxArraySort {}
+impl std::hash::Hash for ZeloxArraySort {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailArraySort {
+impl ScalarUDFImpl for ZeloxArraySort {
     fn name(&self) -> &str {
         "zelox_array_sort"
     }
@@ -1228,10 +1228,10 @@ fn rebuild_map(
 }
 
 // ============================================================
-// SailMapTransformKeys
+// ZeloxMapTransformKeys
 // ============================================================
 #[derive(Debug)]
-pub struct SailMapTransformKeys {
+pub struct ZeloxMapTransformKeys {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     key_param: String,
@@ -1240,7 +1240,7 @@ pub struct SailMapTransformKeys {
     signature: Signature,
 }
 
-impl SailMapTransformKeys {
+impl ZeloxMapTransformKeys {
     pub fn new(
         lambda_expr: Arc<dyn PhysicalExpr>,
         key_param: String,
@@ -1258,7 +1258,7 @@ impl SailMapTransformKeys {
     }
 }
 
-impl SailMapTransformKeys {
+impl ZeloxMapTransformKeys {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -1269,19 +1269,19 @@ impl SailMapTransformKeys {
     }
 }
 
-impl PartialEq for SailMapTransformKeys {
+impl PartialEq for ZeloxMapTransformKeys {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailMapTransformKeys {}
-impl std::hash::Hash for SailMapTransformKeys {
+impl Eq for ZeloxMapTransformKeys {}
+impl std::hash::Hash for ZeloxMapTransformKeys {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailMapTransformKeys {
+impl ScalarUDFImpl for ZeloxMapTransformKeys {
     fn name(&self) -> &str {
         "zelox_map_transform_keys"
     }
@@ -1328,10 +1328,10 @@ impl ScalarUDFImpl for SailMapTransformKeys {
 }
 
 // ============================================================
-// SailMapTransformValues
+// ZeloxMapTransformValues
 // ============================================================
 #[derive(Debug)]
-pub struct SailMapTransformValues {
+pub struct ZeloxMapTransformValues {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     key_param: String,
@@ -1340,7 +1340,7 @@ pub struct SailMapTransformValues {
     signature: Signature,
 }
 
-impl SailMapTransformValues {
+impl ZeloxMapTransformValues {
     pub fn new(
         lambda_expr: Arc<dyn PhysicalExpr>,
         key_param: String,
@@ -1358,7 +1358,7 @@ impl SailMapTransformValues {
     }
 }
 
-impl SailMapTransformValues {
+impl ZeloxMapTransformValues {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -1369,19 +1369,19 @@ impl SailMapTransformValues {
     }
 }
 
-impl PartialEq for SailMapTransformValues {
+impl PartialEq for ZeloxMapTransformValues {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailMapTransformValues {}
-impl std::hash::Hash for SailMapTransformValues {
+impl Eq for ZeloxMapTransformValues {}
+impl std::hash::Hash for ZeloxMapTransformValues {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailMapTransformValues {
+impl ScalarUDFImpl for ZeloxMapTransformValues {
     fn name(&self) -> &str {
         "zelox_map_transform_values"
     }
@@ -1428,10 +1428,10 @@ impl ScalarUDFImpl for SailMapTransformValues {
 }
 
 // ============================================================
-// SailMapFilter
+// ZeloxMapFilter
 // ============================================================
 #[derive(Debug)]
-pub struct SailMapFilter {
+pub struct ZeloxMapFilter {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     key_param: String,
@@ -1440,7 +1440,7 @@ pub struct SailMapFilter {
     signature: Signature,
 }
 
-impl SailMapFilter {
+impl ZeloxMapFilter {
     pub fn new(
         lambda_expr: Arc<dyn PhysicalExpr>,
         key_param: String,
@@ -1458,7 +1458,7 @@ impl SailMapFilter {
     }
 }
 
-impl SailMapFilter {
+impl ZeloxMapFilter {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -1469,19 +1469,19 @@ impl SailMapFilter {
     }
 }
 
-impl PartialEq for SailMapFilter {
+impl PartialEq for ZeloxMapFilter {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailMapFilter {}
-impl std::hash::Hash for SailMapFilter {
+impl Eq for ZeloxMapFilter {}
+impl std::hash::Hash for ZeloxMapFilter {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailMapFilter {
+impl ScalarUDFImpl for ZeloxMapFilter {
     fn name(&self) -> &str {
         "zelox_map_filter"
     }
@@ -1541,10 +1541,10 @@ impl ScalarUDFImpl for SailMapFilter {
 }
 
 // ============================================================
-// SailMapZipWith
+// ZeloxMapZipWith
 // ============================================================
 #[derive(Debug)]
-pub struct SailMapZipWith {
+pub struct ZeloxMapZipWith {
     id: u64,
     lambda_expr: Arc<dyn PhysicalExpr>,
     key_param: String,
@@ -1554,7 +1554,7 @@ pub struct SailMapZipWith {
     signature: Signature,
 }
 
-impl SailMapZipWith {
+impl ZeloxMapZipWith {
     pub fn new(
         lambda_expr: Arc<dyn PhysicalExpr>,
         key_param: String,
@@ -1574,7 +1574,7 @@ impl SailMapZipWith {
     }
 }
 
-impl SailMapZipWith {
+impl ZeloxMapZipWith {
     pub fn encode_parts(&self) -> HofEncodeParts {
         HofEncodeParts {
             lambda_expr: self.lambda_expr.clone(),
@@ -1589,19 +1589,19 @@ impl SailMapZipWith {
     }
 }
 
-impl PartialEq for SailMapZipWith {
+impl PartialEq for ZeloxMapZipWith {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
 }
-impl Eq for SailMapZipWith {}
-impl std::hash::Hash for SailMapZipWith {
+impl Eq for ZeloxMapZipWith {}
+impl std::hash::Hash for ZeloxMapZipWith {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.id.hash(state);
     }
 }
 
-impl ScalarUDFImpl for SailMapZipWith {
+impl ScalarUDFImpl for ZeloxMapZipWith {
     fn name(&self) -> &str {
         "zelox_map_zip_with"
     }

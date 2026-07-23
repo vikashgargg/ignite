@@ -18,7 +18,7 @@
     "module": "pyspark.sql.functions",
     "function": "array_concat",
     "status": "supported",
-    "note": "This is Sail exclusive (not available in PySpark or Spark SQL). This is a synonym of `concat`."
+    "note": "This is Zelox exclusive (not available in PySpark or Spark SQL). This is a synonym of `concat`."
   },
   {
     "module": "pyspark.sql.functions",
@@ -29,7 +29,7 @@
     "module": "pyspark.sql.functions",
     "function": "array_contains_all",
     "status": "supported",
-    "note": "This is Sail exclusive (not available in PySpark or Spark SQL)."
+    "note": "This is Zelox exclusive (not available in PySpark or Spark SQL)."
   },
   {
     "module": "pyspark.sql.functions",

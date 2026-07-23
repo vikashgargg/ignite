@@ -96,7 +96,7 @@ udf(lambda x: x, returnType="binary")("str_col")  # expects bytearray(b"1")
 ```
 
 ### Root cause
-Sail's PyO3 UDF bridge doesn't apply Spark's implicit output type coercion rules when the Python return value doesn't match the declared `returnType`. Spark does a best-effort cast; Sail likely errors or returns the raw value.
+Zelox's PyO3 UDF bridge doesn't apply Spark's implicit output type coercion rules when the Python return value doesn't match the declared `returnType`. Spark does a best-effort cast; Zelox likely errors or returns the raw value.
 
 ### Fix path
 1. In `zelox-python-udf`, after calling the Python fn and converting the result RecordBatch, apply a `CastExec` matching the declared `returnType`
@@ -136,7 +136,7 @@ The `FILTER (WHERE ...)` clause on aggregate functions is parsed but not lowered
 
 ### Behaviour difference
 - **Spark:** Malformed JSON lines are written to a `_corrupt_record` column; valid lines are processed
-- **Zelox (Sail):** Malformed JSON causes a hard error / the entire file read fails
+- **Zelox (Zelox):** Malformed JSON causes a hard error / the entire file read fails
 
 ### Fix (complete — Day 9, schema case)
 

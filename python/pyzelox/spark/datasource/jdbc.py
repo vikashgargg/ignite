@@ -1,4 +1,4 @@
-"""JDBC data source for Sail, backed by connectorX.
+"""JDBC data source for Zelox, backed by connectorX.
 
 Supports ``spark.read.format("jdbc")`` and ``spark.read.jdbc()`` with options
 consistent with the PySpark JDBC API.
@@ -183,7 +183,7 @@ class JdbcDataSourceReader(DataSourceReader):
             if sql is not None:
                 self._sql_filters.append(sql)
             else:
-                yield f  # Reject unsupported filter; Sail will apply it post-read
+                yield f  # Reject unsupported filter; Zelox will apply it post-read
 
     # ------------------------------------------------------------------
     # Partitions

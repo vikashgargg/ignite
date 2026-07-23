@@ -51,10 +51,10 @@ pub enum CommitConflictError {
     #[error("Protocol changed since last commit: {0}")]
     ProtocolChanged(String),
 
-    #[error("Sail Delta Lake does not support writer version {0}")]
+    #[error("Zelox Delta Lake does not support writer version {0}")]
     UnsupportedWriterVersion(i32),
 
-    #[error("Sail Delta Lake does not support reader version {0}")]
+    #[error("Zelox Delta Lake does not support reader version {0}")]
     UnsupportedReaderVersion(i32),
 
     #[error("Snapshot is corrupted: {source}")]

@@ -7,29 +7,29 @@ import pyzelox
 from pyzelox.spark.utils._function_scanner import scan_directory
 
 
-def load_sail_support_data() -> dict[tuple[str, str], str]:
+def load_zelox_support_data() -> dict[tuple[str, str], str]:
     """Retrieve support information from internal JSON files."""
-    sail_support_index: dict[tuple[str, str], str] = {}
+    zelox_support_index: dict[tuple[str, str], str] = {}
 
     base_dir = Path(pyzelox.__file__).parent / "data" / "compatibility"
 
     for p in base_dir.rglob("*.json"):
         if p.is_file():
             data = json.loads(p.read_text(encoding="utf-8"))
-            sail_support_index.update({(func["module"], func["function"]): func["status"] for func in data})
+            zelox_support_index.update({(func["module"], func["function"]): func["status"] for func in data})
 
-    return sail_support_index
+    return zelox_support_index
 
 
-def check_sail_pyspark_compatibility(repo_path: Path) -> Counter[tuple[str, str, str]]:
-    """Scan a directory for PySpark function usage and look up sail support."""
-    sail_support_index = load_sail_support_data()
+def check_zelox_pyspark_compatibility(repo_path: Path) -> Counter[tuple[str, str, str]]:
+    """Scan a directory for PySpark function usage and look up zelox support."""
+    zelox_support_index = load_zelox_support_data()
 
     pyspark_function_usage = scan_directory(repo_path)
 
     counter: Counter[tuple[str, str, str]] = Counter()
     for key, count in pyspark_function_usage.items():
-        counter[(*key, sail_support_index.get(key, "unknown"))] = count
+        counter[(*key, zelox_support_index.get(key, "unknown"))] = count
 
     return counter
 
