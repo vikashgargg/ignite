@@ -403,6 +403,28 @@ except ImportError:
     _PandasToArrowConversion = None
 
 
+# PySpark 4.2 relocated the conversion helpers *and* changed the arrow-native UDF
+# mapper convention (`read_udfs` returns a `func(split_index, Iterator[pa.RecordBatch])
+# -> Iterator[pa.RecordBatch]` for arrow eval types, instead of a mapper yielding
+# `(output, output_type)` tuples). Use this as the single 4.2 gate.
+_IS_V42 = _ArrowArrayToPandasConversion is not None
+
+
+def _arrow_udf_call(udf, args: "list[pa.Array]") -> pa.Array:
+    """Invoke a 4.2 arrow-native UDF mapper (RecordBatch in, RecordBatch out) and
+    return the single output column."""
+    names = [f"_{i}" for i in range(len(args))]
+    batch = pa.RecordBatch.from_arrays(list(args), names)
+    out_batches = list(udf(0, iter([batch])))
+    if not out_batches:
+        msg = "arrow UDF produced no output batch"
+        raise RuntimeError(msg)
+    column = out_batches[0].column(0)
+    if isinstance(column, pa.ChunkedArray):
+        column = column.combine_chunks()
+    return column
+
+
 if _ArrowArrayToPandasConversion is not None:
     # PySpark 4.2+. Route arrow<->pandas conversion through the relocated helpers,
     # sourcing the exact configuration the serializer was constructed with so the
@@ -706,6 +728,10 @@ class PySparkScalarArrowUdf:
         self._udf = udf
 
     def __call__(self, args: list[pa.Array], _num_rows: int) -> pa.Array:
+        if _IS_V42:
+            # 4.2 arrow-native mapper: RecordBatch in, RecordBatch out, output already
+            # in the declared return type.
+            return _arrow_udf_call(self._udf, args)
         inputs = tuple(args)
         [(output, output_type)] = list(self._udf(None, (inputs,)))
         if isinstance(output, pa.ChunkedArray):
@@ -733,6 +759,8 @@ class PySparkScalarArrowIterUdf:
         self._udf = udf
 
     def __call__(self, args: list[pa.Array], _num_rows: int) -> pa.Array:
+        if _IS_V42:
+            return _arrow_udf_call(self._udf, args)
         inputs = tuple(args)
         [(output, output_type)] = list(self._udf(None, [inputs]))
         if isinstance(output, pa.ChunkedArray):
