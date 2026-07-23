@@ -29,9 +29,19 @@ impl PySparkUdfPayload {
         let serializer = PyModule::import(py, intern!(py, "pyspark.serializers"))?
             .getattr(intern!(py, "CPickleSerializer"))?
             .call0()?;
-        let tuple = PyModule::import(py, intern!(py, "pyspark.worker"))?
-            .getattr(intern!(py, "read_udfs"))?
-            .call1((serializer, infile, eval_type))?;
+        let worker = PyModule::import(py, intern!(py, "pyspark.worker"))?;
+        let read_udfs = worker.getattr(intern!(py, "read_udfs"))?;
+        // PySpark 4.2 splits the two config blocks out of the payload and passes
+        // them to `read_udfs`; earlier versions read them inside `read_udfs`.
+        let tuple = if get_pyspark_version()?.is_v4_2() {
+            let runner_conf = worker
+                .getattr(intern!(py, "RunnerConf"))?
+                .call1((&infile,))?;
+            let eval_conf = worker.getattr(intern!(py, "EvalConf"))?.call1((&infile,))?;
+            read_udfs.call1((serializer, infile, eval_type, runner_conf, eval_conf))?
+        } else {
+            read_udfs.call1((serializer, infile, eval_type))?
+        };
         tuple
             .get_item(0)?
             .into_pyobject(py)
@@ -54,19 +64,20 @@ impl PySparkUdfPayload {
 
         data.extend(i32::from(eval_type).to_be_bytes());
 
-        if should_write_config(eval_type) {
-            let config = config.to_key_value_pairs();
-            data.extend((config.len() as i32).to_be_bytes()); // number of configuration options
-            for (key, value) in config {
-                data.extend((key.len() as i32).to_be_bytes()); // length of the key
-                data.extend(key.as_bytes());
-                data.extend((value.len() as i32).to_be_bytes()); // length of the value
-                data.extend(value.as_bytes());
-            }
+        if pyspark_version.is_v4_2() {
+            // PySpark 4.2: the worker `main()` reads two config blocks unconditionally,
+            // right after `eval_type` — `RunnerConf` then `EvalConf`. Carry the runner
+            // config (timezone/safecheck/arrow settings) and an empty eval config
+            // (populated only for stateful UDFs, which are handled elsewhere).
+            crate::cereal::write_conf_block(&mut data, &config.to_key_value_pairs());
+            crate::cereal::write_conf_block(&mut data, &[]);
+        } else if should_write_config(eval_type) {
+            crate::cereal::write_conf_block(&mut data, &config.to_key_value_pairs());
         }
 
-        // PySpark 4.1+ reads input types for ArrowBatched UDFs.
-        // PySpark 4.0.x does not read input types and would misparse the stream.
+        // PySpark 4.1 reads a separate input-types block for ArrowBatched UDFs.
+        // PySpark 4.0.x does not read input types; 4.2 derives them from each UDF's
+        // return type instead, so no block is written for either.
         if matches!(pyspark_version, PySparkVersion::V4_1)
             && matches!(eval_type, spec::PySparkUdfType::ArrowBatched)
         {
@@ -75,7 +86,9 @@ impl PySparkUdfPayload {
             data.extend(schema_json.as_bytes());
         }
 
-        if pyspark_version.is_v4() {
+        // 4.0/4.1 read a per-stream profiling byte here; 4.2 moved profiling into
+        // RunnerConf and dropped the byte.
+        if pyspark_version.is_v4() && !pyspark_version.is_v4_2() {
             data.extend(0u8.to_be_bytes()); // profiling is not enabled
         }
 
@@ -87,7 +100,12 @@ impl PySparkUdfPayload {
             .map_err(|e| PyUdfError::invalid(format!("num args: {e}")))?;
         data.extend(num_arg_offsets.to_be_bytes()); // number of argument offsets
 
-        let allow_kwargs = pyspark_version.is_v4() && supports_kwargs(eval_type);
+        // PySpark 4.2 `read_single_udf` reads a keyword-argument flag byte after *every*
+        // argument offset, regardless of whether the UDF type supports kwargs; 4.0/4.1 only
+        // read it for kwarg-capable types. Always emit the flag on 4.2 (positional args
+        // write a `0` byte via `write_kwarg`).
+        let allow_kwargs = pyspark_version.is_v4_2()
+            || (pyspark_version.is_v4() && supports_kwargs(eval_type));
 
         for (i, offset) in arg_offsets.iter().enumerate() {
             let offset: i32 = (*offset)
@@ -102,6 +120,12 @@ impl PySparkUdfPayload {
         data.extend(1i32.to_be_bytes()); // number of functions
         data.extend((command.len() as i32).to_be_bytes()); // length of the function
         data.extend_from_slice(command);
+
+        // PySpark 4.2 `read_single_udf` reads an 8-byte `result_id` (a `read_long`)
+        // after the command; earlier versions do not.
+        if pyspark_version.is_v4_2() {
+            data.extend(0i64.to_be_bytes()); // result_id (unused without profiling)
+        }
 
         Ok(data)
     }

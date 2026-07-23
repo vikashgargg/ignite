@@ -129,7 +129,16 @@ def _load_udf(payload: bytes, eval_type: int):
 
     infile = io.BytesIO(payload)
     serializer = CPickleSerializer()
-    udfs = read_udfs(serializer, infile, eval_type)
+    try:
+        # PySpark 4.2 moved the RunnerConf/EvalConf blocks ahead of read_udfs, which
+        # now takes them as required arguments. These classes do not exist before 4.2.
+        from pyspark.worker import EvalConf, RunnerConf  # noqa: PLC0415
+
+        runner_conf = RunnerConf(infile)
+        eval_conf = EvalConf(infile)
+        udfs = read_udfs(serializer, infile, eval_type, runner_conf, eval_conf)
+    except ImportError:
+        udfs = read_udfs(serializer, infile, eval_type)
     return udfs[0]
 
 

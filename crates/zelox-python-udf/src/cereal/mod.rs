@@ -14,11 +14,25 @@ enum PySparkVersion {
     V3,
     V4_0,
     V4_1,
+    V4_2,
 }
 
 impl PySparkVersion {
     fn is_v4(&self) -> bool {
-        matches!(self, PySparkVersion::V4_0 | PySparkVersion::V4_1)
+        matches!(
+            self,
+            PySparkVersion::V4_0 | PySparkVersion::V4_1 | PySparkVersion::V4_2
+        )
+    }
+
+    /// PySpark 4.2 reworked the Python-worker UDF/UDTF wire protocol: the worker
+    /// `main()` now reads two config blocks (`RunnerConf` then `EvalConf`) from the
+    /// stream immediately after `eval_type` and passes them into
+    /// `read_udfs`/`read_udtf` as new required arguments. It also dropped the
+    /// separate input-types block and the profiling byte, and appended an 8-byte
+    /// `result_id` (a `read_long`) after each UDF command.
+    fn is_v4_2(&self) -> bool {
+        matches!(self, PySparkVersion::V4_2)
     }
 }
 
@@ -33,14 +47,30 @@ fn get_pyspark_version() -> PyUdfResult<PySparkVersion> {
             Ok(PySparkVersion::V3)
         } else if version.starts_with("4.0.") {
             Ok(PySparkVersion::V4_0)
-        } else if version.starts_with("4.") {
+        } else if version.starts_with("4.1.") {
             Ok(PySparkVersion::V4_1)
+        } else if version.starts_with("4.") {
+            // 4.2 and later 4.x default to the newest known protocol.
+            Ok(PySparkVersion::V4_2)
         } else {
             Err(PyUdfError::invalid(format!(
                 "unsupported PySpark version: {version}"
             )))
         }
     })
+}
+
+/// Writes a PySpark worker config block: a big-endian `i32` count followed by
+/// that many length-prefixed (key, value) UTF-8 pairs. Used for the 4.2
+/// `RunnerConf`/`EvalConf` blocks.
+pub(crate) fn write_conf_block(data: &mut Vec<u8>, pairs: &[(String, String)]) {
+    data.extend((pairs.len() as i32).to_be_bytes());
+    for (key, value) in pairs {
+        data.extend((key.len() as i32).to_be_bytes());
+        data.extend(key.as_bytes());
+        data.extend((value.len() as i32).to_be_bytes());
+        data.extend(value.as_bytes());
+    }
 }
 
 fn check_python_udf_version(version: &str) -> PyUdfResult<()> {
