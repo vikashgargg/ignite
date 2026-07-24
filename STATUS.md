@@ -1,8 +1,19 @@
 # Zelox — Build Status
 
-> Last updated: 2026-07-06
-> Branch: `upgrade/datafusion54-arrow583`
-> **Latest (2026-07-06): DataFusion 54.0.0 + Arrow 58.3.0 upgrade COMPLETE + validated.** Full workspace
+> Last updated: 2026-07-24
+> Branch: `chore/rename-zelox`
+> **Latest (2026-07-24): Product rename + PySpark 4.2 + fresh tri-engine confirmation (Phase 1 done).**
+> sail/vajra→**zelox** rename complete (crates, wire/proto, docs, identity — regression-free, Rust 873/0,
+> clippy clean). **PySpark 4.2 canonical**: `createDataFrame` 3GB-config fix + UDF/UDTF worker wire protocol
+> (V4_2) + `trigger(realTime)` wired to the realtime engine. **Fresh EKS tri-engine head-to-head** (both
+> engines equal 6-vCPU, 100M, S3 output verified — [RENAME42_EKS_TRIENGINE](docs/benchmarks/RENAME42_EKS_TRIENGINE.md)):
+> **batch 8.0× vs Spark** (1.89 vs 5.6 GiB), **realtime latency ~2× vs Flink** (p50 88 vs 162 ms, tail 2.3×,
+> no-GC), **realtime→S3 EO PASS** (dup=0 across kill-9). Torn to $0. **Open / Phase 2:** distributed
+> throughput at 16-vCPU scale is UNCONFIRMED (Phase 1 was single-node; 4xlarge capacity blocked 16-vCPU) —
+> [phase2-distributed-parity-plan.md](docs/design/phase2-distributed-parity-plan.md). Remaining: 13 pandas/arrow
+> 4.2 UDF-kind tests (layer 2b tail, tracked).
+>
+> **Prior (2026-07-06): DataFusion 54.0.0 + Arrow 58.3.0 upgrade COMPLETE + validated.** Full workspace
 > migrated — `cargo test --workspace` 860/0, `clippy --all-targets -D warnings` clean, gold byte-identical to
 > DF53. Root-caused + fixed a critical DF54 **distributed scan double-count** (morsel-driven shared work-source
 > pooled all files → isolated distributed tasks read each file N× → silent N× duplication; fixed with DF54's

@@ -18,6 +18,12 @@
 **Legend:** ✅ done+measured · 🟡 in-progress/partial · 🔴 gap/unmeasured · ⬜ backlog.
 Status vs **S**=Spark, **F**=Flink: `>` beats, `=` parity, `<` behind, `?` unmeasured.
 
+> **⭐ Milestone (2026-07-24) — rename→zelox + PySpark 4.2 + Phase-1 tri-engine confirmation.** Fresh EKS
+> head-to-head on `zelox:rename42`, both engines equal 6-vCPU, 100M, **S3 output verified**: batch **8.0× vs
+> Spark** (1.89 vs 5.6 GiB), realtime latency **~2× vs Flink** (p50 88 vs 162 ms, tail 2.3×), realtime→S3 EO
+> **dup=0 across kill-9**. Evidence: [RENAME42_EKS_TRIENGINE](benchmarks/RENAME42_EKS_TRIENGINE.md). **These are
+> single-node.** Distributed throughput at 16-vCPU is Phase 2 (unconfirmed): [phase2-distributed-parity-plan](design/phase2-distributed-parity-plan.md).
+
 ---
 
 ## 1. Per-axis scorecard (charter axes × measured status)
