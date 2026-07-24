@@ -1,11 +1,11 @@
 # Single-broker KRaft Kafka for the F3-d KIND multi-node de-risk. No nodeSelector (KIND nodes
 # are unlabeled); advertised listener = the in-cluster service DNS so the dynamically-spawned
-# Vajra worker pods (on the worker nodes) can reach it. Namespace `vajra` to match k8s/sail.yaml.
+# Zelox worker pods (on the worker nodes) can reach it. Namespace `zelox` to match k8s/zelox.yaml.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kafka
-  namespace: vajra
+  namespace: zelox
 spec:
   replicas: 1
   selector: { matchLabels: { app: kafka } }
@@ -20,7 +20,7 @@ spec:
             - { name: KAFKA_NODE_ID, value: "1" }
             - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
             - { name: KAFKA_LISTENERS, value: "PLAINTEXT://:9092,CONTROLLER://:9094" }
-            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka.vajra.svc.cluster.local:9092" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "PLAINTEXT://kafka.zelox.svc.cluster.local:9092" }
             - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT" }
             - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "PLAINTEXT" }
             - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
@@ -35,7 +35,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: kafka
-  namespace: vajra
+  namespace: zelox
 spec:
   selector: { app: kafka }
   ports: [ { port: 9092, targetPort: 9092 } ]

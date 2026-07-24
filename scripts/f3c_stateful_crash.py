@@ -31,7 +31,7 @@ def produce(windows, extra_ts=None):
     if extra_ts is not None:
         lines.append(json.dumps({"k": 0, "ts": extra_ts}))
     subprocess.run(
-        ["docker", "exec", "-i", "vajra_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
+        ["docker", "exec", "-i", "zelox_kafka", "/opt/kafka/bin/kafka-console-producer.sh",
          "--bootstrap-server", BOOT, "--topic", TOPIC],
         input=("\n".join(lines) + "\n").encode(), capture_output=True, check=True)
 

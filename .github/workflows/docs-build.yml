@@ -62,23 +62,23 @@ jobs:
       - name: Build Python Documentation
         run: |
           hatch env create docs
-          hatch run docs:install-pysail
+          hatch run docs:install-pyzelox
           hatch run docs:build
 
       - name: Build VitePress Site
         env:
-          SAIL_SITE_URL: "https://${{ inputs.stage == 'prod' && 'docs' || 'docs.dev' }}.lakesail.com/sail/${{ inputs.version }}/"
+          ZELOX_SITE_URL: "https://docs.zelox.club/${{ inputs.version }}/"
           # The Fathom Analytics script will not be added if the site ID is not set.
-          SAIL_FATHOM_SITE_ID: ${{ vars.FATHOM_SITE_ID }}
+          ZELOX_FATHOM_SITE_ID: ${{ vars.FATHOM_SITE_ID }}
           # The Apollo.io script will not be added if the app ID is not set.
-          SAIL_APOLLOIO_APP_ID: ${{ vars.APOLLOIO_APP_ID }}
+          ZELOX_APOLLOIO_APP_ID: ${{ vars.APOLLOIO_APP_ID }}
         run: |
-          if [[ "${SAIL_SITE_URL}" == */main/ ]]; then
+          if [[ "${ZELOX_SITE_URL}" == */main/ ]]; then
             version="$(hatch version)+$(git rev-parse --short=7 HEAD)"
           else
             version="$(hatch version)"
           fi
-          export SAIL_VERSION="$version"
+          export ZELOX_VERSION="$version"
           pnpm run docs:build
         shell: bash
 

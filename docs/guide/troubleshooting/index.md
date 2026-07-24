@@ -7,7 +7,7 @@ rank: 13
 
 ## System Time Zone Issue on Amazon Linux
 
-When you run Sail on Amazon Linux, you may encounter the following error when creating a session:
+When you run Zelox on Amazon Linux, you may encounter the following error when creating a session:
 
 > `failed to get system time zone: No such file or directory (os error 2)`
 
@@ -41,7 +41,7 @@ Note that the `TZ` environment variable may also affect other libraries using th
 
 ## JVM-Only `sparkContext` Patterns Under Spark Connect
 
-Spark Connect does not support `SparkContext` or RDD operations, since there is no JVM in the client process. Code that accesses `spark.sparkContext` will raise an error under Spark Connect (and therefore under Sail).
+Spark Connect does not support `SparkContext` or RDD operations, since there is no JVM in the client process. Code that accesses `spark.sparkContext` will raise an error under Spark Connect (and therefore under Zelox).
 
 A common example is creating an empty DataFrame using the legacy pattern:
 
@@ -69,7 +69,7 @@ This is possibly related to upstream issues such as [this](https://github.com/pr
 You can either ignore these warnings, or install specific versions of Protobuf and gRPC libraries along with PySpark:
 
 ```bash
-pip install "pyspark[connect]==4.0.0" \
+pip install "pyspark[connect]==4.2.0" \
   "protobuf==5.28.3" \
   "grpcio==1.71.2" \
   "grpcio-status==1.71.2"

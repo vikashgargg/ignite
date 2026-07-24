@@ -12,7 +12,7 @@ rank: 1
 ::: code-group
 
 ```python [Python]
-path = "file:///tmp/sail/users"
+path = "file:///tmp/zelox/users"
 df = spark.createDataFrame(
     [(1, "Alice"), (2, "Bob")],
     schema="id INT, name STRING",
@@ -30,7 +30,7 @@ df.show()
 ```sql [SQL]
 CREATE TABLE users (id INT, name STRING)
 USING iceberg
-LOCATION 'file:///tmp/sail/users';
+LOCATION 'file:///tmp/zelox/users';
 
 INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');
 
@@ -48,7 +48,7 @@ This improves query performance by skipping data files that do not match the fil
 ::: code-group
 
 ```python [Python]
-path = "file:///tmp/sail/metrics"
+path = "file:///tmp/zelox/metrics"
 df = spark.createDataFrame(
     [(2024, 1.0), (2025, 2.0)],
     schema="year INT, value FLOAT",
@@ -63,7 +63,7 @@ df.show()
 ```sql [SQL]
 CREATE TABLE metrics (year INT, value FLOAT)
 USING iceberg
-LOCATION 'file:///tmp/sail/metrics'
+LOCATION 'file:///tmp/zelox/metrics'
 PARTITIONED BY (year);
 
 INSERT INTO metrics VALUES (2024, 1.0), (2025, 2.0);
@@ -83,9 +83,9 @@ df = spark.read.format("iceberg").option("timestampAsOf", "2025-01-02T03:04:05.6
 df = spark.read.format("iceberg").option("branch", "main").load(path)
 ```
 
-Time travel is not available for Spark SQL in Sail yet, but we plan to support it soon.
+Time travel is not available for Spark SQL in Zelox yet, but we plan to support it soon.
 
 ## More Features
 
-We will continue adding more examples for advanced Iceberg features as they become available in Sail.
-In the meantime, feel free to reach out to us on [Slack](https://lakesail.com/slack) or [GitHub Discussions](https://github.com/lakehq/sail/discussions) if you have questions!
+We will continue adding more examples for advanced Iceberg features as they become available in Zelox.
+In the meantime, feel free to reach out to us on [GitHub Discussions](https://github.com/vikashgargg/zelox/discussions) if you have questions!

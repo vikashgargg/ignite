@@ -1,4 +1,4 @@
-# Vajra benchmarks — published results
+# Zelox benchmarks — published results
 
 All numbers are reproducible, same-machine/same-cluster, identical data + SQL,
 vs **real Apache Spark** (not estimates). Scripts are dual-engine
@@ -12,7 +12,7 @@ for the Spark-replacement / fewer-resources / Flink-class-streaming claims.
 
 ## Summary
 
-| Benchmark | Scale | Setup | Vajra | Apache Spark 3.5.3 | Speedup |
+| Benchmark | Scale | Setup | Zelox | Apache Spark 3.5.3 | Speedup |
 |---|---|---|---|---|---|
 | **TPC-H** | SF-1 (~1 GB) | single node, warm, `local[4]` | **1.78 s** (22/22) | 63.46 s (22/22) | **≈36×** |
 | **TPC-H** | **SF-100 (~100 GB)** | **single node**, AWS EKS r7gd.4xlarge (128 GB) | **346.97 s** (22/22) | 1099.27 s (22/22) | **≈3.2× + ≈2.2× less RAM** |
@@ -31,15 +31,15 @@ standardized cluster benchmark (Nexmark) is the next step.
 continuous streaming end-to-end latency (source-emit → sink-process) measured via the
 now-wired `LatencyTracker`: **p50 = 0.1 ms, p99 ≤ 0.3 ms** (100 rows/s, single-node,
 debug). That's **Flink-class** (Flink p99 ~tens of ms), not the Spark ~100 ms–1 s
-micro-batch class — Vajra's tick is ~10 ms. Caveats: low rate, single-node, no heavy
+micro-batch class — Zelox's tick is ~10 ms. Caveats: low rate, single-node, no heavy
 stateful ops yet; next is high-rate/stateful/cluster + exposing via `lastProgress`.
 
-**Vajra vs LakeSail (fork-parity check) ✅:** [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md)
+**Zelox vs LakeSail (fork-parity check) ✅:** [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md)
 — measured on the **identical** ClickBench harness (same c6a.4xlarge class, local
-`hits.parquet`, best-of-3): **Vajra 60.11 s vs LakeSail 65.50 s = 0.92× — MATCHING**,
-43/43, Vajra marginally faster overall. Confirms the shared DataFusion core is
+`hits.parquet`, best-of-3): **Zelox 60.11 s vs LakeSail 65.50 s = 0.92× — MATCHING**,
+43/43, Zelox marginally faster overall. Confirms the shared DataFusion core is
 correctly implemented in the fork. Runner + raw results:
-[`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md). (Vajra's 1M-smoke
+[`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md). (Zelox's 1M-smoke
 and 100M-distributed-on-S3 numbers are a *different* setup, not comparable to this.)
 
 ## How to read the speedup — be precise (it depends on scale + workload)
@@ -50,12 +50,12 @@ and 100M-distributed-on-S3 numbers are a *different* setup, not comparable to th
 - Honest public claim: **"~3× faster and ~2× less memory at 100 GB scale; up to
   ~36× on small/warm workloads"** — *not* a flat "30–40× on everything." Always
   quote the benchmark + scale with the number.
-- Vajra also passed queries Spark 3.5.3 rejects (ClickBench Q40 CASE coercion),
+- Zelox also passed queries Spark 3.5.3 rejects (ClickBench Q40 CASE coercion),
   i.e. broader Spark-4.x-compatible semantics.
 
 ## Memory — MEASURED at SF-100 ✅
 Head-to-head peak memory on the same 128 GB node, same SF-100 data:
-**Vajra 51.7 GiB vs Spark 115 GiB** (Spark saturated its cap) → **Vajra used
+**Zelox 51.7 GiB vs Spark 115 GiB** (Spark saturated its cap) → **Zelox used
 ≥2.2× less memory** and never pinned RAM. See [TPCH_SF100.md](TPCH_SF100.md).
 The "no JVM → less memory" claim is now backed by a measured number at scale.
 

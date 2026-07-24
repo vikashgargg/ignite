@@ -6,12 +6,12 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["Vajra Contributors"]
+authors = ["Zelox Contributors"]
 edition = "2021"
-homepage = "https://github.com/vikashgargg/ignite"
+homepage = "https://github.com/vikashgargg/zelox"
 license = "Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/vikashgargg/ignite"
+repository = "https://github.com/vikashgargg/zelox"
 rust-version = "1.95.0"
 
 [workspace.lints.clippy]
@@ -24,6 +24,7 @@ todo = "deny"
 
 [workspace.dependencies]
 thiserror = { version = "2.0.18" }
+pprof = { version = "0.14", features = ["flamegraph"] }
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-stream = { version = "0.1.18", features = ["time", "io-util"] }
 pbjson = "0.9.0"
@@ -67,7 +68,7 @@ ryu = "1.0.23"
 either = "1.16.0"
 num-bigint = "0.4.6"
 mimalloc = { version = "0.1.52", default-features = false }
-tikv-jemallocator = { version = "0.6.0", default-features = false }
+tikv-jemallocator = { version = "0.6.0", default-features = false, features = ["profiling"] }
 rand = "0.10.1"
 rand_chacha = "0.10.0"
 rand_distr = "0.6.0"
@@ -185,7 +186,7 @@ datafusion-spark = { version = "54.0.0", features = ["core"] }
 # The `pyo3` version must match the one used in `arrow-pyarrow` (replace `RELEASE` with the release we are using):
 #   https://github.com/apache/arrow-rs/blob/RELEASE/arrow-pyarrow/Cargo.toml
 pyo3 = { version = "0.28.3", features = ["serde", "abi3-py310"] }
-# Jiter has a dependency on pyo3, which needs to match the version used in Sail.
+# Jiter has a dependency on pyo3, which needs to match the version used in Zelox.
 # https://github.com/pydantic/jiter/blob/v0.13.0/Cargo.toml
 jiter = { version = "0.13.0" }
 arrow = { version = "58.3.0", features = ["chrono-tz"] }

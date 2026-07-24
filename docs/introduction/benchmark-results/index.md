@@ -5,7 +5,7 @@ rank: 5
 
 # Benchmark Results
 
-We ran a derived TPC-H benchmark to compare the performance and resource efficiency of Sail and Apache Spark.
+We ran a derived TPC-H benchmark to compare the performance and resource efficiency of Zelox and Apache Spark.
 The benchmark consists of 22 queries that cover a wide range of SQL operations, including filters, joins, aggregations, and subqueries.
 
 ## Setup
@@ -17,26 +17,26 @@ The benchmark consists of 22 queries that cover a wide range of SQL operations, 
 
 ## Key Findings
 
-| Metric                     | Spark            | Sail                 |
+| Metric                     | Spark            | Zelox                 |
 | -------------------------- | ---------------- | -------------------- |
 | Total Query Time           | 387.36 seconds   | **102.75 seconds**   |
 | Query Speed-Up             | 0% (baseline)    | **43% - 727%**       |
 | Peak Memory Usage          | 54 GB (constant) | **22 GB** (1 second) |
 | Disk Write (Shuffle Spill) | > 110 GB         | **0 GB**             |
 
-From the results, we can see that Sail completes the workload nearly 4x faster than Spark,
-and Sail can run on 1/4 the instance size, leading to up to 94% cost reduction.
-Sail can handle larger datasets on the same hardware or achieve similar performance on smaller, cheaper infrastructure.
+From the results, we can see that Zelox completes the workload nearly 4x faster than Spark,
+and Zelox can run on 1/4 the instance size, leading to up to 94% cost reduction.
+Zelox can handle larger datasets on the same hardware or achieve similar performance on smaller, cheaper infrastructure.
 
 ## Detailed Results
 
 ### Query Time
 
-The following figure shows query time comparison between Sail and Spark for individual queries.
+The following figure shows query time comparison between Zelox and Spark for individual queries.
 
 <SvgDiagram :svg="data['query-time.vega.json']" />
 
-The following figure shows sorted relative improvements of Sail over Spark for each query.
+The following figure shows sorted relative improvements of Zelox over Spark for each query.
 
 <SvgDiagram :svg="data['query-speed-up.vega.json']" />
 
@@ -48,9 +48,9 @@ The following figure shows that Spark consumed about 54 GB of memory during quer
 
 <SvgDiagram :svg="data['resource-utilization.vega.json']['spark']" />
 
-In contrast, the following figure shows drastically different resource consumption characteristics of Sail. At peak, Sail utilized approximately 22 GB of memory, but this usage lasted for only one second. Sail released memory after executing each query and had zero disk usage, relying solely on the available memory for computation.
+In contrast, the following figure shows drastically different resource consumption characteristics of Zelox. At peak, Zelox utilized approximately 22 GB of memory, but this usage lasted for only one second. Zelox released memory after executing each query and had zero disk usage, relying solely on the available memory for computation.
 
-<SvgDiagram :svg="data['resource-utilization.vega.json']['sail']" />
+<SvgDiagram :svg="data['resource-utilization.vega.json']['zelox']" />
 
 <script setup lang="ts">
 import SvgDiagram from "@theme/components/SvgDiagram.vue";

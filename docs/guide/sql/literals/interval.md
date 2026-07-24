@@ -256,7 +256,7 @@ interval unit:
 Mix of the <code><SyntaxText raw="'YEAR'['S']" /></code> or <code><SyntaxText raw="'MONTH'['S']" /></code> interval units with other units is not allowed.
 
 ::: info
-Although Sail supports the <code><SyntaxText raw="'YEAR'['S']" /></code> and <code><SyntaxText raw="'MONTH'['S']" /></code> interval units in the multi-unit syntax, the Spark client is unable to convert these from Arrow when invoking `.collect()` or `.toPandas()`.
+Although Zelox supports the <code><SyntaxText raw="'YEAR'['S']" /></code> and <code><SyntaxText raw="'MONTH'['S']" /></code> interval units in the multi-unit syntax, the Spark client is unable to convert these from Arrow when invoking `.collect()` or `.toPandas()`.
 :::
 
 ## Multi-unit Interval Examples

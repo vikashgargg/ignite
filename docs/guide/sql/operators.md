@@ -5,7 +5,7 @@ rank: 5
 
 # Operators
 
-Sail supports all Spark SQL operators in SQL expressions.
+Zelox supports all Spark SQL operators in SQL expressions.
 
 ## Operator Precedence
 
@@ -14,7 +14,7 @@ For example, in the expression `3 + 4 * 5`, the multiplication operator (`*`) ha
 
 Operators that have higher precedence are evaluated before operators with lower precedence. Operators with the same precedence are evaluated based on their associativity.
 
-The following table lists the precedence and associativity of all the SQL operators in Sail.
+The following table lists the precedence and associativity of all the SQL operators in Zelox.
 The operators are listed in order of decreasing precedence, where 1 is the highest precedence.
 
 <table tabindex="0">
@@ -136,7 +136,7 @@ In the original Spark documentation, the logical not operator (`NOT` or `!`) has
 higher precedence than predicates such as `LIKE`.
 This is inconsistent with the actual implementation in Spark.
 
-In both the Sail documentation here and the Sail implementation, the logical not operator has a lower precedence than other predicates.
+In both the Zelox documentation here and the Zelox implementation, the logical not operator has a lower precedence than other predicates.
 This provides a more intuitive behavior, where `NOT a LIKE b` is interpreted as `NOT (a LIKE b)` instead of `(NOT a) LIKE b`.
 
 You can refer to the bug reports ([#729](https://github.com/lakehq/sail/issues/729) and [#773](https://github.com/lakehq/sail/issues/773)) and the bug fix ([#776](https://github.com/lakehq/sail/pull/776)) for more details.

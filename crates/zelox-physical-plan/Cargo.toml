@@ -1,0 +1,25 @@
+[package]
+name = "zelox-physical-plan"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-catalog = { path = "../zelox-catalog" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-logical-plan = { path = "../zelox-logical-plan" }
+
+async-stream = { workspace = true }
+chrono = { workspace = true }
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+bytes = { workspace = true }
+serde_json = { workspace = true }
+object_store = { workspace = true }

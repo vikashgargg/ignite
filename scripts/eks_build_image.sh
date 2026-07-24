@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Fast arm64 vajra image build via a throwaway c7g EC2 (native, no Docker-Desktop emulation), pushed to
-# ECR. Reuses the prior bench resources (instance profile vajra-bench-ec2 = ECR push, SG vajra-build-sg
+# Fast arm64 zelox image build via a throwaway c7g EC2 (native, no Docker-Desktop emulation), pushed to
+# ECR. Reuses the prior bench resources (instance profile zelox-bench-ec2 = ECR push, SG zelox-build-sg
 # = SSH, public subnet) and a fresh temp key. Builds from the LOCAL working tree (rsync, no GitHub
 # auth). Terminates the builder + cleans up at the end. ~8min build on c7g.4xlarge (16 native cores).
 #
@@ -9,10 +9,10 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 TAG="${1:-wmprof}"; REGION="${REGION:-ap-south-1}"; ITYPE="${INSTANCE_TYPE:-c7g.4xlarge}"
-PROFILE="${PROFILE:-vajra-bench-ec2}"; SG="${SG:-sg-043445d6492980581}"; SUBNET="${SUBNET:-subnet-07d37405bf8df92fa}"
+PROFILE="${PROFILE:-zelox-bench-ec2}"; SG="${SG:-sg-043445d6492980581}"; SUBNET="${SUBNET:-subnet-07d37405bf8df92fa}"
 AMI="$(aws ssm get-parameter --region "$REGION" --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 --query Parameter.Value --output text)"
-ECR="$(aws ecr describe-repositories --region "$REGION" --repository-name vajra --query 'repositories[0].repositoryUri' --output text)"; REG="${ECR%/vajra}"
-KEY=/tmp/vajra-img-key.pem; KN="vajra-img-key-$$"
+ECR="$(aws ecr describe-repositories --region "$REGION" --repository-name zelox --query 'repositories[0].repositoryUri' --output text)"; REG="${ECR%/zelox}"
+KEY=/tmp/zelox-img-key.pem; KN="zelox-img-key-$$"
 mask(){ sed -E 's/[0-9]{12}/<ACCT>/g'; }
 echo "build -> $(echo "$ECR" | mask):$TAG  on $ITYPE"
 
@@ -25,7 +25,7 @@ aws ec2 create-key-pair --region "$REGION" --key-name "$KN" --query KeyMaterial 
 IID="$(aws ec2 run-instances --region "$REGION" --image-id "$AMI" --instance-type "$ITYPE" --key-name "$KN" \
   --iam-instance-profile Name="$PROFILE" --security-group-ids "$SG" --subnet-id "$SUBNET" --associate-public-ip-address \
   --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":60,"VolumeType":"gp3"}}]' \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=vajra-img-builder}]' --query 'Instances[0].InstanceId' --output text)"
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=zelox-img-builder}]' --query 'Instances[0].InstanceId' --output text)"
 echo "launched $IID; waiting running..."; aws ec2 wait instance-running --region "$REGION" --instance-ids "$IID"
 IP="$(aws ec2 describe-instances --region "$REGION" --instance-ids "$IID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
 SSHO="-o StrictHostKeyChecking=no -o ConnectTimeout=5 -i $KEY ec2-user@$IP"
@@ -33,10 +33,10 @@ echo "waiting sshd on ${IP%.*}.x ..."; for i in $(seq 1 40); do ssh $SSHO true 2
 
 ssh $SSHO 'sudo dnf install -y docker >/dev/null 2>&1 && sudo systemctl start docker' </dev/null
 rsync -az --delete --exclude target --exclude .git --exclude .venvs --exclude node_modules --exclude '*.parquet' \
-  -e "ssh -o StrictHostKeyChecking=no -i $KEY" ./ ec2-user@"$IP":~/ignite/
+  -e "ssh -o StrictHostKeyChecking=no -i $KEY" ./ ec2-user@"$IP":~/zelox/
 ssh $SSHO "bash -s" <<REMOTE
 set -e
 aws ecr get-login-password --region $REGION | sudo docker login --username AWS --password-stdin $REG >/dev/null 2>&1
-cd ~/ignite && sudo docker build -f docker/Dockerfile -t $REG/vajra:$TAG . && sudo docker push $REG/vajra:$TAG
+cd ~/zelox && sudo docker build -f docker/Dockerfile -t $REG/zelox:$TAG . && sudo docker push $REG/zelox:$TAG
 REMOTE
-echo "PUSHED $(echo "$REG" | mask)/vajra:$TAG"
+echo "PUSHED $(echo "$REG" | mask)/zelox:$TAG"

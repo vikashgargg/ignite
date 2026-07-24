@@ -2,7 +2,7 @@ apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
 metadata:
-  name: vajra-bench
+  name: zelox-bench
   region: ap-south-1
   version: "1.31"
 
@@ -22,7 +22,7 @@ managedNodeGroups:
     labels:
       workload: bench
     tags:
-      project: vajra-bench
+      project: zelox-bench
 
 iam:
   withOIDC: true

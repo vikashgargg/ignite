@@ -1,10 +1,10 @@
 # Single large Graviton spot node for a controlled SF-100 time+memory head-to-head
-# (Vajra vs Apache Spark on identical local data). Distributed-at-scale is already
+# (Zelox vs Apache Spark on identical local data). Distributed-at-scale is already
 # proven by the ClickBench-100M EKS run; this isolates the per-engine comparison.
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 metadata:
-  name: vajra-sf100
+  name: zelox-sf100
   region: ap-south-1
   version: "1.31"
 vpc:

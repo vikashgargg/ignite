@@ -17,14 +17,14 @@ Before committing changes, make sure to format your code and fix all Clippy warn
 Tests use "gold data" files for validation. If you change logic that affects output, you may need to update these files:
 
 ```bash
-env SAIL_UPDATE_GOLD_DATA=1 cargo nextest run
+env ZELOX_UPDATE_GOLD_DATA=1 cargo nextest run
 ```
 
 ### Python Development
 
 - **Formatting**: `hatch fmt`
 - **Test**:
-  1. Build the native extension and install the `pysail` package in editable mode for the `default` Hatch environment: `hatch run maturin develop`. Re-run this command if you modify Rust code. Python code changes are reflected immediately.
+  1. Build the native extension and install the `pyzelox` package in editable mode for the `default` Hatch environment: `hatch run maturin develop`. Re-run this command if you modify Rust code. Python code changes are reflected immediately.
   2. Run tests using `pytest` via Hatch: `hatch run pytest`. You can pass additional arguments to `pytest` if needed. For example, use the `-k` flag to filter tests by keywords. The keywords can match tests by function names or file names and allow predicates with `and`, `or`, and `not`. In this way you do not need to select tests by the full path.
 
 You must run `pytest` to ensure the relevant tests pass when making changes to Rust or Python code.
@@ -40,7 +40,7 @@ pnpm install
 - **Formatting**: `pnpm run format`
 - **Linting**: `pnpm run lint`
 - **Build**:
-  1. Build the `pysail` package to prepare for API documentation generation: `hatch run docs:maturin develop`
+  1. Build the `pyzelox` package to prepare for API documentation generation: `hatch run docs:maturin develop`
   2. Build the API documentation using Sphinx: `hatch run docs:build`
   3. Build the documentation site using VitePress: `pnpm run docs:build`
 
@@ -52,19 +52,19 @@ You can skip API documentation generation if you are only working on files insid
 
 ### Codec
 
-When adding functions (`ScalarUDF` or `AggregateUDF`), physical expressions (`PhysicalExpr`), or physical plan nodes (`ExecutionPlan`), make sure to update `crates/sail-execution/src/codec.rs` so that the query plan can work in cluster mode.
+When adding functions (`ScalarUDF` or `AggregateUDF`), physical expressions (`PhysicalExpr`), or physical plan nodes (`ExecutionPlan`), make sure to update `crates/zelox-execution/src/codec.rs` so that the query plan can work in cluster mode.
 
 ### Test Style
 
-Most functionalities in Sail can be described via SQL, and we prefer BDD tests in `.feature` files (Gherkin syntax) for them.
+Most functionalities in Zelox can be described via SQL, and we prefer BDD tests in `.feature` files (Gherkin syntax) for them.
 Such tests are loaded and executed in `pytest`.
 We describe scenarios with `Given`, `When`, and `Then`. We assert user-facing outcomes rather than internal states.
 
 The BDD tests are structured as follows:
 
-- `python/pysail/tests/**/*.feature` (test case definitions)
-- `python/pysail/tests/**/test*_features.py` (test loaders)
-- `python/pysail/testing/**/steps/*.py` (step implementations)
+- `python/pyzelox/tests/**/*.feature` (test case definitions)
+- `python/pyzelox/tests/**/test*_features.py` (test loaders)
+- `python/pyzelox/testing/**/steps/*.py` (step implementations)
 
 Python tests are suitable for Spark DataFrame APIs. The BDD tests should already cover Spark SQL features comprehensively, and Python unit tests additionally ensure that the _interface_ is working properly.
 

@@ -1,7 +1,7 @@
 -- Flink CORRECTNESS variant of flink-sql.sql: identical 10s tumbling keyed COUNT, but the aggregation
 -- result is written to a Kafka topic `wagg_out` (JSON) so the harness can consume it and verify the SAME
--- correctness Vajra reports (distinct (window,k) groups + sum(count)). Bounded read + dml-sync so the job
--- terminates once the backlog is fully aggregated. This makes the Vajra-vs-Flink comparison BOTH-correct.
+-- correctness Zelox reports (distinct (window,k) groups + sum(count)). Bounded read + dml-sync so the job
+-- terminates once the backlog is fully aggregated. This makes the Zelox-vs-Flink comparison BOTH-correct.
 
 SET 'execution.runtime-mode' = 'streaming';
 SET 'table.dml-sync' = 'true';

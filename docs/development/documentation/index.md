@@ -5,17 +5,17 @@ rank: 4
 
 # Documentation
 
-The Sail documentation is built using [VitePress](https://vitepress.dev/), a static site generator based on
+The Zelox documentation is built using [VitePress](https://vitepress.dev/), a static site generator based on
 [Vue.js](https://vuejs.org/).
 You write documentation in Markdown files, and VitePress generates the documentation site from them.
 
-The Sail Python API reference is generated using [Sphinx](https://www.sphinx-doc.org/).
+The Zelox Python API reference is generated using [Sphinx](https://www.sphinx-doc.org/).
 Instead of producing the HTML files directly, we configure Sphinx to output the rendered HTML fragments in JSON format.
 The HTML fragments are loaded during the build process of the VitePress site.
-This makes the Python API reference an organic part of the single-page application (SPA) for the Sail documentation.
+This makes the Python API reference an organic part of the single-page application (SPA) for the Zelox documentation.
 
 The source code for the documentation site is located in the `docs` directory.
-The source code for the Python API reference is located in the `python/pysail/docs` directory.
+The source code for the Python API reference is located in the `python/pyzelox/docs` directory.
 
 ## Environment Setup
 

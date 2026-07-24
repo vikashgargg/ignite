@@ -5,12 +5,12 @@ rank: 4
 
 # User-Defined Functions
 
-Sail provides performant support for PySpark user-defined functions (UDFs) and user-defined table functions (UDTFs).
+Zelox provides performant support for PySpark user-defined functions (UDFs) and user-defined table functions (UDTFs).
 You can use UDFs and UDTFs in the PySpark DataFrame API.
 You can also register UDFs and UDTFs and then use them in Spark SQL queries.
 
 :::info
-Spark Java or Scala UDFs are not supported in Sail.
+Spark Java or Scala UDFs are not supported in Zelox.
 :::
 
 ## Supported APIs
@@ -35,7 +35,7 @@ Here is a list of supported (:white_check_mark:) and unsupported (:construction:
 ::: info
 The PySpark library uses different logic for input and output conversion, depending on whether Arrow optimization is enabled.
 Arrow optimization is controlled by the `useArrow` argument of the `udf()` and `udtf()` wrappers, and the `spark.sql.execution.pythonUDTF.arrow.enabled` configuration.
-Sail respects such configuration for input and output conversion. But note that Sail uses Arrow for query execution regardless of whether Arrow is enabled in PySpark.
+Zelox respects such configuration for input and output conversion. But note that Zelox uses Arrow for query execution regardless of whether Arrow is enabled in PySpark.
 :::
 
 ## Topics

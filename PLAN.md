@@ -1,4 +1,4 @@
-# Ignite — Master Build Plan
+# Zelox — Master Build Plan
 
 > Last updated: 2026-05-20  
 > Branch: `phase1/production-hardening`  
@@ -33,7 +33,7 @@
 
 ## 1. Project Vision
 
-Ignite is a **Rust-native, single-binary Spark engine**. It implements the
+Zelox is a **Rust-native, single-binary Spark engine**. It implements the
 Spark Connect gRPC protocol so existing PySpark code runs unchanged, but
 replaces the JVM + Python ser/de loop with a columnar, vectorized Rust
 execution engine built on Apache DataFusion and Apache Arrow.
@@ -62,43 +62,43 @@ execution engine built on Apache DataFusion and Apache Arrow.
                      │  Spark Connect gRPC (protobuf over HTTP/2)
                      ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      IGNITE SERVER  (sail-spark-connect)               │
+│                      ZELOX SERVER  (zelox-spark-connect)               │
 │  tonic gRPC server  •  Spark Connect proto deserialiser                │
-│  Session management (sail-session)  •  Auth middleware                 │
+│  Session management (zelox-session)  •  Auth middleware                 │
 └────────────────────┬───────────────────────────────────────────────────┘
                      │  Unresolved Relation/Plan
                      ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │                      QUERY PIPELINE                                    │
-│  Parser (sail-sql-parser)  →  Analyzer (sail-sql-analyzer)             │
-│  →  Planner (sail-plan)  →  Logical Optimizer (sail-logical-optimizer) │
-│  →  Physical Planner (sail-physical-plan)                              │
-│  →  Physical Optimizer (sail-physical-optimizer)                       │
+│  Parser (zelox-sql-parser)  →  Analyzer (zelox-sql-analyzer)             │
+│  →  Planner (zelox-plan)  →  Logical Optimizer (zelox-logical-optimizer) │
+│  →  Physical Planner (zelox-physical-plan)                              │
+│  →  Physical Optimizer (zelox-physical-optimizer)                       │
 └────────────────────┬───────────────────────────────────────────────────┘
                      │  Optimised Physical Plan
                      ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      EXECUTION ENGINE  (sail-execution)                │
+│                      EXECUTION ENGINE  (zelox-execution)                │
 │  DataFusion StreamingExec  •  Arrow RecordBatch  •  SIMD via AVX-512   │
 │  8 192 rows/batch  •  columnar operators  •  vectorised aggregations   │
 └──────┬─────────────────────────────────────┬───────────────────────────┘
        │  [local]                             │  [distributed, Phase 2]
        │                                      ▼
        │                         ┌────────────────────────────┐
-       │                         │  SCHEDULER  (sail-cli)      │
+       │                         │  SCHEDULER  (zelox-cli)      │
        │                         │  DAG partitioning           │
        │                         │  Task dispatch to workers   │
        │                         └────────────┬───────────────┘
        │                                      │  Arrow Flight RPC
        │                                      ▼
        │                         ┌────────────────────────────┐
-       │                         │  WORKERS  (sail-cli worker) │
+       │                         │  WORKERS  (zelox-cli worker) │
        │                         │  Stateless  •  same binary  │
-       │                         │  sail-flight shuffle        │
+       │                         │  zelox-flight shuffle        │
        │                         └────────────────────────────┘
        ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                      STORAGE LAYER  (sail-object-store, sail-data-source)│
+│                      STORAGE LAYER  (zelox-object-store, zelox-data-source)│
 │  AWS S3  •  GCS  •  Azure ADLS  •  Local FS  •  HDFS                  │
 │  Parquet  •  Delta Lake  •  Apache Iceberg  •  ORC  •  CSV  •  JSON    │
 └────────────────────────────────────────────────────────────────────────┘
@@ -108,7 +108,7 @@ execution engine built on Apache DataFusion and Apache Arrow.
 
 ## 3. Low-Level Design
 
-### 3.1 Spark Connect Server (`sail-spark-connect`)
+### 3.1 Spark Connect Server (`zelox-spark-connect`)
 
 **Protocol:** Spark Connect uses gRPC over HTTP/2. The proto definitions are
 from `apache/spark` — `spark/connect/proto`. Messages:
@@ -134,20 +134,20 @@ handler.execute_plan(request)
   → stream RecordBatch chunks back as Arrow IPC
 ```
 
-**Session state** (`sail-session`):
+**Session state** (`zelox-session`):
 - `SessionConfig`: Spark conf key→value map
 - `CatalogState`: current database, temp view registry
 - `UdfRegistry`: registered Python/Rust UDFs
 - Sessions keyed by `session_id` UUID, stored in a `DashMap`
 
 **Key files:**
-- `crates/sail-spark-connect/src/service.rs` — gRPC handler impl
-- `crates/sail-spark-connect/src/proto/` — generated protobuf types
-- `crates/sail-session/src/session.rs` — session state
+- `crates/zelox-spark-connect/src/service.rs` — gRPC handler impl
+- `crates/zelox-spark-connect/src/proto/` — generated protobuf types
+- `crates/zelox-session/src/session.rs` — session state
 
 ---
 
-### 3.2 SQL Parser & Analyzer (`sail-sql-parser`, `sail-sql-analyzer`)
+### 3.2 SQL Parser & Analyzer (`zelox-sql-parser`, `zelox-sql-analyzer`)
 
 **Parser design:** Uses `chumsky` (a parser combinator library) with a Pratt
 expression parser for operator precedence. Targets Spark SQL dialect.
@@ -187,7 +187,7 @@ Expression
 
 ---
 
-### 3.3 Query Planner & Optimizer (`sail-plan`, `sail-logical-optimizer`, `sail-physical-plan`)
+### 3.3 Query Planner & Optimizer (`zelox-plan`, `zelox-logical-optimizer`, `zelox-physical-plan`)
 
 **Logical plan** = DataFusion `LogicalPlan` extended with Spark-specific nodes:
 - `RepartitionByExpr` — DISTRIBUTE BY
@@ -234,10 +234,10 @@ whose statistics prove they cannot satisfy the predicate.
 
 ---
 
-### 3.4 Execution Engine (`sail-execution`)
+### 3.4 Execution Engine (`zelox-execution`)
 
 **DataFusion integration:**
-Ignite registers custom physical operators into DataFusion's `ExecutionContext`.
+Zelox registers custom physical operators into DataFusion's `ExecutionContext`.
 DataFusion drives execution via its `ExecutionPlan::execute()` → `SendableRecordBatchStream`.
 
 **Batch processing:**
@@ -272,7 +272,7 @@ No serialisation — the same memory is reused.
 
 ---
 
-### 3.5 Storage Layer (`sail-object-store`, `sail-data-source`)
+### 3.5 Storage Layer (`zelox-object-store`, `zelox-data-source`)
 
 **Abstraction:** The `object_store::ObjectStore` trait provides:
 ```rust
@@ -302,12 +302,12 @@ object_store.get_range(path, byte_range)   // footer first (statistics)
   → Arrow RecordBatch stream
 ```
 
-**Delta Lake** (`sail-delta-lake` → `delta-rs`):
+**Delta Lake** (`zelox-delta-lake` → `delta-rs`):
 - Read: resolve latest snapshot, construct add-file list, filter by partition
 - Write: write Parquet files, then write `_delta_log/N.json` action file
 - CDF (Change Data Feed): read `_change_data/` files for incremental ETL
 
-**Iceberg** (`sail-catalog-iceberg` → `iceberg-rust`):
+**Iceberg** (`zelox-catalog-iceberg` → `iceberg-rust`):
 - REST catalog: `GET /v1/namespaces/{ns}/tables/{tbl}` → table metadata
 - Snapshot resolution: walk snapshot chain to find current manifest list
 - Manifest files: per-partition file lists with column statistics
@@ -315,7 +315,7 @@ object_store.get_range(path, byte_range)   // footer first (statistics)
 
 ---
 
-### 3.6 Python UDF Bridge (`sail-python-udf`, `sail-python`)
+### 3.6 Python UDF Bridge (`zelox-python-udf`, `zelox-python`)
 
 **Execution model:**
 ```
@@ -343,9 +343,9 @@ At execution time:
 | UDTF | `pd.DataFrame` | `pd.DataFrame` | Table-returning |
 
 **Python subprocess isolation:**
-Ignite embeds the Python interpreter via PyO3. Child processes (e.g., from
+Zelox embeds the Python interpreter via PyO3. Child processes (e.g., from
 `multiprocessing`) see the same binary as `sys.executable` and fork correctly
-because of the `SAIL_RUN_PYTHON` env var gate in `main.rs`.
+because of the `ZELOX_RUN_PYTHON` env var gate in `main.rs`.
 
 ---
 
@@ -384,7 +384,7 @@ Result aggregation:
 
 ---
 
-### 3.8 Arrow Flight Shuffle (Phase 2, `sail-flight`)
+### 3.8 Arrow Flight Shuffle (Phase 2, `zelox-flight`)
 
 **Why Flight not disk:**
 Spark writes >110 GB to disk during a 100 GB TPC-H run (shuffle amplification).
@@ -469,33 +469,33 @@ checkpoint/
 ## 4. Crate Dependency Graph
 
 ```
-ignite (binary)
-└── sail-cli
-    ├── sail-spark-connect          ← Spark Connect gRPC server
-    │   ├── sail-session            ← session state
-    │   ├── sail-plan               ← AST → LogicalPlan
-    │   │   ├── sail-sql-parser     ← SQL → AST
-    │   │   ├── sail-sql-analyzer   ← name resolution
-    │   │   ├── sail-logical-plan   ← LogicalPlan nodes
-    │   │   └── sail-catalog        ← catalog trait
-    │   │       ├── sail-catalog-memory
-    │   │       ├── sail-catalog-iceberg
-    │   │       ├── sail-catalog-hms
-    │   │       ├── sail-catalog-unity
-    │   │       ├── sail-catalog-glue
-    │   │       └── sail-catalog-onelake
-    │   ├── sail-execution          ← DataFusion execution
-    │   │   ├── sail-logical-optimizer
-    │   │   ├── sail-physical-plan
-    │   │   ├── sail-physical-optimizer
-    │   │   ├── sail-python-udf     ← Python UDF bridge
-    │   │   │   └── sail-python     ← PyO3 interpreter
-    │   │   ├── sail-data-source    ← Parquet/ORC/CSV readers
-    │   │   ├── sail-delta-lake     ← Delta Lake
-    │   │   └── sail-iceberg        ← Iceberg format
-    │   └── sail-object-store       ← S3/GCS/Azure/local
-    ├── sail-flight                 ← Arrow Flight SQL + shuffle
-    └── sail-telemetry              ← OpenTelemetry tracing
+zelox (binary)
+└── zelox-cli
+    ├── zelox-spark-connect          ← Spark Connect gRPC server
+    │   ├── zelox-session            ← session state
+    │   ├── zelox-plan               ← AST → LogicalPlan
+    │   │   ├── zelox-sql-parser     ← SQL → AST
+    │   │   ├── zelox-sql-analyzer   ← name resolution
+    │   │   ├── zelox-logical-plan   ← LogicalPlan nodes
+    │   │   └── zelox-catalog        ← catalog trait
+    │   │       ├── zelox-catalog-memory
+    │   │       ├── zelox-catalog-iceberg
+    │   │       ├── zelox-catalog-hms
+    │   │       ├── zelox-catalog-unity
+    │   │       ├── zelox-catalog-glue
+    │   │       └── zelox-catalog-onelake
+    │   ├── zelox-execution          ← DataFusion execution
+    │   │   ├── zelox-logical-optimizer
+    │   │   ├── zelox-physical-plan
+    │   │   ├── zelox-physical-optimizer
+    │   │   ├── zelox-python-udf     ← Python UDF bridge
+    │   │   │   └── zelox-python     ← PyO3 interpreter
+    │   │   ├── zelox-data-source    ← Parquet/ORC/CSV readers
+    │   │   ├── zelox-delta-lake     ← Delta Lake
+    │   │   └── zelox-iceberg        ← Iceberg format
+    │   └── zelox-object-store       ← S3/GCS/Azure/local
+    ├── zelox-flight                 ← Arrow Flight SQL + shuffle
+    └── zelox-telemetry              ← OpenTelemetry tracing
 ```
 
 ---
@@ -516,19 +516,19 @@ ignite (binary)
 
 | Week | Theme | Key deliverables |
 |---|---|---|
-| **W1** | Foundation | Fork sail → ignite, CI pipeline, binary rename, PLAN.md |
+| **W1** | Foundation | Fork zelox → zelox, CI pipeline, binary rename, PLAN.md |
 | **W2** | Cross-compile | `cargo-zigbuild`, musl + universal macOS builds, install.sh, binary size < 80 MB |
 | **W3** | Spark compat audit | Full Spark 4.0 proto surface audit, compatibility test harness setup |
 | **W4** | Compat gaps batch 1 | Fix top-10 SQL compatibility failures (from W3 triage) |
 | **W5** | Python UDF | Pandas UDF / Arrow UDF roundtrip tests, cloudpickle support |
 | **W6** | Delta Lake write | `delta-rs` write path, ACID commit, schema enforcement |
 | **W7** | Compat gaps batch 2 | Fix next-10 SQL compat failures |
-| **W8** | PyPI package | `ignite-pyspark` thin client, `pip install ignite-pyspark` |
+| **W8** | PyPI package | `zelox-pyspark` thin client, `pip install zelox-pyspark` |
 | **W9** | Iceberg read | `iceberg-rust` REST catalog, snapshot time travel |
 | **W10** | TPC-H harness | SF-1 → SF-100 benchmark infra, first public numbers |
 | **W11** | Storage backends | GCS, Azure ADLS, HDFS auth, S3 multipart upload |
 | **W12** | Performance pass | Profile TPC-H bottlenecks, SIMD kernel tuning |
-| **W13** | Docs site | mdBook docs, API reference, `ignite explain` command |
+| **W13** | Docs site | mdBook docs, API reference, `zelox explain` command |
 | **W14** | Hardening | Error messages, config validation, graceful shutdown |
 | **W15** | Beta | Private beta with 3–5 design partners |
 | **W16–20** | Beta feedback | Bug fixes from beta, Spark 4.1 compat, ORC reader |
@@ -567,7 +567,7 @@ W3: compat audit
 |---|---|---|
 | **M7** | Scheduler core | Tokio-based scheduler, stage DAG builder, task queue |
 | **M8** | Worker protocol | Worker gRPC API, heartbeat, task lifecycle |
-| **M8** | K8s Helm chart | `helm install ignite ignite/ignite`, scheduler + worker pods |
+| **M8** | K8s Helm chart | `helm install zelox zelox/zelox`, scheduler + worker pods |
 | **M9** | Flight shuffle | Arrow Flight map/reduce shuffle, memory-first with spill |
 | **M9** | Fault tolerance | Task retry, worker failure detection, dead letter queue |
 | **M10** | Kafka source | `rdkafka` consumer, JSON/Avro/binary deserialisation |
@@ -592,7 +592,7 @@ W3: compat audit
 | **M19–20** | MLflow compat | MLflow REST API server backed by object store |
 | **M21** | GPU workers | DataFusion GPU execution path (CUDA/ROCm) |
 | **M22** | ONNX inference | Run ONNX models inside execution pipeline |
-| **M23** | Notebooks | Jupyter kernel backed by Ignite, web notebook UI |
+| **M23** | Notebooks | Jupyter kernel backed by Zelox, web notebook UI |
 | **M24** | v1.0.0 launch | Public cloud GA, pricing announcement |
 
 ---
@@ -603,7 +603,7 @@ W3: compat audit
 
 | Day | Done |
 |---|---|
-| Day 1 | Fork sail → vikashgargg/ignite; Rust 1.95 installed; `cargo check` passing; binary renamed `ignite`; CLI restructured; ARCHITECTURE.md; GitHub Actions CI (ignite-ci.yml); install.sh; README updated; committed + pushed `phase1/foundation` |
+| Day 1 | Fork zelox → vikashgargg/zelox; Rust 1.95 installed; `cargo check` passing; binary renamed `zelox`; CLI restructured; ARCHITECTURE.md; GitHub Actions CI (zelox-ci.yml); install.sh; README updated; committed + pushed `phase1/foundation` |
 
 ### Week 2 (Current)
 
@@ -612,12 +612,12 @@ W3: compat audit
 | **Day 2** | ✅ Done | `cargo-zigbuild` + musl targets; cross-compile Linux x86_64 + aarch64; macOS universal binary; binary size report |
 | **Day 3** | ✅ Done | Gold test suite: all passing. Compat audit: 94 skip/xfail annotations triaged into 10 categories → `COMPAT.md` |
 | **Day 4** | ✅ Done | Spark compat fixes: DELETE without WHERE (C1), monotonically_increasing_id in aggregates (C2/C10), UPDATE SET CoW (C1), FILTER in aggregates (C4 — stale skip removed); workspace clean |
-| **Day 5** | ✅ Done | `ignite bench` implemented (DuckDB-driven, all 22 queries, timing table); C6 INSERT OVERWRITE stale skip removed; Makefile bench targets; end-goal memory + perf targets set |
+| **Day 5** | ✅ Done | `zelox bench` implemented (DuckDB-driven, all 22 queries, timing table); C6 INSERT OVERWRITE stale skip removed; Makefile bench targets; end-goal memory + perf targets set |
 | **Day 6** | ✅ Done | C8 managed tables fixed; C3 UDF skip removed (awaiting CI); README compat + memory target section added |
 | **Day 7** | ✅ Done | C5 JSON permissive mode (schema case): `PermissiveJsonDecoder` + `PermissiveJsonFormat` + `PermissiveJsonSource`; skip markers removed from `test_json_schema_show` / `test_json_schema_collect`; no-schema `_corrupt_record` remains open |
-| **Day 8** | ✅ Done | Apple Container local dev: fixed DNS (#656) + context bug (#425); thin LTO fix (OOM); `ignite:latest` built; PySpark smoke test ✅ `SELECT 1+1=2` |
+| **Day 8** | ✅ Done | Apple Container local dev: fixed DNS (#656) + context bug (#425); thin LTO fix (OOM); `zelox:latest` built; PySpark smoke test ✅ `SELECT 1+1=2` |
 | **Day 9** | ✅ Done | C5 full impl: `PermissiveJsonDecoder` streaming pipeline + 7 Rust unit tests (incl. `test_streaming_pipeline_permissive`); `scripts/smoke_json_permissive.py` — 5 PySpark end-to-end tests: PERMISSIVE, DROPMALFORMED, FAILFAST, columnNameOfCorruptRecord ✅ all green; merged via PR #1 squash into `phase1/foundation` |
-| **Day 10** | ✅ Done | Production hardening: Apple Container layer-cache split (`manifests.tar.gz` → `cargo fetch` + `crates.tar.gz` → build); SIGTERM handler in `sail-cli/src/spark/server.rs`; `Ignite ready on …` readiness log; HEALTHCHECK TCP probe; `container-build` / `container-build-clean` Makefile targets; smoke test updated for new readiness string |
+| **Day 10** | ✅ Done | Production hardening: Apple Container layer-cache split (`manifests.tar.gz` → `cargo fetch` + `crates.tar.gz` → build); SIGTERM handler in `zelox-cli/src/spark/server.rs`; `Zelox ready on …` readiness log; HEALTHCHECK TCP probe; `container-build` / `container-build-clean` Makefile targets; smoke test updated for new readiness string |
 
 ### Day 2 Delivery Notes
 
@@ -625,7 +625,7 @@ W3: compat audit
 - `cargo-zigbuild` + zig 0.14.0 installed locally
 - Rust targets installed: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `x86_64-apple-darwin`, `aarch64-apple-darwin`
 - Local native build (`aarch64-apple-darwin`): **105 MB** release binary (macOS dynamically links Python3.framework via PyO3 — expected)
-- Linux musl sizes (statically linked, truly portable): measured in CI via `ignite-ci.yml`
+- Linux musl sizes (statically linked, truly portable): measured in CI via `zelox-ci.yml`
 
 **Binary size note:**
 The < 80 MB target applies to the Linux musl binary (static, no dylib deps). The macOS binary is larger because PyO3 links against Python3.framework dynamically. Linux musl CI builds will produce the stripped static binary meeting the target.
@@ -637,27 +637,27 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 - Makefile `build-macos` target detects and sets this automatically
 
 **CI additions (this session):**
-- `ignite-ci.yml`: `build-binary` → matrix `build-linux` (x86_64 + aarch64 musl) + new `build-macos-universal` job
-- `release-binary.yml`: new workflow — publishes `ignite-x86_64-unknown-linux-musl`, `ignite-aarch64-unknown-linux-musl`, `ignite-universal2-apple-darwin` as GitHub Release assets on `v*` tags (required by `install.sh`)
+- `zelox-ci.yml`: `build-binary` → matrix `build-linux` (x86_64 + aarch64 musl) + new `build-macos-universal` job
+- `release-binary.yml`: new workflow — publishes `zelox-x86_64-unknown-linux-musl`, `zelox-aarch64-unknown-linux-musl`, `zelox-universal2-apple-darwin` as GitHub Release assets on `v*` tags (required by `install.sh`)
 
 ### Day 4 Delivery Notes
 
-**Fix C1a — DELETE without WHERE clause** (`crates/sail-delta-lake/src/table_format.rs`):
+**Fix C1a — DELETE without WHERE clause** (`crates/zelox-delta-lake/src/table_format.rs`):
 - Both MoR and CoW DELETE branches no longer error when `condition = None`
 - Use `lit(true)` as the predicate — negated to `NOT true = false` by delta-rs, retaining no rows
 
-**Fix C2/C10 — `monotonically_increasing_id()` in aggregate context** (`crates/sail-plan/src/resolver/query/aggregate.rs`):
+**Fix C2/C10 — `monotonically_increasing_id()` in aggregate context** (`crates/zelox-plan/src/resolver/query/aggregate.rs`):
 - Exclude `SparkMonotonicallyIncreasingId` from the volatile-in-aggregate check (it has special pre-projection handling)
 - Pre-project `monotonically_increasing_id()` calls out of aggregate function arguments into deterministic column refs before DataFusion builds the Aggregate node
 - Removed 3 skips from `test_monotonic_id.py` (2 explode-in-aggregate skips intentionally kept — separate issue)
 
-**Fix C1b — UPDATE SET as Copy-on-Write** (`crates/sail-plan/src/resolver/command/update.rs` + `mod.rs`):
+**Fix C1b — UPDATE SET as Copy-on-Write** (`crates/zelox-plan/src/resolver/command/update.rs` + `mod.rs`):
 - New file: `update.rs` implements `resolve_command_update` as: scan table → project each column through `CASE WHEN condition THEN new_val ELSE original_col END` → overwrite with `WriteMode::Truncate`
 - Wired into command dispatcher in `mod.rs`
-- Removed 6 UPDATE skips and 2 DELETE skips from `test_dml.py`; removed module-level Ignite skip (cleanup fixed via `try/finally` on `meow` table)
+- Removed 6 UPDATE skips and 2 DELETE skips from `test_dml.py`; removed module-level Zelox skip (cleanup fixed via `try/finally` on `meow` table)
 
 **Fix C4 — FILTER in aggregate functions** (`test_group_by.py`):
-- Confirmed `filter` is already lowered in `sail-plan/src/resolver/expression/function.rs:147`
+- Confirmed `filter` is already lowered in `zelox-plan/src/resolver/expression/function.rs:147`
 - Removed stale `@pytest.mark.skip` from `test_aggregation_filter`
 
 **Workspace status:** `cargo check --workspace` passes clean.
@@ -666,20 +666,20 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 
 ## 9. Key Technical Decisions
 
-### D1 — Fork sail rather than build from scratch
+### D1 — Fork zelox rather than build from scratch
 **Decision:** Fork `lakehq/sail` as the foundation.  
-**Reason:** Sail already has Spark Connect proto impl, SQL parser, DataFusion integration, PyO3 UDF bridge, Delta Lake, Iceberg, catalog integrations — roughly 12–18 months of work already done.  
-**Trade-off:** Inherits sail's naming conventions and some sail-specific abstractions. We rename only the binary/CLI; internal crates keep `sail-` prefix to enable upstreaming patches.
+**Reason:** Zelox already has Spark Connect proto impl, SQL parser, DataFusion integration, PyO3 UDF bridge, Delta Lake, Iceberg, catalog integrations — roughly 12–18 months of work already done.  
+**Trade-off:** Inherits zelox's naming conventions and some zelox-specific abstractions. We rename only the binary/CLI; internal crates keep `zelox-` prefix to enable upstreaming patches.
 
-### D2 — Keep `sail-` prefix on internal crates
-**Decision:** Internal crates stay `sail-*`; only the binary is named `ignite`.  
+### D2 — Keep `zelox-` prefix on internal crates
+**Decision:** Internal crates stay `zelox-*`; only the binary is named `zelox`.  
 **Reason:** Makes it easy to contribute fixes back to `lakehq/sail` without large rename diffs. Users never see crate names.  
 **Trade-off:** Slight naming confusion internally. Acceptable.
 
 ### D3 — Static binary via musl libc
 **Decision:** Ship a `x86_64-unknown-linux-musl` binary with no dynamic deps.  
 **Reason:** Works on any Linux distro with kernel ≥ 3.2. No `glibc` version mismatch.  
-**Trade-off:** Musl's `malloc` is slower than `glibc` for multi-threaded workloads. Mitigated by `mimalloc` (already in place in `sail-cli`).
+**Trade-off:** Musl's `malloc` is slower than `glibc` for multi-threaded workloads. Mitigated by `mimalloc` (already in place in `zelox-cli`).
 
 ### D4 — `cargo-zigbuild` for macOS universal binary
 **Decision:** Use `cargo-zigbuild` with zig as cross-linker for macOS universal2 target.  
@@ -702,7 +702,7 @@ System CommandLineTools Python 3.9 lacks `python3-config`, causing PyO3's build 
 
 | Risk | Probability | Impact | Mitigation |
 |---|---|---|---|
-| SQL compatibility gaps in edge cases | High | Medium | Sail gold-test suite + official PySpark test suite in CI |
+| SQL compatibility gaps in edge cases | High | Medium | Zelox gold-test suite + official PySpark test suite in CI |
 | Python UDF ecosystem (complex cloudpickle) | Medium | High | Test against top-50 PyPI ML libraries; fail gracefully with clear error |
 | iceberg-rust API instability | Medium | Medium | Pin version; contribute upstream; fallback to REST-only if needed |
 | musl + PyO3 linking issues | Low | High | Test musl build in CI from Day 2; catch early |

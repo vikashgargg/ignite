@@ -1,6 +1,6 @@
 # All-in-one validation — combined batch + streaming (2026-06-11)
 
-A single sweep validating Vajra as one batch+streaming engine after the session's work
+A single sweep validating Zelox as one batch+streaming engine after the session's work
 (keyed-windowed fix, Phase-2 parallelism, exactly-once, crash recovery). Local, debug build,
 current `HEAD`. Harness: `/tmp/allinone.py`.
 

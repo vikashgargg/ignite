@@ -1,6 +1,6 @@
-# Vajra — Road to a True Production Spark Replacement
+# Zelox — Road to a True Production Spark Replacement
 
-The honest checklist of what it takes to call Vajra a **production-grade drop-in
+The honest checklist of what it takes to call Zelox a **production-grade drop-in
 Spark replacement** and cut a **1.0 GA**. Capability/correctness/medium-scale perf
 are already proven (see the matrix below); the open work is **security, reliability
 under production conditions, and release hygiene**. Every item has a **measurable
@@ -12,7 +12,7 @@ Status legend: ✅ done · 🟡 partial · ⬜ not started.
 ---
 
 ## 0. Definition of "True Spark Replacement / GA"
-A user runs `pip install vajra-pyspark`, points existing PySpark at Vajra, and it
+A user runs `pip install zelox-pyspark`, points existing PySpark at Zelox, and it
 works — **correctly, fast, safely, and reliably, for days, under load**. Concretely,
 all P0 items below are ✅ and published.
 
@@ -36,10 +36,10 @@ all P0 items below are ✅ and published.
 | ClickBench 100M distributed (EKS) | ✅ | 43/43, 377.9 s, S3 + real K8s |
 | ClickBench parity vs LakeSail | ✅ | 60.11 s vs 65.50 s (0.92×) on identical c6a.4xlarge harness |
 | **Re-confirm on current `phase4` build** | ⬜ | rebuild from branch, ClickBench within ±10% of the 60.11 s release number |
-| Same-box Spark ClickBench reference | ⬜ | run Spark on the same box → full 3-way (Vajra/LakeSail-published/Spark) |
+| Same-box Spark ClickBench reference | ⬜ | run Spark on the same box → full 3-way (Zelox/LakeSail-published/Spark) |
 | Distributed TPC-H SF-100 < 60 s | ⬜ | 10-node K8s, 22/22, total < 60 s |
 | Large-state (high key cardinality) | ❌ | **BUG found 2026-06-22** (`scripts/state_scale_stress.py`): streaming windowed-agg silently caps at **65536 distinct keys** (drops the rest); batch groupBy is correct at 200k. P0 correctness gap vs Flink (handles billions). Also F5: state is in-memory (no spill) ⇒ very large state OOMs. |
-| Realtime streaming latency (p50/p99) | 🟡 | `scripts/stream_latency.sh` — produce→Vajra realtime Kafka→Kafka→visible per-record. Smoke 2026-06-22 (**debug** build): p50 25 ms / p99 137 ms / max 142 ms, n=440k. Release build + Flink side-by-side (the "beats Flink tail-latency" claim) pending. |
+| Realtime streaming latency (p50/p99) | 🟡 | `scripts/stream_latency.sh` — produce→Zelox realtime Kafka→Kafka→visible per-record. Smoke 2026-06-22 (**debug** build): p50 25 ms / p99 137 ms / max 142 ms, n=440k. Release build + Flink side-by-side (the "beats Flink tail-latency" claim) pending. |
 
 ## 3. Security & Hardening  — **first audit pass done; pentest still outstanding**
 > First-pass internal review done 2026-06-06 ([docs/THREAT_MODEL.md](THREAT_MODEL.md)):
@@ -83,16 +83,16 @@ all P0 items below are ✅ and published.
 ## 6. Release, Packaging & API Stability  — **still alpha**
 | Item | Status | Acceptance criterion |
 |---|---|---|
-| `pip install vajra-pyspark` smoke | ⬜ | published to PyPI; the DoD one-liner works on a clean machine (DoD item) |
+| `pip install zelox-pyspark` smoke | ⬜ | published to PyPI; the DoD one-liner works on a clean machine (DoD item) |
 | Multi-arch release binaries | 🟡 | macOS arm64 + Linux x86_64 ship; add Linux arm64 (build-from-source only today) |
 | Version / API stability policy | ⬜ | move off `v0.6.0-alpha`; semver policy + documented stability guarantees |
-| Upgrade / compat matrix | ⬜ | supported Spark-client versions + Vajra upgrade path documented |
+| Upgrade / compat matrix | ⬜ | supported Spark-client versions + Zelox upgrade path documented |
 | Full CI lane green end-to-end | 🟡 | clippy ✅ + differential ✅; get fmt/test/build/scorecard/k8s/macos all green |
 
 ## 7. Documentation & Support
 | Item | Status | Acceptance criterion |
 |---|---|---|
-| Migration guide (Spark → Vajra) | ⬜ | "point your code here + known differences" guide |
+| Migration guide (Spark → Zelox) | ⬜ | "point your code here + known differences" guide |
 | Known-limitations page | 🟡 | exists in roadmap; promote to user-facing (PYTHONPATH, mimalloc, HMS stubs) |
 | Deployment guides | 🟡 | K8s/Helm + Apple Container exist; add a hardened-prod reference deployment |
 
@@ -102,7 +102,7 @@ all P0 items below are ✅ and published.
 - **GA = every P0 below is ✅ and published.**
 - **P0 (blockers):** §3 security pass (CVE gate + threat model + fuzz + auth/DoS + pentest),
   §4 Kafka→Delta 24 h soak + concurrency + one failover test, §1 `differential-spark`
-  required, §6 `vajra-pyspark` PyPI smoke + full CI green + drop the `-alpha`.
+  required, §6 `zelox-pyspark` PyPI smoke + full CI green + drop the `-alpha`.
 - **P1 (credibility):** §2 phase4 re-confirm + same-box Spark ClickBench + distributed
   SF-100 < 60 s; §1 Spark 4.x reference + TPC-DS + ≥97% suite.
 - **P2 (polish → 1.0-rc):** §5 SLOs/tracing/runbooks; §6 arm64 Linux + semver; §7 docs.
@@ -123,7 +123,7 @@ and will it survive production?"** So:
 2. **Reliability:** stand up the Kafka→Delta 24 h soak and a concurrency load test; add
    one worker/scheduler-kill failover test.
 3. **Lock the gates (cheap, high trust):** make `differential-spark` required, get the
-   full CI lane green, publish + smoke-test `vajra-pyspark` on PyPI.
+   full CI lane green, publish + smoke-test `zelox-pyspark` on PyPI.
 4. **Quick win:** the phase4 ClickBench re-confirm (~$1, ~1 h) to prove no perf
    regression since the released binary.
 

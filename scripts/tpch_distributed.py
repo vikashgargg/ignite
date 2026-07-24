@@ -1,8 +1,8 @@
 """
-Vajra TPC-H Distributed Benchmark (SF-100)
+Zelox TPC-H Distributed Benchmark (SF-100)
 ============================================
 Runs all 22 TPC-H queries at scale factor 100 (~100 GB) against a running
-Vajra cluster and reports query times + summary.
+Zelox cluster and reports query times + summary.
 
 Usage:
     # Generate data (requires ~150 GB disk; downloads DuckDB TPC-H extension)
@@ -21,7 +21,7 @@ Usage:
     SPARK_REMOTE=sc://localhost:50051 TPCH_SF=1 python scripts/tpch_distributed.py
 
 Environment Variables:
-    SPARK_REMOTE        Vajra server address (default: sc://localhost:50051)
+    SPARK_REMOTE        Zelox server address (default: sc://localhost:50051)
     TPCH_SF             Scale factor (default: 1)
     TPCH_DATA_DIR       Directory for Parquet data files (default: /tmp/tpch_data)
     TPCH_SKIP_GENERATE  Set to 1 to skip data generation (data must already exist)
@@ -30,7 +30,7 @@ Environment Variables:
     TPCH_PASS_THRESHOLD Minimum queries that must pass (default: 22)
 
 Requirements:
-    pip install pyspark[connect]==4.0.0 duckdb pandas pyarrow
+    pip install pyspark[connect]==4.2.0 duckdb pandas pyarrow
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ except ImportError:
 try:
     from pyspark.sql import SparkSession
 except ImportError:
-    print("ERROR: pyspark not installed. Run: pip install pyspark[connect]==4.0.0")
+    print("ERROR: pyspark not installed. Run: pip install pyspark[connect]==4.2.0")
     sys.exit(1)
 
 SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "sc://localhost:50051")
@@ -482,7 +482,7 @@ def main() -> None:
     else:
         query_nums = list(range(1, 23))
 
-    print(f"Vajra TPC-H Distributed Benchmark (SF={TPCH_SF})")
+    print(f"Zelox TPC-H Distributed Benchmark (SF={TPCH_SF})")
     print(f"Server    : {SPARK_REMOTE}")
     print(f"Data dir  : {TPCH_DATA_DIR}")
     print(f"Queries   : {len(query_nums)}")
@@ -491,7 +491,7 @@ def main() -> None:
 
     # `SPARK_REMOTE=local[*]` (or any `local...` value) runs against a real
     # in-process Apache Spark (JVM) for an apples-to-apples reference comparison;
-    # otherwise connect to a remote Spark Connect server (Vajra).
+    # otherwise connect to a remote Spark Connect server (Zelox).
     if SPARK_REMOTE.startswith("local"):
         print(f"Engine    : reference Apache Spark (master={SPARK_REMOTE})")
         # pyspark auto-enables Spark Connect when the SPARK_REMOTE env var is

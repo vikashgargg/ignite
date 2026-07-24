@@ -1,6 +1,6 @@
-# Validating Vajra as a Production Spark Replacement on Kubernetes
+# Validating Zelox as a Production Spark Replacement on Kubernetes
 
-> How to prove Vajra is a drop-in Apache Spark replacement on a **real** Kubernetes
+> How to prove Zelox is a drop-in Apache Spark replacement on a **real** Kubernetes
 > cluster — at scale, with production storage, autoscaling, and HA — and how that
 > goes beyond what LakeSail currently demonstrates.
 
@@ -34,7 +34,7 @@ end-to-end). Use a cloud cluster for the **real** validation.
             │              Kubernetes cluster               │
             │                                                │
  PySpark    │   ┌────────────┐      ┌────────────────────┐  │
- client ────┼──▶│  vajra      │      │  HPA (2→N workers) │  │
+ client ────┼──▶│  zelox      │      │  HPA (2→N workers) │  │
  sc://      │   │  scheduler  │◀────▶│  scales on CPU/mem │  │
             │   │  (Deployment│      └────────────────────┘  │
             │   │   + Lease HA)│                              │
@@ -51,7 +51,7 @@ end-to-end). Use a cloud cluster for the **real** validation.
                  └─────────────────────────────────────┘
 ```
 
-Vajra ships all of this today (see `helm/vajra/`): scheduler + worker Deployments,
+Zelox ships all of this today (see `helm/zelox/`): scheduler + worker Deployments,
 HPA, PodDisruptionBudget, RBAC, and Kubernetes Lease-based scheduler leader election.
 
 ---
@@ -65,7 +65,7 @@ Cheapest reliable option is **AWS EKS with spot instances** (or GKE/AKS equivale
 ```sh
 # EKS via eksctl — 3× m6i.2xlarge spot (8 vCPU / 32 GB each), autoscale to 10
 eksctl create cluster \
-  --name vajra-prod-test \
+  --name zelox-prod-test \
   --region us-east-1 \
   --node-type m6i.2xlarge \
   --nodes 3 --nodes-min 3 --nodes-max 10 \
@@ -75,7 +75,7 @@ eksctl create cluster \
 
 GKE equivalent:
 ```sh
-gcloud container clusters create vajra-prod-test \
+gcloud container clusters create zelox-prod-test \
   --num-nodes 3 --machine-type e2-standard-8 \
   --enable-autoscaling --min-nodes 3 --max-nodes 10 \
   --region us-central1
@@ -84,34 +84,34 @@ gcloud container clusters create vajra-prod-test \
 ### 2. Object storage for data + shuffle (production pattern)
 
 ```sh
-aws s3 mb s3://vajra-prod-test-data
+aws s3 mb s3://zelox-prod-test-data
 # Worker pods get S3 access via IRSA (IAM Roles for Service Accounts) — no static keys
 eksctl create iamserviceaccount \
-  --cluster vajra-prod-test --name vajra-worker --namespace vajra \
+  --cluster zelox-prod-test --name zelox-worker --namespace zelox \
   --attach-policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess \
   --approve
 ```
 
-### 3. Deploy Vajra with the Helm chart
+### 3. Deploy Zelox with the Helm chart
 
 ```sh
-helm install vajra ./helm/vajra \
-  --namespace vajra --create-namespace \
-  --set image.repository=<your-registry>/vajra \
+helm install zelox ./helm/zelox \
+  --namespace zelox --create-namespace \
+  --set image.repository=<your-registry>/zelox \
   --set image.tag=v0.6.0-alpha \
   --set mode=kubernetes-cluster \
   --set scheduler.ha.enabled=true \
   --set worker.replicas=3 \
   --set worker.autoscaling.enabled=true \
   --set worker.autoscaling.maxReplicas=10 \
-  --set serviceAccount.name=vajra-worker \
-  --set storage.s3.bucket=vajra-prod-test-data
+  --set serviceAccount.name=zelox-worker \
+  --set storage.s3.bucket=zelox-prod-test-data
 ```
 
 ### 4. Run the production validation suite
 
 ```sh
-kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 &
+kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 &
 
 # (a) Full Spark compatibility — must be 105/105 in kubernetes-cluster mode
 SPARK_REMOTE=sc://localhost:50051 python scripts/spark_compat_score.py
@@ -127,9 +127,9 @@ SPARK_REMOTE=sc://localhost:50051 python scripts/tpcds_score.py
 
 | Test | Command | Pass criteria |
 |---|---|---|
-| **Autoscaling** | Submit a heavy job, watch `kubectl get hpa -n vajra -w` | Workers scale 3→N under load, back down after |
-| **Scheduler HA** | `kubectl delete pod -n vajra -l role=scheduler` mid-query | Standby acquires the Lease, job completes |
-| **Worker loss** | `kubectl delete pod -n vajra -l role=worker` mid-shuffle | Stage retried on another worker, correct result |
+| **Autoscaling** | Submit a heavy job, watch `kubectl get hpa -n zelox -w` | Workers scale 3→N under load, back down after |
+| **Scheduler HA** | `kubectl delete pod -n zelox -l role=scheduler` mid-query | Standby acquires the Lease, job completes |
+| **Worker loss** | `kubectl delete pod -n zelox -l role=worker` mid-shuffle | Stage retried on another worker, correct result |
 | **Graceful drain** | `kubectl drain <node>` | Pods reschedule, no data loss (SIGTERM handler) |
 | **Rolling upgrade** | `helm upgrade` to a new tag | Zero failed queries during rollout (PDB holds quorum) |
 | **24h endurance** | Kafka → Delta streaming job for 24h | No OOM, no restart, checkpoints advance |
@@ -137,9 +137,9 @@ SPARK_REMOTE=sc://localhost:50051 python scripts/tpcds_score.py
 ### 6. Tear down
 
 ```sh
-helm uninstall vajra -n vajra
-eksctl delete cluster --name vajra-prod-test --region us-east-1
-aws s3 rb s3://vajra-prod-test-data --force
+helm uninstall zelox -n zelox
+eksctl delete cluster --name zelox-prod-test --region us-east-1
+aws s3 rb s3://zelox-prod-test-data --force
 ```
 
 ---
@@ -150,14 +150,14 @@ For CI / pre-cloud confidence that the image + manifests are valid. This is what
 `k8s-scorecard` CI job runs on every push.
 
 ```sh
-kind create cluster --name vajra
-make container-build-k8s            # or: docker build -f docker/Dockerfile -t vajra:latest .
-kind load docker-image vajra:latest --name vajra
-kubectl apply -f k8s/sail.yaml
-kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=120s
-kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 &
+kind create cluster --name zelox
+make container-build-k8s            # or: docker build -f docker/Dockerfile -t zelox:latest .
+kind load docker-image zelox:latest --name zelox
+kubectl apply -f k8s/zelox.yaml
+kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=120s
+kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 &
 SPARK_REMOTE=sc://localhost:50051 python scripts/spark_compat_score.py   # expect 105/105
-kind delete cluster --name vajra
+kind delete cluster --name zelox
 ```
 
 > Note: building the image from source needs a builder with ≥ 8 GB RAM. On an
@@ -166,9 +166,9 @@ kind delete cluster --name vajra
 
 ---
 
-## Vajra vs LakeSail on Kubernetes
+## Zelox vs LakeSail on Kubernetes
 
-| Capability | LakeSail | **Vajra** |
+| Capability | LakeSail | **Zelox** |
 |---|---|---|
 | Helm chart | basic | **scheduler + workers + HPA + PDB + RBAC** |
 | Horizontal Pod Autoscaler | ❌ | **✅ CPU/mem-based worker autoscaling** |
@@ -176,7 +176,7 @@ kind delete cluster --name vajra
 | Graceful shutdown (SIGTERM) | partial | **✅ drains in-flight tasks** |
 | PodDisruptionBudget | ❌ | **✅ quorum held during rollout** |
 | Object-store shuffle (S3/GCS) | ✅ | **✅ via `object_store`** |
-| Single-YAML quickstart | ❌ | **✅ `k8s/sail.yaml`** |
+| Single-YAML quickstart | ❌ | **✅ `k8s/zelox.yaml`** |
 | Spark compat in k8s mode | ~95% | **100% (105/105)** |
 | Distributed lambda HOFs + recursive CTE | partial | **✅ (Sprint 4.1 codec fix)** |
 
@@ -184,7 +184,7 @@ kind delete cluster --name vajra
 
 ## CI coverage
 
-The `k8s-scorecard` job in `.github/workflows/ignite-ci.yml` runs Path B (kind +
+The `k8s-scorecard` job in `.github/workflows/zelox-ci.yml` runs Path B (kind +
 `kubernetes-cluster` mode + 105 scorecard) on every push to a clean 16 GB runner —
 so the K8s deployment path is continuously validated regardless of local hardware.
 

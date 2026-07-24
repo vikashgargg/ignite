@@ -1,6 +1,6 @@
-# Vajra — Spark-parity gap list + DataFusion/Arrow upgrade plan (STANDING, updated 2026-07-04)
+# Zelox — Spark-parity gap list + DataFusion/Arrow upgrade plan (STANDING, updated 2026-07-04)
 
-The maintained list of what remains to make Vajra a **true drop-in Spark replacement** ([charter](../../MEMORY.md)),
+The maintained list of what remains to make Zelox a **true drop-in Spark replacement** ([charter](../../MEMORY.md)),
 plus the safe path to adopt the latest DataFusion/Arrow via LakeSail v0.6.5 as a proven reference. Work this
 architect-first, T1→T2→T3 ([three-tier-sdlc.md](three-tier-sdlc.md)); update this doc as items land.
 
@@ -9,7 +9,7 @@ architect-first, T1→T2→T3 ([three-tier-sdlc.md](three-tier-sdlc.md)); update
 - **Versions:** DataFusion **54.0.0**, Arrow **58.3.0** (`Cargo.toml`) — upgraded 2026-07-06, T2-validated. (Note: Arrow-rs is at 58.x — "Arrow
   25" was a version mix-up; the real target is 58.3.0.)
 - **Streaming (just landed, merged to main cfae68f1):** crash-EO exactly-once (aligned barriers + exact
-  PartitionEOF idle + emit floor) EKS-confirmed; final-window completeness (opt-in `VAJRA_COMPLETE_ON_END`,
+  PartitionEOF idle + emit floor) EKS-confirmed; final-window completeness (opt-in `ZELOX_COMPLETE_ON_END`,
   Flink scan.bounded.mode parity); **parallel Kafka sink** (fixed a 15/16 data-loss bug + ~300× throughput,
   100M/100M @ 1.67M msg/s on EKS). All T1→T2→T3 validated. 3-tier SDLC + kind tier established.
 - **SQL compat:** 105/105 scorecard; TPC-H SF-1 ~36× vs Spark; TPC-DS 97/99. Batch-on-S3 6.2× vs Spark.
@@ -72,20 +72,20 @@ combination, which de-risks our upgrade. Plan:
 ## 2c. DataFusion 54 migration — progress + precise remaining map (branch upgrade/datafusion54-arrow583)
 
 **DONE (committed 94253edb):** Arrow 58.3 (green); Cargo pins 53.1→54.0 + `avro` dropped from
-datafusion-common (`arrow-avro` auto-added); **sail-common-datafusion** + **sail-cache** fully migrated
+datafusion-common (`arrow-avro` auto-added); **zelox-common-datafusion** + **zelox-cache** fully migrated
 (`TableScopedPath` re-key + new `cache_limit`/`update_cache_limit`/`drop_table_entries`, ported from LakeSail
 v0.6.5); **ALL 254 `as_any` trait-impl overrides removed** (DF54 made `Any` a supertrait; downcasting now via
 inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downcast_ref`**.
 
 **WORKSPACE LIB COMPILES GREEN ON DF54** (`cargo build --workspace` = 0 errors). Landed the full remaining map:
 - *Mechanical (done):* `partition_statistics -> Result<Arc<Statistics>>` (delta relaxed_tz/scan_by_adds + 6 in
-  sail-physical-plan: merge_cardinality_check, monotonic_id, repartition, spark_partition_id, streaming
+  zelox-physical-plan: merge_cardinality_check, monotonic_id, repartition, spark_partition_id, streaming
   filter/limit — deref-clone `Arc` where the body mutates or calls `with_fetch`); `PartitionedFile.table_reference:
   None` + `extensions: Default::default()` (DF54 changed `extensions` from `Option<Arc<dyn Any>>` to
   `FileExtensions`); `CastColumnExpr → CastExpr::new_with_target_field` (iceberg expr_adapter, mirroring DF's own
   `schema_rewriter`).
 - *Semantic (done):* logical `Cast`/`TryCast` construction → `Cast::new(expr, data_type)` (still takes `DataType`,
-  converts to `field: FieldRef` internally) across sail-function (3) + sail-plan (window/aggregate/misc/time_travel/
+  converts to `field: FieldRef` internally) across zelox-function (3) + zelox-plan (window/aggregate/misc/time_travel/
   read/stat) + delta metadata_predicate destructure `Cast { expr, field }` using `field.data_type()`; reading
   `cast.data_type` → `cast.field.data_type()` (values.rs); `PruningStatistics::row_counts(&self)` arg-drop —
   delta impl reworked to **container-level** (per-Add `num_records`, column-independent, removed dead per-column
@@ -97,7 +97,7 @@ inherent `dyn X::downcast_ref::<T>()`); **13 `.as_any()` call-sites → `.downca
   downcast on `dyn ExecutionPlan`/`TableProvider`/`DataSource`/`DataSink`/`FileSource`/`PhysicalExpr`/UDFs — driven
   by exact compiler spans so arrow-array `.as_any()` was never touched) + **177 now-unused `use std::any::Any`**
   imports cleaned.
-- **sail-execution/codec.rs (the distributed round-trip — highest care):** DF54 merged `&TaskContext` + `&dyn
+- **zelox-execution/codec.rs (the distributed round-trip — highest care):** DF54 merged `&TaskContext` + `&dyn
   PhysicalExtensionCodec` into **`PhysicalPlanDecodeContext::new(task_ctx, codec)`** for every decode
   (`parse_protobuf_file_scan_config` / `parse_physical_sort_exprs` / `parse_protobuf_partitioning`); every
   serialize (`serialize_file_scan_config` / `serialize_physical_sort_exprs`) now takes `(items, codec,
@@ -155,7 +155,7 @@ Each is a Spark-compat win; cherry-pick from LakeSail v0.6.5 (same fork lineage)
 - [ ] TPC-H SF-100 distributed < 60s (10-node K8s)
 - [ ] autoscaling / elasticity; rescale-from-checkpoint on EKS (mechanism done locally)
 - [ ] observability (metrics/traces) + Grafana; zero-downtime upgrade; multi-region
-- [ ] `pip install vajra-pyspark` one-liner works unchanged
+- [ ] `pip install zelox-pyspark` one-liner works unchanged
 
 **Platform upgrade:**
 - [ ] DataFusion 54.0 + Arrow 58.3 (§2)

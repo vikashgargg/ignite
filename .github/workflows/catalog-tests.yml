@@ -14,7 +14,7 @@ jobs:
       HATCH_ENV: "test.spark-4.1.1"
       # Coverage environment variables
       RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/.github/scripts/rustc-workspace-wrapper.sh
-      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/sail-catalog-it-%p-%m.profraw
+      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/zelox-catalog-it-%p-%m.profraw
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +43,7 @@ jobs:
 
       - name: Set Up Hatch Environment
         run: |
-          hatch run install-pysail
+          hatch run install-pyzelox
 
       - name: List Python packages
         continue-on-error: true
@@ -52,14 +52,14 @@ jobs:
 
       - name: Run Catalog Integration Tests
         run: |
-          hatch run pytest -m catalog_integration --pyargs pysail.tests.spark -v
+          hatch run pytest -m catalog_integration --pyargs pyzelox.tests.spark -v
 
       # Generate coverage report after catalog IT tests
       - name: Generate coverage report
         run: |
           # Wait for background Rust toolchain installation to complete
           wait
-          BINARY_PATH=$(hatch run python -c 'import pysail._native; import os; print(os.path.dirname(pysail._native.__file__))')
+          BINARY_PATH=$(hatch run python -c 'import pyzelox._native; import os; print(os.path.dirname(pyzelox._native.__file__))')
           echo "Binary path: $BINARY_PATH"
           LLVM_PATH=$(.github/scripts/find-llvm-profdata.sh)
           grcov target --binary-path "$BINARY_PATH" -s . \

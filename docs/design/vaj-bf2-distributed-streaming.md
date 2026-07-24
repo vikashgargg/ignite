@@ -1,6 +1,6 @@
 # VAJ-BF2 — Distributed streaming + Arrow Flight exchange (architect-first design)
 
-> **Status:** DESIGN (2026-07-07). Design-before-code per the charter. Grounded in the existing Vajra
+> **Status:** DESIGN (2026-07-07). Design-before-code per the charter. Grounded in the existing Zelox
 > code (traced) + REFERENCES §4 (Ballista 53.0.0 Arrow Flight), §2d (Spark 4.1 RT-mode pipelined
 > stages), Flink FLIP-8 (credit-based flow control). **Not yet implemented.**
 
@@ -8,16 +8,16 @@
 Complete per-stage profile (clean 20M/16-part, 2026-07-07): `from_json 135s` (#1, intrinsic JSON
 tokenize = PARITY with Flink's Jackson) > **`exchange 89.8s` (#2)** > `finalize 27s` >
 `source_read 4.4s` (CHEAP, ruled out) > `encode 0.3s`; window `STARVED(upstream)`. Single-node
-windowed-agg is parse-bound parity (Vajra ~1.05× behind Flink on identical work). The exchange is the
-only stage where Vajra's **no-JVM Arrow zero-copy network shuffle** can *structurally* beat Flink's
+windowed-agg is parse-bound parity (Zelox ~1.05× behind Flink on identical work). The exchange is the
+only stage where Zelox's **no-JVM Arrow zero-copy network shuffle** can *structurally* beat Flink's
 JVM-serialized shuffle — but that only manifests **multi-node** (single-node exchange is in-memory).
 
 ## 1. The two big de-riskers (code-traced 2026-07-07)
-1. **Arrow Flight transport ALREADY EXISTS + is tested.** `sail-execution/src/stream_service/`:
+1. **Arrow Flight transport ALREADY EXISTS + is tested.** `zelox-execution/src/stream_service/`:
    `FlightServiceClient` + `FlightRecordBatchStream` (`client.rs`), `TaskStreamFlightServer` + `do_get`
    + `Ticket` (`server.rs`), `test_arrow_flight_shuffle_roundtrip` (`tests.rs`). The **batch** shuffle
    already moves Arrow `RecordBatch` streams cross-node zero-copy over Flight. **Reuse it.**
-2. **FlowEvents ALREADY ⟷ RecordBatches.** `sail-common-datafusion/.../event/encoding.rs`:
+2. **FlowEvents ALREADY ⟷ RecordBatches.** `zelox-common-datafusion/.../event/encoding.rs`:
    `EncodedFlowEventStream::encode(FlowEvent) -> RecordBatch` (data AND markers — Watermark/Checkpoint/
    Idle/EndOfData — encoded into a special-schema batch with `_marker`/`_retracted` columns);
    `DecodedFlowEventStream` reverses it. So a streaming sub-channel's `FlowEvent` stream **is** a
@@ -28,15 +28,15 @@ barriers) already serializes to Arrow RecordBatches, and Flight already carries 
 streams zero-copy. This is the no-JVM structural edge, already built for batch.
 
 ## 2. What's actually missing (the real work)
-Today the streaming path is **single-process**: `StreamExchangeExec` (`sail-physical-plan/.../
+Today the streaming path is **single-process**: `StreamExchangeExec` (`zelox-physical-plan/.../
 streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the deploy is ONE pod
 (`--mode local-cluster --workers 4`). BF2 must run streaming on the **existing** distributed mode:
 
 - **T-BF2.1 — Multi-pod streaming topology. RESOLVED (2026-07-07): the distributed mode ALREADY
-  EXISTS.** `sail-cli/src/runner.rs`: three modes `local | local-cluster | kubernetes-cluster`;
+  EXISTS.** `zelox-cli/src/runner.rs`: three modes `local | local-cluster | kubernetes-cluster`;
   **`kubernetes-cluster`** is a real distributed multi-pod mode (`Cluster`/`ClusterRole::Worker` worker
   pods, Flight shuffle, K8s Lease-based scheduler-HA leader election). BUT: **every benchmark (batch AND
-  streaming) ran `local-cluster` single-pod** (`k8s/eks/vajra-sf100.yaml`: "local-cluster on the single
+  streaming) ran `local-cluster` single-pod** (`k8s/eks/zelox-sf100.yaml`: "local-cluster on the single
   big node"), and the scheduler is run-to-completion (`job_scheduler/core.rs`: final-stages-succeed →
   job-succeeds — fits bounded/availableNow streaming via `EndOfData`; continuous runs forever). ⇒ BF2's
   topology work is **NOT greenfield distributed execution** (it exists) — it's (a) verify streaming runs
@@ -62,7 +62,7 @@ streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the dep
   (markers arrive as decoded FlowEvents — same code path). The EO barrier-aligned commit must hold
   across the **network cut** (a worker crash mid-epoch).
 - **T-BF2.4 — Credit-based network backpressure (Flink FLIP-8).** The mpsc `channel_capacity`
-  (`VAJRA_EXCHANGE_CHANNEL_CAP`, default 16) is the local backpressure bound. Over Flight/gRPC there is
+  (`ZELOX_EXCHANGE_CHANNEL_CAP`, default 16) is the local backpressure bound. Over Flight/gRPC there is
   HTTP/2 flow control, but we want *explicit* credit so a fast producer can't unbounded-buffer at the
   receiver. Design an application-level credit (receiver grants N-batch credit; producer blocks when
   exhausted) mirroring the mpsc bound. Grounded: Flink FLIP-8 credit flow control.
@@ -79,21 +79,21 @@ streaming/exchange.rs`) routes via in-memory `tokio::mpsc` channels, and the dep
 1. **Multi-node benchmark FIRST** (≥2 compute nodes, 16-part) — the single-node profile can't show the
    network exchange. Build the topology, then profile network-exchange vs parse vs source with the
    now-complete WM_PROF (source_read wired 2026-07-07). RANK before optimizing the transport.
-2. **T1 local multi-process** (multiple `vajra` server processes on one host, Flight between them) —
+2. **T1 local multi-process** (multiple `zelox` server processes on one host, Flight between them) —
    correctness_gate + inc_ckpt dup=0 across the network cut.
-3. **T2 kind multi-pod** (≥2 vajra-stream pods) — n_windows/sum exact; fusion/EO unchanged.
+3. **T2 kind multi-pod** (≥2 zelox-stream pods) — n_windows/sum exact; fusion/EO unchanged.
 4. **T3 EKS multi-node** (≥2 compute) — windowed-agg throughput **> Flink** at ≥16-part; per-stage
    network-exchange CPU < Flink's shuffle; EO dup=0 across crash + network cut. Claim ONLY the measured
    multi-node head-to-head; tear to $0.
 
 ## 4b. Experiment 1 result (kind, 2026-07-07) — distributed execution CONFIRMED (batch); streaming pending
-Deployed `k8s/sail.yaml` (kubernetes-cluster driver, `vajra:t7fuse`) on kind. A trivial distributed
+Deployed `k8s/zelox.yaml` (kubernetes-cluster driver, `zelox:t7fuse`) on kind. A trivial distributed
 query (`spark.range(0,1e6,1,8).sum`) returned the correct result **and the driver dynamically launched
-5 worker pods** (`sail-worker-*-1..5`) — so kubernetes-cluster worker-pod launch + cross-pod Flight
+5 worker pods** (`zelox-worker-*-1..5`) — so kubernetes-cluster worker-pod launch + cross-pod Flight
 shuffle + correct result are **PROVEN on kind**. The hard part (distributed worker launch + Flight
 shuffle) works. **Still UNOBSERVED:** the STREAMING windowed-agg cross-pod behavior — the streaming run
 was blocked by kind Kafka data-path friction (topic empty: producer BOOT namespace, slow single-broker
-kind Kafka), NOT a Vajra issue. **Next-session step (skip the friction):** get a small `events` topic
+kind Kafka), NOT a Zelox issue. **Next-session step (skip the friction):** get a small `events` topic
 populated in the driver's namespace (fix producer BOOT to `kafka.<ns>.svc`, or pre-create+seed the
 topic), run `stream_windowed_agg.py` against the kubernetes-cluster driver, and watch: does the
 streaming DAG spread across the launched worker pods, and does `StreamExchangeExec` (mpsc) error /
@@ -101,16 +101,16 @@ fall-back / route cross-pod? That single observation scopes T-BF2.2.
 
 ## 4c. Experiment 2 result (kind, 2026-07-07) — ROOT-CAUSED: streaming DAG pinned to ONE worker
 Seeded a small `events` topic (400k rows, 8 parts, exact `{"k","ts","v"}` scheme) **in the driver's
-namespace** (`vajra`), skipping the flaky producer BOOT path, then ran the bounded windowed-agg
+namespace** (`zelox`), skipping the flaky producer BOOT path, then ran the bounded windowed-agg
 (`trigger(availableNow=True)`) against the kubernetes-cluster driver. Observed:
-- **The driver launched 5 worker pods for the STREAMING job** (`sail-worker-nwfrntow45-1..5`, all
+- **The driver launched 5 worker pods for the STREAMING job** (`zelox-worker-nwfrntow45-1..5`, all
   Running) — so worker-pod launch happens for streaming, not just batch.
 - **BUT the entire windowed-agg ran on ONE worker.** Worker 1's log shows `F5_PEAK p0..p7` — **all 8
   window partitions on a single pod**; workers 2–5 started their server, did **zero** window work, and
   were aborted at shutdown. The query executed to completion with **no exchange error** — it only
-  failed the post-hoc `read.parquet` verification (`No files found in file:///tmp/sail/wagg_out/`),
+  failed the post-hoc `read.parquet` verification (`No files found in file:///tmp/zelox/wagg_out/`),
   which is expected kind hostPath locality (sink wrote on worker 1's node; driver read its own node),
-  **not** a Vajra fault.
+  **not** a Zelox fault.
 - ⇒ `StreamExchangeExec`'s mpsc **never crossed a pod** — not because it errors, but because the whole
   streaming pipeline (source → exchange → window) is co-located on one worker.
 
@@ -135,7 +135,7 @@ T-BF2.4.)
 
 ## 4d. T-BF2.2 IMPLEMENTED + T1-validated (2026-07-07, commit d816eac7)
 Added the `StreamExchangeExec` stage-boundary arm to `build_job_graph` (planner.rs), gated
-`VAJRA_DISTRIBUTED_STREAM=1` (resolved once at `try_new`, threaded — not per-node env). It emits the
+`ZELOX_DISTRIBUTED_STREAM=1` (resolved once at `try_new`, threaded — not per-node env). It emits the
 existing marker-aware Hash shuffle via `create_shuffle` (the exchange's properties already carry
 `Partitioning::Hash(keys, N)`), so the N window instances distribute across workers. **Prod-grade
 guards:** default keeps the F2/F3-validated inline path (additive/reversible); only the **align-free
@@ -146,7 +146,7 @@ barrier. **T1 green:** deterministic unit tests (gate OFF→1 stage, gate ON→2
 only when gated); `dist_streaming_smoke` **6/6** with the gate ON (local-cluster, workers=4;
 `windowed_file=97` preserved through the new shuffle); clippy `-D warnings` green.
 
-**Deployment-mode parity check (2026-07-07) — Vajra runs the full batch+streaming suite like
+**Deployment-mode parity check (2026-07-07) — Zelox runs the full batch+streaming suite like
 Spark/Flink across all three modes:**
 | Mode | Spark/Flink analogue | `dist_streaming_smoke` |
 |------|----------------------|------------------------|
@@ -159,8 +159,8 @@ worker pods (the placement Exp 2 showed pinned to one), counts exact. Then T-BF2
 + T-BF2.4 (credit backpressure) → T3 EKS multi-node vs Flink on the ranked #2 exchange stage.
 
 ## 4e. T2 kind multi-pod result (2026-07-08) — TWO real blockers found (before EKS spend)
-Ran the gate-ON `vajra:bf2` on a 3-node kind cluster (`kind-multinode.yaml`), driver flag
-`VAJRA_DISTRIBUTED_STREAM=1` confirmed, 400k seeded. **Two findings, both root-caused from code:**
+Ran the gate-ON `zelox:bf2` on a 3-node kind cluster (`kind-multinode.yaml`), driver flag
+`ZELOX_DISTRIBUTED_STREAM=1` confirmed, 400k seeded. **Two findings, both root-caused from code:**
 
 1. **The multi-partition Kafka benchmark is the N→M case, NOT 1→N.** The realtime Kafka source sets
    `parallelism = count_kafka_partitions()` (reader.rs:361) = 8 for an 8-partition topic ⇒ plan is
@@ -182,7 +182,7 @@ Ran the gate-ON `vajra:bf2` on a 3-node kind cluster (`kind-multinode.yaml`), dr
 task placement (small, surgical, but changes global placement → gate + batch-correctness T1) →
 **T-BF2.3** N→M cross-network barrier align (so the 8-partition benchmark distributes) → **T-BF2.4**
 credit backpressure → T3 EKS. T2 caught this before EKS spend — exactly its purpose (kind torn down,
-AWS $0). *(Secondary harness note: kind cross-node `file:///tmp/sail` read still flaky for the post-hoc
+AWS $0). *(Secondary harness note: kind cross-node `file:///tmp/zelox` read still flaky for the post-hoc
 verify — the F5_PEAK worker logs are the reliable placement signal; use an object-store/S3 sink for the
 EKS verify, per f2f3 §F3-d.)*
 
@@ -282,18 +282,18 @@ T-BF2.3: crash-EO N→M dup=0** (counts-exact done) + the Kafka N→M path (real
 ## 4i. T-BF2.3 crash-EO N→M VALIDATED dup=0 (2026-07-08) — T1 COMPLETE
 Ran the existing committed crash-EO gate `f3c_stateful_crash.sh` (continuous stateful windowed-agg over
 a **4-partition** Kafka topic = N→M, local-cluster, `kill -9` mid-run → restart → verify) with
-`VAJRA_DISTRIBUTED_STREAM=1`. **Result: `F3C_STATEFUL_EO_ACROSS_CRASH PASS` — `no_dup=True`,
+`ZELOX_DISTRIBUTED_STREAM=1`. **Result: `F3C_STATEFUL_EO_ACROSS_CRASH PASS` — `no_dup=True`,
 `all_counts_10=True`, rows=12/6 windows, IDENTICAL to the gate-OFF baseline.** Confirmed the N→M cut was
 genuinely active (not a silent fallback): the task-runner plan dump shows
 `ShuffleWriteExec: partitioning=Hash([#8@3], 8)` over the streaming source + a multi-stage job
 (`job 1 stage 0/1`) — i.e. the keyed exchange was cut into a distributed cross-network Hash shuffle whose
 receiver aligns Chandy-Lamport barriers to a consistent cut. So the aligning shuffle preserves
-exactly-once across a hard crash. **Reproducible gate: `VAJRA_DISTRIBUTED_STREAM=1 bash
+exactly-once across a hard crash. **Reproducible gate: `ZELOX_DISTRIBUTED_STREAM=1 bash
 scripts/f3c_stateful_crash.sh`.** ⇒ T-BF2.3 T1 is COMPLETE (counts-exact `nm_dist_gate` + crash-EO f3c).
 Next: T2 kind (pods spread) + the Kafka N→M throughput benchmark → T-BF2.4 → T3 EKS vs Flink.
 
-## 4j. T2 kind result (2026-07-08, vajra:bf3) — cut distributes the SOURCE, NOT the window (T-BF2.6)
-Ran the gate-ON `vajra:bf3` (all of T-BF2.2/2.5/2.3) on a 3-node kind cluster, 8-partition Kafka
+## 4j. T2 kind result (2026-07-08, zelox:bf3) — cut distributes the SOURCE, NOT the window (T-BF2.6)
+Ran the gate-ON `zelox:bf3` (all of T-BF2.2/2.5/2.3) on a 3-node kind cluster, 8-partition Kafka
 windowed-agg. **The N→M cut fired** (driver debug: `stage 1 inputs=[StageInput(stage=0, mode=Shuffle)]`,
 `Hash([#8@3], 8)`; 2 stages). **Stage 0 (source) ran as 8 distributed tasks.** BUT the window still ran
 all 8 `F5_PEAK p0..p7` on ONE pod. Root cause from the driver's TaskRegion + stage-1 plan:
@@ -343,7 +343,7 @@ stage-partitions `0:4 (source) / 1:8 (window) / 2:1 (sink)`; `nm_dist_gate` dup=
 the funnel cut); `f3c` crash-EO dup=0 (align via the shuffle read preserves EO); `dist_streaming_smoke`
 6/6; 4 stage-boundary unit tests (exchange + funnel × gate on/off); clippy `-D` green.
 
-**T2 kind (vajra:bf4) — WINDOW DISTRIBUTES CONFIRMED + a new scheduler gap (T-BF2.7):**
+**T2 kind (zelox:bf4) — WINDOW DISTRIBUTES CONFIRMED + a new scheduler gap (T-BF2.7):**
 - With the DEFAULT `worker_task_slots=8` the 8 window instances still ran on ONE pod. Root-caused from
   the driver log (not guessed): the region is 8 task-sets `{stage0 pi, stage1 pi}` (pipeline-co-located),
   but (a) `worker_task_slots=8` ⇒ **one worker can hold the entire 8-task region**, and (b) the region
@@ -351,7 +351,7 @@ the funnel cut); `f3c` crash-EO dup=0 (align via the shuffle read preserves EO);
   after) — so even-spread has only the first worker to place on → packs. This is a distributed-scheduler
   gap analogous to **Spark `spark.scheduler.minRegisteredResourcesRatio` / `maxRegisteredResourcesWaitingTime`**
   and **Flink slot-wait** (wait for the required slots/resources before deploying). = **T-BF2.7.**
-- **PROOF the window distributes** (root-cause confirmed, no rebuild): set `SAIL_CLUSTER__WORKER_TASK_SLOTS=2`
+- **PROOF the window distributes** (root-cause confirmed, no rebuild): set `ZELOX_CLUSTER__WORKER_TASK_SLOTS=2`
   so the 8-task region can't fit on one worker → the 8 window instances spread across **4 pods, 2
   partitions each** — `p1/p5, p2/p6, p3/p7, p0/p4` = a clean even-spread round-robin (T-BF2.5 working).
   ⇒ **T-BF2.6 is validated: the window compute distributes across worker pods.**
@@ -368,7 +368,7 @@ even-spread distributes across ALL of them. **Deadlock-safe:** the pending-worke
 (`handle_probe_pending_worker → track_worker_failed_to_start`) times out a worker that never starts and
 decrements the count, so it always reaches 0 within `task_launch_timeout`. No-op when no workers were
 requested. = Spark `spark.scheduler.minRegisteredResourcesRatio` / Flink slot-wait.
-**T2 kind (vajra:bf5, DEFAULT `worker_task_slots=8`, no workaround):** the 8 window instances now spread
+**T2 kind (zelox:bf5, DEFAULT `worker_task_slots=8`, no workaround):** the 8 window instances now spread
 across **4 pods, 2 partitions each** — `p0/p4, p1/p5, p2/p6, p3/p7`, clean even-spread. The earlier
 provisioning worry was unfounded: ~4 workers ARE provisioned for the streaming query; the ONLY problem
 was the assign-before-register timing race, which the wait-gate fixes. **T1:** nm_dist_gate dup=0 +
@@ -388,7 +388,7 @@ buffers WITHOUT BOUND at a slow receiver — exactly the streaming in-flight mem
 (no credit-based flow control on the cross-stage/cross-pod shuffle; the in-process exchange already has
 coarse bounded-blocking credit via `channel_capacity`).
 
-**Naive fix attempted + MEASURED (opt-in `VAJRA_CREDIT_BACKPRESSURE`, blocking `send().await` instead
+**Naive fix attempted + MEASURED (opt-in `ZELOX_CREDIT_BACKPRESSURE`, blocking `send().await` instead
 of overflow):** f3c crash-EO PASSED (no deadlock — the align receiver drains non-barriered inputs, as
 predicted), BUT `nm_dist_gate` showed **non-deterministic DATA LOSS** (distributed availableNow file
 source: 3990 correct then 3630 = −360 rows, same config = a race). **Reverted — will not ship lossy
@@ -401,7 +401,7 @@ an early-finishing merge). Blocking `send().await` drops the in-flight batch (`E
 when the receiver isn't yet connected or has already closed — the lifecycle race. So credit backpressure
 cannot simply replace the overflow.
 
-**RESOLVED (commit pending): bounded-overflow credit — the Flink FLIP-2 model, one prod solution.** Keep the existing lossless try_send+overflow (it never drops during operation + drains on close), then BOUND the overflow: when it exceeds the credit cap, block draining it FIFO via `tx.reserve().await` — an ATOMIC permit (`permit.send` is infallible, so no batch is ever dropped) that awaits the receiver making room = wait-for-credit. Opt-in `VAJRA_CREDIT_BACKPRESSURE=<cap>` (0=off default). **MEASURED: nm_dist_gate dup=0 AND deterministic (3990×3) + f3c crash-EO PASS** (vs the naive blocking-send which was non-deterministically lossy). The earlier lifecycle race is gone because the new batch is always parked in `overflow` first (never consumed by a blocking send that can hit a closed receiver); only the FIFO drain blocks, via an atomic permit. This is credit-based flow control — keep transient
+**RESOLVED (commit pending): bounded-overflow credit — the Flink FLIP-2 model, one prod solution.** Keep the existing lossless try_send+overflow (it never drops during operation + drains on close), then BOUND the overflow: when it exceeds the credit cap, block draining it FIFO via `tx.reserve().await` — an ATOMIC permit (`permit.send` is infallible, so no batch is ever dropped) that awaits the receiver making room = wait-for-credit. Opt-in `ZELOX_CREDIT_BACKPRESSURE=<cap>` (0=off default). **MEASURED: nm_dist_gate dup=0 AND deterministic (3990×3) + f3c crash-EO PASS** (vs the naive blocking-send which was non-deterministically lossy). The earlier lifecycle race is gone because the new batch is always parked in `overflow` first (never consumed by a blocking send that can hit a closed receiver); only the FIFO drain blocks, via an atomic permit. This is credit-based flow control — keep transient
 pre-subscription/close buffering, but BOUND the slow-receiver case: cap `overflow` at a credit limit and
 block (await channel capacity) only once the receiver is *connected and actively consuming*, so a
 straggler-vs-closed-receiver never loses data. Grounded in Flink FLIP-2 (receiver grants credit;
@@ -411,9 +411,9 @@ plateaus, doesn't grow O(N)). **Not correctness-critical for the throughput beat
 counts-exact + crash-EO already done); it's the MEMORY-bound lever (bounds in-flight vs Flink).
 
 
-## 4n. Kind PENETRATION (E2E prod-grade verify, 2026-07-08, vajra:bf6 = all VAJ-BF2 incl T-BF2.4)
-Full-stack verify on a 3-node kind cluster with ALL gates on (kubernetes-cluster, VAJRA_DISTRIBUTED_STREAM=1,
-VAJRA_CREDIT_BACKPRESSURE=16) so EKS has no unknowns. **Merge-readiness gates GREEN first:** `cargo test
+## 4n. Kind PENETRATION (E2E prod-grade verify, 2026-07-08, zelox:bf6 = all VAJ-BF2 incl T-BF2.4)
+Full-stack verify on a 3-node kind cluster with ALL gates on (kubernetes-cluster, ZELOX_DISTRIBUTED_STREAM=1,
+ZELOX_CREDIT_BACKPRESSURE=16) so EKS has no unknowns. **Merge-readiness gates GREEN first:** `cargo test
 --workspace` EXIT=0 (all pass) + `cargo clippy --workspace --all-targets -D warnings` 0 issues.
 **Penetration result:** the distributed windowed-agg RAN E2E on real k8s — source + exchange + window
 DISTRIBUTE across **4 worker pods** (2 window partitions each: p0/p4 p1/p5 p2/p6 p3/p7 = clean
@@ -428,7 +428,7 @@ EKS uses S3 (prior EKS runs proved counts + crash-EO to S3). ⇒ EKS = scale + F
 measurement, not discovery. Kind torn down, AWS $0.
 
 
-## 4o. T3 EKS multi-node result (2026-07-08, vajra:bf6, 2x c7g.2xlarge compute + kafka) — HONEST NEGATIVE
+## 4o. T3 EKS multi-node result (2026-07-08, zelox:bf6, 2x c7g.2xlarge compute + kafka) — HONEST NEGATIVE
 Ran the distributed windowed-agg (100M/16-part Kafka -> S3) on a 2-compute-node EKS cluster,
 kubernetes-cluster mode, all gates on (DISTRIBUTED=1 + CREDIT=16). **What WORKED (capability proven at
 scale):** (1) the window DISTRIBUTES CROSS-NODE — 4 worker pods, 2 per compute node (verified `get pods
@@ -448,16 +448,16 @@ Flight (§3 design: co-located links should stay mpsc — verify the exchange is
 throughput BEAT is unproven and currently a regression.
 
 
-## 4p. T3 EKS FAIR A/B — Vajra distributed vs Flink 2-TM, SAME 2-node cluster (2026-07-08) — DECISIVE NEGATIVE
+## 4p. T3 EKS FAIR A/B — Zelox distributed vs Flink 2-TM, SAME 2-node cluster (2026-07-08) — DECISIVE NEGATIVE
 Recreated the cluster and ran BOTH engines sequentially on the SAME 2x c7g.2xlarge compute (16 vCPU
-total) + same 100M/16-part Kafka topic + IDENTICAL 10s tumbling-window keyed COUNT (Flink SQL == Vajra
+total) + same 100M/16-part Kafka topic + IDENTICAL 10s tumbling-window keyed COUNT (Flink SQL == Zelox
 stream_windowed_agg). Fair head-to-head:
 | Engine (2-node, 16 vCPU) | wall_s | throughput |
 |--------------------------|--------|------------|
-| **Vajra distributed** (kubernetes-cluster, all gates) | 68.67 | **1.456M ev/s** (counts exact via S3; 8 workers 4/4 across nodes) |
+| **Zelox distributed** (kubernetes-cluster, all gates) | 68.67 | **1.456M ev/s** (counts exact via S3; 8 workers 4/4 across nodes) |
 | **Flink 2-TM** (2 TMs, one per node, parallelism 16) | 19.17 | **5.22M ev/s** |
-**Flink is ~3.6x FASTER than Vajra at equal 2-node resources.** The "distribute the exchange to
-STRUCTURALLY BEAT Flink" thesis (the whole VAJ-BF2 premise) is **REFUTED BY MEASUREMENT** — Vajra's
+**Flink is ~3.6x FASTER than Zelox at equal 2-node resources.** The "distribute the exchange to
+STRUCTURALLY BEAT Flink" thesis (the whole VAJ-BF2 premise) is **REFUTED BY MEASUREMENT** — Zelox's
 distributed streaming is CORRECT (cross-node, EO, S3 counts-exact) but ~3.6x SLOWER than Flink's mature
 network stack, not faster. (Honest, like the VAJ-T7 null result — claim only measured.) Cluster torn to $0.
 
@@ -469,7 +469,7 @@ serialization for chained/local ops); (b) NON-FUSED stages (each cut stage is a 
 own scheduling/stream overhead — Flink fuses/chains); (c) same-node links NOT staying mpsc (the §3
 design says co-located should skip serialization — verify); (d) credit backpressure throttling; (e)
 WM_PROF didn't emit on EKS so NONE of this is attributed yet (fixing the dump-site is prerequisite #1).
-**Strategic honesty:** Vajra's PROVEN wins are batch (6.2x vs Spark), memory (path-dependent), unified
+**Strategic honesty:** Zelox's PROVEN wins are batch (6.2x vs Spark), memory (path-dependent), unified
 single-engine, no-JVM. Distributed streaming THROUGHPUT is NOT a win and would need major work to become
 one; the board should reflect this and the team should decide whether to root-cause the 3.6x or invest
 in the proven axes.
@@ -490,21 +490,21 @@ Frustration warranted; here is what the MEASUREMENTS say (not guesses), ruling c
   > finalize=18s > encode=0.2s`, `input_wait=610%`.** BUT the "exchange" timer WRAPS `senders[owner].send().await`,
   which BLOCKS on the bounded channel when the window is slow — so **most of the 267s is BACKPRESSURE-WAIT, not
   CPU.** `input_wait=610%` confirms the window is INPUT-STARVED. The genuine CPU bottleneck is **`from_json` (the
-  parse, 131s)** — and per KB §6 Vajra's Rust parse is already **~parity with Flink's Jackson** (being Rust not
+  parse, 131s)** — and per KB §6 Zelox's Rust parse is already **~parity with Flink's Jackson** (being Rust not
   JVM is the edge, already realized).
 
-**HONEST CONCLUSION (the prod-bar truth):** on this windowed-COUNT workload Vajra is **parse-bound at ~PARITY
+**HONEST CONCLUSION (the prod-bar truth):** on this windowed-COUNT workload Zelox is **parse-bound at ~PARITY
 with Flink single-node** (1.05–1.15× — small + intrinsic), and **distribution does NOT help — the workload does
-not scale with nodes** (Flink 2-node 5.22M ≈ Flink 1-node 5.58M; neither engine gains), while Vajra's cross-node
+not scale with nodes** (Flink 2-node 5.22M ≈ Flink 1-node 5.58M; neither engine gains), while Zelox's cross-node
 shuffle is less optimized so it REGRESSES. **This is not a single missed-prod-bar bug to "fix" — it is a workload
-where neither engine's advantages dominate, and Vajra is already competitive.** To genuinely BEAT Flink the lever
-is NOT this workload's raw parse-throughput; it is (a) workloads that leverage Vajra's REAL edges — columnar
+where neither engine's advantages dominate, and Zelox is already competitive.** To genuinely BEAT Flink the lever
+is NOT this workload's raw parse-throughput; it is (a) workloads that leverage Zelox's REAL edges — columnar
 vectorized compute-heavy aggregation, no-GC tail latency (D2, unmeasured), memory-bounded state; or (b) a
 CONFIRMED exchange route-CPU optimization (the per-row key-group loop + N-way `take` in `distribute`) — but that
 needs finer profiling to separate route-CPU from backpressure-wait first (the current timer conflates them; fix
 = time the route separately from the send-await). WM_PROF worker-env now fixed (was driver-only) so a future
 distributed profile can attribute per-worker. **Do NOT claim a distributed-streaming throughput beat — measured
-false. Vajra's measured wins remain batch (6.2× vs Spark), memory, unified, no-JVM.**
+false. Zelox's measured wins remain batch (6.2× vs Spark), memory, unified, no-JVM.**
 
 
 ## 4r. DECISIVE: split exchange CPU vs backpressure-wait (2026-07-08) — the exchange is ~FREE, parse is the bottleneck
@@ -516,9 +516,9 @@ already SIMD (simd-json) and ~parity with Flink's Jackson (KB §6, being Rust no
 **⇒ single-node is PARSE-BOUND at PARITY — there is NO exchange/route inefficiency to fix (proven 6s). The 3.6×
 distributed regression is the cross-node Flight/gRPC transport (a SEPARATE path: `do_get` FlightDataEncoderBuilder
 IPC + gRPC, only exercised cross-node — NOT `exchange_cpu`), but distribution does not help this workload anyway
-(Flink flat 1->2 nodes). NO missed-prod-bar bug exists on windowed-COUNT; Vajra is competitive (parity), not
+(Flink flat 1->2 nodes). NO missed-prod-bar bug exists on windowed-COUNT; Zelox is competitive (parity), not
 lagging, single-node.** Instrumentation kept (EXCHANGE_WAIT_NS) for future distributed profiling. Beat lever is
-NOT this workload's parse throughput; it is Vajra's real edges (columnar compute-heavy agg per Arroyo's 10x sliding
+NOT this workload's parse throughput; it is Zelox's real edges (columnar compute-heavy agg per Arroyo's 10x sliding
 windows; no-GC latency D2; memory).
 
 ## 5. Risks / open questions (resolve before coding each ticket)
@@ -532,13 +532,13 @@ windows; no-GC latency D2; memory).
   coalescing before Flight send (like the batch shuffle's IPC batching).
 
 ## 6. First step when building (T-BF2.1 resolved → sharpened)
-The distributed mode (`kubernetes-cluster`) exists AND a distributed manifest exists: **`k8s/sail.yaml`**
-= driver Deployment (`SAIL_MODE=kubernetes-cluster`) + Service + RBAC (Role/ServiceAccount/RoleBinding
+The distributed mode (`kubernetes-cluster`) exists AND a distributed manifest exists: **`k8s/zelox.yaml`**
+= driver Deployment (`ZELOX_MODE=kubernetes-cluster`) + Service + RBAC (Role/ServiceAccount/RoleBinding
 so the driver launches worker pods via the k8s API) + a worker pod-template patch. The driver
 DYNAMICALLY launches worker pods (`KubernetesWorkerManager::launch_worker`); workers `register_worker`
-back (`driver/actor/handler.rs:62`). So the experiment adapts `k8s/sail.yaml`, not greenfield. Concrete
+back (`driver/actor/handler.rs:62`). So the experiment adapts `k8s/zelox.yaml`, not greenfield. Concrete
 first move:
-1. **On kind, deploy `k8s/sail.yaml` (kubernetes-cluster driver, image `vajra:TAG`) + run the
+1. **On kind, deploy `k8s/zelox.yaml` (kubernetes-cluster driver, image `zelox:TAG`) + run the
    windowed-agg** so the driver launches ≥2 worker pods. Observe: does the streaming DAG spread its
    stages across worker pods (like batch), and what happens at the `StreamExchangeExec` boundary — does
    it error (mpsc can't cross pods), fall back, or already route via Flight? This ONE experiment tells
@@ -546,7 +546,7 @@ first move:
    realtime source pinned `parallelism=1` — memory — which may force the source stage onto one pod.)
 2. Based on that: swap `StreamExchangeExec` cross-pod sub-channels to the existing Flight `do_get`
    transport (carrying `EncodedFlowEventStream` RecordBatches), same-pod stays mpsc, behind an env gate
-   (`VAJRA_DISTRIBUTED_STREAM`). T1 multi-process (multiple `vajra` processes on one host) first —
+   (`ZELOX_DISTRIBUTED_STREAM`). T1 multi-process (multiple `zelox` processes on one host) first —
    correctness_gate + inc_ckpt dup=0 across the real network cut — then T2 kind multi-pod → T3 EKS.
 3. Then credit backpressure (T-BF2.4) + cross-network EO validation (T-BF2.3).
 

@@ -5,11 +5,11 @@ rank: 5
 
 # Azure
 
-Sail supports reading from and writing to Azure storage services.
+Zelox supports reading from and writing to Azure storage services.
 
 ## URI Formats
 
-Sail supports the following URI formats for Azure storage services:
+Zelox supports the following URI formats for Azure storage services:
 
 <ul>
   <li>
@@ -106,11 +106,11 @@ Sail supports the following URI formats for Azure storage services:
 
 ## Configuration
 
-You can use environment variables to configure Azure storage services in Sail.
+You can use environment variables to configure Azure storage services in Zelox.
 Some configuration options can be set using different environment variables.
 
 ::: warning
-The environment variables to configure Azure storage services are experimental and may change in future versions of Sail.
+The environment variables to configure Azure storage services are experimental and may change in future versions of Zelox.
 :::
 
 ### Security Configuration

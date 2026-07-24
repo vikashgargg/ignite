@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Measure FLINK's windowed-agg CORRECTNESS (the blackhole throughput job discards output). Runs the
 # identical 10s tumbling keyed COUNT (flink-sql-verify.sql) writing the result to Kafka `wagg_out`, then
-# consumes it and asserts distinct (window,k) groups + sum(count) == the same values Vajra reports. Makes
-# the Vajra-vs-Flink comparison BOTH-correct. Assumes cluster up + `events` topic already loaded (N events).
+# consumes it and asserts distinct (window,k) groups + sum(count) == the same values Zelox reports. Makes
+# the Zelox-vs-Flink comparison BOTH-correct. Assumes cluster up + `events` topic already loaded (N events).
 # Usage: scripts/eks_flink_verify.sh [N]
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"

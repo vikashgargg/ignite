@@ -1,11 +1,11 @@
 name: Bug report
-description: Report a defect in Vajra (incorrect result, crash, regression).
+description: Report a defect in Zelox (incorrect result, crash, regression).
 labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for the report. Please include a **minimal, reproducible** example — Vajra aims to be a
+        Thanks for the report. Please include a **minimal, reproducible** example — Zelox aims to be a
         byte-exact drop-in for Spark, so concrete repro + expected-vs-actual is the most useful thing.
   - type: textarea
     id: what-happened
@@ -26,8 +26,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Vajra version / image tag / commit
-      placeholder: "ghcr.io/vikashgargg/ignite:0.6.0 (or git sha)"
+      label: Zelox version / image tag / commit
+      placeholder: "ghcr.io/vikashgargg/zelox:0.6.0 (or git sha)"
     validations:
       required: true
   - type: dropdown
@@ -41,6 +41,6 @@ body:
     id: env
     attributes:
       label: Environment
-      description: OS/arch, Python version, how you launched Vajra, relevant RUST_LOG output.
+      description: OS/arch, Python version, how you launched Zelox, relevant RUST_LOG output.
     validations:
       required: false

@@ -1,4 +1,4 @@
-# Publish the Vajra container image to GHCR so anyone can `docker pull` and try it.
+# Publish the Zelox container image to GHCR so anyone can `docker pull` and try it.
 # Prod-grade pattern (per Docker docs / Vector / DataFusion): build each arch on its NATIVE runner,
 # push by digest, merge into ONE multi-arch manifest, then scan (Trivy), sign (cosign keyless) and
 # attach an SBOM (syft). Same arm64 image is what runs on EKS and Apple `container`.
@@ -16,7 +16,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }} # e.g. vikashgargg/ignite
+  IMAGE_NAME: ${{ github.repository }} # e.g. vikashgargg/zelox
 
 permissions:
   contents: read
@@ -146,6 +146,6 @@ jobs:
         with:
           image: ${{ needs.merge.outputs.image-ref }}
           format: spdx-json
-          output-file: vajra.sbom.spdx.json
+          output-file: zelox.sbom.spdx.json
       - name: Attest SBOM with cosign
-        run: cosign attest --yes --predicate vajra.sbom.spdx.json --type spdxjson "${{ needs.merge.outputs.image-ref }}"
+        run: cosign attest --yes --predicate zelox.sbom.spdx.json --type spdxjson "${{ needs.merge.outputs.image-ref }}"

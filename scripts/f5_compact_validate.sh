@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # F5.3 compaction validation — RECURRING keys (each key appears in M batches → M partials/key before
-# compaction). A/B: compaction ON (default) vs OFF (VAJRA_F5_NO_COMPACT=1), fixed small budget.
+# compaction). A/B: compaction ON (default) vs OFF (ZELOX_F5_NO_COMPACT=1), fixed small budget.
 # Expect: out == N EXACT in BOTH (compaction is correctness-preserving), and spill_events(ON) <<
 # spill_events(OFF) — compaction collapses the per-batch partial pile-up toward O(distinct groups).
 set -uo pipefail
-BIN=${VAJRA_BIN:-./target/release/vajra}
+BIN=${ZELOX_BIN:-./target/release/zelox}
 PY=${PY:-.venvs/smoke/bin/python}
 PORT=${PORT:-50073}
-BUDGET=${SAIL_STREAMING_STATE_BUDGET_BYTES:-2097152} # 2 MiB
+BUDGET=${ZELOX_STREAMING_STATE_BUDGET_BYTES:-2097152} # 2 MiB
 N=${N:-100000}; M=${M:-20}   # N distinct keys, each repeated across M rounds -> N*M rows
 ROOT=$(mktemp -d /tmp/f5cmp.XXXX)
 echo "F5.3 compaction A/B: N=$N keys x M=$M rounds = $((N*M)) rows, budget=$BUDGET, root=$ROOT"
@@ -28,7 +28,7 @@ PY
 
 run() { # run LABEL  (EXTRA = extra "VAR=val" env pairs, passed via env(1) so they ARE assignments)
   local label="$1" OUT="$ROOT/out_$1" CK="$ROOT/ck_$1" LOG="$ROOT/srv_$1.log"
-  env SAIL_STREAMING_STATE_BUDGET_BYTES=$BUDGET VAJRA_F5_DEBUG=1 ${EXTRA:-} \
+  env ZELOX_STREAMING_STATE_BUDGET_BYTES=$BUDGET ZELOX_F5_DEBUG=1 ${EXTRA:-} \
     "$BIN" server --ip 127.0.0.1 --port "$PORT" >"$LOG" 2>&1 &
   local SRV=$!; sleep 4
   SPARK_REMOTE="sc://localhost:$PORT" DIR="$DIR" OUT="$OUT" CK="$CK" \
@@ -39,5 +39,5 @@ run() { # run LABEL  (EXTRA = extra "VAR=val" env pairs, passed via env(1) so th
 }
 
 EXTRA="" run "compact_ON"
-EXTRA="VAJRA_F5_NO_COMPACT=1" run "compact_OFF"
+EXTRA="ZELOX_F5_NO_COMPACT=1" run "compact_OFF"
 echo "root=$ROOT"

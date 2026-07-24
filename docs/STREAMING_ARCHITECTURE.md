@@ -1,6 +1,6 @@
-# Vajra Streaming Architecture (authoritative spec)
+# Zelox Streaming Architecture (authoritative spec)
 
-**Purpose.** Single source of truth for Vajra's streaming engine: the component
+**Purpose.** Single source of truth for Zelox's streaming engine: the component
 contracts, the full feature matrix, the honest gap register, and the validation gates.
 We build to *fill this matrix* — not to chase bugs. Every change must cite the cell it
 advances and meet that cell's done-criteria. Grounded in the Apache references, not copied
@@ -11,7 +11,7 @@ engine under the Spark API. See [[feedback_prod_grade_bar]], [[feedback_no_worka
 
 From Flink's dynamic-table model: **a continuous query's output must be semantically
 equivalent to the same query run in batch on a snapshot of the input.** Every streaming
-operator + sink is judged against this. Vajra's differential primitive is
+operator + sink is judged against this. Zelox's differential primitive is
 `FlowEvent::Data{ batch, retracted: BooleanArray }` — Flink's *retract stream*
 (`retracted=false` = INSERT / UPDATE_AFTER; `retracted=true` = UPDATE_BEFORE / DELETE).
 
@@ -26,23 +26,23 @@ References (consulted, not copied):
 
 | Component | File | Responsibility | Contract |
 |---|---|---|---|
-| FlowEvent model | `sail-common-datafusion/src/streaming/event/` | `Data{batch,retracted}` + `Marker(Watermark/Checkpoint/EndOfData/...)`; encode/decode | Markers never overtake their data; retract row == a prior insert row verbatim |
-| Kafka source | `sail-data-source/src/formats/kafka/reader.rs` | bounded/realtime/unbounded reads; 1 instance per partition (FLIP-27) | Bounded read reaches captured end offsets (replayable); per-partition event-time order |
-| Watermark | `sail-physical-plan/src/streaming/watermark.rs` | emit `Watermark(maxTs−delay)`, monotonic, per-partition | Never regress; delay = bounded out-of-orderness |
+| FlowEvent model | `zelox-common-datafusion/src/streaming/event/` | `Data{batch,retracted}` + `Marker(Watermark/Checkpoint/EndOfData/...)`; encode/decode | Markers never overtake their data; retract row == a prior insert row verbatim |
+| Kafka source | `zelox-data-source/src/formats/kafka/reader.rs` | bounded/realtime/unbounded reads; 1 instance per partition (FLIP-27) | Bounded read reaches captured end offsets (replayable); per-partition event-time order |
+| Watermark | `zelox-physical-plan/src/streaming/watermark.rs` | emit `Watermark(maxTs−delay)`, monotonic, per-partition | Never regress; delay = bounded out-of-orderness |
 | Keyed exchange | `streaming/exchange.rs` | hash-shuffle by key N→M; MIN-merge watermarks at receiver | Same key→same partition; downstream watermark = MIN over inputs (FLIP-182) |
 | Barrier align | `streaming/barrier_align.rs` | N→1 Chandy-Lamport barrier alignment | Collect barrier from all N before forwarding one (EO) |
 | Window agg | `streaming/window_accum.rs` | event-time window agg; append + update(changelog)+allowedLateness | Append: emit-once-on-close. Update: retract+insert, retain until `end+L≤wm`, zero loss within L |
 | Dedup | `streaming/dedup.rs` | keyed dedup with watermark eviction | Exactly-once per key within watermark horizon |
 | Stream join | `streaming/stream_join.rs` | interval/equi join, per-side state | Bounded state via watermark; no spurious drops |
 | Collector | `streaming/collector.rs` | materialize changelog→table (bounded) | Net by row-identity: insert +1, retract −1; survivors = batch-equivalent result |
-| File sink | `sail-data-source` file write + `_spark_metadata` | append-only durable sink + EO commit log | Append-only; cannot represent retractions (see gaps) |
+| File sink | `zelox-data-source` file write + `_spark_metadata` | append-only durable sink + EO commit log | Append-only; cannot represent retractions (see gaps) |
 | Kafka sink | `kafka/sink.rs` | EO Kafka producer (txn) | Transactional; upsert mode = key'd changelog (gap) |
 | Realtime file sink | `RealtimeFileSinkExec` | per-epoch atomic commit (realtime EO) | One atomic object per epoch (F4) |
 | State snapshot | `streaming/state_io.rs` | operator state stage/restore | Write-ahead; commit after output durable |
-| Distributed codec | `sail-execution/src/codec.rs` | (de)serialize physical plan across workers | Every exec field round-trips (else local-cluster/distributed diverges) |
-| Planner | `sail-session/src/planner.rs` | logical streaming node → physical exec | Preserve all node options onto exec |
-| Rewriter | `sail-plan/src/streaming/rewriter.rs` | optimized plan → streaming operators | Thread bounded/checkpoint/realtime/output-mode/lateness |
-| Executor | `sail-spark-connect/.../plan_executor.rs` | writeStream spec → streaming run options | Map trigger/outputMode/options to engine flags |
+| Distributed codec | `zelox-execution/src/codec.rs` | (de)serialize physical plan across workers | Every exec field round-trips (else local-cluster/distributed diverges) |
+| Planner | `zelox-session/src/planner.rs` | logical streaming node → physical exec | Preserve all node options onto exec |
+| Rewriter | `zelox-plan/src/streaming/rewriter.rs` | optimized plan → streaming operators | Thread bounded/checkpoint/realtime/output-mode/lateness |
+| Executor | `zelox-spark-connect/.../plan_executor.rs` | writeStream spec → streaming run options | Map trigger/outputMode/options to engine flags |
 
 ## 2. Feature matrix (operator × output mode × sink × distribution)
 
@@ -77,7 +77,7 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   that N=2/single-sink f3c never stresses), or (2) window operator state/emit-vs-offset misalignment
   across the epoch boundary at 8 partitions. NEXT = instrument a continuous run to log which epoch
   commits which (window,key) and find the double-commit; do NOT build a redundant sink. Still BLOCKS
-  flipping `VAJRA_INC_CKPT` default-on.
+  flipping `ZELOX_INC_CKPT` default-on.
   **ROOT-CAUSED 2026-06-25 (artifact inspection, no extra runs):** the "dups" are NOT re-emits of the
   same value — they are **un-merged PARTIAL COUNTS that sum to the true count**: e.g. (W0,k170)→{epoch0:3,
   epoch24:7} (=10), (W0,k200)→{epoch0:8,epoch24:2}, and crucially (W2,k254)→{epoch24:7, epoch24:3}
@@ -129,7 +129,7 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
   (Compounds with F5: even once uncapped, state is in-memory — no spill — so very large state OOMs.)
 
 - **P0 — throughput**: windowed agg ~2.5× slower than Flink wall (EKS 100M, 2026-06-21:
-  Flink 17.4s/8.7GiB vs Vajra **44s**/2.4GiB). LOCALIZED by elimination at EKS scale:
+  Flink 17.4s/8.7GiB vs Zelox **44s**/2.4GiB). LOCALIZED by elimination at EKS scale:
   (a) `from_json` = 3.67M rows/s single-thread (×16 ≫ 2.3M/s aggregate) ⇒ not it;
   (b) `shuffle.partitions=1` (no exchange) = 43.6s ≈ 44s ⇒ exchange/parallelism not it;
   (c) larger batch (128Ki) = worse (44s, 2.4GiB) ⇒ per-batch overhead not it;
@@ -161,7 +161,7 @@ Status: ✅ done+validated · 🟡 built, validation pending · ⛔ gap (not bui
 
 1. **Unit** (in-crate, no I/O): operator logic, e.g. `window_accum::update_mode_tests` proves
    retract+insert convergence; `collector` netting test. Fast, runs in CI.
-2. **Local Spark-diff** (`scripts/diff_test`, local Kafka in docker): same query on Vajra vs real
+2. **Local Spark-diff** (`scripts/diff_test`, local Kafka in docker): same query on Zelox vs real
    Spark 3.5.3; assert bit-equal (append) or converged-equal (update). No cloud cost.
 3. **EKS vs Flink** (bundled, paid): 100M head-to-head — correctness (per-group exact, 0 loss),
    memory, throughput vs official Flink 1.19. One spend per milestone, torn down to $0 after.

@@ -5,7 +5,7 @@ import yaml from "js-yaml";
 
 const APP_CONFIG_PATH = path.join(
   __dirname,
-  "../../../../crates/sail-common/src/config/application.yaml",
+  "../../../../crates/zelox-common/src/config/application.yaml",
 );
 
 interface ConfigItem {

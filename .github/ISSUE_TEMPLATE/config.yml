@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Question / discussion
-    url: https://github.com/vikashgargg/ignite/discussions
+    url: https://github.com/vikashgargg/zelox/discussions
     about: Ask usage questions and discuss ideas in GitHub Discussions.
   - name: Security vulnerability
-    url: https://github.com/vikashgargg/ignite/security/policy
+    url: https://github.com/vikashgargg/zelox/security/policy
     about: Please report security issues privately per our SECURITY.md, not as public issues.

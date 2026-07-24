@@ -2,7 +2,7 @@
 
 **Purpose:** before building Phase B step 2, audit the WHOLE realtime throughput path and list every gap
 to ≤1.2×-and-then-beat Flink — so we fix the right things, in order. Grounded in Phase A
-(`VAJRA_WM_PROF`: window STARVED, bottleneck UPSTREAM) + KB §2d (FLIP-27 / Spark 4.1 RT-mode / Arrow
+(`ZELOX_WM_PROF`: window STARVED, bottleneck UPSTREAM) + KB §2d (FLIP-27 / Spark 4.1 RT-mode / Arrow
 Flight shuffle / Ballista / FAANG).
 
 ## The realtime path, stage by stage (where each stands)
@@ -45,9 +45,9 @@ N-instance commit union under crash — the same multi-partition-commit race the
 | | throughput | wall | peak RSS |
 |---|---|---|---|
 | Flink 1.19 | 5.67M ev/s | 17.6s | 8.57 GiB |
-| Vajra (:wmprof) | **4.92M ev/s** | 20.3s | 10.38 GiB |
+| Zelox (:wmprof) | **4.92M ev/s** | 20.3s | 10.38 GiB |
 
-**Vajra ≈ 1.15× SLOWER (NOT the old 2.4×) + 1.2× more memory** on this path — much closer than assumed.
+**Zelox ≈ 1.15× SLOWER (NOT the old 2.4×) + 1.2× more memory** on this path — much closer than assumed.
 **`WM_PROF` per-stage CPU (summed over 16 instances), RANKED:**
 `source_read=106s` ≫ `exchange=80s` > `from_json=38s` > `finalize=23s` > `encode=0.3s`.
 ⇒ **DOMINANT = source_read (Kafka read + Arrow batch-build), then exchange (shuffle route+coalesce).
@@ -61,7 +61,7 @@ from_json only 3rd — simd-json was NOT the target (confirmed by not blind-impl
 3. from_json (~17%) only after 1+2. finalize/encode negligible.
 
 ## EKS TOPOLOGY CONFIRMED 2026-06-30 — SINGLE NODE
-`k8s/stream/`: Vajra `replicas:1` + `--mode local-cluster --workers 4`, `eks-stream-cluster
+`k8s/stream/`: Zelox `replicas:1` + `--mode local-cluster --workers 4`, `eks-stream-cluster
 desiredCapacity:1`, `role:compute` single node. ⇒ **(a) streaming Arrow Flight shuffle (#2) is NOT on
 the critical path** for this test — in-process exchange across 4 in-node workers is fine; defer Flight to
 true multi-node scale-out. **(b) The throughput NUMBER needs only step 1 + an EKS NO-CRASH run** — a
@@ -73,7 +73,7 @@ separable from the throughput number. **This is much cheaper than assumed.**
 The EKS throughput harness (`scripts/stream_windowed_agg.py`, `state_scale_stress.py`) uses
 **`trigger(availableNow=True)` — the BOUNDED path**, which ALREADY runs one-instance-per-Kafka-partition
 (16 readers, `reader.rs:270`). So: **(1)** Phase A's "single-instance source STARVED" was profiled on the
-**CONTINUOUS** path (`inc_ckpt_gate`), a DIFFERENT path. **(2)** `VAJRA_RT_MULTI` / Phase B multi-instance
+**CONTINUOUS** path (`inc_ckpt_gate`), a DIFFERENT path. **(2)** `ZELOX_RT_MULTI` / Phase B multi-instance
 only helps CONTINUOUS — it does NOT touch the bounded path the EKS 2.4× gap was measured on. ⇒ **The EKS
 throughput gap is NOT the realtime single-instance source.** Must RE-PROFILE the BOUNDED (availableNow)
 windowed-agg to find ITS bottleneck (from_json / exchange / window — all already parallel-read at 16).
@@ -81,7 +81,7 @@ Phase B remains valid for *continuous-mode* throughput, but the headline EKS num
 profile first. (This is exactly the robustness check paying off — caught before EKS $$.)
 
 ## BOUNDED-PATH PROFILE 2026-06-30 — the REAL EKS gap is `from_json` + exchange (NOT parallelism/window)
-Profiled `stream_windowed_agg.py` (availableNow, 16 partitions/16 readers, VAJRA_WM_PROF) locally:
+Profiled `stream_windowed_agg.py` (availableNow, 16 partitions/16 readers, ZELOX_WM_PROF) locally:
 window **STILL STARVED** — input_wait ≈75%/instance, finalize only **17–20%**, throughput 0.26M ev/s
 (local, modest). ⇒ **even with 16 parallel readers, upstream (`from_json` parse + exchange) can't feed
 the window fast enough.** So the ~2.4×-vs-Flink gap is **per-unit `from_json`/exchange throughput**, NOT
@@ -137,7 +137,7 @@ instance**. encode 3ms (0.4%), finalize ~18% (window). So the source instance is
 justifies a big change** (from_json simd-json would cut ~13%×~2 = ~6% of source time — not the 2.4×).
 Local throughput is **core-limited** (0.27M/s on 4 workers) and does NOT represent the EKS 16-vCPU
 profile. **CONCLUSION: local profiling is exhausted; the clean attribution + the real number require
-EKS** (16 vCPU, 100M, vs Flink 1.19). All instrumentation (VAJRA_WM_PROF: input_wait/finalize/encode/
+EKS** (16 vCPU, 100M, vs Flink 1.19). All instrumentation (ZELOX_WM_PROF: input_wait/finalize/encode/
 from_json) is committed + ready to read on EKS. simd-json stays a candidate to evaluate IF the EKS
 profile shows parse dominant there (coordinate the dep with the version-upgrade repo).
 
@@ -148,14 +148,14 @@ profile shows parse dominant there (coordinate the dep with the version-upgrade 
 3. (Multi-instance / Flight shuffle remain CONTINUOUS-path / multi-node items, not this gap.)
 
 ## Recommended order (RE-REVISED after the mismatch — superseded by the bounded profile above)
-1. **Profile the BOUNDED availableNow windowed-agg** (VAJRA_WM_PROF, EndOfData dump) over Kafka locally
+1. **Profile the BOUNDED availableNow windowed-agg** (ZELOX_WM_PROF, EndOfData dump) over Kafka locally
    → find the real EKS-path bottleneck (window busy? exchange? from_json even at 16 readers?).
 2. Fix the dominant bounded-path stage (the actual EKS gap).
 3. THEN EKS A/B on the bounded path vs Flink.
 (Phase B continuous multi-instance stays banked for continuous-mode throughput / correctness.)
 
 ## Recommended order (REVISED — superseded by the path-mismatch above)
-1. **EKS throughput A/B FIRST** (answers the headline cheaply): deploy step-1 `VAJRA_RT_MULTI=1` on the
+1. **EKS throughput A/B FIRST** (answers the headline cheaply): deploy step-1 `ZELOX_RT_MULTI=1` on the
    single-node cluster, no-crash, measure ev/s vs the single-instance baseline AND vs Flink 1.19. Confirms
    whether parallel read+from_json closes/beats the gap. Pre-flight: i32-overflow at scale, teardown-$0.
 2. **Step 2 (N-instance EO commit union)** + local crash-gate — the correctness claim, once throughput

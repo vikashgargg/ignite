@@ -3,7 +3,7 @@
 Status: SCOPE (2026-06-25). Purpose: catch multi-partition / large-state / crash correctness bugs
 **proactively** (a standing gate), instead of reactively (this session found the continuous-EO dup,
 and F5.3 compaction-multipart + EKS-scale remain — all the SAME class: passes trivially, breaks at
-scale/skew). Flink's edge is decades of this hammering; this gate is how Vajra leapfrogs with the
+scale/skew). Flink's edge is decades of this hammering; this gate is how Zelox leapfrogs with the
 no-JVM/Arrow architecture + harder-on-ourselves-than-reality discipline.
 
 ## Invariant contract (every cell asserts these vs a batch ground-truth on the same input)
@@ -48,8 +48,8 @@ what should pass; XFAIL flips to a FAIL if it *starts* passing = the fix landed 
 
 ## Deliverable
 `scripts/correctness_gate.sh`: runs the cells, asserts the contract per cell, prints a PASS/XFAIL/FAIL
-matrix, exits 0 iff all GREEN cells pass AND no XFAIL unexpectedly passes. Needs docker `vajra_kafka` +
-`target/debug/vajra` + `.venvs/smoke`. CI: GREEN micro-batch cells (C1-C4) blocking + fast; continuous
+matrix, exits 0 iff all GREEN cells pass AND no XFAIL unexpectedly passes. Needs docker `zelox_kafka` +
+`target/debug/zelox` + `.venvs/smoke`. CI: GREEN micro-batch cells (C1-C4) blocking + fast; continuous
 cells (C5-C7) tracked (XFAIL allowed) until the per-partition fix lands.
 
 ## Why this is the highest-leverage prod-grade step

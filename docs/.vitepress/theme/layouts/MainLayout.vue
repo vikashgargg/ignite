@@ -14,11 +14,13 @@
       >
         <div v-if="!isDevGuide" class="info custom-block !pt-2 !pb-2">
           <p>
-            <span class="mr-1">&#127873;</span
-            ><span class="font-semibold">Using Sail?</span> Tell us your story
-            and
-            <a href="https://lakesail.com/share-story" target="_blank"
-              >get free merch</a
+            <span class="mr-1">&#11088;</span
+            ><span class="font-semibold">Using Zelox?</span> Tell us how it's
+            going in
+            <a
+              href="https://github.com/vikashgargg/zelox/discussions"
+              target="_blank"
+              >GitHub Discussions</a
             >!
           </p>
         </div>
@@ -31,7 +33,7 @@
             {{
               version === "main" ? "an unreleased version" : "an old version"
             }}
-            of Sail. Please visit
+            of Zelox. Please visit
             <a :href="latestBase" target="_blank">here</a>
             for the documentation of the latest stable version.
           </p>
@@ -41,7 +43,7 @@
           class="warning custom-block !pt-2 !pb-2"
         >
           <p>
-            This is a snapshot of the development guide for a released Sail
+            This is a snapshot of the development guide for a released Zelox
             version. For up-to-date information, please visit the development
             guide for the <code>main</code> branch
             <a :href="`${mainBase}development/`" target="_blank"> here</a>.

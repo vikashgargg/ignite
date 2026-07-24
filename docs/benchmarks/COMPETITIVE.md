@@ -1,20 +1,20 @@
-# Vajra vs Apache Spark vs LakeSail — where we stand
+# Zelox vs Apache Spark vs LakeSail — where we stand
 
 Honest competitive read, backed by our **measured, reproducible** numbers and
 **LakeSail's published claims**. Updated 2026-06-06.
 
 ## Important context
-Vajra is **forked from `lakehq/sail`**. The analytical engine core (Rust +
+Zelox is **forked from `lakehq/sail`**. The analytical engine core (Rust +
 Apache DataFusion) is therefore **shared lineage** with LakeSail — so raw
 query-perf is in the **same ballpark** for both. We now have a **head-to-head on
-the identical ClickBench harness**: Vajra **60.11 s vs LakeSail's published 65.50 s
-(0.92×)** on the same c6a.4xlarge class — i.e. **~parity, Vajra marginally faster**
-(details below). We do **not** spin this into "Vajra beats LakeSail" — a ~8% edge on
+the identical ClickBench harness**: Zelox **60.11 s vs LakeSail's published 65.50 s
+(0.92×)** on the same c6a.4xlarge class — i.e. **~parity, Zelox marginally faster**
+(details below). We do **not** spin this into "Zelox beats LakeSail" — a ~8% edge on
 one run with a shared core is parity, not a moat. The real differentiation is
 **operational features, demonstrable trust, and transparent multi-scale benchmarks.**
 
-## Measured: Vajra vs Apache Spark (same machine/cluster, identical data + SQL)
-| Benchmark | Scale | Vajra | Spark 3.5.3 | Gain |
+## Measured: Zelox vs Apache Spark (same machine/cluster, identical data + SQL)
+| Benchmark | Scale | Zelox | Spark 3.5.3 | Gain |
 |---|---|---|---|---|
 | TPC-H | SF-1 (warm) | 1.78 s | 63.46 s | **~36× faster** |
 | ClickBench | ~1M rows | 3.87 s | 48.07 s | **~12× faster** |
@@ -40,9 +40,9 @@ memory at scale.** All reproducible (`scripts/`, `k8s/eks/`, `docs/SCALE_TESTING
   publishes a single "8×/94%" without disclosed conditions. Our benchmarking is
   the more transparent of the two.
 
-## Where Vajra leads / is at parity / trails
+## Where Zelox leads / is at parity / trails
 
-| Dimension | Vajra | LakeSail v0.6.3 |
+| Dimension | Zelox | LakeSail v0.6.3 |
 |---|---|---|
 | Analytical query perf vs Spark | ~3–36× (measured, multi-scale) | "8×" (claimed) — shared core ⇒ ~parity |
 | Memory at scale | **measured ~2.2× less than Spark** | "94% cost" (claimed) |
@@ -61,30 +61,30 @@ memory at scale.** All reproducible (`scripts/`, `k8s/eks/`, `docs/SCALE_TESTING
   demonstrable trust (CI-gating differential), multi-mode verification, and
   transparent benchmarking.**
 
-## Direct Vajra-vs-LakeSail check (ClickBench, shared core) — ✅ MATCHING
-Because Vajra is forked from sail, the honest correctness check is: does Vajra
+## Direct Zelox-vs-LakeSail check (ClickBench, shared core) — ✅ MATCHING
+Because Zelox is forked from Sail, the honest correctness check is: does Zelox
 match LakeSail on the **identical** ClickBench harness? **Measured 2026-06-06 on a
 real c6a.4xlarge** (same instance class, local `hits.parquet`, single-node, best-of-3):
 
-| | Vajra | LakeSail (published) | ratio |
+| | Zelox | LakeSail (published) | ratio |
 |---|---|---|---|
-| Hot total (43q) | **60.11 s** | 65.50 s | **0.92× — Vajra ~8% faster** |
+| Hot total (43q) | **60.11 s** | 65.50 s | **0.92× — Zelox ~8% faster** |
 | Passed | 43/43 | 43/43 | tie |
 
 **Verdict: MATCHING — shared DataFusion core confirmed correctly implemented.**
-Vajra is faster on 37/43 queries (notably Q7 min/max from Parquet stats, and the
+Zelox is faster on 37/43 queries (notably Q7 min/max from Parquet stats, and the
 Q37–43 filtered/OFFSET queries), LakeSail faster on 4 (Q21–24; Q24 wide top-N is
-Vajra's weak spot). Runner + raw JSON: [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md);
-full analysis: [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md). (Vajra's
+Zelox's weak spot). Runner + raw JSON: [`benchmarks/clickbench/`](../../benchmarks/clickbench/README.md);
+full analysis: [CLICKBENCH_VS_LAKESAIL.md](CLICKBENCH_VS_LAKESAIL.md). (Zelox's
 1M-smoke / 100M-distributed-on-S3 numbers are a different setup, not comparable.)
 
 ## What's next (to close the remaining gaps)
-- **Same-cluster Spark reference for ClickBench 100M** (we have Vajra's number;
+- **Same-cluster Spark reference for ClickBench 100M** (we have Zelox's number;
   add Spark for a full distributed head-to-head).
 - **TPC-DS** (broader query surface than TPC-H).
 - **Spark 4.x reference** (current reference is the production-line 3.5.3).
 - **Endurance + concurrency** (multi-user, long-running streaming).
 - Keep growing the **differential trust harness** and broaden **official Spark
   test-suite** coverage.
-- (Optional, careful) a **direct Vajra-vs-LakeSail** run on identical hardware —
+- (Optional, careful) a **direct Zelox-vs-LakeSail** run on identical hardware —
   only if framed honestly given the shared core.

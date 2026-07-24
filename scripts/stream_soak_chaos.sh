@@ -9,14 +9,14 @@
 #       -> assert the durable output is EXACTLY the contiguous id set (exactly-once across
 #          crash: no loss, no duplicate) and RSS recovers flat.
 #
-# Local/free: uses a local Kafka broker (default localhost:9092) + the vajra binary. The
+# Local/free: uses a local Kafka broker (default localhost:9092) + the zelox binary. The
 # 24h prod DoD is the same harness with SOAK=1 (DURATION_S=86400).
 #
 # Usage:
 #   BOOT=localhost:9092 DURATION_S=180 scripts/stream_soak_chaos.sh
 #   SOAK=1 scripts/stream_soak_chaos.sh                 # 24h prod DoD run
 #
-# Requires: a built vajra binary (target/{release,debug}/vajra) and a Spark-Connect client
+# Requires: a built zelox binary (target/{release,debug}/zelox) and a Spark-Connect client
 # venv (.venvs/smoke). The script locates/instructs for both. Exit 0 = gate passed.
 set -uo pipefail
 
@@ -35,11 +35,11 @@ METRICS="/tmp/soak_metrics.csv"
 LEAK_RATIO="${LEAK_RATIO:-1.5}"                         # max(RSS)/median(RSS) must stay under this
 
 BIN=""
-for c in "$ROOT/target/release/vajra" "$ROOT/target/debug/vajra"; do
+for c in "$ROOT/target/release/zelox" "$ROOT/target/debug/zelox"; do
   [ -x "$c" ] && BIN="$c" && break
 done
 if [ -z "$BIN" ]; then
-  echo "FATAL: no vajra binary. Build one: cargo build --release -p sail-cli" >&2; exit 2
+  echo "FATAL: no zelox binary. Build one: cargo build --release -p zelox-cli" >&2; exit 2
 fi
 PY="$ROOT/.venvs/smoke/bin/python"
 [ -x "$PY" ] || { echo "FATAL: Spark-Connect venv missing at .venvs/smoke (see scripts/dist_streaming_smoke.py header)" >&2; exit 2; }

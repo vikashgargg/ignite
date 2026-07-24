@@ -5,13 +5,13 @@ rank: 12
 
 # Performance Tuning
 
-Sail is designed to provide high performance for data processing workloads. However, several factors can affect the performance of your Sail applications. In this guide, we discuss common performance tuning techniques and best practices to help you optimize your Sail applications.
+Zelox is designed to provide high performance for data processing workloads. However, several factors can affect the performance of your Zelox applications. In this guide, we discuss common performance tuning techniques and best practices to help you optimize your Zelox applications.
 
 ## Configuration Options
 
 ::: info
-Here, we refer to configuration options by their names, such as `execution.batch_size`, but you can typically set these options via environment variables, such as `SAIL_EXECUTION__BATCH_SIZE`.
-Refer to the [Configuration Guide](../configuration/) for more information on how Sail configuration works in general.
+Here, we refer to configuration options by their names, such as `execution.batch_size`, but you can typically set these options via environment variables, such as `ZELOX_EXECUTION__BATCH_SIZE`.
+Refer to the [Configuration Guide](../configuration/) for more information on how Zelox configuration works in general.
 :::
 
 `execution.batch_size` controls the number of rows processed in each batch during execution.

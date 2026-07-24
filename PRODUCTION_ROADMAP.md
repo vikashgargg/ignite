@@ -1,4 +1,4 @@
-# Vajra — Production Spark Replacement Roadmap
+# Zelox — Production Spark Replacement Roadmap
 
 > Last updated: 2026-07-04
 > Goal: **True drop-in Apache Spark replacement** (+ Flink-class streaming).
@@ -7,7 +7,7 @@
 > adoption now live in [docs/design/spark-parity-and-upgrade-plan.md](docs/design/spark-parity-and-upgrade-plan.md)** — read that first; this file is the older sprint-level roadmap.
 >
 > **Current state (2026-07-04):** streaming milestone landed on `main` — crash-EO exactly-once (EKS-confirmed),
-> final-window completeness (`VAJRA_COMPLETE_ON_END`, Flink `scan.bounded.mode` parity), and a **parallel Kafka
+> final-window completeness (`ZELOX_COMPLETE_ON_END`, Flink `scan.bounded.mode` parity), and a **parallel Kafka
 > sink** (fixed a 15/16 data-loss bug + ~300× throughput; 100M/100M @ 1.67M msg/s on EKS). The **3-tier SDLC**
 > (T1 local → T2 `kind` → T3 EKS) + [kind tier](k8s/kind/) are established. Versions: DataFusion 54.0.0 (upgraded 2026-07-06),
 > Arrow 58.3.0 (DF54 upgrade COMPLETE + T2-kind validated 2026-07-06; morsel-scan distributed fix).
@@ -16,7 +16,7 @@
 
 ## Definition of Done — "True Spark Replacement"
 
-A user can `pip install vajra-pyspark`, point their existing PySpark code at Vajra, and it works. Specifically:
+A user can `pip install zelox-pyspark`, point their existing PySpark code at Zelox, and it works. Specifically:
 
 - [ ] 105/105 scorecard on all three deployment modes (already done ✅)
 - [x] VARIANT / parse_json / variant_get (Spark 4.x semi-structured type)
@@ -28,7 +28,7 @@ A user can `pip install vajra-pyspark`, point their existing PySpark code at Vaj
 - [ ] TPC-H SF-100 distributed < 60s (10-node K8s cluster)
 - [ ] Kafka → Delta pipeline runs 24 h without OOM or restart
 - [ ] Apple Container cluster: `make container-run-cluster` → same score as K8s
-- [ ] `pip install vajra-pyspark && python -c "from vajra_pyspark import VajraSession; s=VajraSession.local(); s.sql('SELECT 1').show()"`
+- [ ] `pip install zelox-pyspark && python -c "from zelox_pyspark import ZeloxSession; s=ZeloxSession.local(); s.sql('SELECT 1').show()"`
 
 ---
 
@@ -48,7 +48,7 @@ A user can `pip install vajra-pyspark`, point their existing PySpark code at Vaj
 
 ### Where we lead
 
-| Feature | Vajra | LakeSail |
+| Feature | Zelox | LakeSail |
 |---|---|---|
 | Spark compat scorecard | **100% (105/105)** | ~95% |
 | Kafka streaming source | ✅ rdkafka | ❌ issue #1969 open |
@@ -66,7 +66,7 @@ A user can `pip install vajra-pyspark`, point their existing PySpark code at Vaj
 | Binary size | **80 MB Linux / 105 MB macOS** | ~300 MB |
 | Cold start | **~200 ms** | ~2 s |
 
-> Vajra is forked from `lakehq/sail` → shared analytical core → query perf vs
+> Zelox is forked from `lakehq/sail` → shared analytical core → query perf vs
 > Spark is ~parity with LakeSail; we don't claim "faster than LakeSail." Honest
 > per-scale read: [docs/benchmarks/COMPETITIVE.md](docs/benchmarks/COMPETITIVE.md).
 
@@ -101,8 +101,8 @@ The `VARIANT` semi-structured type is Spark 4.0's biggest new type. Required for
 **Functions to implement:** `parse_json`, `try_parse_json`, `is_variant_null`, `variant_get`, `try_variant_get`, `variant_explode`, `variant_explode_outer`, `to_variant_object`, `schema_of_variant_agg`.
 
 **Files:**
-- `crates/sail-plan/src/resolver/data_type.rs` — `DataType::Variant` → internal Struct{value:Binary, metadata:Binary}
-- `crates/sail-plan/src/function/scalar/variant.rs` — all variant functions
+- `crates/zelox-plan/src/resolver/data_type.rs` — `DataType::Variant` → internal Struct{value:Binary, metadata:Binary}
+- `crates/zelox-plan/src/function/scalar/variant.rs` — all variant functions
 - SQL parser — `VARIANT` keyword in type grammar
 
 **Test:**
@@ -119,8 +119,8 @@ spark.sql("SELECT variant_get(parse_json('{\"a\":42}'), '$.a', 'INT')").collect(
 `SELECT * FROM t VERSION AS OF 5` and `TIMESTAMP AS OF '2024-01-01'`.
 
 **Files:**
-- `crates/sail-plan/src/resolver/` — detect `FOR SYSTEM_VERSION AS OF` / `AT VERSION` / `AT TIMESTAMP` on table scan
-- `crates/sail-delta-lake/src/table_format.rs` — pass version/timestamp to `open_table_with_object_store_and_table_config_at_version`
+- `crates/zelox-plan/src/resolver/` — detect `FOR SYSTEM_VERSION AS OF` / `AT VERSION` / `AT TIMESTAMP` on table scan
+- `crates/zelox-delta-lake/src/table_format.rs` — pass version/timestamp to `open_table_with_object_store_and_table_config_at_version`
 - DeltaReadOptions — add `version: Option<i64>`, `timestamp: Option<i64>`
 
 **Test:**
@@ -137,9 +137,9 @@ assert spark.sql("SELECT * FROM t VERSION AS OF 0").collect() == [Row(v=1)]
 `df.groupBy("k").applyInPandas(fn, schema)` — each group lands as a Pandas DataFrame in Python.
 
 **Files:**
-- `crates/sail-spark-connect/src/proto/plan.rs` — handle `ApplyInPandas` / `CoGroupMap` plan nodes
-- `crates/sail-python-udf/src/udf/pyspark_group_map_udf.rs` — already has skeleton, wire execution
-- `crates/sail-plan/src/resolver/query/udf.rs` — GroupedMapUDF logical node
+- `crates/zelox-spark-connect/src/proto/plan.rs` — handle `ApplyInPandas` / `CoGroupMap` plan nodes
+- `crates/zelox-python-udf/src/udf/pyspark_group_map_udf.rs` — already has skeleton, wire execution
+- `crates/zelox-plan/src/resolver/query/udf.rs` — GroupedMapUDF logical node
 
 **Test:**
 ```python
@@ -157,8 +157,8 @@ df.groupBy("k").applyInPandas(normalize, schema="k long, v double").show()
 Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log files from accumulating. Critical for production tables.
 
 **Files:**
-- `crates/sail-delta-lake/src/kernel/checkpoints.rs` — write V2 format (already partially done)
-- `crates/sail-delta-lake/src/kernel/checkpoint_augment.rs` — sidecar metadata
+- `crates/zelox-delta-lake/src/kernel/checkpoints.rs` — write V2 format (already partially done)
+- `crates/zelox-delta-lake/src/kernel/checkpoint_augment.rs` — sidecar metadata
 - Trigger: compact when `_delta_log/` has > 10 JSON files since last checkpoint
 
 ---
@@ -170,8 +170,8 @@ Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log
 **OverwriteIf for Iceberg:** same pattern as Delta fix — route to overwrite plan instead of `not_impl_err!`.
 
 **Files:**
-- `crates/sail-iceberg/src/table_format.rs` — remove `not_impl_err!` for `OverwriteIf` / `OverwritePartitions`
-- `crates/sail-iceberg/src/spec/` — V3 format changes
+- `crates/zelox-iceberg/src/table_format.rs` — remove `not_impl_err!` for `OverwriteIf` / `OverwritePartitions`
+- `crates/zelox-iceberg/src/spec/` — V3 format changes
 - REST catalog: improve sort transform parsing
 
 ---
@@ -197,7 +197,7 @@ Delta V2 checkpoint (multi-part Parquet sidecars) prevents thousands of JSON log
 
 ### 4.8 dbt Integration Guide  `[x]` P2 · ~4 hours
 
-Test `dbt-spark` connector against Vajra. Write `docs/integrations/dbt.md`.
+Test `dbt-spark` connector against Zelox. Write `docs/integrations/dbt.md`.
 
 LakeSail has this — it's an important adoption channel.
 
@@ -207,17 +207,17 @@ LakeSail has this — it's an important adoption channel.
 
 The honest gating items between "feature-complete" and "true production Spark
 replacement." LakeSail's latest remains **v0.6.3 (2026-05-21)** — no new release.
-Vajra leads on the operational axis (streaming, JWT/mTLS, K8s HA, Apple Container,
+Zelox leads on the operational axis (streaming, JWT/mTLS, K8s HA, Apple Container,
 Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance**.
 
 ### Done this sprint
 - [x] **Merged to `main`** (2026-06-04, `fc6ec9e2`) after the local scorecard gate.
   Multi-mode verification with the fresh release binary: `local` **105/105**,
   `local-cluster` (4-worker distributed) **105/105**, **Apple Container** (fresh image,
-  `SAIL_MODE=local-cluster`, 4 workers) **105/105**, **K8s (kind, kubernetes-cluster mode,
+  `ZELOX_MODE=local-cluster`, 4 workers) **105/105**, **K8s (kind, kubernetes-cluster mode,
   driver spawns worker pods)** **105/105**. Fixes landed: 5 GB Apple builder VM (default 2 GB
   OOM'd `hive_metastore`); `docker/Dockerfile` Rust `1.86→1.95` + `ARG CARGO_JOBS`
-  (`71e9bdf2`); scorecard `SCORECARD_REMOTE_TMP` for the K8s `/tmp/sail` mount + the two
+  (`71e9bdf2`); scorecard `SCORECARD_REMOTE_TMP` for the K8s `/tmp/zelox` mount + the two
   `_metadata` tests moved to the shared `tmp` root. **All four modes 105/105.**
 - [x] **Workspace clippy lane green** — `cargo clippy --all-targets --all-features -- -D warnings`
   exits 0 for the first time (commit `90f69f22`). Complied with the strict lints
@@ -243,9 +243,9 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
   workloads toward the full function surface.
 - [ ] **Full CI lane green end-to-end** `P0` — all jobs (clippy ✅, fmt, test, build-linux,
   distributed-scorecard, k8s/macos-scorecard, differential-spark ✅).
-- [ ] **Delta byte-size snapshot refresh** `P1` — ~10 `@sail-only` operation_metrics/merge
+- [ ] **Delta byte-size snapshot refresh** `P1` — ~10 `@zelox-only` operation_metrics/merge
   snapshots fail only on physical Parquet byte sizes (all semantic counters already match
-  Spark). Regenerate from Vajra's deterministic output, or match upstream parquet encoding.
+  Spark). Regenerate from Zelox's deterministic output, or match upstream parquet encoding.
 - [ ] **Delta EXPLAIN plan-shape + MERGE-source nullability** `P2` — remaining ~few Delta
   feature failures (plan-string snapshots; VALUES/temp-view source nullability in the plan dump).
 - [ ] **Official Apache Spark test-suite breadth** `P1` — extend beyond the 105/105 scorecard
@@ -255,33 +255,33 @@ Web UI); rough SQL/lakehouse parity; the open gap is **proven scale performance*
 The single biggest credibility gap. We claim 5–10x but lack a published real-scale result.
 
 - [x] **Benchmark harness repaired + validated** (commit `8a7a1af7`) — fixed two bugs
-  (Arrow ChunkedArray conversion in `vajra bench`; f-string SyntaxError in
+  (Arrow ChunkedArray conversion in `zelox bench`; f-string SyntaxError in
   `scripts/tpch_distributed.py`). Canonical path is client→server:
   `SPARK_REMOTE=sc://localhost:50051 TPCH_SF=1 python scripts/tpch_distributed.py`
   → **22/22 TPC-H pass** (debug build, cold, single-node).
 - [x] **Release + warm + vs-Spark single-node number** — published head-to-head in
   [docs/benchmarks/TPCH_SF1.md](docs/benchmarks/TPCH_SF1.md): TPC-H SF-1, 22/22 both engines,
-  identical Parquet + queries, same machine, both warm, `local[4]`. **Vajra 1.780s vs
+  identical Parquet + queries, same machine, both warm, `local[4]`. **Zelox 1.780s vs
   Apache Spark 3.5.3 63.463s → ~36×.** Reproducible via `scripts/tpch_distributed.py`
-  (now dual-engine: remote=Vajra, `local[*]`=reference Spark).
+  (now dual-engine: remote=Zelox, `local[*]`=reference Spark).
 - [x] **Distributed at 100M-row scale on real AWS EKS** `P0` — full **ClickBench (100M rows,
-  13.7 GB)** run distributed on a 3-node Graviton **spot** EKS cluster (`SAIL_MODE=
+  13.7 GB)** run distributed on a 3-node Graviton **spot** EKS cluster (`ZELOX_MODE=
   kubernetes-cluster`, driver spawned worker pods, data from **S3**): **43/43 passed,
   377.9s.** Proves distributed + S3 object store + real K8s at scale. Whole run cost **~$1**,
   torn down to **$0**. Toolkit: `k8s/eks/`, `scripts/aws_eks_teardown.sh`,
   [docs/SCALE_TESTING.md](docs/SCALE_TESTING.md).
 - [x] **TPC-H SF-100 (100 GB) time + memory head-to-head vs Spark** — same 128 GB node,
-  same data ([docs/benchmarks/TPCH_SF100.md](docs/benchmarks/TPCH_SF100.md)): **Vajra
+  same data ([docs/benchmarks/TPCH_SF100.md](docs/benchmarks/TPCH_SF100.md)): **Zelox
   346.97s / 51.7 GiB vs Apache Spark 3.5.3 1099.27s / 115 GiB → ~3.2× faster, ~2.2× less
   memory**, 22/22 each. Memory claim now MEASURED. Honest scaling: ~36× at SF-1 (warm)
   narrows to ~3.2× at SF-100 — publish per-scale, not a flat "30–40×". ~$1.5 run, torn to $0.
 - [x] **ClickBench 43-query run vs Spark** — published in
   [docs/benchmarks/CLICKBENCH.md](docs/benchmarks/CLICKBENCH.md): single-node smoke (~1M
-  rows), identical data + SQL, same machine. **Vajra 3.872s (43/43) vs Apache Spark 3.5.3
-  48.072s (42/43) → ≈12.4×** (+ full 100M distributed on EKS above). Vajra also passes Q40
+  rows), identical data + SQL, same machine. **Zelox 3.872s (43/43) vs Apache Spark 3.5.3
+  48.072s (42/43) → ≈12.4×** (+ full 100M distributed on EKS above). Zelox also passes Q40
   where Spark 3.5.3 errors on a CASE coercion (matches Spark 4.x). `scripts/clickbench.py`
   is dual-engine and S3-aware.
-- [ ] **Refactor `vajra bench` self-test** `P2` — spawn the server out-of-process so the
+- [ ] **Refactor `zelox bench` self-test** `P2` — spawn the server out-of-process so the
   embedded interpreter doesn't share the GIL with gRPC + DuckDB (current fatal-GIL crash).
 
 ---
@@ -290,7 +290,7 @@ The single biggest credibility gap. We claim 5–10x but lack a published real-s
 
 ### 5.1 Official Apache Spark Test Suite  `[x]` P0 · ~5 days
 
-Run the official Spark SQL test suite against Vajra. Target ≥ 95% pass rate.
+Run the official Spark SQL test suite against Zelox. Target ≥ 95% pass rate.
 
 **Steps:**
 1. Clone `apache/spark`, extract `sql/core/src/test/resources/sql-tests/inputs/`
@@ -328,7 +328,7 @@ Write `scripts/test_endurance.py`.
 
 Hive Metastore Thrift client for reading catalog tables from existing Hive/Glue deployments.
 
-**Files:** `crates/sail-catalog/src/hms/` (new)
+**Files:** `crates/zelox-catalog/src/hms/` (new)
 
 ---
 
@@ -350,8 +350,8 @@ Planner already accepts it (Sprint 3). Need to wire the executor:
 - State store: RocksDB or in-memory HashMap with eviction
 
 **Files:**
-- `crates/sail-spark-connect/src/streaming/` — state store + window accumulator
-- `crates/sail-plan/src/resolver/query/misc.rs` — emit proper Window LogicalPlan nodes
+- `crates/zelox-spark-connect/src/streaming/` — state store + window accumulator
+- `crates/zelox-plan/src/resolver/query/misc.rs` — emit proper Window LogicalPlan nodes
 
 ---
 
@@ -381,8 +381,8 @@ Every sprint must stay green on all three modes:
 
 | Mode | Command | CI job |
 |---|---|---|
-| `local` | `vajra server` | `macos-scorecard` |
-| `local-cluster` | `vajra cluster start` | `distributed-scorecard` |
+| `local` | `zelox server` | `macos-scorecard` |
+| `local-cluster` | `zelox cluster start` | `distributed-scorecard` |
 | `kubernetes-cluster` | Helm + kind | `k8s-scorecard` |
 | Apple Container cluster | `make container-run-cluster` | manual / future CI |
 

@@ -1,4 +1,4 @@
-# Vajra build targets  (binary: vajra, internal crates: sail-*)
+# Zelox build targets  (binary: zelox, internal crates: zelox-*)
 # Usage: make <target>
 
 .PHONY: help dev check test clippy fmt build-linux build-macos build-all release clean \
@@ -10,14 +10,14 @@
         smoke-setup scorecard scorecard-container scorecard-k8s
 
 CARGO      := $(shell which cargo)
-BINARY     := target/debug/vajra
+BINARY     := target/debug/zelox
 RELEASE_DIR := target/release
 
 # PyO3 requires the target Python version when cross-compiling to a different OS/arch.
 PYO3_CROSS_PYTHON_VERSION ?= 3.11
 
 # Image + container names
-IMAGE      ?= vajra:latest
+IMAGE      ?= zelox:latest
 
 # ── Smoke test venv ───────────────────────────────────────────────────────────
 # Python version must match the container (ARG PYTHON_VERSION in Dockerfile).
@@ -26,10 +26,10 @@ SMOKE_VENV     := .venvs/smoke
 SMOKE_PYTHON   := $(SMOKE_VENV)/bin/python
 SMOKE_PYPATH   := $(SMOKE_VENV)/lib/python$(CONTAINER_PY)/site-packages
 SCORECARD      := $(SMOKE_PYTHON) scripts/spark_compat_score.py
-CONTAINER  ?= vajra
+CONTAINER  ?= zelox
 
 help:
-	@echo "Vajra build targets:"
+	@echo "Zelox build targets:"
 	@echo "  make dev                     Build debug binary (fast, for local testing)"
 	@echo "  make check                   cargo check all crates (fastest correctness check)"
 	@echo "  make test                    Run unit tests"
@@ -45,15 +45,15 @@ help:
 	@echo "  make bench-sf10              Run TPC-H SF-10 benchmark (larger, ~60s)"
 	@echo "  make container-build         Build Apple Container image (uses layer cache)"
 	@echo "  make container-build-clean   Same, but forces a clean rebuild (--no-cache)"
-	@echo "  make container-run           Run vajra container in local (single-node) mode"
-	@echo "  make container-run-cluster   Run vajra container in local-cluster mode"
-	@echo "  make docker-build            Build vajra Docker image for use with kind/k8s"
-	@echo "  make kind-setup              Create kind cluster, load image, deploy vajra"
+	@echo "  make container-run           Run zelox container in local (single-node) mode"
+	@echo "  make container-run-cluster   Run zelox container in local-cluster mode"
+	@echo "  make docker-build            Build zelox Docker image for use with kind/k8s"
+	@echo "  make kind-setup              Create kind cluster, load image, deploy zelox"
 	@echo "  make kind-teardown           Delete kind cluster"
 	@echo "  make helm-lint               Lint the Helm chart"
-	@echo "  make helm-install            Install/upgrade Vajra via Helm into current k8s context"
+	@echo "  make helm-install            Install/upgrade Zelox via Helm into current k8s context"
 	@echo "  make helm-upgrade            Upgrade existing Helm release"
-	@echo "  make helm-uninstall          Uninstall Vajra Helm release"
+	@echo "  make helm-uninstall          Uninstall Zelox Helm release"
 	@echo "  make smoke-setup             Create .venvs/smoke with correct Python version"
 	@echo "  make scorecard               Run 71-test compat scorecard (local binary, debug)"
 	@echo "  make scorecard-container     Run scorecard against running Apple Container (:50051)"
@@ -62,9 +62,9 @@ help:
 
 # ── Helm ─────────────────────────────────────────────────────────────────────
 HELM       := $(shell command -v helm 2>/dev/null || echo helm)
-HELM_CHART := helm/vajra
-HELM_RELEASE ?= vajra
-HELM_NAMESPACE ?= vajra
+HELM_CHART := helm/zelox
+HELM_RELEASE ?= zelox
+HELM_NAMESPACE ?= zelox
 
 helm-lint:
 	$(HELM) lint $(HELM_CHART)
@@ -87,14 +87,14 @@ smoke-setup:
 scorecard: $(SMOKE_PYTHON)
 	DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \
 	PYTHONPATH=$(SMOKE_PYPATH) \
-	VAJRA_BIN=$(RELEASE_DIR)/vajra \
+	ZELOX_BIN=$(RELEASE_DIR)/zelox \
 		$(SCORECARD)
 
 # Remote container/k8s mode — requires a server already running on :50051.
-# File-based tests (JSON, Parquet, Delta) use /tmp/vajra which is mounted
-# into every container via -v /tmp/vajra:/tmp/vajra.
+# File-based tests (JSON, Parquet, Delta) use /tmp/zelox which is mounted
+# into every container via -v /tmp/zelox:/tmp/zelox.
 scorecard-container scorecard-k8s: $(SMOKE_PYTHON)
-	@mkdir -p /tmp/vajra
+	@mkdir -p /tmp/zelox
 	SPARK_REMOTE=sc://localhost:50051 \
 	PYTHONPATH=$(SMOKE_PYPATH) \
 		$(SCORECARD)
@@ -104,7 +104,7 @@ $(SMOKE_PYTHON):
 	@exit 1
 
 dev:
-	$(CARGO) build -p sail-cli
+	$(CARGO) build -p zelox-cli
 	@echo "Binary: $(BINARY)"
 
 check:
@@ -124,24 +124,24 @@ fmt-fix:
 	$(CARGO) fmt --all
 
 release:
-	$(CARGO) build --release -p sail-cli
-	@echo "Binary: $(RELEASE_DIR)/vajra"
-	@ls -lh $(RELEASE_DIR)/vajra
+	$(CARGO) build --release -p zelox-cli
+	@echo "Binary: $(RELEASE_DIR)/zelox"
+	@ls -lh $(RELEASE_DIR)/zelox
 
 # ── Cross-compilation ─────────────────────────────────────────────────────────
 build-linux:
 	@echo "Building Linux x86_64 musl..."
 	PYO3_CROSS_PYTHON_VERSION=$(PYO3_CROSS_PYTHON_VERSION) \
-		$(CARGO) zigbuild --release -p sail-cli --target x86_64-unknown-linux-musl
+		$(CARGO) zigbuild --release -p zelox-cli --target x86_64-unknown-linux-musl
 	@echo "Building Linux aarch64 musl..."
 	PYO3_CROSS_PYTHON_VERSION=$(PYO3_CROSS_PYTHON_VERSION) \
-		$(CARGO) zigbuild --release -p sail-cli --target aarch64-unknown-linux-musl
+		$(CARGO) zigbuild --release -p zelox-cli --target aarch64-unknown-linux-musl
 	@echo ""
 	@echo "Binaries:"
-	@ls -lh target/x86_64-unknown-linux-musl/release/vajra
-	@ls -lh target/aarch64-unknown-linux-musl/release/vajra
-	@file target/x86_64-unknown-linux-musl/release/vajra
-	@file target/aarch64-unknown-linux-musl/release/vajra
+	@ls -lh target/x86_64-unknown-linux-musl/release/zelox
+	@ls -lh target/aarch64-unknown-linux-musl/release/zelox
+	@file target/x86_64-unknown-linux-musl/release/zelox
+	@file target/aarch64-unknown-linux-musl/release/zelox
 
 PYTHON_BIN := $(shell command -v python3.11 2>/dev/null || \
                        command -v python3.12 2>/dev/null || \
@@ -153,19 +153,19 @@ PYTHON_LIB := $(shell $(PYTHON_BIN) -c \
 
 build-macos:
 	@echo "Building macOS x86_64..."
-	$(CARGO) zigbuild --release -p sail-cli --target x86_64-apple-darwin
+	$(CARGO) zigbuild --release -p zelox-cli --target x86_64-apple-darwin
 	@echo "Building macOS aarch64 (native)..."
 	PYO3_PYTHON=$(PYTHON_BIN) \
 	RUSTFLAGS="$(if $(PYTHON_LIB),-L $(PYTHON_LIB))" \
-	$(CARGO) build --release -p sail-cli --target aarch64-apple-darwin
+	$(CARGO) build --release -p zelox-cli --target aarch64-apple-darwin
 	@echo "Creating universal binary..."
-	lipo -create -output target/vajra-universal2-apple-darwin \
-		target/x86_64-apple-darwin/release/vajra \
-		target/aarch64-apple-darwin/release/vajra
+	lipo -create -output target/zelox-universal2-apple-darwin \
+		target/x86_64-apple-darwin/release/zelox \
+		target/aarch64-apple-darwin/release/zelox
 	@echo ""
 	@echo "Universal binary:"
-	@ls -lh target/vajra-universal2-apple-darwin
-	@file target/vajra-universal2-apple-darwin
+	@ls -lh target/zelox-universal2-apple-darwin
+	@file target/zelox-universal2-apple-darwin
 
 build-all: build-linux build-macos
 
@@ -173,25 +173,25 @@ build-all: build-linux build-macos
 bench: bench-sf1
 
 bench-sf1:
-	@echo "Building Vajra release binary..."
-	$(CARGO) build --release -p sail-cli
+	@echo "Building Zelox release binary..."
+	$(CARGO) build --release -p zelox-cli
 	@echo ""
-	$(RELEASE_DIR)/vajra bench --scale-factor 1
+	$(RELEASE_DIR)/zelox bench --scale-factor 1
 
 bench-sf10:
-	@echo "Building Vajra release binary..."
-	$(CARGO) build --release -p sail-cli
+	@echo "Building Zelox release binary..."
+	$(CARGO) build --release -p zelox-cli
 	@echo ""
-	$(RELEASE_DIR)/vajra bench --scale-factor 10
+	$(RELEASE_DIR)/zelox bench --scale-factor 10
 
 size-report:
 	@echo "=== Binary Size Report ==="
 	@for f in \
-		target/x86_64-unknown-linux-musl/release/vajra \
-		target/aarch64-unknown-linux-musl/release/vajra \
-		target/x86_64-apple-darwin/release/vajra \
-		target/aarch64-apple-darwin/release/vajra \
-		target/vajra-universal2-apple-darwin; do \
+		target/x86_64-unknown-linux-musl/release/zelox \
+		target/aarch64-unknown-linux-musl/release/zelox \
+		target/x86_64-apple-darwin/release/zelox \
+		target/aarch64-apple-darwin/release/zelox \
+		target/zelox-universal2-apple-darwin; do \
 		[ -f "$$f" ] && printf "%-60s %s\n" "$$f" "$$(ls -lh $$f | awk '{print $$5}')"; \
 	done
 
@@ -216,75 +216,75 @@ clean:
 _container-ctx:
 	@echo "=== Fixing buildkit DNS (Apple Container issue #656) ==="
 	container exec buildkit /bin/sh -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf' 2>/dev/null || true
-	@echo "=== Creating build context in /tmp/vajra-ctx ==="
-	rm -rf /tmp/vajra-ctx
-	mkdir -p /tmp/vajra-ctx
-	cp Cargo.toml Cargo.lock /tmp/vajra-ctx/
-	cp docker/apple/Dockerfile /tmp/vajra-ctx/Dockerfile
-	bash scripts/make-manifests.sh /tmp/vajra-ctx/manifests.tar.gz
-	tar -czf /tmp/vajra-ctx/crates.tar.gz crates/
+	@echo "=== Creating build context in /tmp/zelox-ctx ==="
+	rm -rf /tmp/zelox-ctx
+	mkdir -p /tmp/zelox-ctx
+	cp Cargo.toml Cargo.lock /tmp/zelox-ctx/
+	cp docker/apple/Dockerfile /tmp/zelox-ctx/Dockerfile
+	bash scripts/make-manifests.sh /tmp/zelox-ctx/manifests.tar.gz
+	tar -czf /tmp/zelox-ctx/crates.tar.gz crates/
 	@echo "=== Build context ==="
-	@du -sh /tmp/vajra-ctx/
+	@du -sh /tmp/zelox-ctx/
 
 container-build: _container-ctx
 	@echo "=== Running container build (incremental, uses layer cache) ==="
-	container build --platform linux/arm64 -t $(IMAGE) /tmp/vajra-ctx
-	@echo "=== Done. Run with: container run --name $(CONTAINER) -p 50051:50051 -v /tmp/vajra:/tmp/vajra $(IMAGE) ==="
+	container build --platform linux/arm64 -t $(IMAGE) /tmp/zelox-ctx
+	@echo "=== Done. Run with: container run --name $(CONTAINER) -p 50051:50051 -v /tmp/zelox:/tmp/zelox $(IMAGE) ==="
 
 container-build-clean: _container-ctx
 	@echo "=== Running container build (clean, no cache) ==="
-	container build --no-cache --platform linux/arm64 -t $(IMAGE) /tmp/vajra-ctx
-	@echo "=== Done. Run with: container run --name $(CONTAINER) -p 50051:50051 -v /tmp/vajra:/tmp/vajra $(IMAGE) ==="
+	container build --no-cache --platform linux/arm64 -t $(IMAGE) /tmp/zelox-ctx
+	@echo "=== Done. Run with: container run --name $(CONTAINER) -p 50051:50051 -v /tmp/zelox:/tmp/zelox $(IMAGE) ==="
 
 # ── Apple Container run helpers ───────────────────────────────────────────────
 container-run:
-	@echo "=== Starting Vajra (local single-node mode) ==="
-	mkdir -p /tmp/vajra
+	@echo "=== Starting Zelox (local single-node mode) ==="
+	mkdir -p /tmp/zelox
 	container run --rm --name $(CONTAINER) -p 50051:50051 \
-		-v /tmp/vajra:/tmp/vajra \
+		-v /tmp/zelox:/tmp/zelox \
 		$(IMAGE)
 
 container-run-cluster:
-	@echo "=== Starting Vajra (local-cluster distributed mode) ==="
-	mkdir -p /tmp/vajra
+	@echo "=== Starting Zelox (local-cluster distributed mode) ==="
+	mkdir -p /tmp/zelox
 	container run --rm --name $(CONTAINER)-cluster -p 50051:50051 \
-		-e SAIL_MODE=local-cluster \
-		-v /tmp/vajra:/tmp/vajra \
+		-e ZELOX_MODE=local-cluster \
+		-v /tmp/zelox:/tmp/zelox \
 		$(IMAGE)
 
 # ── Docker build (for kind/k8s) ───────────────────────────────────────────────
 _docker-ctx:
-	@echo "=== Creating build context in /tmp/vajra-ctx ==="
-	rm -rf /tmp/vajra-ctx
-	mkdir -p /tmp/vajra-ctx
-	cp Cargo.toml Cargo.lock /tmp/vajra-ctx/
-	cp docker/apple/Dockerfile /tmp/vajra-ctx/Dockerfile
-	bash scripts/make-manifests.sh /tmp/vajra-ctx/manifests.tar.gz
-	tar -czf /tmp/vajra-ctx/crates.tar.gz crates/
+	@echo "=== Creating build context in /tmp/zelox-ctx ==="
+	rm -rf /tmp/zelox-ctx
+	mkdir -p /tmp/zelox-ctx
+	cp Cargo.toml Cargo.lock /tmp/zelox-ctx/
+	cp docker/apple/Dockerfile /tmp/zelox-ctx/Dockerfile
+	bash scripts/make-manifests.sh /tmp/zelox-ctx/manifests.tar.gz
+	tar -czf /tmp/zelox-ctx/crates.tar.gz crates/
 	@echo "=== Build context ==="
-	@du -sh /tmp/vajra-ctx/
+	@du -sh /tmp/zelox-ctx/
 
 docker-build: _docker-ctx
 	@echo "=== Building Docker image $(IMAGE) (linux/arm64) ==="
 	CARGO_PROFILE_RELEASE_LTO=off CARGO_BUILD_JOBS=2 \
-	docker build --platform linux/arm64 -t $(IMAGE) /tmp/vajra-ctx
+	docker build --platform linux/arm64 -t $(IMAGE) /tmp/zelox-ctx
 	@echo "=== Done. Load into kind with: kind load docker-image $(IMAGE) ==="
 
 # ── kind Kubernetes cluster ───────────────────────────────────────────────────
-KIND_CLUSTER ?= vajra-dev
+KIND_CLUSTER ?= zelox-dev
 
 kind-setup:
 	@echo "=== Creating kind cluster '$(KIND_CLUSTER)' ==="
-	mkdir -p /tmp/vajra /private/tmp/vajra /private/tmp/sail
+	mkdir -p /tmp/zelox /private/tmp/zelox /private/tmp/zelox
 	kind create cluster --name $(KIND_CLUSTER) --config k8s/kind-config.yaml
 	@echo "=== Loading $(IMAGE) into kind ==="
 	kind load docker-image $(IMAGE) --name $(KIND_CLUSTER)
-	@echo "=== Deploying Vajra to kind ==="
-	kubectl apply -f k8s/sail.yaml
+	@echo "=== Deploying Zelox to kind ==="
+	kubectl apply -f k8s/zelox.yaml
 	@echo "=== Waiting for pod to be ready ==="
-	kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=120s
+	kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=120s
 	@echo ""
-	@echo "=== Port-forward: kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 ==="
+	@echo "=== Port-forward: kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 ==="
 
 kind-teardown:
 	@echo "=== Deleting kind cluster '$(KIND_CLUSTER)' ==="

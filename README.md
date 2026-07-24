@@ -1,36 +1,132 @@
-# Vajra (वज्र)
+<div align="center">
 
-> *Sanskrit: thunderbolt + diamond — speed of lightning, hardness of diamond.*
+# Zelox
 
-**Vajra is a Rust-native unified batch + streaming engine — Apache Spark's batch *and* Flink-class streaming in one binary. Drop in your existing PySpark code. No JVM. No Hadoop. One binary.**
+**One engine for batch *and* streaming. Spark's API, Flink's latency, no JVM.**
 
-[![CI](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml/badge.svg)](https://github.com/vikashgargg/ignite/actions/workflows/ignite-ci.yml)
-[![Release](https://img.shields.io/github/v/release/vikashgargg/ignite)](https://github.com/vikashgargg/ignite/releases)
+Zelox runs your existing PySpark code unchanged — then runs it in 200 ms instead of 2 minutes,
+and streams it at millisecond latency with exactly-once guarantees that survive `kill -9`.
+
+[![CI](https://github.com/vikashgargg/zelox/actions/workflows/zelox-ci.yml/badge.svg)](https://github.com/vikashgargg/zelox/actions/workflows/zelox-ci.yml)
+[![Release](https://img.shields.io/github/v/release/vikashgargg/zelox)](https://github.com/vikashgargg/zelox/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Spark compat](https://img.shields.io/badge/Spark%20SQL%20compat-105%2F105-brightgreen)](COMPAT.md)
+
+[Quick start](#quick-start) · [Realtime mode](#realtime-mode--millisecond-streaming-through-the-spark-api) · [Benchmarks](docs/benchmarks/README.md) · [Streaming](docs/STREAMING.md) · [Docs](https://docs.zelox.club/)
+
+</div>
 
 ```sh
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 ```
 
 ---
 
-## Why Vajra Exists
+## The name
 
-Apache Spark is the industry standard for large-scale data processing — and it carries the full weight of that legacy. A JVM that takes 30–120 seconds to warm up. A cluster setup that requires HDFS, YARN, or Kubernetes just to run a local job. Gigabytes of heap before the first query executes. Python data bouncing through Arrow IPC, back through the JVM, back out to Python.
+**Zelox** — from Greek **ζῆλος** (*zêlos*: zeal, ardour, the drive to pursue something
+relentlessly) + **-x**, for exactness.
 
-**Vajra is what Spark would look like if it were designed today.**
+**Zeal and exactness.** Those are the two halves of this engine, and they are usually
+sold as a trade-off.
 
-Built on Rust, Apache Arrow, and Apache DataFusion — the same columnar engine that powers ClickHouse, InfluxDB, and Delta Lake's own query path. No garbage collector. No JVM warmup. No serialisation tax between Python and the execution engine. One statically-linked binary you can `curl | sh` onto any machine.
+Every data system asks you to pick a side. Want speed? Take at-least-once delivery,
+reconcile the duplicates downstream, and accept that your streaming numbers and your
+batch numbers will quietly disagree. Want correctness? Take the checkpoint pause, the
+JVM, the second engine, the 30-second cold start. The industry has spent a decade
+treating that as a law of physics.
 
-Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC protocol exactly. Point `SparkSession.builder.remote(...)` at a Vajra server and your existing jobs run. The only difference is they start in 200 milliseconds instead of 2 minutes, and they use 300 MB of RAM instead of 4 GB.
+It isn't. It's an artifact of implementation — of garbage collectors that must stop the
+world, of batch and streaming written as two separate engines with two separate notions
+of what a row means.
+
+Zelox is the argument that you can refuse the trade. Rust and Arrow remove the GC pause,
+so the tail stays flat under load. Aligned checkpoint barriers commit state, offsets, and
+sink visibility as one atomic act, so exactly-once survives `kill -9` at 16 partitions and
+100M events. One execution core runs both batch and streaming, so the same query means
+the same thing in both. Relentless *and* exact — the whole name is the whole claim.
+
+*In Greek myth Zelos was one of the four winged enforcers who stood at Zeus's throne
+alongside Nike (victory), Kratos (strength), and Bia (force). Zelos was the one who
+never let up.*
+
+The name is a promise; the [benchmarks](#proven-results) are whether we keep it. Every
+number in this README is measured and reproducible — check them.
 
 ---
 
-## Vajra vs the Field
+## Why Zelox exists
+
+Apache Spark is the industry standard for large-scale data processing — and it carries the
+full weight of that legacy. A JVM that takes 30–120 seconds to warm up. A cluster setup that
+wants HDFS, YARN, or Kubernetes just to run a local job. Gigabytes of heap before the first
+query executes. Python data bouncing through Arrow IPC, back through the JVM, back out to
+Python.
+
+And when you need low-latency streaming, Spark hands you off to a second system entirely.
+So you run Spark for batch and Flink for streaming: two engines, two deployment stories, two
+sets of semantics, two on-call runbooks, and a permanent correctness question about whether
+the batch and streaming versions of the same logic actually agree.
+
+**Zelox collapses that into one engine.**
+
+Built on Rust, Apache Arrow, and Apache DataFusion — the same columnar foundation behind
+ClickHouse, InfluxDB, and Delta Lake's query path. No garbage collector. No JVM warmup. No
+serialisation tax between Python and the execution engine. One statically-linked binary you
+can `curl | sh` onto any machine.
+
+Your PySpark code runs **unchanged** — Zelox implements the Spark Connect gRPC protocol
+exactly. Point `SparkSession.builder.remote(...)` at a Zelox server and your existing jobs
+run. Batch and streaming share the same execution core, so the same query means the same
+thing in both.
+
+### What you get
+
+|  | |
+|---|---|
+| **One engine, two workloads** | Spark-class batch **and** Flink-class streaming on the same binary, same SQL surface, same semantics |
+| **Drop-in** | Spark Connect protocol; change one line (`.remote(...)`) and your PySpark job runs |
+| **Fast cold** | ~200 ms to first query vs 30–120 s JVM warmup |
+| **Small** | ~300 MB idle vs 2–4 GB JVM heap; 80 MB Linux binary |
+| **Millisecond streaming** | `trigger(continuous=…)` → event-at-a-time pipeline, ~62 ms p50 end-to-end through Kafka |
+| **Exactly-once that survives crashes** | `kill -9` → resume with `dup=0`, bit-identical output — verified on EKS at 16 partitions / 100M events |
+| **Proven compatible** | 105/105 Spark SQL scorecard across all four modes; 124 workloads checked byte-exact against real Spark in CI |
+
+---
+
+## Lineage
+
+Zelox began as a fork of [Sail](https://github.com/lakehq/sail) (LakeSail, Inc., Apache-2.0)
+and has grown into its own product with its own goals — the same way
+**MariaDB** grew out of MySQL, **OpenSearch** out of Elasticsearch, and
+**Valkey** out of Redis.
+
+We inherited an excellent Rust + DataFusion analytical core, and we say so
+plainly: on raw batch query performance against Spark, Zelox and Sail sit in the
+same ballpark, because that lineage is shared. **We do not claim to be faster
+than Sail.**
+
+Where Zelox diverges is scope. Sail is a Spark batch replacement. Zelox is a
+**unified batch *and* streaming engine** — Flink-class Structured Streaming with
+exactly-once semantics verified across hard crashes, event-time windows and
+watermarks, stream-stream joins, and millisecond realtime mode — plus the
+operational surface a production deployment actually needs: JWT/mTLS auth,
+Kubernetes HA with lease election, a Helm chart, a web UI, and a CI-gating
+differential trust harness that checks 124 workloads byte-exact against real
+Spark.
+
+Attribution for the inherited code is preserved in [`NOTICE`](NOTICE), and the
+pre-fork release history is kept intact in the
+[upstream changelog](docs/reference/changelog/index.md). Where a fix applies to
+the shared core, we send it upstream.
+
+---
+
+## Zelox vs the Field
 
 > *LakeSail v0.6.3 (2026-05-21) is the closest open-source comparison. Numbers are measured, not estimated.*
 
-| Capability | Apache Spark 3.5 | LakeSail v0.6.3 | **Vajra v0.6.0** |
+| Capability | Apache Spark 3.5 | LakeSail v0.6.3 | **Zelox v0.6.0** |
 |---|---|---|---|
 | Runtime | JVM (GC pauses) | Rust | **Rust** |
 | Cold start | 30–120 s | ~2 s | **~200 ms** |
@@ -39,7 +135,7 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | TPC-H SF-1 (22q, warm) | 63.46 s | ~15 s | **1.78 s (~36×)** |
 | TPC-H SF-100 (22q, 100 GB, same node) | 1099 s / 115 GiB | not run | **347 s / 51.7 GiB (~3.2× faster, ~2.2× less RAM)** |
 | ClickBench 100M (distributed on EKS) | — | — | **377.9 s, 43/43** |
-| pip install | `pyspark` (JVM needed) | `pysail` | **`vajra-pyspark`** |
+| pip install | `pyspark` (JVM needed) | `pysail` | **`zelox-pyspark`** |
 | **Spark SQL compat (105-test scorecard, all modes)** | ✅ reference | ~95% | **✅ 105/105 (100%)** |
 | Python UDFs — scalar / Pandas / Arrow | ✅ | ✅ | **✅** |
 | **Python-version-agnostic UDFs (any 3.10+)** | ✅ | ✅ abi3 | **✅ abi3 + subprocess** |
@@ -68,17 +164,17 @@ Your PySpark code runs **unchanged** — Vajra implements the Spark Connect gRPC
 | **dbt integration guide** | ✅ | ✅ v0.6.3 | **✅** |
 | **ClickBench 43/43 benchmark** | ✅ | ✅ v0.6.3 | **✅** |
 
-All Vajra numbers above are measured (LTO release binary; SF-100 + ClickBench-100M
+All Zelox numbers above are measured (LTO release binary; SF-100 + ClickBench-100M
 on AWS EKS Graviton), not estimated. **The speedup is scale-dependent** — ~36× on
 small/warm TPC-H SF-1, narrowing to a still-substantial **~3.2× faster + ~2.2× less
 memory at 100 GB**. Quote the scale with the number; full conditions, per-query
-tables, and the honest Vajra-vs-Spark-vs-LakeSail read are in
+tables, and the honest Zelox-vs-Spark-vs-LakeSail read are in
 [docs/benchmarks/](docs/benchmarks/README.md) and
 [docs/benchmarks/COMPETITIVE.md](docs/benchmarks/COMPETITIVE.md).
 
-> **On LakeSail:** Vajra is forked from `lakehq/sail`, so the analytical core
+> **On LakeSail:** Zelox is forked from `lakehq/sail`, so the analytical core
 > (Rust + DataFusion) is shared lineage — raw query perf vs Spark sits in the same
-> ballpark for both. We do **not** claim "faster than LakeSail." Vajra's
+> ballpark for both. We do **not** claim "faster than LakeSail." Zelox's
 > differentiation is operational features (streaming, auth, K8s HA, Apple
 > Container, Web UI), a **CI-gating differential trust harness** (124 workloads
 > byte-exact vs real Spark), **four-mode** 105/105 verification, and **transparent,
@@ -90,7 +186,7 @@ tables, and the honest Vajra-vs-Spark-vs-LakeSail read are in
 
 ```
 ══════════════════════════════════════════════════════════════════
-  VAJRA SPARK COMPATIBILITY SCORECARD  (v0.6.0-alpha)
+  ZELOX SPARK COMPATIBILITY SCORECARD  (v0.6.0-alpha)
 ══════════════════════════════════════════════════════════════════
   1. Basic SQL                         ✓✓✓✓✓✓✓✓✓✓✓✓✓  13/13
   2. Aggregate Functions                   ✓✓✓✓✓✓  6/6
@@ -114,15 +210,15 @@ tables, and the honest Vajra-vs-Spark-vs-LakeSail read are in
   Modes:  local ✅  local-cluster ✅  kubernetes-cluster ✅
 ══════════════════════════════════════════════════════════════════
 
-TPC-H SF-1  — 22/22 PASS — Vajra 1.78s  vs  Spark 63.46s   (~36× warm/small)
-TPC-H SF-100 — 22/22 PASS — Vajra 347s / 51.7GiB  vs  Spark 1099s / 115GiB
+TPC-H SF-1  — 22/22 PASS — Zelox 1.78s  vs  Spark 63.46s   (~36× warm/small)
+TPC-H SF-100 — 22/22 PASS — Zelox 347s / 51.7GiB  vs  Spark 1099s / 115GiB
                             (~3.2× faster, ~2.2× less RAM — measured on EKS)
-ClickBench 100M (distributed, EKS) — 43/43 PASS — Vajra 377.9s
+ClickBench 100M (distributed, EKS) — 43/43 PASS — Zelox 377.9s
 ```
 
 ### Streaming — measured head-to-head vs Apache Flink 1.19 (honest)
 
-Vajra is also a streaming engine. The authoritative head-to-head is a **rigorous
+Zelox is also a streaming engine. The authoritative head-to-head is a **rigorous
 Nexmark-methodology tri-engine run** vs **official Apache Flink 1.19** on AWS Graviton EKS,
 identical 10 s tumbling keyed-COUNT over a shared Kafka topic (2026-07-01,
 [docs/benchmarks/STREAMING_VS_FLINK_EKS.md](docs/benchmarks/STREAMING_VS_FLINK_EKS.md),
@@ -130,16 +226,16 @@ identical 10 s tumbling keyed-COUNT over a shared Kafka topic (2026-07-01,
 
 Latest fair EKS run (2026-07-04, 100M events, BOTH engines measured like-for-like):
 
-| Dimension | Flink 1.19 | Vajra | Verdict |
+| Dimension | Flink 1.19 | Zelox | Verdict |
 |---|--:|--:|---|
 | **Throughput** (windowed-agg) | 5.66M ev/s | 5.51M ev/s | 🟡 **~tied** (Flink ~1.5% faster) |
 | **Memory** (peak RSS) | 8.58 GiB | 7.06 GiB | 🟢 **~18% less** (no-JVM Arrow; batch ~8× less) |
-| **Windowed-agg completeness** | 10 windows / 100M | 10 windows / 100M (`VAJRA_COMPLETE_ON_END`) | 🟢 **parity** (Flink `scan.bounded.mode`) |
+| **Windowed-agg completeness** | 10 windows / 100M | 10 windows / 100M (`ZELOX_COMPLETE_ON_END`) | 🟢 **parity** (Flink `scan.bounded.mode`) |
 | **Crash exactly-once** (16-part continuous, `kill -9`) | mature | **dup=0, sum exact, clean==crash** (EKS-confirmed) | 🟢 correct |
 | **Kafka→Kafka passthrough** | parallel | **100M/100M @ 1.67M msg/s** (parallel sink) | 🟢 fixed (was a 1/16-partition data-loss bug) |
 | **Latency** (ms, realtime) | p50 ~98 ms | tail better (no GC); clean re-measure pending | 🟡 to re-measure |
 
-**Honest summary:** Vajra is **competitive, not categorically-better** on streaming — throughput **~tied**,
+**Honest summary:** Zelox is **competitive, not categorically-better** on streaming — throughput **~tied**,
 **memory wins**, **exactly-once holds across a hard crash** (16-partition continuous, verified via
 `_spark_metadata`), **completeness matches Flink**, and the Kafka sink now writes **every partition** at
 ~1.67M msg/s (a fixed 15/16 data-loss bug). Latency vs Flink is being re-measured cleanly (the earlier
@@ -156,7 +252,7 @@ way — see the [3-tier SDLC](docs/design/three-tier-sdlc.md) (T1 local → T2 `
 > **The road to a true Spark + Flink replacement** — what's measured, where the real gaps
 > are (throughput parse-fusion, latency, large-state, mid-job failure recovery), and the
 > grounded plan to close them — is in **[docs/PROD_GRADE_ROADMAP.md](docs/PROD_GRADE_ROADMAP.md)**.
-> Vajra is a strong Spark **batch** replacement and a **competitive** Flink streaming
+> Zelox is a strong Spark **batch** replacement and a **competitive** Flink streaming
 > replacement; streaming throughput + operational maturity are the honest remaining work.
 
 ### Production workloads on real object storage (EKS 2026-07-02)
@@ -167,7 +263,7 @@ Canonical Uber/Netflix streaming-data-lake + batch-ETL patterns on **real S3**
 | Workload | Result |
 |---|---|
 | **P1** Kafka → 10 s windowed-agg → **Parquet on S3**, exactly-once | clean + **EO-under-crash** (kill -9 → resume from S3 checkpoint): rows=9000, **dup=0**, sum=90M **bit-identical**; 4.67M ev/s, 7.25 GiB |
-| **P4** batch 200M rows → write **Parquet on S3** → read+agg **vs Spark 3.5.3** | Vajra **5.92 s / 3.44 GiB** vs Spark **36.94 s / 8.1 GiB** — **6.2× faster, 2.4× less memory, bit-identical output** |
+| **P4** batch 200M rows → write **Parquet on S3** → read+agg **vs Spark 3.5.3** | Zelox **5.92 s / 3.44 GiB** vs Spark **36.94 s / 8.1 GiB** — **6.2× faster, 2.4× less memory, bit-identical output** |
 
 ---
 
@@ -179,8 +275,8 @@ The published multi-arch image (linux/amd64 + linux/arm64 — the **same arm64 i
 EKS and Apple `container`) is on GHCR, signed and SBOM-attested:
 
 ```sh
-# Start a Vajra Spark Connect server on :50051 (bind 0.0.0.0 so it's reachable through -p)
-docker run --rm -p 50051:50051 ghcr.io/vikashgargg/ignite:latest server --ip 0.0.0.0 --mode local
+# Start a Zelox Spark Connect server on :50051 (bind 0.0.0.0 so it's reachable through -p)
+docker run --rm -p 50051:50051 ghcr.io/vikashgargg/zelox:latest server --ip 0.0.0.0 --mode local
 ```
 
 ```python
@@ -190,7 +286,7 @@ spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
 spark.range(1_000_000).selectExpr("sum(id)").show()
 ```
 
-Verify provenance: `cosign verify ghcr.io/vikashgargg/ignite:latest` (keyless, Sigstore).
+Verify provenance: `cosign verify ghcr.io/vikashgargg/zelox:latest` (keyless, Sigstore).
 
 ### Prerequisites
 
@@ -202,30 +298,30 @@ Verify provenance: `cosign verify ghcr.io/vikashgargg/ignite:latest` (keyless, S
 ### Install (one command)
 
 ```sh
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 ```
 
 The installer:
 1. Downloads the pre-built binary for your platform
-2. Creates an isolated Python venv at `~/.local/lib/vajra/venv` with pyspark 4.x + all Spark Connect deps
-3. Wraps the binary so `vajra sql` / `vajra run` just work — no manual `PYTHONPATH` setup
+2. Creates an isolated Python venv at `~/.local/lib/zelox/venv` with pyspark 4.x + all Spark Connect deps
+3. Wraps the binary so `zelox sql` / `zelox run` just work — no manual `PYTHONPATH` setup
 
 After install, add to your PATH (shown by the installer) then test:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"   # paste exact line from installer output
-vajra --version                         # vajra 0.1.0
-vajra sql "SELECT 1"                    # prints +---+ \n| 1 | \n+---+
+zelox --version                         # zelox 0.1.0
+zelox sql "SELECT 1"                    # prints +---+ \n| 1 | \n+---+
 ```
 
 ### Run a quick smoke test
 
 ```sh
 # One-shot SQL
-vajra sql "SELECT 'hello' AS msg, current_timestamp() AS ts"
+zelox sql "SELECT 'hello' AS msg, current_timestamp() AS ts"
 
 # TPC-H benchmark (requires: pip install duckdb)
-vajra bench --scale-factor 1
+zelox bench --scale-factor 1
 ```
 
 ### Connect your existing PySpark code — change one line
@@ -236,7 +332,7 @@ from pyspark.sql import SparkSession
 # Before (Spark):
 # spark = SparkSession.builder.getOrCreate()
 
-# After (Vajra) — everything else stays the same:
+# After (Zelox) — everything else stays the same:
 spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
 
 df = spark.read.parquet("s3://my-bucket/data/")
@@ -244,36 +340,36 @@ df.groupBy("region").agg({"revenue": "sum"}).show()
 ```
 
 ```sh
-vajra server                             # start server on :50051
+zelox server                             # start server on :50051
 python my_job.py                         # run job using pyspark installed in the venv
-# or: vajra run -f my_job.py            # run in-process, no separate server needed
+# or: zelox run -f my_job.py            # run in-process, no separate server needed
 ```
 
 ### One-shot SQL
 
 ```sh
-vajra sql "SELECT count(*) FROM parquet.'/tmp/data/*.parquet'"
+zelox sql "SELECT count(*) FROM parquet.'/tmp/data/*.parquet'"
 ```
 
 ### Run a PySpark script
 
 ```sh
-vajra run -f my_etl_job.py
+zelox run -f my_etl_job.py
 ```
 
 ### TPC-H self-benchmark
 
 ```sh
-vajra bench --scale-factor 10   # requires: pip install duckdb
+zelox bench --scale-factor 10   # requires: pip install duckdb
 ```
 
 ---
 
 ## Batch **and** streaming in one engine
 
-The whole point of Vajra: **one binary, one API** does Spark's batch **and** Flink-class streaming.
+The whole point of Zelox: **one binary, one API** does Spark's batch **and** Flink-class streaming.
 No JVM, no separate cluster, no second framework — the same `SparkSession` you already know. Start a
-server once (`vajra server`, or the Docker image above), then point PySpark at `sc://localhost:50051`.
+server once (`zelox server`, or the Docker image above), then point PySpark at `sc://localhost:50051`.
 
 ### Batch (Spark-class) — read → transform → write
 
@@ -330,10 +426,48 @@ query = (windowed.writeStream
 query.awaitTermination()
 ```
 
-### Pick your latency — from backfill to **millisecond realtime**
+## Realtime mode — millisecond streaming through the Spark API
 
-Just like Flink lets you tune the latency/throughput trade-off, Vajra gives you the full spectrum
-**through the standard Spark `trigger()` API** — same query, one line changes:
+This is the part Spark can't do and Flink makes you switch engines for.
+
+Spark's Structured Streaming is micro-batch: latency is bounded below by your batch interval.
+Flink gives you true event-at-a-time processing, but it's a different engine, a different API,
+and a different operational story. **Zelox gives you both latency classes on one engine, and you
+select between them with a single argument** — `trigger()`, the standard Spark API. Nothing else
+in the query changes.
+
+Under `continuous`, Zelox stops batching entirely and runs the query as a **long-lived,
+event-at-a-time pipeline**, with the commit/epoch cadence decoupled from data flow. The trigger
+interval controls how often state and offsets are committed, *not* how often data moves — data
+flows continuously between commits. Tighten the interval for tighter commit granularity.
+
+**Why the tail is flat:** there is no JVM and no garbage collector, so nothing in the pipeline can
+be interrupted by a stop-the-world pause. In-engine *processing* latency is sub-millisecond;
+end-to-end latency through Kafka is millisecond-class and network-dominated — **~62 ms p50,
+126 ms p99.9** at 20k events/s, measured against Flink 1.19 on identical hardware (table below).
+Flink edges the median; **Zelox's extreme tail is slightly better** — that's the no-GC payoff.
+
+**Exactly-once holds in realtime mode, across hard crashes, at scale.** Multi-partition continuous
+stateful processing commits window state, source offsets, and sink visibility together under
+**aligned checkpoint barriers** (the Flink ABS model). Verified on EKS at 16 Kafka partitions and
+100M events: `kill -9` mid-stream, resume, and the output is `dup=0`, sum exact, **bit-identical to
+the uncrashed run**.
+
+**Where this sits against Spark's own Real-Time Mode.** Spark 4.1 introduced RTM in Scala and 4.2
+brought it to PySpark — but **stateless-only**: no Python UDFs, and stateful RTM (aggregations,
+stream-stream joins, dedup) is deferred to **Spark 4.3**. Zelox's realtime path is **stateful today** —
+windowed aggregation, joins, and dedup all run under the continuous engine with per-epoch commits. That
+is the one place Zelox is genuinely ahead of upstream Spark rather than at parity.
+
+> **On the 4.2 trigger:** Spark 4.2's `.trigger(realTime="<interval>")` (`Trigger.RealTime`) is wired end to
+> end — `real_time_batch_duration` decodes to `StreamTrigger::RealTime` and routes to the same
+> `StreamDriver::Realtime` engine as the pre-4.2 `.trigger(continuous=…)`. Either trigger enters Zelox's
+> Flink-parity realtime mode; the duration is the commit/checkpoint interval (min 5 s per 4.2), not a latency
+> target — records flow continuously between commits.
+
+### Pick your latency — from backfill to millisecond realtime
+
+Same query. One line changes:
 
 | Mode | `trigger(...)` | Latency class | When to use |
 |---|---|---|---|
@@ -353,23 +487,12 @@ q3 = windowed.writeStream.format("parquet").option("path", OUT) \
      .option("checkpointLocation", CK).trigger(continuous="1 second").start()     # realtime mode
 ```
 
-**How you invoke realtime mode:** switch the trigger to `continuous` — that's the whole change.
+Tune the commit interval independently of throughput:
 
 ```python
-# Micro-batch (Spark-class): a new batch every 5s
-q = df.writeStream.format("kafka")....trigger(processingTime="5 seconds").start()
-
-# REALTIME (Flink-class): continuous event-at-a-time pipeline. The interval is the commit/epoch
-# cadence (decoupled from data flow) — tune it down for tighter commits; data still flows continuously.
 q = df.writeStream.format("kafka")....trigger(continuous="1 second").start()
 q = df.writeStream.format("kafka")....trigger(continuous="200 milliseconds").start()  # tighter commits
 ```
-
-Under `continuous`, Vajra runs the query as a **long-lived, event-at-a-time pipeline** (not
-micro-batches), with commit cadence decoupled from data flow. Because there is **no JVM and no GC**,
-the tail stays flat and never eats a stop-the-world pause. In-engine *processing* latency is
-sub-millisecond; **end-to-end** latency (through Kafka) is **millisecond-class (~60 ms p50 at 20k/s,
-below)** — Kafka/network dominated, the same as Flink, and we match it.
 
 **This is the exact query our latency harness runs** ([scripts/stream_latency_query.py](scripts/stream_latency_query.py)) —
 copy-paste and try it, don't take our word for it:
@@ -394,23 +517,18 @@ one command: `BOOT=localhost:9092 DURATION_S=60 RATE=20000 scripts/stream_latenc
 
 | | p50 | p99 | p99.9 | max |
 |---|--:|--:|--:|--:|
-| **Vajra** (realtime) | 62 ms | 119 ms | **126 ms** | **129 ms** |
+| **Zelox** (realtime) | 62 ms | 119 ms | **126 ms** | **129 ms** |
 | Flink 1.19 | 53 ms | 110 ms | 127 ms | 131 ms |
 
-Both are **millisecond-class** and competitive; Flink edges the median, **Vajra's extreme tail
+Both are **millisecond-class** and competitive; Flink edges the median, **Zelox's extreme tail
 (p99.9/max) is slightly better** — the no-GC payoff. This is a real, reproducible number, not a claim.
 
-> **Honest status (EKS-measured 2026-07-03):** micro-batch modes are production-proven (incl. EO across a
-> hard crash on S3). **Realtime-mode (continuous) multi-partition STATEFUL processing is no-duplicate +
-> COMPLETE at scale** — validated on EKS at **16 partitions**: Kafka→10s windowed-agg→Parquet-on-S3 gave
-> `rows=9000 distinct=9000 sum=90,000,000 **dup=0**` (one reader per Kafka partition + per-instance
-> committed-offset union + Flink `withIdleness` drain). At the same run, **throughput reached near-parity
-> with Flink 1.19** (5.39M vs 5.48M ev/s, the N-reader default closing the prior gap) while using **~1.2×
-> less memory** (7.04 vs 8.55 GiB). **BUT exactly-once across a hard `kill -9` does NOT yet hold at scale**
-> — the 16-partition crash produced dups (the per-epoch commit isn't crash-atomic/idempotent across N
-> instances). **This is the open P0** — we claim no-dup + completeness + throughput/memory, **not**
-> crash-recovery EO at scale, until it's fixed + re-validated to dup=0 on EKS
-> (see [docs/design/continuous-stateful-eo-fix.md](docs/design/continuous-stateful-eo-fix.md)).
+> **Status (EKS-measured 2026-07-04):** micro-batch modes are production-proven (incl. EO across a hard
+> crash on S3). **Realtime-mode (continuous) multi-partition STATEFUL processing is exactly-once, no-duplicate
+> and COMPLETE at scale** — validated on EKS at **16 partitions**. Crash-EO at scale was an open P0 through
+> 2026-07-03; it was closed by **aligned checkpoint barriers** (Flink ABS-style: barrier-aligned atomic commit
+> of window state + source offsets + sink visibility across all N instances), then EKS-confirmed at 100M
+> events — `dup=0`, sum exact, clean run bit-identical to the crash run.
 
 Both jobs run on the **same server**, the **same 105/105 Spark-compatible engine**, with **no JVM**
 and **no Flink** — batch and streaming share one execution core. See
@@ -431,18 +549,18 @@ Best for: development, notebooks, quick queries.
 
 ```sh
 # Install
-curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 
 # Start server
-vajra server
+zelox server
 # Listening on sc://127.0.0.1:50051 [mode: local]
 
 # Connect from Python (pip install pyspark)
 python3 - <<'EOF'
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.remote("sc://localhost:50051").getOrCreate()
-spark.sql("SELECT 'Vajra works!' AS msg").show()
+spark.sql("SELECT 'Zelox works!' AS msg").show()
 spark.range(1000).groupBy().sum("id").show()
 EOF
 ```
@@ -455,7 +573,7 @@ Best for: parallel workloads on M-series Mac (uses all cores across N workers).
 
 ```sh
 # Start with 4 in-process workers
-vajra server --mode local-cluster --workers 4
+zelox server --mode local-cluster --workers 4
 # Workers: 4  |  sc://127.0.0.1:50051
 
 # Connect — same PySpark code, no changes
@@ -471,7 +589,7 @@ EOF
 
 ---
 
-### Mode 3 — Apple Container (macOS 26 / Sequoia) — unique to Vajra
+### Mode 3 — Apple Container (macOS 26 / Sequoia) — unique to Zelox
 
 Best for: isolated, reproducible runs on Apple Silicon Mac using Apple's native container runtime (no Docker needed).
 
@@ -482,18 +600,18 @@ Best for: isolated, reproducible runs on Apple Silicon Mac using Apple's native 
 make container-build
 
 # --- Single-node local mode ---
-container run --rm --name vajra \
+container run --rm --name zelox \
   -p 50051:50051 \
-  -v /tmp/vajra-data:/tmp/data \
-  vajra:latest
+  -v /tmp/zelox-data:/tmp/data \
+  zelox:latest
 
 # --- Local-cluster mode (4 in-process workers) ---
-container run --rm --name vajra \
+container run --rm --name zelox \
   -p 50051:50051 \
-  -e SAIL_MODE=local-cluster \
-  -e SAIL_EXECUTION__TARGET_PARTITIONS=4 \
-  -v /tmp/vajra-data:/tmp/data \
-  vajra:latest
+  -e ZELOX_MODE=local-cluster \
+  -e ZELOX_EXECUTION__TARGET_PARTITIONS=4 \
+  -v /tmp/zelox-data:/tmp/data \
+  zelox:latest
 
 # Connect from host Mac
 python3 - <<'EOF'
@@ -503,7 +621,7 @@ spark.sql("SELECT count(*), avg(id) FROM range(1000000)").show()
 EOF
 
 # Stop
-container stop vajra
+container stop zelox
 ```
 
 ---
@@ -519,17 +637,17 @@ Best for: distributed multi-node workloads. Works on Linux x86_64 / aarch64 and 
 # brew install kind kubectl helm  (macOS)
 
 # 1. Create a local k8s cluster
-kind create cluster --name vajra
+kind create cluster --name zelox
 
-# 2. Deploy Vajra
-kubectl apply -f k8s/sail.yaml
+# 2. Deploy Zelox
+kubectl apply -f k8s/zelox.yaml
 
 # 3. Wait for pods ready
-kubectl wait --for=condition=ready pod -l app=vajra-spark-server \
-  -n vajra --timeout=120s
+kubectl wait --for=condition=ready pod -l app=zelox-spark-server \
+  -n zelox --timeout=120s
 
 # 4. Forward port
-kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 &
+kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 &
 
 # 5. Run Spark job
 python3 - <<'EOF'
@@ -543,8 +661,8 @@ EOF
 **Production Helm deployment (with auth + HPA):**
 
 ```sh
-helm install vajra ./helm/vajra \
-  --namespace vajra --create-namespace \
+helm install zelox ./helm/zelox \
+  --namespace zelox --create-namespace \
   --set server.replicas=3 \
   --set auth.enabled=true \
   --set auth.token=my-secret-token \
@@ -568,11 +686,11 @@ EOF
 
 | Mode | Command | Use case | Workers |
 |---|---|---|---|
-| `local` | `vajra server` | Dev / notebooks | 1 process |
-| `local-cluster` | `vajra server --mode local-cluster --workers 4` | Multi-core Mac | N in-process |
-| Apple Container local | `container run ... vajra:latest` | Isolated, reproducible | 1 container |
-| Apple Container cluster | `container run -e SAIL_MODE=local-cluster ...` | Isolated multi-worker | N in-container |
-| Kubernetes | `kubectl apply -f k8s/sail.yaml` | Distributed, production | K8s pods |
+| `local` | `zelox server` | Dev / notebooks | 1 process |
+| `local-cluster` | `zelox server --mode local-cluster --workers 4` | Multi-core Mac | N in-process |
+| Apple Container local | `container run ... zelox:latest` | Isolated, reproducible | 1 container |
+| Apple Container cluster | `container run -e ZELOX_MODE=local-cluster ...` | Isolated multi-worker | N in-container |
+| Kubernetes | `kubectl apply -f k8s/zelox.yaml` | Distributed, production | K8s pods |
 
 ---
 
@@ -627,7 +745,7 @@ EOF
 | Stateful deduplication (`dropDuplicates`) | ✅ |
 | **Exactly-once**, crash-verified (`kill -9` → resume): stateless **and** stateful, incl. **Parquet-on-S3** sink (dup=0, bit-identical) | ✅ |
 | **Multi-partition *continuous* stateful** — no-dup + **complete** (validated to **16 partitions on EKS**, dup=0, sum exact) | ✅ |
-| Multi-partition continuous **exactly-once across hard crash** — **NOT yet correct at scale** (16-part EKS crash → dups; the open P0) | 🔴 |
+| Multi-partition continuous **exactly-once across hard crash** — aligned checkpoint barriers (Flink ABS), EKS-confirmed at 100M | ✅ |
 | Spillable large state (object-store) + incremental checkpoints | ✅ |
 | Rescale from checkpoint (key-groups, Flink FLIP-8) | ✅ gated |
 | Iceberg sink | 🚧 in progress |
@@ -639,7 +757,7 @@ EOF
 | Apple Container (macOS 26, **Apple Silicon only**) | ✅ |
 | Kubernetes Helm chart (HPA, liveness/readiness) | ✅ |
 | Scheduler HA via K8s Lease election (`--ha`) | ✅ |
-| Bearer token auth (`--auth-token` / `SAIL_AUTH__TOKEN`) | ✅ |
+| Bearer token auth (`--auth-token` / `ZELOX_AUTH__TOKEN`) | ✅ |
 | mTLS (`--tls-cert/--tls-key/--tls-ca`) | ✅ |
 | Web UI on `:4040` (query history + streaming status) | ✅ |
 | Prometheus `/metrics` endpoint | ✅ |
@@ -650,7 +768,7 @@ EOF
 ## Architecture
 
 ```
-PySpark client  ──Spark Connect gRPC + JWT/mTLS──▶  vajra server
+PySpark client  ──Spark Connect gRPC + JWT/mTLS──▶  zelox server
                                                           │
                                           ┌───────────────┼───────────────┐
                                           │               │               │
@@ -690,23 +808,23 @@ PySpark client  ──Spark Connect gRPC + JWT/mTLS──▶  vajra server
 ## CLI Reference
 
 ```
-vajra server [--ip IP] [--port PORT] [--mode MODE] [--workers N]
+zelox server [--ip IP] [--port PORT] [--mode MODE] [--workers N]
              [--auth-token TOKEN] [--tls-cert PATH] [--tls-key PATH] [--ha]
-vajra sql "<query>"             Execute SQL and print results
-vajra run -f <script.py>        Run a PySpark script
-vajra shell                     Interactive PySpark REPL
-vajra bench [--scale-factor N]  TPC-H benchmark (requires pip install duckdb)
+zelox sql "<query>"             Execute SQL and print results
+zelox run -f <script.py>        Run a PySpark script
+zelox shell                     Interactive PySpark REPL
+zelox bench [--scale-factor N]  TPC-H benchmark (requires pip install duckdb)
 ```
 
 **Key environment variables:**
 
 | Variable | Default | Description |
 |---|---|---|
-| `SAIL_MODE` | `local` | `local` / `local-cluster` / `kubernetes-cluster` |
-| `SAIL_AUTH__TOKEN` | — | Bearer token for gRPC auth |
-| `SAIL_AUTH__TLS__CERT` | — | Path to TLS certificate (PEM) |
+| `ZELOX_MODE` | `local` | `local` / `local-cluster` / `kubernetes-cluster` |
+| `ZELOX_AUTH__TOKEN` | — | Bearer token for gRPC auth |
+| `ZELOX_AUTH__TLS__CERT` | — | Path to TLS certificate (PEM) |
 | `PYTHONPATH` | — | Path to PySpark site-packages (required for Python UDFs) |
-| `SAIL_RUNTIME__STACK_SIZE` | `8388608` | Tokio worker thread stack size in bytes |
+| `ZELOX_RUNTIME__STACK_SIZE` | `8388608` | Tokio worker thread stack size in bytes |
 
 ---
 
@@ -714,16 +832,16 @@ vajra bench [--scale-factor N]  TPC-H benchmark (requires pip install duckdb)
 
 ```sh
 # Prerequisites: Rust 1.91+, protoc 3.x, Python 3.10+
-git clone https://github.com/vikashgargg/ignite
-cd ignite
+git clone https://github.com/vikashgargg/zelox
+cd zelox
 
 # Dev build (fast, unoptimised)
 make dev
-./target/debug/vajra --version
+./target/debug/zelox --version
 
 # Release build (LTO, ~30 min)
 make release
-./target/release/vajra --version
+./target/release/zelox --version
 
 # Cross-compile: Linux musl (x86_64 + aarch64) + macOS universal2
 make build-all
@@ -749,4 +867,12 @@ checklist **[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)**.
 
 ## License
 
-Apache 2.0. Vajra is built on the shoulders of [lakehq/sail](https://github.com/lakehq/sail) — we have deep respect for that work and upstream fixes wherever possible.
+Apache 2.0.
+
+Zelox is a fork of [Sail](https://github.com/lakehq/sail), developed by LakeSail, Inc.
+and the Sail contributors, and licensed under the Apache License 2.0. Portions of this
+software are derived from Sail and retain that license and the copyright of their
+original authors — see [`NOTICE`](NOTICE) for full attribution.
+
+We have deep respect for that work and contribute fixes upstream wherever possible.
+Zelox is an independent project and is not affiliated with or endorsed by LakeSail, Inc.

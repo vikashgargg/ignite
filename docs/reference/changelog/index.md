@@ -3,7 +3,17 @@ prev: false
 next: false
 ---
 
-# Changelog
+# Upstream Sail changelog (pre-fork)
+
+::: info
+Zelox is a fork of [Sail](https://github.com/lakehq/sail) by LakeSail, Inc. This page
+preserves the **upstream Sail** release history up to the fork point — the work described
+below was done by the Sail contributors, and the linked pull requests live in the
+`lakehq/sail` repository.
+
+Changes made in Zelox since the fork are tracked separately in
+[`CHANGELOG.md`](https://github.com/vikashgargg/zelox/blob/main/CHANGELOG.md).
+:::
 
 ## 0.6.2
 
@@ -345,8 +355,8 @@ _December 12, 2025_
 
 - Improved Delta Lake and Iceberg integration ([#1098](https://github.com/lakehq/sail/pull/1098), [#1095](https://github.com/lakehq/sail/pull/1095), [#1108](https://github.com/lakehq/sail/pull/1108), [#1115](https://github.com/lakehq/sail/pull/1115), [#1109](https://github.com/lakehq/sail/pull/1109), and [#1117](https://github.com/lakehq/sail/pull/1117)).
 - Added support for exporting logs, metrics, and traces to OpenTelemetry collectors ([#1097](https://github.com/lakehq/sail/pull/1097), [#1104](https://github.com/lakehq/sail/pull/1104), and [#1116](https://github.com/lakehq/sail/pull/1116)).
-- Added a Python example for reporting Sail compatibility for PySpark code ([#1075](https://github.com/lakehq/sail/pull/1075)).
-- Added support for customizing pod labels for Sail workers in Kubernetes deployments ([#1103](https://github.com/lakehq/sail/pull/1103)).
+- Added a Python example for reporting Zelox compatibility for PySpark code ([#1075](https://github.com/lakehq/sail/pull/1075)).
+- Added support for customizing pod labels for Zelox workers in Kubernetes deployments ([#1103](https://github.com/lakehq/sail/pull/1103)).
 - Added support for the following SQL functions ([#1106](https://github.com/lakehq/sail/pull/1106)):
   - `shuffle`
   - `bitwise_not`
@@ -478,7 +488,7 @@ _September 30, 2025_
 - Fixed issues with session key generation when the user ID is missing on the Windows platform ([#849](https://github.com/lakehq/sail/pull/849)).
 - Continued the work for data streaming support ([#832](https://github.com/lakehq/sail/pull/832)).
 - Added batch view creation endpoints in the MCP server ([#875](https://github.com/lakehq/sail/pull/875)).
-- Added an example of using Kustomize with pod templates for Sail workers ([#833](https://github.com/lakehq/sail/pull/833)).
+- Added an example of using Kustomize with pod templates for Zelox workers ([#833](https://github.com/lakehq/sail/pull/833)).
 - Fixed input repartitioning issues for PySpark UDTFs ([#662](https://github.com/lakehq/sail/pull/662)).
 - Fixed issues with the `DataFrame.replace()` method in the Spark DataFrame API ([#891](https://github.com/lakehq/sail/pull/891)).
 - Added support for the `REAL` data type in the SQL parser ([#892](https://github.com/lakehq/sail/pull/892)).
@@ -505,7 +515,7 @@ Huge thanks to [@SparkApplicationMaster](https://github.com/SparkApplicationMast
 _September 3, 2025_
 
 - Added support for the text file format ([#737](https://github.com/lakehq/sail/pull/737) and [#813](https://github.com/lakehq/sail/pull/813)).
-- Added support for the Spark DataFrame streaming API and added a few data sources/sinks for testing purposes ([#751](https://github.com/lakehq/sail/pull/751)). This provides a foundation for streaming support in Sail but is not ready for general use yet.
+- Added support for the Spark DataFrame streaming API and added a few data sources/sinks for testing purposes ([#751](https://github.com/lakehq/sail/pull/751)). This provides a foundation for streaming support in Zelox but is not ready for general use yet.
 - Improved the internals of the Delta Lake integration ([#768](https://github.com/lakehq/sail/pull/768) and [#794](https://github.com/lakehq/sail/pull/794)).
 - Improved idle session handling ([#761](https://github.com/lakehq/sail/pull/761) and [#818](https://github.com/lakehq/sail/pull/818)).
 - Fixed performance issues with the `DataFrame.show()` method in the Spark DataFrame API ([#790](https://github.com/lakehq/sail/pull/790)).
@@ -706,7 +716,7 @@ Huge thanks to [@davidlghellin](https://github.com/davidlghellin) for the contin
 
 _June 28, 2025_
 
-The 0.3.0 release introduces support for Spark 4.0 in Sail, alongside the existing support for Spark 3.5. One of the most notable changes in Spark 4.0 is the new `pyspark-client` package, a lightweight PySpark client. When using Sail in your PySpark applications, you can now choose to install this client package, instead of the full `pyspark` package that includes all the JAR files.
+The 0.3.0 release introduces support for Spark 4.0 in Zelox, alongside the existing support for Spark 3.5. One of the most notable changes in Spark 4.0 is the new `pyspark-client` package, a lightweight PySpark client. When using Zelox in your PySpark applications, you can now choose to install this client package, instead of the full `pyspark` package that includes all the JAR files.
 
 Here is a summary of the new features and improvements in this release.
 
@@ -724,14 +734,14 @@ Here is a summary of the new features and improvements in this release.
 
 ### Breaking Changes
 
-The `spark` "extra" has been removed from the `pysail` package. As a result, you can no longer use commands like `pip install pysail[spark]` to install Sail along with Spark. Instead, you must install the PySpark package separately in your Python environment.
+The `spark` "extra" has been removed from the `pyzelox` package. As a result, you can no longer use commands like `pip install pyzelox[spark]` to install Zelox along with Spark. Instead, you must install the PySpark package separately in your Python environment.
 
-This change allows you to freely choose the PySpark version when using Sail. Depending on your requirements, you can opt for either the `pyspark` package (Spark 3.5 or later) or the `pyspark-client` package (introduced in Spark 4.0).
+This change allows you to freely choose the PySpark version when using Zelox. Depending on your requirements, you can opt for either the `pyspark` package (Spark 3.5 or later) or the `pyspark-client` package (introduced in Spark 4.0).
 
 ### Contributors
 
 We are thrilled by the growing interest from the community.
-Huge thanks to [@rafafrdz](https://github.com/rafafrdz), [@davidlghellin](https://github.com/davidlghellin), [@lonless9](https://github.com/lonless9), and [@pimlie](https://github.com/pimlie) for making their first contributions to Sail!
+Huge thanks to [@rafafrdz](https://github.com/rafafrdz), [@davidlghellin](https://github.com/davidlghellin), [@lonless9](https://github.com/lonless9), and [@pimlie](https://github.com/pimlie) for making their first contributions to Zelox!
 
 ## 0.2.6
 
@@ -800,7 +810,7 @@ _January 15, 2025_
 
 _December 3, 2024_
 
-We are excited to announce the first Sail release with the distributed processing capability. Spark SQL and DataFrame queries can now run on Kubernetes, powered by the Sail distributed compute engine. We also introduced a new Sail CLI and a configuration mechanism that will serve as the entrypoint for all Sail features moving forward.
+We are excited to announce the first Zelox release with the distributed processing capability. Spark SQL and DataFrame queries can now run on Kubernetes, powered by the Zelox distributed compute engine. We also introduced a new Zelox CLI and a configuration mechanism that will serve as the entrypoint for all Zelox features moving forward.
 
 We continued extending coverage for Spark SQL functions and the Spark DataFrame API. The changes are listed below.
 
@@ -820,7 +830,7 @@ We continued extending coverage for Spark SQL functions and the Spark DataFrame 
 
 ### Breaking Changes
 
-This release comes with the new Sail CLI, and the way to launch the Spark Connect server and PySpark shell is different from the 0.1.x versions. Please refer to the [Getting Started](/introduction/getting-started/) page for the updated instructions.
+This release comes with the new Zelox CLI, and the way to launch the Spark Connect server and PySpark shell is different from the 0.1.x versions. Please refer to the [Getting Started](/introduction/getting-started/) page for the updated instructions.
 
 ## 0.1.7
 
@@ -838,7 +848,7 @@ _November 1, 2024_
   - `regr_avgx`
 - Fixed most issues with `ORDER BY` in the derived TPC-DS benchmark, bringing total coverage to 74 out of the 99 queries ([#261](https://github.com/lakehq/sail/pull/261)).
 
-We also made significant changes to the Sail internals to support **distributed processing**. We are targeting the 0.2.0 release in the next few weeks for an MVP (minimum viable product) of this exciting feature. Please stay tuned! If you are interested in the ongoing work, you can follow [#246](https://github.com/lakehq/sail/issues/246) in our GitHub repository to get the latest updates!
+We also made significant changes to the Zelox internals to support **distributed processing**. We are targeting the 0.2.0 release in the next few weeks for an MVP (minimum viable product) of this exciting feature. Please stay tuned! If you are interested in the ongoing work, you can follow [#246](https://github.com/lakehq/sail/issues/246) in our GitHub repository to get the latest updates!
 
 ## 0.1.6
 
@@ -931,4 +941,4 @@ _September 03, 2024_
 
 _August 29, 2024_
 
-This is the first Sail release.
+This is the first Zelox release.

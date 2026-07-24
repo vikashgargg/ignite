@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creates .venvs/smoke with the Python version that matches the Vajra container.
+# Creates .venvs/smoke with the Python version that matches the Zelox container.
 #
 # The container base image is python:${PYTHON_VERSION}-slim (see docker/apple/Dockerfile).
 # Client-side Python MUST match so UDF pickle serialisation succeeds.

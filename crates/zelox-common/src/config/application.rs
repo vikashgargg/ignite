@@ -1,0 +1,734 @@
+use figment::providers::Env;
+use figment::value::{Dict, Empty, Map, Tag, Value};
+use figment::{Error, Figment, Metadata, Profile, Provider};
+use secrecy::SecretString;
+use serde::{Deserialize, Serialize};
+
+use crate::config::loader::{
+    deserialize_non_empty_string, deserialize_non_zero, deserialize_unknown_unit, ConfigDefinition,
+};
+use crate::config::observer::{
+    serialize_non_empty_string, serialize_non_zero, serialize_optional_secret,
+};
+use crate::error::{CommonError, CommonResult};
+
+const APP_CONFIG: &str = include_str!("application.yaml");
+
+pub const ZELOX_ENV_VAR_PREFIX: &str = "ZELOX_";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    pub mode: ExecutionMode,
+    pub runtime: RuntimeConfig,
+    pub cluster: ClusterConfig,
+    pub execution: ExecutionConfig,
+    pub kubernetes: KubernetesConfig,
+    pub parquet: ParquetConfig,
+    pub catalog: CatalogConfig,
+    pub optimizer: OptimizerConfig,
+    pub spark: SparkConfig,
+    pub flight: FlightConfig,
+    pub python: PythonConfig,
+    pub telemetry: TelemetryConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
+    pub ui: UiConfig,
+    /// Reserved for internal use.
+    /// This field ensures that environment variables with prefix `ZELOX_INTERNAL_`
+    /// can only be used for internal configuration.
+    /// Such environment variables are ignored by application configuration.
+    #[serde(skip_serializing, deserialize_with = "deserialize_unknown_unit")]
+    pub internal: (),
+}
+
+/// A configuration provider that injects placeholder internal configuration.
+struct InternalConfigPlaceholder;
+
+impl Provider for InternalConfigPlaceholder {
+    fn metadata(&self) -> Metadata {
+        Metadata::named("Internal")
+    }
+
+    fn data(&self) -> Result<Map<Profile, Dict>, Error> {
+        Ok(Map::from([(
+            Profile::Default,
+            Dict::from([(
+                "internal".to_string(),
+                Value::Empty(Tag::Default, Empty::Unit),
+            )]),
+        )]))
+    }
+}
+
+impl AppConfig {
+    pub fn load() -> CommonResult<Self> {
+        // FIXME: Serde aliases conflict when defaults and env vars use different field names.
+        //  This causes: `Error: invalid argument: duplicate field...`
+        Figment::from(ConfigDefinition::new(APP_CONFIG))
+            .merge(InternalConfigPlaceholder)
+            .merge(Env::prefixed(ZELOX_ENV_VAR_PREFIX).map(|p| p.as_str().replace("__", ".").into()))
+            .extract()
+            .map_err(|e| CommonError::InvalidArgument(e.to_string()))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    Local,
+    #[serde(alias = "local-cluster")]
+    LocalCluster,
+    #[serde(
+        alias = "kubernetes-cluster",
+        alias = "k8s-cluster",
+        alias = "k8s_cluster",
+        alias = "kube-cluster",
+        alias = "kube_cluster"
+    )]
+    KubernetesCluster,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeConfig {
+    pub stack_size: usize,
+    pub memory_pool: MemoryPoolConfig,
+    pub temporary_files: TemporaryFilesConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(into = "memory_pool::MemoryPool", from = "memory_pool::MemoryPool")]
+pub enum MemoryPoolConfig {
+    Unbounded,
+    Greedy(GreedyMemoryPoolConfig),
+    Fair(FairMemoryPoolConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GreedyMemoryPoolConfig {
+    pub max_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FairMemoryPoolConfig {
+    pub max_size: usize,
+}
+
+mod memory_pool {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Type {
+        Unbounded,
+        Greedy,
+        Fair,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct MemoryPool {
+        pub r#type: Type,
+        pub greedy: super::GreedyMemoryPoolConfig,
+        pub fair: super::FairMemoryPoolConfig,
+    }
+
+    impl From<MemoryPool> for super::MemoryPoolConfig {
+        fn from(value: MemoryPool) -> Self {
+            match value.r#type {
+                Type::Unbounded => super::MemoryPoolConfig::Unbounded,
+                Type::Greedy => super::MemoryPoolConfig::Greedy(value.greedy),
+                Type::Fair => super::MemoryPoolConfig::Fair(value.fair),
+            }
+        }
+    }
+
+    impl From<super::MemoryPoolConfig> for MemoryPool {
+        fn from(value: super::MemoryPoolConfig) -> Self {
+            match value {
+                super::MemoryPoolConfig::Unbounded => MemoryPool {
+                    r#type: Type::Unbounded,
+                    greedy: super::GreedyMemoryPoolConfig { max_size: 0 },
+                    fair: super::FairMemoryPoolConfig { max_size: 0 },
+                },
+                super::MemoryPoolConfig::Greedy(g) => MemoryPool {
+                    r#type: Type::Greedy,
+                    greedy: g,
+                    fair: super::FairMemoryPoolConfig { max_size: 0 },
+                },
+                super::MemoryPoolConfig::Fair(f) => MemoryPool {
+                    r#type: Type::Fair,
+                    greedy: super::GreedyMemoryPoolConfig { max_size: 0 },
+                    fair: f,
+                },
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemporaryFilesConfig {
+    pub paths: Vec<String>,
+    pub max_size: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClusterConfig {
+    pub enable_tls: bool,
+    pub driver_listen_host: String,
+    pub driver_listen_port: u16,
+    pub driver_external_host: String,
+    pub driver_external_port: u16,
+    #[serde(skip_serializing)]
+    pub worker_id: u64,
+    pub worker_listen_host: String,
+    pub worker_listen_port: u16,
+    pub worker_external_host: String,
+    pub worker_external_port: u16,
+    pub worker_initial_count: usize,
+    pub worker_max_count: usize,
+    pub worker_max_idle_time_secs: u64,
+    pub worker_heartbeat_interval_secs: u64,
+    pub worker_heartbeat_timeout_secs: u64,
+    pub worker_launch_timeout_secs: u64,
+    pub worker_task_slots: usize,
+    pub task_launch_timeout_secs: u64,
+    pub task_stream_buffer: usize,
+    pub task_stream_creation_timeout_secs: u64,
+    pub shuffle_spill_dir: String,
+    pub task_max_attempts: usize,
+    pub rpc_retry_strategy: RetryStrategy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(
+    into = "retry_strategy::RetryStrategy",
+    from = "retry_strategy::RetryStrategy"
+)]
+pub enum RetryStrategy {
+    Fixed(FixedRetryStrategy),
+    ExponentialBackoff(ExponentialBackoffRetryStrategy),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedRetryStrategy {
+    pub max_count: usize,
+    pub delay_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExponentialBackoffRetryStrategy {
+    pub max_count: usize,
+    pub initial_delay_secs: u64,
+    pub max_delay_secs: u64,
+    pub factor: u32,
+}
+
+mod retry_strategy {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Type {
+        Fixed,
+        #[serde(alias = "exponential-backoff")]
+        ExponentialBackoff,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct RetryStrategy {
+        pub r#type: Type,
+        pub fixed: super::FixedRetryStrategy,
+        pub exponential_backoff: super::ExponentialBackoffRetryStrategy,
+    }
+
+    impl From<RetryStrategy> for super::RetryStrategy {
+        fn from(value: RetryStrategy) -> Self {
+            match value.r#type {
+                Type::Fixed => super::RetryStrategy::Fixed(value.fixed),
+                Type::ExponentialBackoff => {
+                    super::RetryStrategy::ExponentialBackoff(value.exponential_backoff)
+                }
+            }
+        }
+    }
+
+    impl From<super::RetryStrategy> for RetryStrategy {
+        fn from(value: super::RetryStrategy) -> Self {
+            match value {
+                super::RetryStrategy::Fixed(f) => RetryStrategy {
+                    r#type: Type::Fixed,
+                    fixed: f,
+                    exponential_backoff: super::ExponentialBackoffRetryStrategy {
+                        max_count: 0,
+                        initial_delay_secs: 0,
+                        max_delay_secs: 0,
+                        factor: 0,
+                    },
+                },
+                super::RetryStrategy::ExponentialBackoff(e) => RetryStrategy {
+                    r#type: Type::ExponentialBackoff,
+                    fixed: super::FixedRetryStrategy {
+                        max_count: 0,
+                        delay_secs: 0,
+                    },
+                    exponential_backoff: e,
+                },
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionConfig {
+    pub batch_size: usize,
+    pub default_parallelism: usize,
+    pub collect_statistics: bool,
+    pub use_row_number_estimates_to_optimize_partitioning: bool,
+    pub file_listing_cache: FileListingCacheConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileListingCacheConfig {
+    pub r#type: CacheType,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub ttl: Option<u64>,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub max_entries: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KubernetesConfig {
+    pub image: String,
+    pub image_pull_policy: String,
+    pub namespace: String,
+    pub driver_pod_name: String,
+    pub worker_pod_name_prefix: String,
+    pub worker_service_account_name: String,
+    pub worker_pod_template: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParquetConfig {
+    pub enable_page_index: bool,
+    pub pruning: bool,
+    pub skip_metadata: bool,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub metadata_size_hint: Option<usize>,
+    pub pushdown_filters: bool,
+    pub reorder_filters: bool,
+    pub schema_force_view_types: bool,
+    pub binary_as_string: bool,
+    pub max_predicate_cache_size: usize,
+    pub data_page_size_limit: usize,
+    pub write_batch_size: usize,
+    pub writer_version: String,
+    pub skip_arrow_metadata: bool,
+    pub compression: String,
+    pub dictionary_enabled: bool,
+    pub dictionary_page_size_limit: usize,
+    pub statistics_enabled: String,
+    pub max_row_group_size: usize,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub column_index_truncate_length: Option<usize>,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub statistics_truncate_length: Option<usize>,
+    pub data_page_row_count_limit: usize,
+    #[serde(
+        serialize_with = "serialize_non_empty_string",
+        deserialize_with = "deserialize_non_empty_string"
+    )]
+    pub encoding: Option<String>,
+    pub bloom_filter_on_read: bool,
+    pub bloom_filter_on_write: bool,
+    pub bloom_filter_fpp: f64,
+    pub bloom_filter_ndv: u64,
+    pub allow_single_file_parallelism: bool,
+    pub maximum_parallel_row_group_writers: usize,
+    pub maximum_buffered_record_batches_per_stream: usize,
+    pub file_statistics_cache: FileStatisticsCacheConfig,
+    pub file_metadata_cache: FileMetadataCacheConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileStatisticsCacheConfig {
+    pub r#type: CacheType,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub ttl: Option<u64>,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub max_entries: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileMetadataCacheConfig {
+    pub r#type: CacheType,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub ttl: Option<u64>,
+    #[serde(
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub size_limit: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheType {
+    None,
+    Global,
+    Session,
+}
+
+fn default_catalog_cache_type() -> CacheType {
+    CacheType::None
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogCacheConfig {
+    #[serde(default = "default_catalog_cache_type")]
+    pub database_cache_type: CacheType,
+    #[serde(
+        default,
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub database_cache_size: Option<usize>,
+    #[serde(
+        default,
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub database_cache_ttl_secs: Option<u64>,
+    #[serde(default = "default_catalog_cache_type")]
+    pub table_cache_type: CacheType,
+    #[serde(
+        default,
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub table_cache_size: Option<usize>,
+    #[serde(
+        default,
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub table_cache_ttl_secs: Option<u64>,
+    #[serde(default = "default_catalog_cache_type")]
+    pub view_cache_type: CacheType,
+    #[serde(
+        default,
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub view_cache_size: Option<usize>,
+    #[serde(
+        default,
+        serialize_with = "serialize_non_zero",
+        deserialize_with = "deserialize_non_zero"
+    )]
+    pub view_cache_ttl_secs: Option<u64>,
+}
+
+impl Default for CatalogCacheConfig {
+    fn default() -> Self {
+        Self {
+            database_cache_type: CacheType::None,
+            database_cache_size: None,
+            database_cache_ttl_secs: None,
+            table_cache_type: CacheType::None,
+            table_cache_size: None,
+            table_cache_ttl_secs: None,
+            view_cache_type: CacheType::None,
+            view_cache_size: None,
+            view_cache_ttl_secs: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CatalogConfig {
+    #[serde(
+        serialize_with = "serialize_non_empty_string",
+        deserialize_with = "deserialize_non_empty_string"
+    )]
+    pub default_catalog: Option<String>,
+    pub default_database: Vec<String>,
+    pub global_temporary_database: Vec<String>,
+    pub list: Vec<CatalogType>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OptimizerConfig {
+    pub enable_join_reorder: bool,
+    pub expand_views_at_output: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CatalogType {
+    Memory {
+        name: String,
+        initial_database: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        initial_database_comment: Option<String>,
+    },
+    #[serde(alias = "iceberg-rest")]
+    IcebergRest {
+        // TODO: Update configuration according to:
+        //  https://iceberg.apache.org/docs/nightly/spark-configuration/#catalog-configuration
+        name: String,
+        uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        warehouse: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prefix: Option<String>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_optional_secret"
+        )]
+        oauth_access_token: Option<SecretString>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_optional_secret"
+        )]
+        bearer_access_token: Option<SecretString>,
+        #[serde(flatten)]
+        cache: CatalogCacheConfig,
+    },
+    Unity {
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        default_catalog: Option<String>,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_optional_secret"
+        )]
+        token: Option<SecretString>,
+        #[serde(flatten)]
+        cache: CatalogCacheConfig,
+    },
+    #[serde(alias = "onelake")]
+    OneLake {
+        name: String,
+        url: String,
+        #[serde(
+            skip_serializing_if = "Option::is_none",
+            serialize_with = "serialize_optional_secret"
+        )]
+        bearer_token: Option<SecretString>,
+        #[serde(flatten)]
+        cache: CatalogCacheConfig,
+    },
+    Glue {
+        name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        region: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        endpoint_url: Option<String>,
+        #[serde(flatten)]
+        cache: CatalogCacheConfig,
+    },
+    #[serde(alias = "hms", alias = "hive-metastore")]
+    HiveMetastore {
+        name: String,
+        uris: Vec<String>,
+        thrift_transport: Option<String>,
+        auth: Option<String>,
+        kerberos_service_principal: Option<String>,
+        min_sasl_qop: Option<String>,
+        connect_timeout_secs: Option<u64>,
+        #[serde(flatten)]
+        cache: CatalogCacheConfig,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SparkConfig {
+    pub session_timeout_secs: u64,
+    pub execution_heartbeat_interval_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PythonConfig {
+    pub data_source_write_channel_capacity: usize,
+    pub data_source_slow_write_warn_ms: u64,
+    pub data_source_slow_read_warn_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlightConfig {
+    pub session_timeout_secs: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TelemetryConfig {
+    pub export_traces: bool,
+    pub export_metrics: bool,
+    pub export_logs: bool,
+    pub otlp_endpoint: String,
+    pub otlp_protocol: OtlpProtocol,
+    pub otlp_timeout_secs: u64,
+    pub traces_export_interval_secs: u64,
+    pub metrics_export_interval_secs: u64,
+    pub metrics_collection_interval_secs: u64,
+    pub logs_export_interval_secs: u64,
+    pub logs_export_max_queue_size: u64,
+    pub logs_export_batch_size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OtlpProtocol {
+    Grpc,
+    #[serde(alias = "http-binary")]
+    HttpBinary,
+    #[serde(alias = "http-json")]
+    HttpJson,
+}
+
+/// Bearer token authentication configuration.
+/// Set `ZELOX_AUTH__TOKEN=<secret>` or `--auth-token` CLI flag to require
+/// clients to present `Authorization: Bearer <secret>` on every gRPC call.
+/// When `token` is `None`, the server accepts all connections without auth.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AuthConfig {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_secret"
+    )]
+    pub token: Option<SecretString>,
+    /// TLS configuration for the gRPC server.
+    #[serde(default)]
+    pub tls: TlsConfig,
+    /// Allow a Bearer token to be used without TLS (the token is then sent in
+    /// cleartext and can be sniffed/replayed). Defaults to `false`: the server
+    /// refuses to start with a token but no TLS. Only enable on a trusted network.
+    /// Set `ZELOX_AUTH__ALLOW_INSECURE_TOKEN=true` to override.
+    #[serde(default)]
+    pub allow_insecure_token: bool,
+}
+
+/// TLS / mTLS configuration for the gRPC server.
+///
+/// Set cert + key for TLS. Add `ca` to require client certificates (mTLS).
+///
+///   ZELOX_AUTH__TLS__CERT=/path/to/server.crt
+///   ZELOX_AUTH__TLS__KEY=/path/to/server.key
+///   ZELOX_AUTH__TLS__CA=/path/to/ca.crt       # optional — enables mTLS
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TlsConfig {
+    /// Path to the PEM-encoded server certificate file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cert: Option<String>,
+    /// Path to the PEM-encoded server private key file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Path to the PEM-encoded CA certificate used to verify client certificates.
+    /// When set, mTLS is enforced: clients must present a certificate signed by this CA.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ca: Option<String>,
+}
+
+/// Web UI (read-only query / streaming dashboard) configuration.
+///
+/// The UI is **unauthenticated**, so it binds to `127.0.0.1` by default and is
+/// not reachable off-host. Only set `host` to a non-loopback address (e.g.
+/// `0.0.0.0` in a firewalled cluster) behind your own network controls, or set
+/// `enabled = false` to turn it off entirely.
+///
+///   ZELOX_UI__ENABLED=false
+///   ZELOX_UI__HOST=0.0.0.0
+///   ZELOX_UI__PORT=4040
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiConfig {
+    /// Whether to start the Web UI HTTP server.
+    pub enabled: bool,
+    /// Host/interface the Web UI binds to. Loopback (`127.0.0.1`) by default.
+    pub host: String,
+    /// Port the Web UI listens on.
+    pub port: u16,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            host: "127.0.0.1".to_string(),
+            port: 4040,
+        }
+    }
+}
+
+/// Environment variables for application cluster configuration.
+pub struct ClusterConfigEnv;
+
+macro_rules! define_cluster_config_env {
+    ($($name:ident),* $(,)?) => {
+        $(pub const $name: &'static str = concat!("ZELOX_CLUSTER__", stringify!($name));)*
+    };
+}
+
+impl ClusterConfigEnv {
+    define_cluster_config_env! {
+        ENABLE_TLS,
+        DRIVER_EXTERNAL_HOST,
+        DRIVER_EXTERNAL_PORT,
+        WORKER_ID,
+        WORKER_LISTEN_HOST,
+        WORKER_EXTERNAL_HOST,
+        WORKER_HEARTBEAT_INTERVAL_SECS,
+        TASK_STREAM_BUFFER,
+        TASK_STREAM_CREATION_TIMEOUT_SECS,
+        SHUFFLE_SPILL_DIR,
+        RPC_RETRY_STRATEGY,
+    }
+}

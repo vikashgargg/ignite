@@ -1,15 +1,15 @@
-# Contributing to Vajra
+# Contributing to Zelox
 
 Contributions are more than welcome!
 
-Vajra is a fork of [Sail](https://github.com/lakehq/sail) (by LakeSail, Apache-2.0); see the `NOTICE`
-file for attribution. Issues and PRs for **Vajra** belong in this repository.
+Zelox is a fork of [Sail](https://github.com/lakehq/sail) (by LakeSail, Apache-2.0); see the `NOTICE`
+file for attribution. Issues and PRs for **Zelox** belong in this repository.
 
-Please submit [GitHub issues](https://github.com/vikashgargg/ignite/issues) for bug reports and feature
+Please submit [GitHub issues](https://github.com/vikashgargg/zelox/issues) for bug reports and feature
 requests (templates will guide you). You are welcome to ask questions in
-[GitHub Discussions](https://github.com/vikashgargg/ignite/discussions).
+[GitHub Discussions](https://github.com/vikashgargg/zelox/discussions).
 
-Feel free to open a [pull request](https://github.com/vikashgargg/ignite/pulls) for a code change. The
+Feel free to open a [pull request](https://github.com/vikashgargg/zelox/pulls) for a code change. The
 PR template lists the prod-grade checklist we hold every change to.
 
 ## Prod-grade bar
@@ -21,7 +21,7 @@ Every change is expected to be production-grade and honest:
 - **Tests:** add or update tests; run `cargo test`. Streaming changes cite the feature-matrix cell they
   advance in [`docs/STREAMING_ARCHITECTURE.md`](docs/STREAMING_ARCHITECTURE.md) and meet its done-criteria.
 - **Distributed contract:** a new physical-plan field must round-trip in
-  [`sail-execution/src/codec.rs`](crates/sail-execution/src/codec.rs), or be logged as a single-node gap.
+  [`zelox-execution/src/codec.rs`](crates/zelox-execution/src/codec.rs), or be logged as a single-node gap.
 - **Honest claims:** performance/competitive claims must be **measured head-to-head** with the scale and
   conditions stated, and path-dependence flagged — no estimated or unqualified "beats Spark/Flink" claims.
 - **Docs:** update `CHANGELOG.md` and the relevant knowledge-base docs (CODEMAP / STATUS / BENCHMARKS)

@@ -1,5 +1,11 @@
 # Continuous multi-partition stateful exactly-once — the Flink-class fix
 
+> **RESOLVED (2026-07-04).** The crash-EO-at-scale residual investigated below was closed by
+> **aligned checkpoint barriers** (`73d645a1`, Flink ABS) — the barrier-aligned atomic commit this
+> document concludes was necessary. Merged in `cfae68f1` and EKS-confirmed at 100M events in
+> `623517f3` (dup=0, sum exact, clean == crash). **The "genuinely broken at scale" findings below are
+> the pre-fix investigation record — retained for the root-cause trail, not current status.**
+
 Branch: `streaming/continuous-stateful-eo` · **Status: ✅ DONE (2026-07-03) — C6 + C7 GREEN by default.**
 Gate cells closed: **C6** (continuous 4-partition, no-dup) + **C7** (continuous 4-partition + crash, EO)
 in `scripts/correctness_gate.sh` — promoted XFAIL→GREEN; full gate GREEN (6/6, no regression).
@@ -41,10 +47,10 @@ a patch. **DEFAULT DECISION (open):** N-reader default has this crash-EO gap; si
 for the P1 keyed pattern but fails the scrambled-order no-dup gate. Neither is universally correct → the
 deep rework is the real answer; until then, document honestly + do NOT claim crash-EO exactly-once at scale.
 
-## 🔴 EKS SCALE RESULT (measured 2026-07-03, vajra-stream-ht, 16-partition, image :eo-multipart)
+## 🔴 EKS SCALE RESULT (measured 2026-07-03, zelox-stream-ht, 16-partition, image :eo-multipart)
 
 The honest EKS validation (the bar for the headline claim) — definitive:
-- **Throughput/memory/latency scorecard (100M events vs Flink 1.19):** Vajra **5.389M ev/s** vs Flink 5.479M
+- **Throughput/memory/latency scorecard (100M events vs Flink 1.19):** Zelox **5.389M ev/s** vs Flink 5.479M
   = **~TIED (1.7% slower — IMPROVED from 1.10× by the N-reader default)**; memory **7.04 vs 8.55 GiB =
   ~1.2× LESS (beats Flink)**; latency p50/p99 32/66 ms vs Flink 27/55 (competitive, Flink edges).
 - **P1a CLEAN (no crash), Kafka→10s windowed-agg→Parquet-S3:** `rows=9000 distinct=9000 sum_count=90,000,000
@@ -62,7 +68,7 @@ for the P1 keyed-producer pattern but had the scrambled-order gate dups; N-reade
 union-commit isn't crash-atomic at N=16. **DECISION NEEDED:** either (a) fix the multi-instance crash-atomic
 commit so N-reader is a safe default, or (b) revert T-EO-4's default to single-instance until then (keeping
 N-reader opt-in via a flag) — do NOT ship an N-reader default that regresses crash-EO. Isolate first:
-re-run P1b with `VAJRA_RT_SINGLE=1` on EKS to confirm single-instance still passes crash-EO at 16 parts.
+re-run P1b with `ZELOX_RT_SINGLE=1` on EKS to confirm single-instance still passes crash-EO at 16 parts.
 
 **Honest conclusion:** no-dup + **completeness are Flink-class at scale** (P1a dup=0, throughput near-parity,
 memory beats). But **crash-recovery exactly-once is NOT yet correct at scale** — the per-epoch sink commit +
@@ -74,7 +80,7 @@ crash-EO-at-scale.
 
 ## ✅ RESULT (measured 2026-07-03 — LOCAL gate; see EKS caveat above for crash-EO at scale)
 Multi-partition **continuous stateful exactly-once** is now correct **by default** (realtime Kafka source
-defaults to N readers; `VAJRA_RT_SINGLE` opts out). Measured on `correctness_gate.sh` local-cluster:
+defaults to N readers; `ZELOX_RT_SINGLE` opts out). Measured on `correctness_gate.sh` local-cluster:
 - **C6** continuous 4-partition scrambled: **3/3 = 1800 rows / 6 windows, no-dup, all counts=10** (complete).
 - **C7** continuous 4-partition + hard `kill -9`: **2/2 = INC_CKPT_EO_ACROSS_CRASH PASS**, complete + no-dup.
 - **Full gate GREEN 6/6** (C1/C2/C4/C5 unchanged). clippy `-D warnings` clean.
@@ -152,7 +158,7 @@ immutable Arrow state chunks (our F5/inc-ckpt substrate) — O(delta) checkpoint
    as one); restore replays the union. Gate: **C7** continuous 4-part + crash → EO PASS.
 4. **T-EO-4** — remove/neutralize the single-instance per-partition-WM workaround on the realtime path
    (kept for non-parallel sources). Gate: **C6** continuous 4-part → 0 dups (exact).
-5. **T-EO-5** — codec round-trip for any new physical-plan fields (`sail-execution/src/codec.rs`).
+5. **T-EO-5** — codec round-trip for any new physical-plan fields (`zelox-execution/src/codec.rs`).
 6. **T-EO-6** — scale/skew validation: C6/C7 at PARTS=8 + scrambled order; then the honest **EKS
    multi-node** run (the KB notes full exact-zero historically needed EKS) before claiming Flink-class.
 
@@ -167,7 +173,7 @@ immutable Arrow state chunks (our F5/inc-ckpt substrate) — O(delta) checkpoint
 ## 5b. Progress log (measured)
 
 - **T-EO-1 DONE + validated (2026-07-02).** Realtime `resolve()` now applies the FLIP-27 per-instance
-  filter (`g % parallelism == inst`). Before: `VAJRA_RT_MULTI` PARTS=4 gave `counts=[12,28] sum=40`
+  filter (`g % parallelism == inst`). Before: `ZELOX_RT_MULTI` PARTS=4 gave `counts=[12,28] sum=40`
   (4× over-read, 562 dup groups). After: `counts=[10,10] sum=20` — **over-read eliminated** (per-instance
   counts correct = 10). Committed.
 - **Exposed next layer:** multi-instance NOCRASH now shows **FULL duplicates** (`[10,10]`, ~300 groups) =
@@ -175,7 +181,7 @@ immutable Arrow state chunks (our F5/inc-ckpt substrate) — O(delta) checkpoint
   epoch staging + atomic union commit): each of the N instances/sink-tasks emits its window output, and
   without a coordinated per-epoch union commit the same `(window,key)` is written by more than one epoch
   flush / sink task. Confirms the design — multi-instance realtime is correct ONLY with the union commit.
-- **Single-instance default path** (no `VAJRA_RT_MULTI`) remains the closest today (~2 partial-count
+- **Single-instance default path** (no `ZELOX_RT_MULTI`) remains the closest today (~2 partial-count
   split dups = residual watermark race), but has the inherent interleaved-read false-idle limitation.
 - **Decision:** the robust Flink-class path is T-EO-2/3 (multi-instance union commit), a real F2/F3
   effort. Continue incrementally, each step gated; do not claim exact-zero until C6+C7 are GREEN.
@@ -198,7 +204,7 @@ lateness on the GLOBAL (MIN) watermark AND all N instances have passed it; (b) m
 carry `emitted_ends` so a re-emit is deduped at commit; (c) the coordinated union commit (T-EO-3) dedups
 by (window,key) at the atomic commit. Next debug step: instrument the window emit + `emitted_ends`
 prune/re-close to confirm the lagging-instance re-close, then fix the prune condition to be
-global-watermark + all-instances-passed. Each iteration re-runs `inc_ckpt_gate.sh VAJRA_RT_MULTI=1`.
+global-watermark + all-instances-passed. Each iteration re-runs `inc_ckpt_gate.sh ZELOX_RT_MULTI=1`.
 
 ## 5d. T-EO-3 result + residual (measured 2026-07-03)
 
@@ -206,7 +212,7 @@ global-watermark + all-instances-passed. Each iteration re-runs `inc_ckpt_gate.s
 RT_ASSIGN log proved the mechanism: on the 2nd execution, ALL instances now resume from their
 committed offsets (`(0,843) (1,3738) (2,1744) (3,2675)` — were `0` for 3 of 4 before) ⇒ no re-read.
 
-Measured (`VAJRA_RT_MULTI`, PARTS=4, N=300):
+Measured (`ZELOX_RT_MULTI`, PARTS=4, N=300):
 - **Gate config RUN=40: 3/3 runs = DUP_GROUPS=0, count!=10=0** (no-dup invariant HOLDS, counts exact).
 - **Residual:** a longer RUN=75 hit 309 dups ONCE = a **timing-dependent epoch-boundary race** (more
   commit boundaries → the query-stop-vs-final-epoch-commit gap re-reads). Not yet exact-zero at all
@@ -225,7 +231,7 @@ residual is closed and completeness is proven no-loss on a full-window run.
 The RUN=75 "309 dups" was a **one-off from the earlier disk-full/Docker-unhealthy period** — in a clean
 env, RUN=75 is **2/2 = 0 dups**, RUN=40 is **3/3 = 0 dups** (5/6 total; the outlier explained).
 
-**C7 (continuous PARTS=4 + hard `kill -9` + restart, VAJRA_RT_MULTI):** across the crash,
+**C7 (continuous PARTS=4 + hard `kill -9` + restart, ZELOX_RT_MULTI):** across the crash,
 `no_dup=True, all_counts_10=True, DUP_GROUPS=0, count!=10=0` — **exactly-once no-duplication across a
 hard crash HOLDS on the multi-partition path** (the union-commit recovery replays from committed offsets
 with no re-read). The gate reports FAIL **only on completeness** (`rows=1200 vs 1800` = 4 of 6 windows
@@ -246,7 +252,7 @@ T-EO-3.5 added `withIdleness` to the IN-PROCESS `StreamExchangeExec` N→M merge
 and passed the full gate GREEN (no regression) — but it did NOT close the completeness edge. Instrumented
 (`STREAM_EXCH_MERGE` log): that merge **fires 0 times** for the multi-instance realtime windowed-agg on the
 gate's `--mode local-cluster` path. So the watermark merge for this query is NOT the in-process exchange —
-it is the **distributed shuffle path** (`sail-execution/src/stream_service/client.rs` + `plan/shuffle_write.rs`)
+it is the **distributed shuffle path** (`zelox-execution/src/stream_service/client.rs` + `plan/shuffle_write.rs`)
 and/or the window operator's own multi-input handling (`window_accum.rs`: "one instance per input partition,
 broadcast watermark"). The in-process idleness is correct + kept (it helps single-node/in-process exchange
 plans), but the **completeness fix for the gate's distributed path must add idleness to the DISTRIBUTED
@@ -271,7 +277,7 @@ on workers (making `StreamExchangeExec` idleness the right place after all — u
 **Blocked-on-observability.** Prod-grade rule: do NOT commit completeness fixes we can't measure. The
 required FIRST step is a reliable local streaming-observability harness: either (a) capture worker logs in
 local-cluster (`--mode local-cluster` worker stdout → a known file), or (b) make `inc_ckpt_gate` runnable
-`--mode local` so all logs land in one place, or (c) a `VAJRA_PLAN_DUMP` that prints the finalized streaming
+`--mode local` so all logs land in one place, or (c) a `ZELOX_PLAN_DUMP` that prints the finalized streaming
 physical-plan tree (so the watermark-merge point is known with certainty, not inferred). THEN target the
 idleness at the proven merge point and validate completeness → no-loss. Until then, completeness stays
 honestly open; the CORE no-dup-across-crash win (T-EO-1/T-EO-3) is unaffected and validated.

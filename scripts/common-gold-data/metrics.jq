@@ -1,5 +1,5 @@
 def file_group:
-    if test("/crates/sail-spark-connect/") then "spark"
+    if test("/crates/zelox-spark-connect/") then "spark"
     else "unknown"
     end;
 

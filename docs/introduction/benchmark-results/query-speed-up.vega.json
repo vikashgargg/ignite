@@ -8,8 +8,8 @@
       "url": "_data/query-time-spark.json"
     },
     {
-      "name": "table-sail",
-      "url": "_data/query-time-sail.json",
+      "name": "table-zelox",
+      "url": "_data/query-time-zelox.json",
       "transform": [
         {
           "type": "lookup",
@@ -28,7 +28,7 @@
     }
   ],
   "title": {
-    "text": ["Sail Speed-Up Over Spark"],
+    "text": ["Zelox Speed-Up Over Spark"],
     "frame": "group"
   },
   "scales": [
@@ -36,7 +36,7 @@
       "name": "xscale",
       "type": "band",
       "domain": {
-        "data": "table-sail",
+        "data": "table-zelox",
         "field": "query",
         "sort": { "op": "mean", "field": "speedup", "order": "descending" }
       },
@@ -46,7 +46,7 @@
     {
       "name": "yscale",
       "type": "linear",
-      "domain": { "data": "table-sail", "field": "speedup" },
+      "domain": { "data": "table-zelox", "field": "speedup" },
       "domainMax": 850,
       "range": "height"
     }
@@ -67,7 +67,7 @@
   "marks": [
     {
       "type": "rect",
-      "from": { "data": "table-sail" },
+      "from": { "data": "table-zelox" },
       "encode": {
         "enter": {
           "x": { "scale": "xscale", "field": "query" },
@@ -80,7 +80,7 @@
     },
     {
       "type": "text",
-      "from": { "data": "table-sail" },
+      "from": { "data": "table-zelox" },
       "encode": {
         "enter": {
           "x": { "scale": "xscale", "field": "query", "offset": 5 },

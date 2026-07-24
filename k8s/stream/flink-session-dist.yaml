@@ -90,6 +90,6 @@ spec:
           image: flink:1.19.1-scala_2.12-java17
           args: ["taskmanager"]
           envFrom: [ { configMapRef: { name: flink-config } } ]
-          resources: { requests: {cpu: "15", memory: "26Gi"}, limits: {cpu: "16", memory: "28Gi"} }
+          resources: { requests: {cpu: "6", memory: "12Gi"}, limits: {cpu: "7", memory: "14Gi"} }
           volumeMounts: [ { name: flinklib, mountPath: /opt/flink/lib } ]
       volumes: [ { name: flinklib, emptyDir: {} } ]

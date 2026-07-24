@@ -1,0 +1,18 @@
+apiVersion: v2
+name: zelox
+description: Zelox — a unified batch + streaming engine for Spark workloads, no JVM. Drop-in PySpark replacement via Spark Connect, no JVM required.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - spark
+  - data
+  - analytics
+  - arrow
+  - datafusion
+home: https://github.com/vikashgargg/zelox
+sources:
+  - https://github.com/vikashgargg/zelox
+maintainers:
+  - name: Zelox Contributors
+    url: https://github.com/vikashgargg/zelox

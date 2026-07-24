@@ -1,0 +1,230 @@
+use std::ops::{Div, Mul};
+use std::sync::Arc;
+
+use arrow::datatypes::{DataType, IntervalUnit, TimeUnit};
+use datafusion_common::{DFSchemaRef, ScalarValue};
+use datafusion_expr::{cast, expr, lit, try_cast, ExprSchemable, ScalarUDF};
+use zelox_common::datetime::time_unit_to_multiplier;
+use zelox_common::spec;
+use zelox_common_datafusion::extension::SessionExtensionAccessor;
+use zelox_common_datafusion::session::plan::PlanService;
+use zelox_common_datafusion::utils::items::ItemTaker;
+use zelox_function::scalar::datetime::spark_date::SparkDate;
+use zelox_function::scalar::datetime::spark_interval::{
+    SparkCalendarInterval, SparkDayTimeInterval, SparkYearMonthInterval,
+};
+use zelox_function::scalar::datetime::spark_timestamp::SparkTimestamp;
+use zelox_function::scalar::spark_to_string::{SparkToLargeUtf8, SparkToUtf8, SparkToUtf8View};
+use zelox_function::scalar::variant::spark_cast_to_variant::SparkCastToVariant;
+use zelox_function::scalar::variant::spark_variant_get::SparkVariantGet;
+use zelox_function::scalar::variant::spark_variant_to_json::SparkVariantToJsonUdf;
+
+use crate::error::{PlanError, PlanResult};
+use crate::resolver::expression::NamedExpr;
+use crate::resolver::state::PlanResolverState;
+use crate::resolver::PlanResolver;
+
+impl PlanResolver<'_> {
+    pub(super) async fn resolve_expression_cast(
+        &self,
+        expr: spec::Expr,
+        cast_to_type: spec::DataType,
+        _rename: bool,
+        is_try: bool,
+        schema: &DFSchemaRef,
+        state: &mut PlanResolverState,
+    ) -> PlanResult<NamedExpr> {
+        // CAST(expr AS VARIANT) → rewrite to SparkCastToVariant UDF
+        // Must intercept before resolve_data_type converts Variant to Struct.
+        if matches!(cast_to_type, spec::DataType::Variant) {
+            let NamedExpr { expr, name, .. } =
+                self.resolve_named_expression(expr, schema, state).await?;
+            let name = if need_rename_cast(&expr) {
+                let prefix = if is_try { "TRY_" } else { "" };
+                vec![format!("{}CAST({} AS VARIANT)", prefix, name.one()?)]
+            } else {
+                name
+            };
+            let expr = ScalarUDF::new_from_impl(SparkCastToVariant::new()).call(vec![expr]);
+            return Ok(NamedExpr::new(name, expr));
+        }
+
+        // Extract the DayTimeInterval field unit before resolving to Arrow type,
+        // since it determines the multiplier for numeric-to-interval casts.
+        // Spark uses the end field (or start field for single-field intervals)
+        // to interpret the numeric value: e.g. DayTimeIntervalType(DAY, DAY) treats
+        // the value as days, while DayTimeIntervalType(DAY, SECOND) treats it as seconds.
+        let day_time_interval_field = match &cast_to_type {
+            spec::DataType::Interval {
+                interval_unit: spec::IntervalUnit::DayTime,
+                start_field,
+                end_field,
+            } => end_field.or(*start_field),
+            _ => None,
+        };
+        let cast_to_type = self.resolve_data_type(&cast_to_type, state)?;
+        let NamedExpr { expr, name, .. } =
+            self.resolve_named_expression(expr, schema, state).await?;
+        let expr_type = expr.get_type(schema)?;
+        let name = if need_rename_cast(&expr) {
+            let service = self.ctx.extension::<PlanService>()?;
+            let data_type_string = service
+                .plan_formatter()
+                .data_type_to_simple_string(&cast_to_type)?;
+            vec![format!(
+                "{}CAST({} AS {})",
+                if is_try { "TRY_" } else { "" },
+                name.one()?,
+                data_type_string.to_ascii_uppercase()
+            )]
+        } else {
+            name
+        };
+        let override_string_cast = matches!(
+            expr_type,
+            DataType::Date32
+                | DataType::Date64
+                | DataType::Time32(_)
+                | DataType::Time64(_)
+                | DataType::Duration(_)
+                | DataType::Interval(_)
+                | DataType::Timestamp(_, _)
+                | DataType::List(_)
+                | DataType::LargeList(_)
+                | DataType::FixedSizeList(_, _)
+                | DataType::ListView(_)
+                | DataType::LargeListView(_)
+                | DataType::Struct(_)
+                | DataType::Map(_, _)
+        );
+        let expr = match (expr_type, cast_to_type.clone(), is_try) {
+            (from, DataType::Utf8, _) if is_variant_storage_type(&from) => cast(
+                ScalarUDF::new_from_impl(SparkVariantToJsonUdf::new()).call(vec![expr]),
+                DataType::Utf8,
+            ),
+            (from, DataType::LargeUtf8, _) if is_variant_storage_type(&from) => cast(
+                ScalarUDF::new_from_impl(SparkVariantToJsonUdf::new()).call(vec![expr]),
+                DataType::LargeUtf8,
+            ),
+            (from, DataType::Utf8View, _) if is_variant_storage_type(&from) => {
+                ScalarUDF::new_from_impl(SparkVariantToJsonUdf::new()).call(vec![expr])
+            }
+            (from, to, is_try) if is_variant_storage_type(&from) => {
+                ScalarUDF::new_from_impl(SparkVariantGet::new(is_try)).call(vec![
+                    expr,
+                    lit("$"),
+                    lit(to.to_string()),
+                ])
+            }
+            (from, DataType::Timestamp(time_unit, _) | DataType::Duration(time_unit), _)
+                if from.is_numeric() =>
+            {
+                let multiplier = match (day_time_interval_field, &cast_to_type) {
+                    (Some(field), DataType::Duration(_)) => day_time_field_to_microseconds(field),
+                    _ => time_unit_to_multiplier(&time_unit),
+                };
+                cast(expr.mul(lit(multiplier)), cast_to_type)
+            }
+            (DataType::Timestamp(time_unit, _) | DataType::Duration(time_unit), to, _)
+                if to.is_numeric() =>
+            {
+                cast(
+                    lit(1.0)
+                        .div(lit(time_unit_to_multiplier(&time_unit)))
+                        .mul(cast(expr, DataType::Int64)),
+                    to,
+                )
+            }
+            (
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+                DataType::Interval(IntervalUnit::YearMonth),
+                _,
+            ) => ScalarUDF::new_from_impl(SparkYearMonthInterval::new()).call(vec![expr]),
+            (
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+                DataType::Duration(TimeUnit::Microsecond),
+                _,
+            ) => ScalarUDF::new_from_impl(SparkDayTimeInterval::new()).call(vec![expr]),
+            (
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+                DataType::Interval(IntervalUnit::MonthDayNano),
+                _,
+            ) => ScalarUDF::new_from_impl(SparkCalendarInterval::new()).call(vec![expr]),
+            (
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+                DataType::Date32,
+                is_try,
+            ) => ScalarUDF::new_from_impl(SparkDate::new(is_try)).call(vec![expr]),
+            (
+                DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View,
+                DataType::Timestamp(TimeUnit::Microsecond, tz),
+                is_try,
+            ) => Arc::new(ScalarUDF::new_from_impl(SparkTimestamp::try_new(
+                tz, is_try,
+            )?))
+            .call(vec![expr]),
+            (_, DataType::Utf8, _) if override_string_cast => {
+                ScalarUDF::new_from_impl(SparkToUtf8::new()).call(vec![expr])
+            }
+            (_, DataType::LargeUtf8, _) if override_string_cast => {
+                ScalarUDF::new_from_impl(SparkToLargeUtf8::new()).call(vec![expr])
+            }
+            (_, DataType::Utf8View, _) if override_string_cast => {
+                ScalarUDF::new_from_impl(SparkToUtf8View::new()).call(vec![expr])
+            }
+            (DataType::Date32 | DataType::Date64, to, _)
+                if to.is_numeric() || matches!(to, DataType::Boolean) =>
+            {
+                if !is_try && self.config.ansi_mode {
+                    return Err(PlanError::invalid(format!("cannot cast date to {to}")));
+                }
+                lit(ScalarValue::try_from(&to)?)
+            }
+            (_, to, true) => try_cast(expr, to),
+            (_, to, _) => cast(expr, to),
+        };
+        Ok(NamedExpr::new(name, expr))
+    }
+}
+
+fn is_variant_storage_type(data_type: &DataType) -> bool {
+    let DataType::Struct(fields) = data_type else {
+        return false;
+    };
+    let metadata = fields.iter().find(|field| field.name() == "metadata");
+    let value = fields.iter().find(|field| field.name() == "value");
+    fields.len() == 2
+        && metadata.is_some_and(|field| {
+            matches!(
+                field.data_type(),
+                DataType::Binary | DataType::LargeBinary | DataType::BinaryView
+            )
+        })
+        && value.is_some_and(|field| {
+            matches!(
+                field.data_type(),
+                DataType::Binary | DataType::LargeBinary | DataType::BinaryView
+            )
+        })
+}
+
+fn day_time_field_to_microseconds(field: spec::IntervalFieldType) -> i64 {
+    match field {
+        spec::IntervalFieldType::Day => 86_400_000_000,
+        spec::IntervalFieldType::Hour => 3_600_000_000,
+        spec::IntervalFieldType::Minute => 60_000_000,
+        // Second, or Year/Month (shouldn't appear for DayTime intervals)
+        _ => 1_000_000,
+    }
+}
+
+fn need_rename_cast(expr: &expr::Expr) -> bool {
+    match expr {
+        expr::Expr::Alias(_) | expr::Expr::Column(_) | expr::Expr::OuterReferenceColumn(..) => {
+            false
+        }
+        expr::Expr::Cast(cast) => need_rename_cast(cast.expr.as_ref()),
+        expr::Expr::TryCast(try_cast) => need_rename_cast(try_cast.expr.as_ref()),
+        _ => true,
+    }
+}

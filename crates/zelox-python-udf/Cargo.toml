@@ -1,0 +1,30 @@
+[package]
+name = "zelox-python-udf"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+
+thiserror = { workspace = true }
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+educe = { workspace = true }
+arrow-pyarrow = { workspace = true }
+pyo3 = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+num-bigint = { workspace = true }
+md-5 = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+tempfile = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]

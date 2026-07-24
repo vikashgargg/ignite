@@ -5,7 +5,7 @@ rank: 4
 
 # JDBC Data Source
 
-Sail provides a database connector exposed under the `jdbc` format name for API parity with vanilla PySpark.
+Zelox provides a database connector exposed under the `jdbc` format name for API parity with vanilla PySpark.
 The implementation is based on the Python `connectorx` library.
 No actual JDBC driver or JVM is involved.
 
@@ -13,10 +13,10 @@ No actual JDBC driver or JVM is involved.
 
 ## Installation
 
-You need to install the `pysail` package with the `jdbc` extra to use the JDBC data source.
+You need to install the `pyzelox` package with the `jdbc` extra to use the JDBC data source.
 
 ```bash
-pip install pysail[jdbc]
+pip install pyzelox[jdbc]
 ```
 
 ## Quick Start
@@ -24,7 +24,7 @@ pip install pysail[jdbc]
 Register the datasource once per Spark session.
 
 ```python
-from pysail.spark.datasource.jdbc import JdbcDataSource
+from pyzelox.spark.datasource.jdbc import JdbcDataSource
 
 spark.dataSource.register(JdbcDataSource)
 ```

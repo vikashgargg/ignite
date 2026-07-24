@@ -1,13 +1,13 @@
-# Vajra REFERENCES — distilled external knowledge base
+# Zelox REFERENCES — distilled external knowledge base
 
 **Purpose.** Cite this instead of re-fetching/re-deriving. Each entry: source → key facts →
-**implication for Vajra** (mapped to [docs/STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md)
-cells/gaps). Vajra = no-JVM, Arrow + DataFusion engine replacing Spark(batch)+Flink(streaming),
+**implication for Zelox** (mapped to [docs/STREAMING_ARCHITECTURE.md](STREAMING_ARCHITECTURE.md)
+cells/gaps). Zelox = no-JVM, Arrow + DataFusion engine replacing Spark(batch)+Flink(streaming),
 built on the strongest ideas of these systems and fixing their known limits.
 
 **MAINTENANCE RULE (standing):** whenever a doc/blog/paper is fetched and it yields a useful fact
 **not already captured here** — and that could matter later — **append it to this file** (source +
-key facts + Vajra implication) in the same turn. This file is the single growing knowledge base; do
+key facts + Zelox implication) in the same turn. This file is the single growing knowledge base; do
 not let learnings evaporate into one-off context. Refresh entries when a major release lands; note dates.
 
 Last refreshed: 2026-06-21.
@@ -24,7 +24,7 @@ Source: https://www.databricks.com/blog/introducing-real-time-mode-apache-sparkt
 - **Trigger:** `trigger(RealTimeTrigger.apply(checkpointInterval))`; default checkpoint interval
   **5 min** (decoupled from latency — commits are periodic, records flow continuously). Exactly-once.
 - **Limits:** sources/sinks still expanding; slight overhead; for latency-critical pipelines only.
-- **Implication for Vajra:** our realtime mode (F1b, `KafkaSourceExec` realtime path +
+- **Implication for Zelox:** our realtime mode (F1b, `KafkaSourceExec` realtime path +
   `RealtimeFileSinkExec`) already matches this shape (long-lived pipeline, per-epoch commit decoupled
   from data flush, EO). **Edge to press:** no-JVM + Arrow-native ⇒ lower memory + GC-free tail
   latency; exposed under the same Spark API. Concurrent-stage scheduling + streaming (Flight) shuffle
@@ -46,7 +46,7 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/concepts
   tracks its own watermark; the operator watermark = MIN across splits (a window closes only when ALL
   active partitions pass it — prevents premature close on cross-partition event-time skew). **Idleness:**
   a partition with no events for the timeout is EXCLUDED from the MIN so the watermark never STALLS on
-  an idle/absent partition (liveness vs completeness tradeoff). **Vajra impl (WatermarkExec):** per-
+  an idle/absent partition (liveness vs completeness tradeoff). **Zelox impl (WatermarkExec):** per-
   partition (max_et,last_seen); watermark = MIN over partitions active within `idle_timeout`; startup
   grace withholds until all N seen OR grace elapses; a periodic tick excludes newly-idle partitions even
   with no input. This is the safety that makes per-partition non-blocking (a withhold-until-all-N
@@ -56,7 +56,7 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/concepts
   (`maxParallelism`), `kg = hash(key) % G`. A subtask owns a **contiguous range** of key-groups; rescale
   to M′ just re-assigns ranges. State is written **in key-group order** with a kg→offset index, so a
   rescaled subtask reads the **byte-range** for its key-groups directly — no per-key deserialization.
-  **Vajra impl (`state_io`, rescale steps 1–3a):** `key_group`/`instance_key_group_range`/
+  **Zelox impl (`state_io`, rescale steps 1–3a):** `key_group`/`instance_key_group_range`/
   `key_group_owner` (exchange routes by kg→owner, matching state ownership); manifest records each
   chunk's kg `[lo,hi)` coverage; `restore_keyed_range` gathers a new instance's rows by selecting chunks
   via manifest range (`chunks_for_range`, a lookup) + row-filter. **Beats Flink:** chunk selection is a
@@ -70,14 +70,14 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/concepts
   Ballista** — zero-copy columnar exchange between stages (DoGet/DoPut), the disaggregated-shuffle model
   for distributed (EKS). (4) **StreamNative/Pulsar + Kafka** — partitioned topics; consumers scale to
   partition count; ordering per partition. (5) **FAANG** (LinkedIn Samza/Brooklin, Uber, Netflix Mantis)
-  — converge on per-partition parallel ingest + per-partition watermark/state. **Vajra synthesis (Phase
+  — converge on per-partition parallel ingest + per-partition watermark/state. **Zelox synthesis (Phase
   B, docs/design/streaming-realtime-multi-instance.md):** realtime source → N readers (one per Kafka
   partition, reuse the bounded path) + per-instance epoch staging + atomic union commit (generalize the
   single-coordinator realtime EO); each reader single-partition-ordered ⇒ monotone watermark (removes the
   per-partition-WM workaround) + `StreamExchangeExec` keyed MIN-merge + `StreamBarrierAlignExec` N→1
   align; **EKS distributed shuffle = Arrow Flight** (zero-copy). This is the read+`from_json`
   parallelization the Phase A profile demands AND the watermark-correctness fix, in one change.
-- **Implication for Vajra:** our `StreamBarrierAlignExec` (N→1 Chandy-Lamport) + `state_io` +
+- **Implication for Zelox:** our `StreamBarrierAlignExec` (N→1 Chandy-Lamport) + `state_io` +
   Kafka replay + EO sink mirror this. **Owe:** unaligned-checkpoint option (low-latency EO),
   Key-Group-style rescale for state, savepoints. `FlowEvent::Marker(Checkpoint{epoch})` is the barrier.
 
@@ -89,7 +89,7 @@ VLDB'25 https://www.vldb.org/pvldb/vol18/p4846-mei.pdf
   rescale. **Async runtime execution model** hides remote I/O via parallel multi-I/O.
 - **Numbers:** heavy-I/O queries +75–120% throughput vs local state (with 1GB cache); **−48%** with
   *no* cache (remote latency); beats Flink 1.20 on Nexmark + prod; lower resource use.
-- **Implication for Vajra:** modern state architecture = **decouple state from compute, object-store
+- **Implication for Zelox:** modern state architecture = **decouple state from compute, object-store
   backed + local cache + async access.** Informs F4 (object-store checkpoint/state). Lesson: **cache
   is mandatory** (no-cache remote = −48%). Design state object-store-native with tiered local cache +
   async access (Arrow/Parquet state format) from day one.
@@ -98,20 +98,20 @@ VLDB'25 https://www.vldb.org/pvldb/vol18/p4846-mei.pdf
   NOT via GC but by keeping **state off-heap on DFS/local-disk** (RAM = bounded cache, independent of
   state size) + **credit-based network backpressure** tightly bounding in-flight buffers. ⇒ a no-GC
   engine does NOT automatically win on RSS; bounded memory is an ARCHITECTURAL discipline (bounded
-  in-flight buffers + spilled/tiered state + allocator), which Vajra must engineer explicitly — our
+  in-flight buffers + spilled/tiered state + allocator), which Zelox must engineer explicitly — our
   no-JVM edge is for LATENCY/predictability, orthogonal to RSS. (Explains why T1–T7a CPU fixes left
-  Vajra's bounded-path RSS at 1.12× Flink.)
+  Zelox's bounded-path RSS at 1.12× Flink.)
 
 ### 3c. Spark 4.1 Structured Streaming Real-Time Mode — fetched 2026-07-01
 Source: https://www.databricks.com/blog/introducing-real-time-mode-apache-sparktm-structured-streaming
 - **Execution:** long-lived jobs that **schedule stages concurrently** + an **in-memory streaming
-  shuffle** between tasks (no micro-batch coordination) — i.e. exactly Vajra's streaming-exchange model.
+  shuffle** between tasks (no micro-batch coordination) — i.e. exactly Zelox's streaming-exchange model.
 - **Latency:** p99 **a few ms → ~300ms** (transform-dependent); prod users report 15ms / <200ms e2e.
 - **Tradeoff (KEY):** Databricks explicitly says RT-mode adds **"slight system overhead"** (higher
   memory) and recommend it only for latency-critical pipelines ⇒ even Spark **trades memory for latency**
-  in this design. Validates Vajra's concurrent-stage + in-memory-shuffle direction; latency (p99) is the
+  in this design. Validates Zelox's concurrent-stage + in-memory-shuffle direction; latency (p99) is the
   headline metric to measure, and memory overhead is expected — must be bounded, not eliminated.
-- **Vajra implication:** measure **p99 latency** head-to-head (the RT-mode/Flink axis we have NOT
+- **Zelox implication:** measure **p99 latency** head-to-head (the RT-mode/Flink axis we have NOT
   measured), and treat memory as a bounded-buffer discipline, not a free win.
 
 ### 3d. Flink 2.3 release (current; fetched 2026-07-01 — cite this, don't re-fetch)
@@ -136,7 +136,7 @@ Source: https://nightlies.apache.org/flink/flink-docs-release-2.3/release-notes/
   recoverable writer for EO, no Hadoop dep.
 - **Adaptive scheduler rescale history (FLINK-38333):** records rescale events (parallelism/slots/state)
   via REST. → our rescale work should expose similar observability.
-- **Net for Vajra:** Flink's 2.x momentum is **disaggregated state + recovery speed + skew/backlog
+- **Net for Zelox:** Flink's 2.x momentum is **disaggregated state + recovery speed + skew/backlog
   handling + changelog SQL + async object-store I/O + observability** — NOT raw single-node throughput.
   The replacement bar is these operational axes. Memory is bounded by off-heap state + credit backpressure.
 
@@ -155,7 +155,7 @@ Sources: https://nightlies.apache.org/flink/flink-docs-release-1.19/docs/ops/sta
   removed. Prevents premature deletion.
 - **Async:** the native checkpoint (hard-link of SSTs) is fast/local; the **upload to DFS is async**
   and does not block the dataflow — barriers keep flowing.
-- **Implication for Vajra (THE unlock):** our F5 **spill chunks are already immutable, numbered
+- **Implication for Zelox (THE unlock):** our F5 **spill chunks are already immutable, numbered
   Arrow-IPC blobs** = a perfect SST-analog. So incremental checkpointing is nearly free: a checkpoint
   = a **manifest** listing {referenced chunk-ids + a small in-RAM residual blob + meta}; spilled
   chunks (the bulk) are **referenced, not re-uploaded** (they were written out-of-band during spill,
@@ -172,7 +172,7 @@ https://datafusion.apache.org/ballista/contributors-guide/architecture.html · F
   throughput for shuffle-heavy queries. **Sort-based shuffle is default.** `ShuffleWriterExec` /
   `ShuffleReaderExec` emit metrics. Arrow IPC on disk; **zero-copy** Arrow exchange (no ser/de).
   Scheduler/executor APIs on protobuf + gRPC + Arrow IPC + Flight SQL.
-- **Implication for Vajra:** distributed/streaming shuffle should be **Arrow Flight + IPC, zero-copy,
+- **Implication for Zelox:** distributed/streaming shuffle should be **Arrow Flight + IPC, zero-copy,
   client-cached**, mirroring Ballista's `ShuffleWriter/ReaderExec` split. Foundation for streaming
   Flight shuffle (F2/F3) and for closing the throughput P0 (the exchange path). Reuse Ballista patterns.
 
@@ -191,7 +191,7 @@ Source: https://datafusion.apache.org/
   `DiskManager` (temp spill files). Available in our pinned 53.1.0 (`RuntimeEnv` already used;
   `cluster.shuffle_spill_dir` config exists). So a streaming agg run under a **bounded memory pool**
   spills automatically — no hand-rolled spill for the final merge.
-- **Implication for Vajra:** keep operators Arrow-vectorized, push work into DataFusion kernels.
+- **Implication for Zelox:** keep operators Arrow-vectorized, push work into DataFusion kernels.
   **F5 (spillable window state, docs/design/streaming-spillable-state-f5.md):** the operator's OWN
   `pending_rows: Vec<RecordBatch>` is the unbounded-RAM part (DataFusion's pool can't see it) — spill
   it via `state_io` Arrow-IPC ↔ `CheckpointStore` (object-store = ForSt §3) with a local memory cache;
@@ -223,7 +223,7 @@ arrow-rs raw JSON reader PR #3479.
   builders. **2.3× faster than Java per-record**; great on large/nested records; weaker on
   sparse-null/enum-like. Type coercion (string↔number), nulls via validity bitmap, `validate_row()`
   filters bad rows pre-construction.
-- **Implication for Vajra:** source consume loop should be **alloc-free** (no per-msg String/Vec)
+- **Implication for Zelox:** source consume loop should be **alloc-free** (no per-msg String/Vec)
   to realize the no-GC edge.
 - **MEASURED CORRECTION 2026-06-22 (don't repeat this mistake):** the arrow-json "2.3×" is
   arrow-json-**Rust vs Java/Jackson** (i.e. vs Flink) — NOT vs Rust `serde_json`. We tried an
@@ -234,13 +234,45 @@ arrow-rs raw JSON reader PR #3479.
   help if we could feed it zero-copy (no NDJSON rebuild); not worth it now. Bottleneck for the
   streaming workload was the **read path** (fixed: builders + rdkafka tuning, 2.1×), not parse.
 - **BOUNDED-PATH PROFILE 2026-06-30 (the EKS gap, re-localized):** the EKS throughput harness is
-  `availableNow` (bounded, ALREADY 16-reader parallel). `VAJRA_WM_PROF` shows the window STILL STARVED
+  `availableNow` (bounded, ALREADY 16-reader parallel). `ZELOX_WM_PROF` shows the window STILL STARVED
   (input_wait ~75%/instance, finalize ~20%) ⇒ with read + from_json already optimized (above), the
   remaining ~2.4× gap is the **exchange** (`StreamExchangeExec` per-batch Arrow-IPC re-encode + tokio
   channel copies) or the **`availableNow` micro-batch loop overhead** (re-plan + parquet-commit +
   checkpoint per `maxOffsetsPerTrigger` batch, ~25× at 100M — vs Flink's ONE continuous pipeline).
   NEXT = split exchange vs micro-batch (bigger maxOffsetsPerTrigger A/B + an exchange-side timer).
   Multi-instance/Flight = continuous/multi-node, not this gap. See throughput-robustness-review.md.
+- **RisingWave 3.0 + Arroyo data-plane (2026-07-08, added on request).** Sources:
+  risingwavelabs.github.io/risingwave/design/streaming-overview · docs.risingwave.com/get-started/architecture ·
+  arroyo.dev + github.com/ArroyoSystems/arroyo · goldsky streamling.
+  - **RisingWave** = actor-model streaming; data plane is the **Stream Chunk = columnar Data Chunk +
+    visibility array + an ops column** (Insert/Delete/UpdateInsert/UpdateDelete — the built-in changelog,
+    cf. our WindowOutputMode::Update retract). Local actor→actor via channels; cross-node via an
+    **exchange service**. State = shared S3 object store; source connector **offsets persisted in
+    checkpoints → exactly-once** (== our design). Vectorized batch-at-a-time, never per-row.
+  - **Arroyo 0.10** rebuilt on **Arrow + DataFusion** (interpreted columnar exec, SIMD/cache) = +3×; its
+    **Shuffle Edge** = key-hash partitioning with **connection pooling + BATCHING to amortize per-batch
+    overhead** (directly relevant to our StreamExchange per-batch cost). Kafka msgs are batched into Arrow
+    RecordBatches on the source side. Roar/Streamling: Kafka→RecordBatch→**Arrow Flight zero-copy**.
+  - **CONCLUSION for Zelox (measured, don't re-chase parse):** our source consume loop is ALREADY
+    alloc-free + columnar (kafka/reader.rs:877 appends borrowed bytes into Arrow builders, interned topic
+    idx, batched to RecordBatch; read path already tuned 2.1×) and parse is already Rust-fast (tape, ~15%
+    of pipeline). So the columnar-source box is CHECKED. The two prod-grade levers that remain — the ones a
+    columnar streaming engine actually wins on — are: **(A) CONTINUOUS dataflow vs Spark `availableNow`
+    micro-batch re-plan/commit/checkpoint-per-trigger tax (~25× at 100M — RisingWave/Flink/Arroyo run ONE
+    long-lived pipeline; this is THE structural difference), and (B) exchange = BATCH + pool + zero-copy
+    Arrow-Flight (Arroyo Shuffle-Edge / Ballista), no per-batch IPC re-encode.** Focus here, not parse.
+  - **DISTRIBUTED A/B UN-BLINDED (2026-07-09, EKS 1× c7g.4xlarge, 100M, torn $0)** — per-pod WM_PROF_PROC +
+    Flight send/recv timing (:distprof image, commit 22aba4bc). Zelox distributed 2.09–2.27M ev/s vs Flink
+    5.77M = **Flink 2.77× faster**. Per-pod (cumulative cpu-ms): worker(source+window) source_read=44.2s
+    from_json=11.4s **exchange_cpu=0** shuffle_send=43s **shuffle_recv=598s** (24450 batches); worker(source)
+    source_read=39.6s from_json=11.3s **exchange_cpu=0 shuffle_send=143s** (24468 batches). **MEASURED
+    CONCLUSION: the lag is the FLIGHT SHUFFLE, not compute/routing.** (a) exchange_cpu=0 → keyed-route is free;
+    cost MOVED into cross-pod Flight IPC (was untimed = why prior A/B was blind). (b) **24,468 batches / 100M
+    = ~4,000 rows/batch = tiny** → per-batch IPC framing/serialize dominates (send 143s = ~5.8ms/small-batch).
+    (c) shuffle_recv=598s is mostly BLOCKED-waiting (starvation) — receiver idles behind the small-batch send.
+    **FIX = Arroyo Shuffle-Edge/Ballista: COALESCE big batches before the Flight boundary + connection-pool +
+    zero-copy (Utf8View, no re-encode) to amortize per-batch IPC.** Lever (B), evidence-backed. Runner:
+    scripts/eks_dist_instrumented_ab.sh. source_read/from_json secondary.
 - **VERSION-UPGRADE perf targets (separate upgrade repo; verify in release notes before hand-tuning):**
   (1) **arrow-rs `Utf8View`/`BinaryView` (StringView)** — fewer allocs/copies on string + JSON + shuffle
   paths (big for the value column + exchange re-encode). (2) **DataFusion grouped-`AggregateExec`** perf
@@ -249,7 +281,7 @@ arrow-rs raw JSON reader PR #3479.
   part of the gap "for free"; coordinate with the version-upgrade repo. **Add concrete release-note facts
   here as they're confirmed** (don't assert versions un-verified).
 
-## Cross-cutting design principles for Vajra (synthesized)
+## Cross-cutting design principles for Zelox (synthesized)
 1. **Unified API, two execution modes:** Spark API over batch + micro-batch + realtime
    (Spark-4.1-style long-lived/concurrent-stage). One engine, no JVM.
 2. **Changelog-native:** `FlowEvent.retracted` = Flink retract stream ⇒ correctness by convergence
@@ -282,7 +314,7 @@ TPC-DS https://www.databricks.com/blog/2021/11/02/databricks-sets-official-data-
   agg/sliding+session+proc-time windows/joins = the full streaming surface (our windowed-COUNT ≈ q5/q6).
 - **Metric = `Cores × Time(s)` per query + events/s** (NOT just wall). Full suite ~50 min. Baseline =
   the `nexmark-flink` package (official Flink runner) on a multi-node cluster.
-- **Vajra implication:** for a credible "replaces Flink (streaming)" claim, run NEXMARK (Spark-API
+- **Zelox implication:** for a credible "replaces Flink (streaming)" claim, run NEXMARK (Spark-API
   equivalents of q0–q13) vs `nexmark-flink`, report Cores×Time + ev/s. Our current windowed-COUNT is the
   q5/q6 slice only — full Nexmark is the gold standard to add.
 
@@ -293,7 +325,7 @@ TPC-DS https://www.databricks.com/blog/2021/11/02/databricks-sets-official-data-
   queries = single-user response time), (3) **throughput test** (concurrent query streams), (4) data
   maintenance (insert/delete). **Databricks SQL record: 32,941,245 QphDS @ 100TB** (2.2× prior Alibaba
   14.86M; 10% lower cost). Tooling: `databricks/tpcds-kit`.
-- **Vajra implication:** for "replaces Spark (batch)", run the **TPC-DS 99 power test** (sequential
+- **Zelox implication:** for "replaces Spark (batch)", run the **TPC-DS 99 power test** (sequential
   per-query response time + total wall) at a fixed SF (SF100/SF1000) vs Spark same node/data, + peak mem.
   We have `scripts/tpcds_score.py`. TPC-H (SF-1/SF-100, `tpch_distributed.py`) = simpler secondary.
 
@@ -302,23 +334,23 @@ power test (response time + wall + mem)**. These are the one-time Spark/Flink re
 
 ## 8. RisingWave 3.0 + Polars — mine the best of BOTH (for a next-era engine)
 
-Vajra must beat Spark (batch) AND Flink (streaming) on every axis. Two more engines carry ideas worth
+Zelox must beat Spark (batch) AND Flink (streaming) on every axis. Two more engines carry ideas worth
 stealing; the goal is the **union of the best**, built on our Arrow/DataFusion no-JVM core.
 
 ### RisingWave 3.0 (streaming database — the streaming SQL frontier)
 - **Decoupled compute/storage state (Hummock):** an LSM state store on S3/object-store; compute nodes are
   near-stateless, state lives on cheap durable storage. ⇒ **fast elastic rescale** (state isn't pinned to
-  a node) + cheap large state. This is the SAME direction as **Flink 2.0 ForSt (§3)** and as **Vajra's F5
-  spillable Arrow state + inc-ckpt** (immutable Arrow chunks on object store, O(delta) checkpoints). Vajra
+  a node) + cheap large state. This is the SAME direction as **Flink 2.0 ForSt (§3)** and as **Zelox's F5
+  spillable Arrow state + inc-ckpt** (immutable Arrow chunks on object store, O(delta) checkpoints). Zelox
   already has the substrate; RisingWave validates the architecture (compute/state separation is the frontier).
 - **Materialized views = incremental computation:** a streaming query is a MV kept fresh by *incremental*
-  updates (differential-dataflow-style deltas), not re-execution. Maps to Vajra's **changelog/retraction
+  updates (differential-dataflow-style deltas), not re-execution. Maps to Zelox's **changelog/retraction
   output mode** (`WindowOutputMode::Update`, emit retract+insert) — extend it to full MV maintenance.
 - **Arrangements (shared indexed state):** joins/aggs share indexed state (one arrangement, many readers) =
-  less memory. Vajra analog: shared keyed state across operators on the same key-group (F5 chunks).
+  less memory. Zelox analog: shared keyed state across operators on the same key-group (F5 chunks).
 - **Barrier-based exactly-once** (Chandy-Lamport, like Flink §2) + **per-partition watermarks** — our
   T-EO-1/T-EO-3/T-EO-3.5 (per-instance FLIP-27 read + union commit + withIdleness merge) is exactly this
-  model. **Honest note:** RW is Postgres-wire + MV-centric; Vajra is Spark-API + DataFrame/SQL — same
+  model. **Honest note:** RW is Postgres-wire + MV-centric; Zelox is Spark-API + DataFrame/SQL — same
   streaming core ideas, different surface. (3.0 is the current line; cite durable architecture facts, not
   version-specific perf claims we haven't measured.)
 
@@ -329,8 +361,8 @@ stealing; the goal is the **union of the best**, built on our Arrow/DataFusion n
   infinite event streams (no watermarks/EO/state) — so it's a **batch/perf** reference, not a Flink rival.
 - **Arrow-native, zero-copy, vectorized (SIMD)** columnar kernels + a **lazy query optimizer** (predicate/
   projection pushdown, common-subexpression elim, streaming physical plan). This is the **columnar edge (§6)**
-  that lets Vajra beat Flink's per-record JVM cost — Polars proves how far a well-optimized Arrow engine goes
-  on one node. Vajra's DataFusion core (§5) is the distributed equivalent; steal Polars' optimizer rigor +
+  that lets Zelox beat Flink's per-record JVM cost — Polars proves how far a well-optimized Arrow engine goes
+  on one node. Zelox's DataFusion core (§5) is the distributed equivalent; steal Polars' optimizer rigor +
   morsel scheduling for the single-node hot path.
 
 ### Apache Fluss (Incubating) — columnar streaming storage; validates the T7 pushdown thesis (2026-07-07)
@@ -342,19 +374,19 @@ Sources: https://fluss.apache.org/ · https://www.alibabacloud.com/blog/fluss-re
 - **The on-thesis fact:** because it is columnar, Fluss does **server-side projection + predicate pushdown +
   partition pruning on the Arrow stream** — "if a job reads 3 of 20 columns, Fluss sends only those 3,"
   claimed **up to 10× I/O/network/CPU** savings. This is the SAME principle as **VAJ-T7 source-fusion**
-  (don't materialize/transmit what the query doesn't need — Vajra parses `value`→typed cols in-source so the
+  (don't materialize/transmit what the query doesn't need — Zelox parses `value`→typed cols in-source so the
   raw value column is never materialized), and it is an **official Flink-ecosystem design** validating the
-  approach. Fluss pushes at the *storage* layer; Vajra pushes at the *source-parse* layer — same columnar-
+  approach. Fluss pushes at the *storage* layer; Zelox pushes at the *source-parse* layer — same columnar-
   end-to-end thesis (§6).
 - **Where it informs the epic:** (a) **VAJ-T7** — projection/parse pushdown into the columnar source is the
   right axis (Fluss + Polars + DataFusion all agree). (b) **VAJ-BF2** — Arrow IPC as the zero-copy streaming
   wire (Fluss uses exactly this) reinforces Arrow Flight shuffle. (c) **VAJ-BF3 / roadmap** — disaggregated
   storage/compute (Fluss + RW Hummock) is the scale-out frontier. **Honest scope:** Fluss is a *storage
-  system*, not an engine; Vajra doesn't adopt Fluss, it adopts the **columnar-pushdown + disaggregation
+  system*, not an engine; Zelox doesn't adopt Fluss, it adopts the **columnar-pushdown + disaggregation
   principles** it validates. Not yet measured head-to-head (no claim).
 
-### Synthesis — the "best of all" bar for Vajra (cite this in streaming/engine work)
-| Concern | Best source | Vajra target (build to this) |
+### Synthesis — the "best of all" bar for Zelox (cite this in streaming/engine work)
+| Concern | Best source | Zelox target (build to this) |
 |---|---|---|
 | Exactly-once | Flink barriers + RW barriers | Barrier-aligned union commit (T-EO-3), crash-proven ✅ |
 | Columnar source pushdown | **Fluss** (Arrow server-side projection) + Polars | **VAJ-T7 parse-in-source** — raw `value` never materialized (T1 green, opt-in) 🟡 |
@@ -363,12 +395,12 @@ Sources: https://fluss.apache.org/ · https://www.alibabacloud.com/blog/fluss-re
 | Incremental results | RW materialized views | Changelog/retraction mode → full MV maintenance ⬜ |
 | Vectorized hot path | Polars morsel-driven + DataFusion | Arrow/DataFusion vectorized, no-JVM (§6) ✅; add morsel scheduling ⬜ |
 | Query optimization | Polars/DataFusion optimizer | DataFusion optimizer; mine Polars' pushdown/CSE rigor ⬜ |
-| No-JVM footprint | (Vajra unique) | Arrow single-binary — the categorical memory/startup edge ✅ |
+| No-JVM footprint | (Zelox unique) | Arrow single-binary — the categorical memory/startup edge ✅ |
 
 **Prod-grade bar (STANDING):** every one of these must be *measured* head-to-head (Nexmark/TPC-DS/prod
 workloads) before claiming "better than Flink/Spark", path-dependence flagged. The win is the **union** —
 Flink's correctness + RW's decoupled state/MV incrementalism + Polars' vectorized single-node speed +
-Vajra's no-JVM Arrow core — that no single incumbent has all of.
+Zelox's no-JVM Arrow core — that no single incumbent has all of.
 
 ---
 
@@ -382,7 +414,7 @@ with in-process sibling **work-stealing**. `DataSourceExec::execute(partition)` 
 `self.preserve_order || self.partitioned_by_file_group`, in which case it returns `None` and each
 partition uses `WorkSource::Local(file_groups[partition])`.
 
-**Implication for a distributed engine (Vajra/Ballista-style):** when each output partition runs as an
+**Implication for a distributed engine (Zelox/Ballista-style):** when each output partition runs as an
 ISOLATED task (separate process, no in-process siblings), each task builds its own pool of ALL files
 and, with nobody to steal from, drains the whole pool → **every file is read once per partition → N×
 row duplication** for N file groups. Single-process (`--mode local`) is correct because real siblings
@@ -392,8 +424,8 @@ counts / duplicated rows) with NO error, on ANY file format, and is invisible to
 **Prod-grade fix:** in the per-task plan rewrite (worker/task runner), rebuild each `FileScanConfig`
 scan with `FileScanConfigBuilder::from(cfg).with_partitioned_by_file_group(true)`. This is DF54's own
 opt-out: it disables the shared work source so each partition reads only its assigned file group —
-exactly the fixed one-group-per-task model a distributed scheduler already assigns. (Vajra:
-`sail-execution/src/task_runner/core.rs::rewrite_parquet_adapters`.)
+exactly the fixed one-group-per-task model a distributed scheduler already assigns. (Zelox:
+`zelox-execution/src/task_runner/core.rs::rewrite_parquet_adapters`.)
 
 ## 9. Task placement across workers — even-spread vs fill-first (fetched 2026-07-08; cite for scheduling)
 The scheduler decision "which worker gets each of a stage's N task partitions" determines whether a
@@ -410,9 +442,112 @@ distributed stage actually parallelizes across nodes or collapses onto one. Two 
 - **Spark `spark.deploy.spreadOut`** (Standalone, **default `true`**): spread an app's executors across
   as many worker nodes as possible (better data locality + parallelism) rather than consolidating on
   few nodes. Spark's task scheduler then round-robins tasks across executors within locality levels.
-- **Synthesis for Vajra (VAJ-BF2 T-BF2.5):** the driver's `TaskSlotAssigner` was pure fill-first
+- **Synthesis for Zelox (VAJ-BF2 T-BF2.5):** the driver's `TaskSlotAssigner` was pure fill-first
   (`slots.iter_mut().find_map(pop)` drains worker[0] first) — measured cause of "all N window
   instances on one pod" (T2). Added an **even-spread policy** (pick the worker with the most free
-  slots; Flink's algorithm) gated on distributed streaming (`VAJRA_DISTRIBUTED_STREAM`/`VAJRA_EVEN_SPREAD`),
+  slots; Flink's algorithm) gated on distributed streaming (`ZELOX_DISTRIBUTED_STREAM`/`ZELOX_EVEN_SPREAD`),
   default fill-first so batch/scale-down behavior is unchanged. Cutting a stage boundary (T-BF2.2) is
   necessary but only *distributes* when paired with even-spread placement.
+
+## 8. Kafka source-read throughput — the FLIP-27 fetch model (fetched 2026-07-10; the source_read lever)
+Sources: rust-rdkafka docs.rs/GitHub (fede1024) · users.rust-lang.org "high performance kafka consumer" ·
+Flink FLIP-27 (cwiki) + KafkaPartitionSplitReader/SourceReaderBase · Flink DataStream Kafka connector docs.
+- **MEASURED (Zelox, WM_PROF SOURCE_POLL/BUILD split, local 5M):** source_read = poll 58% + per-message
+  bookkeeping 37% + Arrow build **5%**. The columnar build is NOT the bottleneck (as it should be); the
+  per-message CONSUME dominates.
+- **rust-rdkafka:** **`BaseConsumer` is considerably FASTER than `StreamConsumer` for small messages** —
+  StreamConsumer adds per-message channel/future overhead (the async convenience layer). High-throughput
+  path = BaseConsumer. (Our current code uses `StreamConsumer::stream()` + `.next().now_or_never()` = the
+  slow path for our small JSON events.) rust-rdkafka does NOT expose `rd_kafka_consume_batch` in the safe
+  API (batch drain needs the C FFI).
+- **Flink KafkaSource (FLIP-27):** `KafkaPartitionSplitReader` runs inside a DEDICATED fetcher thread
+  (`SourceReaderBase` spawns fetcher threads for the sync `SplitReader`); `consumer.poll()` returns
+  **MULTIPLE records per call** (plural, amortizes I/O — not single-record). One reader per split (partition).
+- **PROD-GRADE DESIGN for Zelox (synthesis — beats Flink):** per source instance (already 1/partition,
+  FLIP-27), a DEDICATED consume thread (std::thread / spawn_blocking, off the tokio runtime) runs a
+  **BaseConsumer** in a tight `poll()` loop, building **columnar Arrow batches** (our KafkaArrowBuilders,
+  alloc-free = the advantage Flink lacks — it deserializes per-record into JVM objects), handing FULL
+  batches to the async pipeline via a BOUNDED channel (backpressure = Flink credit-flow). + per-partition
+  `Vec<i64>` offsets (not HashMap) to kill the 37% bookkeeping. Net: match Flink's batched poll AND keep our
+  columnar/no-JVM edge ⇒ should EXCEED Flink's 5.07M. MEASURE via `KAFKA_BENCH` micro-bench (isolated read,
+  local/free) before wiring. CAUTION: the rewrite must preserve EO offset-commit, markers (watermark/
+  checkpoint/EndOfData), idleness, and all 3 paths (bounded/realtime/unbounded) — kafka/reader.rs.
+
+## 4b. Arrow Flight throughput — VALIDATED prod-grade columnar shuffle (research paper, fetched 2026-07-11)
+Source: **Benchmarking Apache Arrow Flight (arXiv 2204.03032 / ACM 10.1145/3527199.3527264)** + Arrow Flight
+format docs (arrow.apache.org/docs/format/Flight.html) + Ballista shuffle (§4 above). VALIDATED facts:
+- **Flight is ZERO-COPY**: Arrow RecordBatches cross process boundaries with NO ser/de (IPC = the wire format
+  = the memory format). The columnar-native exchange = Flight + IPC, no re-encode (matches Ballista §4).
+- **Throughput: ~1 GB/s SINGLE stream (localhost), up to ~10 GB/s at 16 PARALLEL streams** (parallelism is
+  THE scaling lever; >16 streams regresses). DoGet ~6 GB/s, DoPut ~4.8 GB/s over network.
+- Best practices: consistent schema client↔server; efficient Arrow types/encodings (fewer/narrower columns);
+  close streams; manage the allocator; leverage gRPC bidirectional HTTP/2.
+- **Zelox measurement (2026-07-11):** distributed streaming shuffle ≈ 1.5M ev/s × ~16 B/row ≈ **24 MB/s =
+  ~40× BELOW Flight's proven 1 GB/s single-stream** ⇒ Zelox's shuffle is transport-CONFIG-throttled, NOT
+  bandwidth/CPU-bound. ROOT CAUSE (code): the tonic CLIENT `do_get` used the DEFAULT 64 KiB HTTP/2 receive
+  window (rpc.rs) — a ~200 KiB coalesced batch exceeds the whole window ⇒ round-trip-latency-bound, INVARIANT
+  to batch size (measured: in-process exchange 3.07M vs Flight 1.55M ev/s, flat across 16k→64k batch rows).
+- **PROD-GRADE COLUMNAR SYNTHESIS (learn from ALL, not mirror one): (1)** large HTTP/2 receive window on the
+  read client (credit-based flow control — FLIP-2 / Flink network buffers as the CONCEPT, sized to Flight's
+  1 GB/s BDP, not copied); **(2)** keep the exchange ZERO-COPY = DROP gzip/zstd compression on the Flight
+  shuffle (defeats zero-copy + burns CPU; Arrow is already compact) and minimize the FlowEvent per-batch
+  re-encode (the null marker-column prepend, encoding.rs — send markers cheaply/out-of-band); **(3)** exploit
+  PARALLEL streams (Flight's 10× lever) for the N→M shuffle. Grounded in the Flight paper + Ballista + Arrow
+  IPC + credit-flow — the columnar/DataFusion-native design, per AIM.
+
+## 9. Frontier fetch 2026-07-16 (per-pillar grounding — Polars / Arroyo 0.15 / RisingWave 3.0)
+Fetched to ground the per-pillar map (docs/design/zelox-per-pillar-grounded-map.md) + answer
+"no-JVM/no-serde yet slow": the distributed lag is EXECUTION-MODEL, and every fast engine engineers the
+same three things Zelox must — batched source poll, morsel/credit backpressure, specialized state.
+
+- **Polars new streaming engine (1.31.1+, becoming default)** — sources: pola.rs / DeepWiki `5.2-streaming-engine`,
+  GH issue #20947. **Morsel-driven parallelism (TUM paper, same lineage as DuckDB/HyPer), 128k-row morsels.**
+  Hybrid **push/pull**: workers PULL morsels from a scheduler; **each operator compiles to an async state
+  machine**; a **WaitToken / SemaphorePermit per morsel = EXACT backpressure** (bounded in-flight). Spillable
+  sinks: out-of-core group-by / equi-join / sort on a **lock-free memory manager + spill-to-disk + OOC
+  multiplexer** ⇒ "usually faster AND uses less memory." **Zelox implication:** the per-morsel semaphore is
+  the memory-bound discipline (mirrors Flink credit-flow) — our bounded mpsc is the analog; make the shuffle
+  edge credit/permit-based + finish F5 spill for OOC. Backpressure is a MEMORY pillar lever, not just flow.
+- **Arroyo 0.15 (Rust + Arrow, our exact stack)** — sources: arroyo.dev blog `why-arrow-and-datafusion`,
+  `how-arroyo-beats-flink-at-sliding-windows`, GH ArroyoSystems/arroyo. Beats Flink **5×+ (10× sliding
+  windows)** with **near-constant throughput across slide/window sizes**. Key architectural lever: **operators
+  store state in worker memory using SPECIALIZED data structures optimized per access pattern**, vs Flink's
+  **generic abstracted state backends (Map/List)** — enabling deeper per-op optimization (e.g. time-based
+  window eviction). Arrow columnar + SIMD. 0.15.0 adds Iceberg. **Zelox implication:** our windowed-agg on
+  DataFusion grouped-hash is generic; a specialized time-eviction window structure is the sliding-window lever
+  (matches Arroyo's win). Confirms Rust+Arrow CAN beat Flink 5× — so our gap is mechanism, not language.
+- **RisingWave 3.0** — sources: risingwave.com backpressure glossary/blog, risingwavelabs streaming-overview,
+  dataengineerthings sub-100ms-S3. **Decoupled compute+storage**, long-running **actors**, shared **S3 state
+  storage** (like Flink 2.0 ForSt). **Backpressure = network-buffer management: a slow downstream signals
+  upstream to slow transmission, bounding in-flight data → prevents OOM** (credit-flow analog). Streaming
+  connectors detect backpressure for decentralized ingest. Sub-100ms latency on S3-decoupled state.
+  **Zelox implication:** the network-buffer backpressure between operators is exactly the shuffle-edge credit
+  lever (VAJ-BF2.4); S3-decoupled state validates our F5/inc-ckpt object-store direction.
+
+## 10. Spark 4.2 Real-Time Mode (fetched 2026-07-17, for the PySpark upgrade)
+Sources: databricks.com/blog/introducing-apache-spark-42 · PySpark 4.2 DataStreamWriter.trigger docs.
+- Spark 4.2 extends **Real-Time Mode to PySpark but STATELESS-only** (no Python UDFs); **stateful RTM
+  (aggregations / stream-stream joins / dedup) is deferred to Spark 4.3**. Update output mode ONLY.
+- **CORRECTION (2026-07-17, web-verified — my earlier "no dedicated RTM trigger param" was WRONG):** RTM
+  is a **NEW dedicated trigger type**, NOT a config: `df.writeStream.trigger(realTime='5 seconds')` /
+  `Trigger.RealTime("<duration>")`, first in PySpark at `4.2.0.dev5`. The duration is a **CHECKPOINT
+  interval (min 5s, default 5min), NOT a latency target**. RTM = long-running task per input partition,
+  record flows source→transform→sink on arrival (introduced Scala 4.1.0, PySpark-native 4.2). Sources:
+  databricks.com/blog/introducing-real-time-mode-apache-sparktm-structured-streaming ·
+  medium @neuw84 "Spark RTM mode" · docs.databricks.com/.../structured-streaming/real-time/setup.
+- **Zelox implication:** Zelox's `StreamDriver::Realtime` engine (streaming.rs:63) is STATEFUL windowed
+  and per-epoch-committed ⇒ **ahead of 4.2's stateless-only RTM** (it does what Spark defers to 4.3). BUT
+  it is entered ONLY via the pre-4.2 `.trigger(continuous=...)` (`ContinuousCheckpointInterval` proto
+  field 8); Zelox's vendored `commands.proto` trigger oneof has **NO `real_time` field**, so a 4.2 client
+  calling `.trigger(realTime=...)` is NOT routed to Zelox's realtime engine (falls through to micro-batch).
+  PRODGRADE WIRING (not done): (1) add `real_time` to commands.proto trigger oneof (match 4.2 field #);
+  (2) `spec::StreamTrigger::RealTime{checkpoint_interval}` + decode in proto/plan.rs; (3) route
+  `Trigger::RealTime(dur)`→`StreamDriver::Realtime` (dur = commit/checkpoint interval, min 5s, per 4.2),
+  enforce update mode; (4) accept realTime for stateful/windowed too = documented SUPERSET (our advantage,
+  = Spark 4.3 preview); (5) test `.trigger(realTime='5s')` from 4.2 client → same 15/150000.
+- 4.2 client compat (batch + continuous via old triggers) + version bump done + merged (8fac299e). The NEW
+  `realTime` trigger surface is now WIRED + kind-validated (commit e183cb22): proto field
+  `real_time_batch_duration=100` (verified vs apache/spark v4.2.0-rc1) → `spec::StreamTrigger::RealTime` →
+  Zelox realtime engine. Client check: pyspark 4.2.0 `.trigger(realTime=...)` emits exactly that field.
+  Kind (rt42 image): `.trigger(realTime="5 seconds")` paced no-closer = 15 windows / 150000 / group=10 /
+  OVER_EMIT=NO == Flink. Zelox realtime = STATEFUL windowed ⇒ SUPERSET of 4.2's stateless-only RTM.

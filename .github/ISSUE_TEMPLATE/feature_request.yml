@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a capability — often "Spark/Flink does X, Vajra should too".
+description: Propose a capability — often "Spark/Flink does X, Zelox should too".
 labels: ["enhancement", "triage"]
 body:
   - type: textarea
@@ -13,7 +13,7 @@ body:
     id: proposal
     attributes:
       label: Proposed solution
-      description: What should Vajra do? API shape, semantics, expected result.
+      description: What should Zelox do? API shape, semantics, expected result.
     validations:
       required: false
   - type: dropdown

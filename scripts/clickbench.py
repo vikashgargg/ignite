@@ -1,7 +1,7 @@
 """
-Vajra ClickBench Benchmark
+Zelox ClickBench Benchmark
 ===========================
-Runs the standard ClickBench 43 OLAP queries against a running Vajra server and
+Runs the standard ClickBench 43 OLAP queries against a running Zelox server and
 reports per-query timing plus a comparison summary.
 
 The benchmark uses the official ClickBench `hits` Parquet dataset (100M rows,
@@ -159,7 +159,7 @@ def download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"  Downloading {url} → {dest} ...", end="", flush=True)
     t0 = time.time()
-    req = urllib.request.Request(url, headers={"User-Agent": "vajra-clickbench/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "zelox-clickbench/1.0"})
     with urllib.request.urlopen(req) as resp, dest.open("wb") as fh:
         fh.write(resp.read())
     print(f" {time.time() - t0:.1f}s, {dest.stat().st_size // 1024 // 1024} MB")
@@ -194,7 +194,7 @@ def main() -> None:
     # Resolve data directory
     s3_data = DATA_DIR.startswith("s3://") or DATA_DIR.startswith("s3a://")
     if s3_data:
-        # Object-store path: the server (Vajra) reads it; no local existence check.
+        # Object-store path: the server (Zelox) reads it; no local existence check.
         data_path = DATA_DIR.rstrip("/")
         print(f"Using S3 data at {data_path}")
     elif DATA_DIR:
@@ -281,7 +281,7 @@ def main() -> None:
 
     print()
     print("═" * 60)
-    print("  VAJRA CLICKBENCH RESULTS")
+    print("  ZELOX CLICKBENCH RESULTS")
     print("═" * 60)
     print(f"  Queries run  : {len(results)}/43")
     print(f"  Passed       : {len(passed)}")

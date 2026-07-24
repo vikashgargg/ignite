@@ -1,5 +1,5 @@
--- Flink side of the Vajra-vs-Flink LATENCY head-to-head (dimension S3).
--- IDENTICAL work to scripts/stream_latency_query.py (Vajra): Kafka lat_in -> raw value
+-- Flink side of the Zelox-vs-Flink LATENCY head-to-head (dimension S3).
+-- IDENTICAL work to scripts/stream_latency_query.py (Zelox): Kafka lat_in -> raw value
 -- passthrough -> Kafka lat_out, CONTINUOUS streaming (unbounded). The producer embeds a
 -- wall-clock produce_ts in each value; the shared latency consumer computes now - produce_ts
 -- on lat_out and reports p50/p99/p99.9/max. `format=raw` passes the whole value through

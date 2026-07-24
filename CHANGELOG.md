@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Vajra are documented here.
+All notable changes to Zelox are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   barriers** in the exchange + **exact source-signaled idleness** (librdkafka `PartitionEOF` = Flink
   `WatermarkStatus.IDLE`) + a **crash-recovery emit floor**. 16-partition continuous `kill -9` → dup=0, sum
   exact, clean==crash.
-- **Final-window completeness** — opt-in `VAJRA_COMPLETE_ON_END` (Flink `scan.bounded.mode` parity): flush all
+- **Final-window completeness** — opt-in `ZELOX_COMPLETE_ON_END` (Flink `scan.bounded.mode` parity): flush all
   windows at end-of-input while keeping Spark availableNow semantics by default (superset). EKS: 10 windows/100M.
 - **Parallel Kafka sink** (Flink `KafkaSink` parity): fixes a **15/16-partition data-loss bug** (a single sink
   task read only input partition 0) + ~300× throughput. EKS: 100M/100M delivered @ 1.67M msg/s.
@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **P1** — Kafka → 10 s windowed aggregation → Parquet on S3, **exactly-once including hard-crash
     recovery** (`kill -9` → resume from S3 checkpoint): rows=9000, duplicates=0, sums bit-identical.
   - **P4** — batch 200M rows → write Parquet on S3 → read + aggregate, vs Apache Spark 3.5.3:
-    Vajra **5.92 s / 3.44 GiB** vs Spark **36.94 s / 8.1 GiB** — ~6.2× faster, ~2.4× less memory,
+    Zelox **5.92 s / 3.44 GiB** vs Spark **36.94 s / 8.1 GiB** — ~6.2× faster, ~2.4× less memory,
     bit-identical output.
 
 ### Changed
@@ -58,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flagged.
 - **Prod-grade structured logging**: all library `eprintln!` scaffolding replaced with the `log`
   facade (`env_logger`, `RUST_LOG` filtering, timestamp/level/target), wired at every server
-  entrypoint. Removed the ad-hoc `VAJRA_F5_DEBUG` env gate (log levels gate verbosity instead).
+  entrypoint. Removed the ad-hoc `ZELOX_F5_DEBUG` env gate (log levels gate verbosity instead).
 
 ### Fixed
 - Per-partition watermark (Flink `withIdleness`) prevents premature window close on multi-partition

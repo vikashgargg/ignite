@@ -1,24 +1,24 @@
 """
-Vajra ClickBench runner — faithful to the ClickHouse/ClickBench `sail` harness.
+Zelox ClickBench runner — faithful to the ClickHouse/ClickBench `zelox` harness.
 
 This mirrors LakeSail's published methodology *exactly* so the results are
-directly comparable (https://github.com/ClickHouse/ClickBench/tree/main/sail):
+directly comparable (https://github.com/ClickHouse/ClickBench/tree/main/zelox):
 
   * Reads the official `hits` Parquet (single file, 99.99M rows, ~14.78 GB).
   * Runs each of the 43 queries via Spark Connect: `spark.sql(q).toPandas()`.
   * 3 runs per query; emits ClickBench-format JSON  [[r1, r2, r3], ...].
   * The "hot" (best-of-3) total is what ClickBench reports.
 
-The ONLY difference vs sail's harness is the server the Spark Connect client
-points at (Vajra instead of LakeSail) — the query set and protocol are identical,
+The ONLY difference vs zelox's harness is the server the Spark Connect client
+points at (Zelox instead of LakeSail) — the query set and protocol are identical,
 because both implement Spark Connect. Run both on the same c6a.4xlarge for a true
-apples-to-apples comparison; the shared DataFusion core means Vajra should land
+apples-to-apples comparison; the shared DataFusion core means Zelox should land
 within noise of LakeSail's published numbers.
 
 Usage:
     SPARK_REMOTE=sc://localhost:50051 \
     CLICKBENCH_HITS=/data/hits.parquet \
-    python benchmarks/clickbench/run.py > results/vajra_c6a.4xlarge.json
+    python benchmarks/clickbench/run.py > results/zelox_c6a.4xlarge.json
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def main() -> int:
     results: list[list[float]] = []
 
     for i, q in enumerate(queries, 1):
-        # sail applies the same backreference fixup for REGEXP_REPLACE.
+        # zelox applies the same backreference fixup for REGEXP_REPLACE.
         q = re.sub(r"\\(\d)", r"$\1", q)
         runs: list[float] = []
         for _ in range(TRIES):
@@ -61,7 +61,7 @@ def main() -> int:
             try:
                 spark.sql(q).toPandas()
                 runs.append(round(timeit.default_timer() - start, 3))
-            except Exception as exc:  # noqa: BLE001 — match sail: record a null
+            except Exception as exc:  # noqa: BLE001 — match zelox: record a null
                 print(f"Q{i} FAILED: {exc}", file=sys.stderr)
                 runs.append(None)  # type: ignore[arg-type]
         print(f"Q{i:>2}: {runs}", file=sys.stderr)

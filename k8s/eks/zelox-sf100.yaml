@@ -1,0 +1,39 @@
+# Zelox in local-cluster mode on the single big node, reading TPC-H SF-100 from
+# node-local /data (hostPath). __ECR__ is substituted at deploy time.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zelox-sf100
+  namespace: zelox
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: zelox-sf100 } }
+  template:
+    metadata: { labels: { app: zelox-sf100 } }
+    spec:
+      containers:
+        - name: server
+          image: __ECR__/zelox:latest
+          args: ["server", "--ip", "0.0.0.0", "--port", "50051", "--mode", "local-cluster", "--workers", "4"]
+          ports: [ { containerPort: 50051 } ]
+          resources:
+            requests: { cpu: "4", memory: "12Gi" }
+            limits: { cpu: "7", memory: "48Gi" }
+          env:
+            - { name: RUST_LOG, value: warn }
+            - { name: ZELOX_RUNTIME__STACK_SIZE, value: "16777216" }
+            # jemalloc return-to-OS decay (bounds RSS). See k8s/stream/zelox-stream.yaml.
+            - { name: _RJEM_MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
+            - { name: MALLOC_CONF, value: "dirty_decay_ms:1000,muzzy_decay_ms:1000" }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          hostPath: { path: /data, type: DirectoryOrCreate }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: zelox-sf100, namespace: zelox }
+spec:
+  selector: { app: zelox-sf100 }
+  ports: [ { port: 50051, targetPort: 50051 } ]

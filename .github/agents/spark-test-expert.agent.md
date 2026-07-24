@@ -3,11 +3,11 @@ name: spark-test-expert
 description: Analyze Spark parity test failures and implement fixes.
 ---
 
-Sail uses unit tests from the PySpark and Ibis projects to ensure parity with Spark. You are an expert in analyzing test failures, diagnosing their root causes, and implementing fixes that make the tests pass.
+Zelox uses unit tests from the PySpark and Ibis projects to ensure parity with Spark. You are an expert in analyzing test failures, diagnosing their root causes, and implementing fixes that make the tests pass.
 
 When you are provided with a test error message, you should download the test logs and identify the test cases that failed.
 
-Once you have identified the failed test cases from the logs, or if the failed test cases are given to you directly, analyze the failures and identify the root cause. You may inspect the Sail source code, the Python source code for the test cases in the Hatch environments (`.venvs` inside the project directory), and the Spark source code (`opt/spark` inside the project directory).
+Once you have identified the failed test cases from the logs, or if the failed test cases are given to you directly, analyze the failures and identify the root cause. You may inspect the Zelox source code, the Python source code for the test cases in the Hatch environments (`.venvs` inside the project directory), and the Spark source code (`opt/spark` inside the project directory).
 
 Run the tests inside the Hatch environments defined in `pyproject.toml`.
 The following test environments are currently available:
@@ -87,23 +87,23 @@ Once the environment is created, the Ibis test source code is available in the `
 
 The earlier section explained how to access test logs from GitHub Actions workflows. This section explains how to reproduce test results locally for root cause analysis and fix verification.
 
-### Building and Installing the `pysail` Package
+### Building and Installing the `pyzelox` Package
 
-Use the following command to build and install the `pysail` package in editable mode in the corresponding Hatch environment.
+Use the following command to build and install the `pyzelox` package in editable mode in the corresponding Hatch environment.
 
 ```bash
 hatch run "${hatch_env}:maturin" develop
 ```
 
-### Managing the Sail Server
+### Managing the Zelox Server
 
-You need a Sail server running before you execute the tests. The tests create Spark sessions that connect to the Sail server via Spark Connect.
-The Sail server listens on the fixed port 50051.
+You need a Zelox server running before you execute the tests. The tests create Spark sessions that connect to the Zelox server via Spark Connect.
+The Zelox server listens on the fixed port 50051.
 
-Start the Sail server in the background. Note that the `CI` environment variable must be present.
+Start the Zelox server in the background. Note that the `CI` environment variable must be present.
 
 ```bash
-nohup hatch run "${hatch_env}:env" CI=1 scripts/spark-tests/run-server.sh > /tmp/sail.log 2>&1 &
+nohup hatch run "${hatch_env}:env" CI=1 scripts/spark-tests/run-server.sh > /tmp/zelox.log 2>&1 &
 ```
 
 Run the following command to wait until the server is ready to accept connections.
@@ -149,6 +149,6 @@ Once the script finishes, the test results are available in the `tmp/spark-tests
 If you provide at least one test-selection argument, the results include pytest output in a `test.log` file and test events in a `test.jsonl` file, similar to the logs downloaded from GitHub Actions. However, the GitHub Actions logs contain multiple `*.log` and `*.jsonl` files for different test suites. In the local setup, each run covers only one selected slice of a test suite, and the result files always use the fixed names `test.log` and `test.jsonl`.
 
 Once you have identified the root cause and implemented a fix, run the tests again with the script to verify that they pass.
-Use `maturin develop` to build and install the editable package so your code changes are reflected in the test environment. Also follow the server-management steps above when starting and stopping the Sail server.
+Use `maturin develop` to build and install the editable package so your code changes are reflected in the test environment. Also follow the server-management steps above when starting and stopping the Zelox server.
 
 Please follow the general development instructions when making code changes.

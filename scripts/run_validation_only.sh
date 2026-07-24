@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
-# Validation-only runner: assumes vajra:latest already built in both Docker and Apple Container.
+# Validation-only runner: assumes zelox:latest already built in both Docker and Apple Container.
 # Tests all three execution modes: k8s-cluster, apple-container-local, apple-container-local-cluster.
 #
 # Prerequisites:
 #   make smoke-setup          (creates .venvs/smoke with the right Python version)
-#   make docker-build         (builds vajra:latest Docker image)
-#   make container-build      (builds vajra:latest Apple Container image)
+#   make docker-build         (builds zelox:latest Docker image)
+#   make container-build      (builds zelox:latest Apple Container image)
 set -euo pipefail
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 
-VAJRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LOG_DIR="/tmp/vajra-validation"
+ZELOX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="/tmp/zelox-validation"
 mkdir -p "$LOG_DIR"
 
 # ── Smoke venv ────────────────────────────────────────────────────────────────
-SMOKE_PYTHON="$VAJRA_DIR/.venvs/smoke/bin/python"
+SMOKE_PYTHON="$ZELOX_DIR/.venvs/smoke/bin/python"
 if [[ ! -x "$SMOKE_PYTHON" ]]; then
     echo "ERROR: smoke venv not found. Run: make smoke-setup" >&2
     exit 1
 fi
 
-SCORECARD_PY="$VAJRA_DIR/scripts/spark_compat_score.py"
+SCORECARD_PY="$ZELOX_DIR/scripts/spark_compat_score.py"
 # Derive PYTHONPATH from the venv itself — no need to guess Python version.
-PYTHONPATH_VAL="$(ls -d "$VAJRA_DIR"/.venvs/smoke/lib/python*/site-packages 2>/dev/null | head -1)"
-KIND_CLUSTER="vajra-dev"
+PYTHONPATH_VAL="$(ls -d "$ZELOX_DIR"/.venvs/smoke/lib/python*/site-packages 2>/dev/null | head -1)"
+KIND_CLUSTER="zelox-dev"
 PASS=0
 FAIL=0
 
@@ -37,7 +37,7 @@ run_scorecard() {
     local label="$1"
     local logfile="$LOG_DIR/scorecard_${label}.log"
     log "Running scorecard ($label) → $logfile"
-    mkdir -p /tmp/vajra  # ensure shared mount point exists
+    mkdir -p /tmp/zelox  # ensure shared mount point exists
     # Use || true so scorecard's sys.exit(1) on test failures does NOT abort this
     # script (set -euo pipefail would otherwise kill us here).
     PYTHONPATH="$PYTHONPATH_VAL" SPARK_REMOTE="sc://localhost:50051" \
@@ -70,25 +70,25 @@ wait_port() {
 section "PHASE 1: Kubernetes cluster mode (kind)"
 
 kind delete cluster --name "$KIND_CLUSTER" 2>/dev/null || true
-mkdir -p /tmp/vajra /private/tmp/vajra /tmp/sail /private/tmp/sail
+mkdir -p /tmp/zelox /private/tmp/zelox /tmp/zelox /private/tmp/zelox
 
 log "Creating kind cluster '$KIND_CLUSTER'..."
 kind create cluster --name "$KIND_CLUSTER" \
-    --config "$VAJRA_DIR/k8s/kind-config.yaml" \
+    --config "$ZELOX_DIR/k8s/kind-config.yaml" \
     2>&1 | tee "$LOG_DIR/kind-setup.log"
 
-log "Loading vajra:latest → kind..."
-kind load docker-image vajra:latest --name "$KIND_CLUSTER" \
+log "Loading zelox:latest → kind..."
+kind load docker-image zelox:latest --name "$KIND_CLUSTER" \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Applying k8s manifests..."
-kubectl apply -f "$VAJRA_DIR/k8s/sail.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
+kubectl apply -f "$ZELOX_DIR/k8s/zelox.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Waiting for deployment (up to 3 min)..."
-if kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=180s \
+if kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=180s \
         2>&1 | tee -a "$LOG_DIR/kind-setup.log"; then
     log "Starting port-forward on 50051..."
-    kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 \
+    kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 \
         > "$LOG_DIR/portforward.log" 2>&1 &
     PF_PID=$!
     sleep 5
@@ -108,15 +108,15 @@ kind delete cluster --name "$KIND_CLUSTER" 2>/dev/null || true
 # ─── PHASE 2: Apple Container — local mode ───────────────────────────────────
 section "PHASE 2: Apple Container local mode"
 
-container stop vajra 2>/dev/null || true
-container rm vajra 2>/dev/null || true
-mkdir -p /tmp/vajra
+container stop zelox 2>/dev/null || true
+container rm zelox 2>/dev/null || true
+mkdir -p /tmp/zelox
 
 log "Starting container (local mode)..."
-container run --rm --detach --name vajra \
+container run --rm --detach --name zelox \
     -p 50051:50051 \
-    -v /tmp/vajra:/tmp/vajra \
-    vajra:latest \
+    -v /tmp/zelox:/tmp/zelox \
+    zelox:latest \
     > "$LOG_DIR/container-local-cid.log" 2>&1
 
 if wait_port apple_local 18; then
@@ -125,21 +125,21 @@ else
     fail "apple_container_local: container not ready on port 50051"
 fi
 
-container stop vajra 2>/dev/null || true
+container stop zelox 2>/dev/null || true
 sleep 3
 
 # ─── PHASE 3: Apple Container — local-cluster mode ───────────────────────────
 section "PHASE 3: Apple Container local-cluster mode"
 
-container stop vajra-cluster 2>/dev/null || true
-container rm vajra-cluster 2>/dev/null || true
+container stop zelox-cluster 2>/dev/null || true
+container rm zelox-cluster 2>/dev/null || true
 
 log "Starting container (local-cluster mode)..."
-container run --rm --detach --name vajra-cluster \
+container run --rm --detach --name zelox-cluster \
     -p 50051:50051 \
-    -e SAIL_MODE=local-cluster \
-    -v /tmp/vajra:/tmp/vajra \
-    vajra:latest \
+    -e ZELOX_MODE=local-cluster \
+    -v /tmp/zelox:/tmp/zelox \
+    zelox:latest \
     > "$LOG_DIR/container-cluster-cid.log" 2>&1
 
 if wait_port apple_cluster 18; then
@@ -148,7 +148,7 @@ else
     fail "apple_container_local_cluster: container not ready"
 fi
 
-container stop vajra-cluster 2>/dev/null || true
+container stop zelox-cluster 2>/dev/null || true
 
 # ─── FINAL REPORT ─────────────────────────────────────────────────────────────
 section "FINAL REPORT"
@@ -169,4 +169,4 @@ if [ $FAIL -gt 0 ]; then
     log "✗ $FAIL mode(s) FAILED — see logs above"
     exit 1
 fi
-log "✓ All $PASS/3 modes PASSED — Vajra is a full Spark replacement"
+log "✓ All $PASS/3 modes PASSED — Zelox is a full Spark replacement"

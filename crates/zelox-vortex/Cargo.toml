@@ -1,0 +1,15 @@
+[package]
+name = "zelox-vortex"
+version = { workspace = true }
+edition = { workspace = true }
+
+[dependencies]
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+
+async-trait = { workspace = true }
+datafusion = { workspace = true }
+
+# TODO(6.4): when disk space allows and vortex-datafusion is confirmed
+# compatible with DataFusion 53.x, add:
+#   vortex-datafusion = "0.73"
+#   vortex-file = "0.73"

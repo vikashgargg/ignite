@@ -12,7 +12,7 @@ deterministically from it (row N has value N + a timestamp derived from N — ve
 loop uses to replay the exact same data after a restart.
 
 ## Model (grounded in Spark / Flink / Fluss — researched 2026-06-10)
-- **Spark Structured Streaming** (micro-batch — Vajra's model): a checkpoint dir with an
+- **Spark Structured Streaming** (micro-batch — Zelox's model): a checkpoint dir with an
   **`offsets/` WAL** (the offset range of batch N, written *before* processing) and a
   **`commits/` log** (written *after* batch N is durable in the sink). Recovery: resume
   from the latest `offsets/`; if `commits/N` is missing, **reprocess batch N**; sinks must
@@ -26,8 +26,8 @@ loop uses to replay the exact same data after a restart.
 **Unifying principle: the committed (source offset + operator state) must be tied to
 *durable sink output*.** That's what makes replay exactly-once rather than at-least/at-most.
 
-### Critical-path consequence for Vajra (important)
-End-to-end exactly-once is **gated by a durable/transactional sink**, which Vajra does not
+### Critical-path consequence for Zelox (important)
+End-to-end exactly-once is **gated by a durable/transactional sink**, which Zelox does not
 have yet (memory sink = in-process/non-durable; file/listing sink rejects streaming input
 — see STREAMING.md). So the honest sequencing is:
 1. **Durable sink** (file/Delta streaming write, idempotent or 2-phase) — *prerequisite*.
@@ -39,9 +39,9 @@ replays from the last *generated* offset instead of from 0 — at-least-once wit
 idempotent sink), not strict exactly-once. The `startOffset` primitive (landed) + the
 offset WAL below deliver that; strict exactly-once follows once the sink lands.
 
-Vajra already has the right substrate: the **flow-event marker** stream
+Zelox already has the right substrate: the **flow-event marker** stream
 ([streaming-watermark.md](streaming-watermark.md)) and a per-batch checkpoint writer in
-`StreamingQuery::run` (`crates/sail-spark-connect/src/streaming.rs`).
+`StreamingQuery::run` (`crates/zelox-spark-connect/src/streaming.rs`).
 
 ## The missing piece: a micro-batch execution coordinator (key finding 2026-06-10)
 Investigation showed offset commit/restore **cannot be cleanly wired onto the current
@@ -101,6 +101,6 @@ primitives exist; the coordinator + the trait are the focused build.
 ## Scope / honesty
 Source-offset recovery (A) gives exactly-once for **stateless** streaming and is the
 tractable next milestone. Operator-state recovery (B) is the larger half (state
-serialization for each operator). Until both land, Vajra is **batch-id-continuity +
+serialization for each operator). Until both land, Zelox is **batch-id-continuity +
 deterministic-replay capable**, not exactly-once — and we must not claim reliability
 parity with Flink/Spark until A+B are done and the tests above pass.

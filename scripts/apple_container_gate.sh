@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# VAJRA-K1 — Apple `container` local smoke gate.
+# ZELOX-K1 — Apple `container` local smoke gate.
 #
 # Proves the SAME published multi-arch image that runs on EKS also runs on Apple `container`
 # (native macOS arm64 runtime, Linux/arm64 VM). One command, exits 0 = green.
 #
 #   scripts/apple_container_gate.sh [IMAGE]
-#   IMAGE defaults to ghcr.io/vikashgargg/ignite:edge (override to test a local build or a tag).
+#   IMAGE defaults to ghcr.io/vikashgargg/zelox:edge (override to test a local build or a tag).
 #
 # Requires: macOS with the `container` CLI (>=1.0.0) and a Python with pyspark-client installed
-# (a Vajra venv, e.g. ~/.local/lib/vajra/venv, or any venv with `pip install pyspark`).
+# (a Zelox venv, e.g. ~/.local/lib/zelox/venv, or any venv with `pip install pyspark`).
 set -euo pipefail
 
-IMAGE="${1:-ghcr.io/vikashgargg/ignite:edge}"
-NAME="vajra-gate"
+IMAGE="${1:-ghcr.io/vikashgargg/zelox:edge}"
+NAME="zelox-gate"
 PORT="50051"
-PY="${VAJRA_PY:-python3}"
+PY="${ZELOX_PY:-python3}"
 
 log() { printf '\n\033[1;36m[gate]\033[0m %s\n' "$*"; }
 cleanup() { container stop "$NAME" >/dev/null 2>&1 || true; container rm "$NAME" >/dev/null 2>&1 || true; }
@@ -28,7 +28,7 @@ container system start >/dev/null 2>&1 || true
 log "pulling image: $IMAGE"
 container image pull "$IMAGE"
 
-log "starting Vajra server in a container"
+log "starting Zelox server in a container"
 cleanup
 container run --rm --detach --name "$NAME" -p "${PORT}:${PORT}" "$IMAGE" server --ip 0.0.0.0 --mode local >/dev/null
 

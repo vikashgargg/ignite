@@ -97,7 +97,7 @@ jobs:
           retention-days: 1
 
       - name: Set Up Hatch Environment
-        run: hatch run install-pysail
+        run: hatch run install-pyzelox
 
       - name: Run Tests
-        run: hatch run pytest --pyargs pysail
+        run: hatch run pytest --pyargs pyzelox

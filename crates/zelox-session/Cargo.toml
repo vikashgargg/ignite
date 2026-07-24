@@ -1,0 +1,56 @@
+[package]
+name = "zelox-session"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common = { path = "../zelox-common" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-catalog = { path = "../zelox-catalog" }
+zelox-catalog-memory = { path = "../zelox-catalog-memory" }
+zelox-catalog-system = { path = "../zelox-catalog-system" }
+zelox-catalog-iceberg = { path = "../zelox-catalog-iceberg" }
+zelox-catalog-unity = { path = "../zelox-catalog-unity" }
+zelox-catalog-onelake = { path = "../zelox-catalog-onelake" }
+zelox-catalog-glue = { path = "../zelox-catalog-glue" }
+zelox-catalog-hms = { path = "../zelox-catalog-hms" }
+zelox-data-source = { path = "../zelox-data-source" }
+zelox-delta-lake = { path = "../zelox-delta-lake" }
+zelox-iceberg = { path = "../zelox-iceberg" }
+zelox-vortex = { path = "../zelox-vortex" }
+zelox-logical-plan = { path = "../zelox-logical-plan" }
+zelox-logical-optimizer = { path = "../zelox-logical-optimizer" }
+zelox-physical-plan = { path = "../zelox-physical-plan" }
+zelox-physical-optimizer = { path = "../zelox-physical-optimizer" }
+zelox-plan = { path = "../zelox-plan" }
+zelox-execution = { path = "../zelox-execution" }
+zelox-python-udf = { path = "../zelox-python-udf" }
+zelox-object-store = { path = "../zelox-object-store" }
+zelox-plan-lakehouse = { path = "../zelox-plan-lakehouse" }
+zelox-server = { path = "../zelox-server" }
+zelox-cache = { path = "../zelox-cache" }
+zelox-telemetry = { path = "../zelox-telemetry" }
+zelox-sql-analyzer = { path = "../zelox-sql-analyzer" }
+
+async-trait = { workspace = true }
+readonly = { workspace = true }
+thiserror = { workspace = true }
+fastrace = { workspace = true }
+log = { workspace = true }
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+datafusion-physical-expr = { workspace = true }
+secrecy = { workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }
+indexmap = { workspace = true }
+futures = { workspace = true }
+async-stream = { workspace = true }
+pyo3 = { workspace = true }
+arrow-pyarrow = { workspace = true }
+arrow = { workspace = true }

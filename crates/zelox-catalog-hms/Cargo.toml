@@ -1,0 +1,32 @@
+[package]
+name = "zelox-catalog-hms"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-catalog = { path = "../zelox-catalog" }
+zelox-common = { path = "../zelox-common" }
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+
+arrow = { workspace = true }
+async-trait = { workspace = true }
+bitflags = { workspace = true }
+chrono = { workspace = true }
+datafusion = { workspace = true }
+futures = { workspace = true }
+hive_metastore = { workspace = true }
+libloading = { workspace = true }
+log = { workspace = true }
+pilota = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+volo = { workspace = true }
+volo-thrift = { workspace = true }
+
+[dev-dependencies]
+arrow = { workspace = true }
+tempfile = { workspace = true }
+testcontainers = { workspace = true }

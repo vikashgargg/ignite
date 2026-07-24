@@ -5,7 +5,7 @@ rank: 5
 
 # Data Sources
 
-Sail supports various data sources for reading and writing.
+Zelox supports various data sources for reading and writing.
 
 You can use the `SparkSession.read`, `DataFrame.write`, and `DataFrame.writeTo()` API to load and save data in different
 formats.

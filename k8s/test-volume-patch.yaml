@@ -1,33 +1,33 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vajra-spark-server
+  name: zelox-spark-server
 spec:
   template:
     spec:
       volumes:
         - name: data
           hostPath:
-            path: /tmp/sail
+            path: /tmp/zelox
             type: DirectoryOrCreate
         - name: pytest-data
           hostPath:
-            path: /private/tmp/sail
+            path: /private/tmp/zelox
             type: DirectoryOrCreate
       containers:
         - name: server
           volumeMounts:
             - name: data
-              mountPath: /tmp/sail
+              mountPath: /tmp/zelox
             - name: pytest-data
-              mountPath: /private/tmp/sail
+              mountPath: /private/tmp/zelox
           env:
-            - name: SAIL_KUBERNETES__WORKER_POD_TEMPLATE
+            - name: ZELOX_KUBERNETES__WORKER_POD_TEMPLATE
               value: |
                 {
                   "metadata": {
                     "labels": {
-                      "custom-label": "sail-worker",
+                      "custom-label": "zelox-worker",
                       "environment": "development",
                       "component": "spark-worker"
                     }
@@ -37,14 +37,14 @@ spec:
                       {
                         "name": "data",
                         "hostPath": {
-                          "path": "/tmp/sail",
+                          "path": "/tmp/zelox",
                           "type": "DirectoryOrCreate"
                         }
                       },
                       {
                         "name": "pytest-data",
                         "hostPath": {
-                          "path": "/private/tmp/sail",
+                          "path": "/private/tmp/zelox",
                           "type": "DirectoryOrCreate"
                         }
                       }
@@ -55,11 +55,11 @@ spec:
                         "volumeMounts": [
                           {
                             "name": "data",
-                            "mountPath": "/tmp/sail"
+                            "mountPath": "/tmp/zelox"
                           },
                           {
                             "name": "pytest-data",
-                            "mountPath": "/private/tmp/sail"
+                            "mountPath": "/private/tmp/zelox"
                           }
                         ]
                       }

@@ -1,6 +1,6 @@
-# Vajra streaming — throughput (first data point)
+# Zelox streaming — throughput (first data point)
 
-A real, reproducible micro-benchmark of Vajra's Structured Streaming micro-batch
+A real, reproducible micro-benchmark of Zelox's Structured Streaming micro-batch
 engine, measured end-to-end through the live Spark Connect path (2026-06-09).
 
 ## What it measures
@@ -24,8 +24,8 @@ rows/s** for this workload. This is a **debug** build on a laptop; a release bui
 
 ## Reproduce
 ```bash
-cargo build -p sail-cli --bin vajra
-RUST_LOG=error ./target/debug/vajra server --port 50099 &
+cargo build -p zelox-cli --bin zelox
+RUST_LOG=error ./target/debug/zelox server --port 50099 &
 # pyspark[connect]==3.5.3 client:
 python - <<'PY'
 from pyspark.sql import SparkSession
@@ -49,7 +49,7 @@ PY
   Streaming Benchmark — plus **sustained** (not bounded-once) throughput and
   **end-to-end latency** percentiles.
 - Streaming **progress metrics** (processedRowsPerSecond, input rate) are not yet
-  reported by Vajra; wiring those up is a prerequisite for standard streaming
+  reported by Zelox; wiring those up is a prerequisite for standard streaming
   benchmarks and is tracked in [../STREAMING.md](../STREAMING.md).
 - Local **memory** and **file** streaming sinks have gaps in single-node mode
   (catalog/listing-table resolution); the **console** sink is the verified path.

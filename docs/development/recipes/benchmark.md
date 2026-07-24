@@ -12,15 +12,15 @@ This is an experimental process. The script used in this page may be removed in 
 You can use the following command to run individual queries from the derived TPC-H benchmark.
 
 ```shell
-python -m pysail.examples.spark.tpch \
+python -m pyzelox.examples.spark.tpch \
   --data-path "$BENCHMARK_PATH"/tpch/data \
   --query-path "$BENCHMARK_PATH"/tpch/queries \
   --query 1
 ```
 
-You need to run this in a Python virtual environment with PySail and PySpark installed.
+You need to run this in a Python virtual environment with PyZelox and PySpark installed.
 If you are in the project source directory, you can use Hatch to set up the environment.
-Run `hatch run maturin develop` to build and install PySail for the default Hatch environment,
+Run `hatch run maturin develop` to build and install PyZelox for the default Hatch environment,
 and then run `hatch shell` to enter the environment.
 
 `BENCHMARK_PATH` is the absolute path of the [DataFusion benchmarks repository](https://github.com/apache/datafusion-benchmarks).
@@ -37,7 +37,7 @@ Please follow the README in that repository to generate the TPC-H data.
 To benchmark with Delta Lake format, first convert the Parquet data using the provided utility:
 
 ```shell
-python -m pysail.examples.spark.convert_to_delta \
+python -m pyzelox.examples.spark.convert_to_delta \
   --input-path "$BENCHMARK_PATH"/tpch/data \
   --output-path "$BENCHMARK_PATH"/tpch/data_delta
 ```

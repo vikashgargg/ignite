@@ -1,9 +1,9 @@
 [project]
-name = "pysail"
+name = "pyzelox"
 version = "0.6.2"
-description = "Sail Python library"
+description = "Zelox Python library"
 authors = [
-    { name = "LakeSail", email = "hello@lakesail.com" },
+    { name = "The Zelox Authors" },
 ]
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -34,7 +34,8 @@ test = [
     # The dependencies for testing the installed package.
     # PySpark 4.1.0 does not work on Windows.
     #   https://issues.apache.org/jira/browse/SPARK-54745
-    "pyspark-client>=4.0,<4.2,!=4.1.0",
+    # 4.2 extends Real-Time Mode to PySpark (stateless); Zelox's stateful continuous path predates it.
+    "pyspark-client>=4.0,<4.3,!=4.1.0",
     "pandas<3",
     "duckdb>=1.0,<2",
     "pytest>=8.4,<9",
@@ -68,13 +69,13 @@ vortex = [
 ]
 
 [project.urls]
-Homepage = "https://lakesail.com"
-Documentation = "https://docs.lakesail.com/sail/latest/"
-Repository = "https://github.com/lakehq/sail"
-Issues = "https://github.com/lakehq/sail/issues"
+Homepage = "https://github.com/vikashgargg/zelox"
+Documentation = "https://docs.zelox.club/"
+Repository = "https://github.com/vikashgargg/zelox"
+Issues = "https://github.com/vikashgargg/zelox/issues"
 
 [project.scripts]
-sail = "pysail.cli:main"
+zelox = "pyzelox.cli:main"
 
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
@@ -95,7 +96,7 @@ python = "3.11"
 installer = "pip"
 skip-install = true
 dependencies = [
-    "pyspark[connect]==4.1.1",
+    "pyspark[connect]==4.2.0",
     "ibis-framework>=12,<13",
     "pandas<3",
     "pytest>=8.4,<9",
@@ -126,11 +127,11 @@ env.CI.installer = "uv"
 
 [tool.hatch.envs.default.scripts]
 # The scripts can be inherited by other environments.
-install-pysail = "\"{env:HATCH_UV}\" pip install pysail --no-index -f target/wheels --force-reinstall"
+install-pyzelox = "\"{env:HATCH_UV}\" pip install pyzelox --no-index -f target/wheels --force-reinstall"
 
 [tool.hatch.envs.coverage]
 template = "default"
-env-vars = { RUSTC_WORKSPACE_WRAPPER = ".github/scripts/rustc-workspace-wrapper.sh", LLVM_PROFILE_FILE = "target/coverage/sail-%p-%m.profraw" }
+env-vars = { RUSTC_WORKSPACE_WRAPPER = ".github/scripts/rustc-workspace-wrapper.sh", LLVM_PROFILE_FILE = "target/coverage/zelox-%p-%m.profraw" }
 
 [tool.hatch.envs.docs]
 python = "3.11"
@@ -142,7 +143,7 @@ dependencies = [
 path = ".venvs/docs"
 
 [tool.hatch.envs.docs.extra-scripts]
-build = "sphinx-build python/pysail/docs python/pysail/docs/_build -b json"
+build = "sphinx-build python/pyzelox/docs python/pyzelox/docs/_build -b json"
 
 [tool.hatch.envs.docs.overrides]
 env.CI.installer = "uv"
@@ -175,18 +176,20 @@ dependencies = [
 ]
 
 [[tool.hatch.envs.test.matrix]]
-spark = ["3.5.7", "4.0.1", "4.1.1"]
+spark = ["3.5.7", "4.0.1", "4.1.1", "4.2.0"]
 
 [tool.hatch.envs.test.overrides]
 matrix.spark.path = [
     { value = ".venvs/test.spark-3.5.7", if = ["3.5.7"] },
     { value = ".venvs/test.spark-4.0.1", if = ["4.0.1"] },
     { value = ".venvs/test.spark-4.1.1", if = ["4.1.1"] },
+    { value = ".venvs/test.spark-4.2.0", if = ["4.2.0"] },
 ]
 matrix.spark.extra-dependencies = [
     { value = "pyspark[connect]==3.5.7", if = ["3.5.7"] },
     { value = "pyspark[connect]==4.0.1", if = ["4.0.1"] },
     { value = "pyspark[connect]==4.1.1", if = ["4.1.1"] },
+    { value = "pyspark[connect]==4.2.0", if = ["4.2.0"] },
 ]
 env.CI.installer = "uv"
 
@@ -203,7 +206,7 @@ dependencies = [
 ]
 
 [[tool.hatch.envs.test-spark.matrix]]
-spark = ["3.5.7", "4.1.1"]
+spark = ["3.5.7", "4.1.1", "4.2.0"]
 
 [tool.hatch.envs.test-spark.extra-scripts]
 install-pyspark = "\"{env:HATCH_UV}\" pip install --force-reinstall 'pyspark[connect] @ opt/spark/python/dist/pyspark-{matrix:spark}.tar.gz' 'pandas<3'"
@@ -212,6 +215,7 @@ install-pyspark = "\"{env:HATCH_UV}\" pip install --force-reinstall 'pyspark[con
 matrix.spark.path = [
     { value = ".venvs/test-spark.spark-3.5.7", if = ["3.5.7"] },
     { value = ".venvs/test-spark.spark-4.1.1", if = ["4.1.1"] },
+    { value = ".venvs/test-spark.spark-4.2.0", if = ["4.2.0"] },
 ]
 env.CI.installer = "uv"
 
@@ -254,20 +258,20 @@ path = ".venvs/test-ibis"
 env.CI.installer = "uv"
 
 [tool.hatch.build.targets.sdist]
-packages = ["python/pysail"]
+packages = ["python/pyzelox"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["python/pysail"]
+packages = ["python/pyzelox"]
 
 [tool.ruff]
 line-length = 120
 
 [tool.ruff.lint.per-file-ignores]
 "crates/**/*.py" = ["INP001", "PLC0415"]
-"python/pysail/docs/conf.py" = ["INP001"]
-"python/pysail/examples/**/*.py" = ["T201", "PLC0415"]
-"python/pysail/testing/**/*.py" = ["S101"]
-"python/pysail/tests/**/*.py" = ["S101", "PLC0415"]
+"python/pyzelox/docs/conf.py" = ["INP001"]
+"python/pyzelox/examples/**/*.py" = ["T201", "PLC0415"]
+"python/pyzelox/testing/**/*.py" = ["S101"]
+"python/pyzelox/tests/**/*.py" = ["S101", "PLC0415"]
 "scripts/**/*.py" = ["SLF001", "PLC0415"]
 
 [tool.pytest.ini_options]
@@ -276,12 +280,12 @@ testpaths = ["python"]
 # Instead, add the configuration using a hook in `conftest.py`.
 # The `pyproject.toml` file is not part of the installed package,
 # so the configuration here will not be available when testing the
-# installed package via `pytest --pyargs pysail`.
+# installed package via `pytest --pyargs pyzelox`.
 
 [tool.maturin]
 python-source = "python"
-module-name = "pysail._native"
-manifest-path = "crates/sail-python/Cargo.toml"
+module-name = "pyzelox._native"
+manifest-path = "crates/zelox-python/Cargo.toml"
 features = [
     "pyo3/extension-module",
     "pyo3/abi3-py38",

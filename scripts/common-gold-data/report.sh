@@ -30,7 +30,7 @@ function collect_metrics() {
   local dir="$2"
 
   find \
-    "${dir}/crates/sail-spark-connect/tests/gold_data" \
+    "${dir}/crates/zelox-spark-connect/tests/gold_data" \
     -name '*.json' \
     -exec \
     jq -f "${project_path}/scripts/common-gold-data/metrics.jq" '{}' '+' \

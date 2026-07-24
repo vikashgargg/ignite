@@ -1,5 +1,5 @@
 {
-  "name": "Sail DevContainer",
+  "name": "Zelox DevContainer",
   "build": {
     "dockerfile": "Dockerfile"
   },

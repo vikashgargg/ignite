@@ -5,7 +5,7 @@ rank: 80
 
 # Standalone Binary
 
-By default, you can run the Sail CLI (the `sail` command) by installing the `pysail` Python library.
+By default, you can run the Zelox CLI (the `zelox` command) by installing the `pyzelox` Python library.
 In some situations, however, you may want to build and run the CLI as a standalone binary.
 
 You can build the CLI with the `release` profile in Cargo.
@@ -13,20 +13,20 @@ You can build the CLI with the `release` profile in Cargo.
 ```bash
 env \
   RUSTFLAGS="-C target-cpu=native" \
-  cargo build -r -p sail-cli --bins
+  cargo build -r -p zelox-cli --bins
 ```
 
 You can then run the Spark Connect server with the following command.
 
 ```bash
-target/release/sail spark server
+target/release/zelox spark server
 ```
 
-The `--help` option can be used to show all the supported arguments of the `sail` command.
+The `--help` option can be used to show all the supported arguments of the `zelox` command.
 
 ## Python Dependency
 
-The Sail CLI binary is dynamically linked to the Python library.
+The Zelox CLI binary is dynamically linked to the Python library.
 The Python version is determined at build time.
 PyO3 infers the Python version from the environment, or you can explicitly configure the
 Python interpreter via the `PYO3_PYTHON` environment variable.
@@ -37,11 +37,11 @@ You can inspect the dynamic library dependencies with command line tools.
 ::: code-group
 
 ```bash [Linux]
-ldd target/release/sail
+ldd target/release/zelox
 ```
 
 ```bash [macOS]
-otool -L target/release/sail
+otool -L target/release/zelox
 ```
 
 :::

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Distributed-streaming smoke harness (F3 gate).
 
-Runs probes against a Vajra server in local-cluster mode (driver + N in-process
+Runs probes against a Zelox server in local-cluster mode (driver + N in-process
 workers) through real Spark Connect. Start the server first:
 
-    target/debug/vajra server --mode local-cluster --workers 2 --port 50081
+    target/debug/zelox server --mode local-cluster --workers 2 --port 50081
 
 then:
 

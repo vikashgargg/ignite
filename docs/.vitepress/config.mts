@@ -15,15 +15,15 @@ import { withSphinxPages } from "./theme/utils/sphinx-plugins";
 import { TreeNode } from "./theme/utils/tree";
 
 // The documentation build process can be configured using the following environment variables:
-// - SAIL_SITE_URL: The URL of the documentation site.
+// - ZELOX_SITE_URL: The URL of the documentation site.
 //     The URL must end with "/" and contain at least one last path segment corresponding to the documentation version.
-// - SAIL_VERSION: The version of the Sail library.
-// - SAIL_FATHOM_SITE_ID: (Optional) The Fathom site ID.
-// - SAIL_APOLLOIO_APP_ID: (Optional) The Apollo.io application ID.
+// - ZELOX_VERSION: The version of the Zelox library.
+// - ZELOX_FATHOM_SITE_ID: (Optional) The Fathom site ID.
+// - ZELOX_APOLLOIO_APP_ID: (Optional) The Apollo.io application ID.
 
 class Site {
   static url(): string {
-    return process.env.SAIL_SITE_URL || "https://localhost/sail/main/";
+    return process.env.ZELOX_SITE_URL || "https://localhost/zelox/main/";
   }
 
   static base(): string {
@@ -45,11 +45,11 @@ class Site {
   }
 
   /**
-   * The version of the Sail library.
+   * The version of the Zelox library.
    * @returns The library version.
    */
   static libVersion(): string {
-    return process.env.SAIL_VERSION || "0.0.0";
+    return process.env.ZELOX_VERSION || "0.0.0";
   }
 
   /**
@@ -67,7 +67,7 @@ class Analytics {
   static head(): HeadConfig[] {
     const items: HeadConfig[] = [];
 
-    const fathomSiteId = process.env.SAIL_FATHOM_SITE_ID;
+    const fathomSiteId = process.env.ZELOX_FATHOM_SITE_ID;
     if (fathomSiteId) {
       items.push([
         "script",
@@ -80,7 +80,7 @@ class Analytics {
       ]);
     }
 
-    const apolloAppId = process.env.SAIL_APOLLOIO_APP_ID;
+    const apolloAppId = process.env.ZELOX_APOLLOIO_APP_ID;
     if (apolloAppId) {
       items.push([
         "script",
@@ -127,14 +127,14 @@ class TransformPageData {
       ["meta", { property: "og:description", content: pageData.description }],
       ["meta", { property: "og:image", content: `${Site.url()}banner.png` }],
       ["meta", { property: "og:type", content: "article" }],
-      ["meta", { property: "og:site_name", content: "Sail Documentation" }],
+      ["meta", { property: "og:site_name", content: "Zelox Documentation" }],
     );
   }
 
   static sphinx(pageData: PageData): void {
     if (pageData.params?.sphinx) {
       pageData.title = pageData.params.current.text;
-      pageData.titleTemplate = ":title - Sail Python API";
+      pageData.titleTemplate = ":title - Zelox Python API";
       if (pageData.relativePath === "reference/python/index.md") {
         pageData.frontmatter.prev = false;
       }
@@ -289,9 +289,9 @@ export default async () => {
     defineConfig({
       base: Site.base(),
       lang: "en-US",
-      title: "Sail",
-      titleTemplate: ":title - Sail Documentation",
-      description: "The Sail documentation site",
+      title: "Zelox",
+      titleTemplate: ":title - Zelox Documentation",
+      description: "The Zelox documentation site",
       head: [
         [
           "link",
@@ -326,7 +326,7 @@ export default async () => {
         libVersion: Site.libVersion(),
       },
       themeConfig: {
-        siteTitle: "Sail",
+        siteTitle: "Zelox",
         logo: "/logo.png",
         nav: [
           {
@@ -379,7 +379,7 @@ export default async () => {
         socialLinks: [
           {
             icon: "github",
-            link: "https://github.com/lakehq/sail",
+            link: "https://github.com/vikashgargg/zelox",
             ariaLabel: "GitHub",
           },
         ],

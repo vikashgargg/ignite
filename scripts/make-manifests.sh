@@ -9,7 +9,7 @@
 # Usage: bash scripts/make-manifests.sh <output.tar.gz>
 set -euo pipefail
 
-OUT_DIR="/tmp/vajra-mfst"
+OUT_DIR="/tmp/zelox-mfst"
 DEST="${1:?usage: $0 <output.tar.gz>}"
 
 rm -rf "$OUT_DIR"

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # T2 tier gate (docs/design/three-tier-sdlc.md): run the streaming stack on the LOCAL kind cluster — REAL
-# Kubernetes (scheduling, real Kafka broker, service networking, the vajra image) — to catch k8s-specific
+# Kubernetes (scheduling, real Kafka broker, service networking, the zelox image) — to catch k8s-specific
 # issues BEFORE EKS, for FREE. Deploys the SAME manifests as EKS with resource REQUESTS scaled to a laptop
 # (8 CPU / ~7.75 GiB Docker VM); T2 proves topology/scheduling/correctness, not scale (that is T3/EKS).
-# First target: the final-window COMPLETENESS gap (EKS: Vajra 9 windows / Flink 10). Self-checking.
+# First target: the final-window COMPLETENESS gap (EKS: Zelox 9 windows / Flink 10). Self-checking.
 # Usage: TAG=realtime-fix N=2000000 EPMS=100 scripts/kind_streaming_test.sh
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
-TAG="${TAG:-realtime-fix}"; N="${N:-2000000}"; EPMS="${EPMS:-100}"; NS=stream; CTX=kind-vajra-kind
+TAG="${TAG:-realtime-fix}"; N="${N:-2000000}"; EPMS="${EPMS:-100}"; NS=stream; CTX=kind-zelox-kind
 kk() { kubectl --context "$CTX" -n "$NS" "$@"; }
 kubectl --context "$CTX" get ns "$NS" >/dev/null 2>&1 || kubectl --context "$CTX" create ns "$NS"
-# Scale resource requests + vajra workers down to fit the kind Docker VM (keeps the SAME manifests/topology).
+# Scale resource requests + zelox workers down to fit the kind Docker VM (keeps the SAME manifests/topology).
 scale_kind() {
   sed -E \
     -e 's/cpu: "1[0-9]"/cpu: "1"/g' -e 's/cpu: "[6-9]"/cpu: "1"/g' \
@@ -35,29 +35,29 @@ TOT=$(kk exec "$KPOD" -- /opt/kafka/bin/kafka-get-offsets.sh --bootstrap-server 
 echo "TOPIC_CHECK events=$TOT expected=$N"
 [ "${TOT:-0}" = "$N" ] || { echo "ABORT: producer self-check failed (events=$TOT != $N)"; exit 3; }
 
-echo "==== [3] Vajra ($TAG, scaled) + client ===="
-ECR_DUMMY=local  # image is loaded into kind as vajra:$TAG; replace the whole ref
-sed -e "s#__ECR__/vajra:eo-multipart#vajra:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/vajra-stream.yaml | scale_kind | kk apply -f -
+echo "==== [3] Zelox ($TAG, scaled) + client ===="
+ECR_DUMMY=local  # image is loaded into kind as zelox:$TAG; replace the whole ref
+sed -E -e "s#__ECR__/zelox:[A-Za-z0-9._-]+#zelox:$TAG#g" -e 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' k8s/stream/zelox-stream.yaml | scale_kind | kk apply -f -
 # ensure the loaded local image is used (never pulled) + bounded-complete flush (Flink-parity)
-kk patch deploy vajra-stream --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null 2>&1
-[ "${COMPLETE:-1}" = "1" ] && kk set env deploy/vajra-stream VAJRA_COMPLETE_ON_END=1 >/dev/null 2>&1
+kk patch deploy zelox-stream --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Never"}]' >/dev/null 2>&1
+[ "${COMPLETE:-1}" = "1" ] && kk set env deploy/zelox-stream ZELOX_COMPLETE_ON_END=1 >/dev/null 2>&1
 # VAJ-T7 source-fusion opt-in (T2 validation): parse `value`->struct in-source, elide raw value col.
 # Also raise the task-runner log so the "source-fusion: fused" line is greppable from pod logs.
-[ "${VAJRA_T7_FUSE:-0}" = "1" ] && kk set env deploy/vajra-stream \
-  VAJRA_T7_FUSE=1 RUST_LOG="warn,sail_physical_plan::streaming::window_accum=info,sail_execution::task_runner::core=debug" >/dev/null 2>&1
-kk wait --for=condition=available --timeout=300s deployment/vajra-stream
-scale_kind < k8s/stream/vajra-client.yaml | kk apply -f -
-kk wait --for=condition=ready --timeout=300s pod/vajra-client
-until kk logs vajra-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
-kk cp scripts/stream_windowed_agg.py vajra-client:/tmp/wagg.py
+[ "${ZELOX_T7_FUSE:-0}" = "1" ] && kk set env deploy/zelox-stream \
+  ZELOX_T7_FUSE=1 RUST_LOG="warn,zelox_physical_plan::streaming::window_accum=info,zelox_execution::task_runner::core=debug" >/dev/null 2>&1
+kk wait --for=condition=available --timeout=300s deployment/zelox-stream
+scale_kind < k8s/stream/zelox-client.yaml | kk apply -f -
+kk wait --for=condition=ready --timeout=300s pod/zelox-client
+until kk logs zelox-client 2>/dev/null | grep -q CLIENT_READY; do sleep 3; done
+kk cp scripts/stream_windowed_agg.py zelox-client:/tmp/wagg.py
 
 echo "==== [4] windowed-agg (availableNow + bounded-complete) -> local sink; assert completeness ===="
-SR="sc://vajra-stream.$NS.svc.cluster.local:50051"
-kk exec vajra-client -- sh -c \
-  "SPARK_REMOTE=$SR BOOT=kafka.$NS.svc.cluster.local:9092 TOPIC=events N_EVENTS=$N OUT=/tmp/wagg CK=/tmp/ck python3 /tmp/wagg.py" 2>&1 | grep -aoE 'VAJRA_WAGG.*' || true
+SR="sc://zelox-stream.$NS.svc.cluster.local:50051"
+kk exec zelox-client -- sh -c \
+  "SPARK_REMOTE=$SR BOOT=kafka.$NS.svc.cluster.local:9092 TOPIC=events N_EVENTS=$N OUT=/tmp/wagg CK=/tmp/ck python3 /tmp/wagg.py" 2>&1 | grep -aoE 'ZELOX_WAGG.*' || true
 
 echo "==== [5] assert n_windows + sum (Flink-parity completeness on real k8s) ===="
-kk exec vajra-client -- sh -c "SPARK_REMOTE=$SR N=$N EPMS=$EPMS python3 - <<'PY'
+kk exec zelox-client -- sh -c "SPARK_REMOTE=$SR N=$N EPMS=$EPMS python3 - <<'PY'
 import os, math
 from pyspark.sql import SparkSession, functions as F
 s=SparkSession.builder.remote(os.environ['SPARK_REMOTE']).getOrCreate()

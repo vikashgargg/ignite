@@ -1,0 +1,69 @@
+# VAJ-BF2 T3: Zelox DISTRIBUTED (kubernetes-cluster) streaming for the multi-node beat vs Flink.
+# The driver dynamically launches worker pods across the role=compute nodes; the windowed-agg's
+# source + exchange + window distribute across them (T-BF2.2/2.5/2.3/2.6/2.7), with credit
+# backpressure (T-BF2.4). Sink -> S3 (object store; the distributed-sink shared-storage requirement).
+# `__ECR__` and `__BUCKET__` are sed-substituted by scripts/eks_dist_headtohead.sh.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: zelox-driver, namespace: stream, labels: { app: zelox-driver } }
+spec:
+  replicas: 1
+  strategy: { rollingUpdate: { maxSurge: 0, maxUnavailable: 1 } }   # 8-vCPU node: no surge deadlock
+  selector: { matchLabels: { app: zelox-driver } }
+  template:
+    metadata: { labels: { app: zelox-driver } }
+    spec:
+      serviceAccountName: zelox-user
+      nodeSelector: { role: compute }
+      containers:
+        - name: server
+          image: __ECR__/zelox:bf6
+          command: [ "zelox" ]
+          args: [ "server", "--ip", "0.0.0.0", "--port", "50051" ]
+          ports: [ { containerPort: 50051 } ]
+          imagePullPolicy: IfNotPresent
+          resources: { requests: { cpu: "1", memory: "4Gi" }, limits: { cpu: "2", memory: "8Gi" } }
+          env:
+            - { name: RUST_LOG, value: "warn,zelox_physical_plan::streaming::window_accum=info" }
+            - { name: ZELOX_MODE, value: "kubernetes-cluster" }
+            - { name: ZELOX_DISTRIBUTED_STREAM, value: "1" }
+            - { name: ZELOX_CREDIT_BACKPRESSURE, value: "16" }
+            - { name: ZELOX_WM_PROF, value: "1" }
+            - { name: ZELOX_CLUSTER__DRIVER_LISTEN_HOST, value: "0.0.0.0" }
+            - name: ZELOX_CLUSTER__DRIVER_EXTERNAL_HOST
+              valueFrom: { fieldRef: { fieldPath: status.podIP } }
+            - { name: ZELOX_KUBERNETES__IMAGE, value: "__ECR__/zelox:bf6" }
+            - { name: ZELOX_KUBERNETES__NAMESPACE, value: "stream" }
+            - name: ZELOX_KUBERNETES__DRIVER_POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - { name: ZELOX_KUBERNETES__WORKER_SERVICE_ACCOUNT_NAME, value: "zelox-user" }
+            # Worker pods: pinned to role=compute, ~3 vCPU each so 2 fit per 8-vCPU node => 4 workers
+            # across the 2 compute nodes; the 8 window tasks even-spread 2-per-worker across nodes.
+            - name: ZELOX_KUBERNETES__WORKER_POD_TEMPLATE
+              value: >-
+                {"spec":{"nodeSelector":{"role":"compute"},"containers":[{"name":"worker","resources":{"requests":{"cpu":"3","memory":"4Gi"},"limits":{"cpu":"3","memory":"10Gi"}},"env":[{"name":"ZELOX_CREDIT_BACKPRESSURE","value":"16"},{"name":"ZELOX_WM_PROF","value":"1"},{"name":"ZELOX_COMPLETE_ON_END","value":"1"},{"name":"RUST_LOG","value":"warn,zelox_physical_plan::streaming::window_accum=info"}]}]}}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: zelox-driver, namespace: stream }
+spec:
+  selector: { app: zelox-driver }
+  ports: [ { protocol: TCP, port: 50051, targetPort: 50051 } ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: zelox-driver, namespace: stream }
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "pods" ]
+    verbs: [ "*" ]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: zelox-user, namespace: stream }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: zelox-driver, namespace: stream }
+subjects: [ { kind: ServiceAccount, name: zelox-user, namespace: stream } ]
+roleRef: { kind: Role, name: zelox-driver, apiGroup: rbac.authorization.k8s.io }

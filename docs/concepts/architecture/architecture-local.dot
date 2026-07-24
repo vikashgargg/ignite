@@ -17,7 +17,7 @@ digraph architecture {
   }
 
   subgraph server {
-    label="Sail Server";
+    label="Zelox Server";
     cluster=true;
     subgraph session {
       label="Session";

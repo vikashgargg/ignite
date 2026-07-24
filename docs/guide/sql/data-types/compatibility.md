@@ -5,14 +5,14 @@ rank: 1
 
 # Compatibility
 
-Sail supports Arrow data types that is a superset of data types available in Spark SQL.
+Zelox supports Arrow data types that is a superset of data types available in Spark SQL.
 For more background information, you can refer to the [Data Types](/guide/dataframe/data-types/) guide for the Spark DataFrame API.
 
 The following table shows the SQL type syntax along with the corresponding Spark data types and Arrow data types.
-Many data types have aliases not supported in JVM Spark. These are extensions in Sail.
+Many data types have aliases not supported in JVM Spark. These are extensions in Zelox.
 
 Many Arrow data types do not have a corresponding SQL type syntax,
-but they are still supported in Sail. You can work with these types in Python UDFs or data sources.
+but they are still supported in Zelox. You can work with these types in Python UDFs or data sources.
 
 <table tabindex="0">
   <thead>

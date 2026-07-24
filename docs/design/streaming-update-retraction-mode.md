@@ -6,7 +6,7 @@ correctness on ordered streams) validated on EKS 2026-06-21: every group exactly
 
 ## Why
 
-Vajra's window operator today (`crates/sail-physical-plan/src/streaming/window_accum.rs`)
+Zelox's window operator today (`crates/zelox-physical-plan/src/streaming/window_accum.rs`)
 is **emit-on-window-close, append-only** — the exact model of Spark Structured Streaming
 and RisingWave's default. A window emits once when `watermark ≥ window_end`, then its
 state is dropped. Any record that arrives for an already-closed window is **silently
@@ -18,12 +18,12 @@ tight watermark drops late data — and Flink SQL and Spark drop it too.
 | Spark append / Flink SQL | dropped | dropped |
 | Flink DataStream | re-fire window (allowedLateness) | side output (kept) |
 | Materialize / differential dataflow | retract + update | retract + update (never lost) |
-| **Vajra today** | dropped | dropped |
-| **Vajra (this design)** | retract + update (changelog) | side output (kept) |
+| **Zelox today** | dropped | dropped |
+| **Zelox (this design)** | retract + update (changelog) | side output (kept) |
 
-Vajra already carries the primitive nobody else exposes under the Spark API:
+Zelox already carries the primitive nobody else exposes under the Spark API:
 `FlowEvent::Data { batch, retracted: BooleanArray }`. The window operator currently hard-codes
-`retracted = all-false`. Using it, Vajra can deliver Flink-DataStream correctness +
+`retracted = all-false`. Using it, Zelox can deliver Flink-DataStream correctness +
 Materialize convergence through the Spark `outputMode("update")` API — beating both
 Spark and Flink-SQL on the correctness axis with zero data loss.
 
@@ -45,7 +45,7 @@ Spark and Flink-SQL on the correctness axis with zero data loss.
 
 ## Status (2026-06-21)
 
-**Operator core: DONE + unit-tested** in `crates/sail-physical-plan/src/streaming/window_accum.rs`:
+**Operator core: DONE + unit-tested** in `crates/zelox-physical-plan/src/streaming/window_accum.rs`:
 - `WindowOutputMode {Append, Update}` + `WindowAccumExec::with_output_mode(mode, allowed_lateness)`
   (defaults to `Append` — today's behavior, so `planner.rs`/`codec.rs`/distributed path unchanged).
 - `emit_changelog`: per-group-key diff (arrow `RowConverter`), retract stale + insert new, coalesced
@@ -58,7 +58,7 @@ Spark and Flink-SQL on the correctness axis with zero data loss.
 1. **User API plumbing** — wire `outputMode("update")` + an `allowedLateness` option from the
    `WriteStream` spec through `write_stream.rs` → `rewrite_streaming_plan` → `WindowAccumNode` →
    `with_output_mode`. Until then update mode is reachable only via the builder (tests).
-2. **Distributed codec** — serialize `output_mode`/`allowed_lateness` in `sail-execution/codec.rs`
+2. **Distributed codec** — serialize `output_mode`/`allowed_lateness` in `zelox-execution/codec.rs`
    so update mode survives local-cluster/distributed planning (today always `Append` over the wire).
 3. **Late side output** (beyond `L`) — currently such rows are simply not tracked (dropped like
    append); add the `_late/` side sink.
@@ -86,7 +86,7 @@ Spark and Flink-SQL on the correctness axis with zero data loss.
 ## Validation (must beat both)
 
 - Out-of-order stream (shuffled event-time, watermark `d`, `L` > out-of-orderness):
-  Vajra `update` mode → **0 loss**, final per-group counts exact; Spark append + Flink SQL
+  Zelox `update` mode → **0 loss**, final per-group counts exact; Spark append + Flink SQL
   → measurable drop on the same stream. This is the head-to-head that demonstrates "better
   than both" on correctness.
 - Append mode regression: identical to today's validated EKS result (every group 10000).

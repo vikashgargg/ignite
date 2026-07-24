@@ -1,15 +1,15 @@
-# Code owners for Vajra. Owners are auto-requested for review on matching paths.
+# Code owners for Zelox. Owners are auto-requested for review on matching paths.
 # See https://docs.github.com/articles/about-code-owners
 
 # Default owner for everything
 *                                   @vikashgargg
 
 # Streaming engine (Flink-replacement hot path)
-/crates/sail-physical-plan/src/streaming/   @vikashgargg
-/crates/sail-data-source/src/formats/kafka/ @vikashgargg
+/crates/zelox-physical-plan/src/streaming/   @vikashgargg
+/crates/zelox-data-source/src/formats/kafka/ @vikashgargg
 
 # Distributed execution + codec (round-trip contract)
-/crates/sail-execution/             @vikashgargg
+/crates/zelox-execution/             @vikashgargg
 
 # Release, CI/CD, container, and packaging
 /.github/                           @vikashgargg

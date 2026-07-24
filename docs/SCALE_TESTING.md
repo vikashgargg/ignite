@@ -1,4 +1,4 @@
-# Vajra scale testing on AWS EKS — minimal cost, full teardown
+# Zelox scale testing on AWS EKS — minimal cost, full teardown
 
 Production-shaped distributed benchmark on real EKS, designed for **~$1–2 total**
 and **guaranteed $0 after**. Default target: **full ClickBench (100M rows)
@@ -24,15 +24,15 @@ aws sts get-caller-identity   # confirm
 export REGION=ap-south-1
 export ACCT=$(aws sts get-caller-identity --query Account --output text)
 export ECR="$ACCT.dkr.ecr.$REGION.amazonaws.com"
-export BUCKET="vajra-scale-$ACCT"
+export BUCKET="zelox-scale-$ACCT"
 ```
 
 ## Step 1 — push the arm64 image to ECR (~3 min)
 ```bash
-aws ecr create-repository --repository-name vajra --region $REGION >/dev/null 2>&1 || true
+aws ecr create-repository --repository-name zelox --region $REGION >/dev/null 2>&1 || true
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR
-docker tag vajra:latest $ECR/vajra:latest        # vajra:latest already built (arm64)
-docker push $ECR/vajra:latest
+docker tag zelox:latest $ECR/zelox:latest        # zelox:latest already built (arm64)
+docker push $ECR/zelox:latest
 ```
 
 ## Step 2 — create the cluster (~15–20 min; the long pole)
@@ -48,17 +48,17 @@ A one-shot loader Job copies the public ClickHouse `hits` parquet (100 files,
 aws s3 mb s3://$BUCKET --region $REGION
 # loader job: see k8s/eks/clickbench-loader.yaml (curl public hits -> aws s3 cp)
 sed "s#__BUCKET__#$BUCKET#g; s#__REGION__#$REGION#g" k8s/eks/clickbench-loader.yaml | kubectl apply -f -
-kubectl wait --for=condition=complete job/clickbench-loader -n vajra --timeout=1800s
+kubectl wait --for=condition=complete job/clickbench-loader -n zelox --timeout=1800s
 ```
 
-## Step 4 — deploy Vajra (kubernetes-cluster mode, ECR image)
+## Step 4 — deploy Zelox (kubernetes-cluster mode, ECR image)
 ```bash
 # Point both the deployment image and the worker-pod-template image at ECR.
-sed "s#image: vajra:latest#image: $ECR/vajra:latest#g; \
-     s#value: vajra:latest#value: $ECR/vajra:latest#g" k8s/sail.yaml \
+sed "s#image: zelox:latest#image: $ECR/zelox:latest#g; \
+     s#value: zelox:latest#value: $ECR/zelox:latest#g" k8s/zelox.yaml \
   | kubectl apply -f -
-kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=300s
-kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 &
+kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=300s
+kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 &
 ```
 
 ## Step 5 — run the distributed benchmark
@@ -74,7 +74,7 @@ TPCH_SF=100 scripts/tpch_distributed.py`.
 ## Step 6 — TEAR DOWN EVERYTHING (do immediately after) ⚠️
 ```bash
 kill %1 2>/dev/null                     # stop port-forward
-scripts/aws_eks_teardown.sh vajra-scale $REGION $BUCKET vajra
+scripts/aws_eks_teardown.sh zelox-scale $REGION $BUCKET zelox
 ```
 The script deletes the cluster (one CFN stack), ECR repo, S3 bucket, any leftover
 eksctl stacks, then **verifies** no EKS/EC2/NAT/ELB/EBS/EIP remain. Confirm all

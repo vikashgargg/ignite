@@ -3,7 +3,7 @@
 Usage:
   # Reference (real Apache Spark, local JVM):
   ENGINE=reference python run_engine.py out_reference.json
-  # Candidate (Vajra via Spark Connect; server must be running on SPARK_REMOTE):
+  # Candidate (Zelox via Spark Connect; server must be running on SPARK_REMOTE):
   ENGINE=candidate SPARK_REMOTE=sc://localhost:50051 python run_engine.py out_candidate.json
 
 Normalization: rows are converted to plain Python, sorted deterministically, and

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Distributed mode validation: Docker→kind (k8s) → Apple Container (local + local-cluster)
-# Runs all three Vajra execution modes and reports pass/fail for each.
+# Runs all three Zelox execution modes and reports pass/fail for each.
 set -euo pipefail
 
-VAJRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-LOG_DIR="/tmp/vajra-validation"
+ZELOX_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+LOG_DIR="/tmp/zelox-validation"
 mkdir -p "$LOG_DIR"
 
-SCORECARD="$VAJRA_DIR/.venvs/smoke/bin/python $VAJRA_DIR/scripts/spark_compat_score.py"
+SCORECARD="$ZELOX_DIR/.venvs/smoke/bin/python $ZELOX_DIR/scripts/spark_compat_score.py"
 # Use Python 3.12 from Homebrew; fall back to system Python 3
 PYTHON_BIN="$(command -v python3.12 2>/dev/null || command -v python3)"
 PYTHONPATH_VAL="$($PYTHON_BIN -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null || echo "")"
-KIND_CLUSTER="vajra-dev"
+KIND_CLUSTER="zelox-dev"
 PASS=0
 FAIL=0
 
@@ -42,8 +42,8 @@ run_scorecard() {
 # ─── PHASE 1: Docker build ────────────────────────────────────────────────────
 section "PHASE 1: Docker build (linux/arm64, for kind)"
 
-log "Building Docker image vajra:latest..."
-cd "$VAJRA_DIR"
+log "Building Docker image zelox:latest..."
+cd "$ZELOX_DIR"
 make docker-build 2>&1 | tee "$LOG_DIR/docker-build.log"
 BUILD_EXIT=$?
 
@@ -53,7 +53,7 @@ if [ $BUILD_EXIT -ne 0 ]; then
     exit 1
 fi
 log "✓ Docker build SUCCEEDED"
-docker image inspect vajra:latest > /dev/null 2>&1 && log "✓ vajra:latest image confirmed in Docker"
+docker image inspect zelox:latest > /dev/null 2>&1 && log "✓ zelox:latest image confirmed in Docker"
 
 # ─── PHASE 2: kind Kubernetes cluster test ────────────────────────────────────
 section "PHASE 2: kind cluster (kubernetes-cluster mode)"
@@ -62,24 +62,24 @@ section "PHASE 2: kind cluster (kubernetes-cluster mode)"
 kind delete cluster --name "$KIND_CLUSTER" 2>/dev/null || true
 
 log "Creating kind cluster '$KIND_CLUSTER'..."
-mkdir -p /tmp/vajra /private/tmp/vajra /tmp/sail /private/tmp/sail
+mkdir -p /tmp/zelox /private/tmp/zelox /tmp/zelox /private/tmp/zelox
 kind create cluster --name "$KIND_CLUSTER" \
-    --config "$VAJRA_DIR/k8s/kind-config.yaml" \
+    --config "$ZELOX_DIR/k8s/kind-config.yaml" \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
-log "Loading vajra:latest into kind..."
-kind load docker-image vajra:latest --name "$KIND_CLUSTER" \
+log "Loading zelox:latest into kind..."
+kind load docker-image zelox:latest --name "$KIND_CLUSTER" \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
-log "Deploying Vajra to kind..."
-kubectl apply -f "$VAJRA_DIR/k8s/sail.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
+log "Deploying Zelox to kind..."
+kubectl apply -f "$ZELOX_DIR/k8s/zelox.yaml" 2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Waiting for deployment rollout (up to 3 min)..."
-kubectl rollout status deployment/vajra-spark-server -n vajra --timeout=180s \
+kubectl rollout status deployment/zelox-spark-server -n zelox --timeout=180s \
     2>&1 | tee -a "$LOG_DIR/kind-setup.log"
 
 log "Starting port-forward on 50051..."
-kubectl port-forward -n vajra svc/vajra-spark-server 50051:50051 \
+kubectl port-forward -n zelox svc/zelox-spark-server 50051:50051 \
     > "$LOG_DIR/portforward.log" 2>&1 &
 PF_PID=$!
 sleep 5
@@ -108,14 +108,14 @@ kind delete cluster --name "$KIND_CLUSTER" 2>/dev/null || true
 # ─── PHASE 3: Apple Container build ──────────────────────────────────────────
 section "PHASE 3: Apple Container build (--cpus 4 --memory 8g)"
 
-log "Starting Apple Container builder with 8 GB (required to avoid OOM during aws-sdk-glue + sail-catalog-hms parallel compile)..."
+log "Starting Apple Container builder with 8 GB (required to avoid OOM during aws-sdk-glue + zelox-catalog-hms parallel compile)..."
 container builder stop 2>/dev/null || true
 sleep 3
 container builder start --cpus 4 --memory 8g --dns 8.8.8.8 2>&1 | tee -a "$LOG_DIR/container-build.log"
 sleep 5
 
 log "Building Apple Container image (LTO=off, jobs=2)..."
-cd "$VAJRA_DIR"
+cd "$ZELOX_DIR"
 make container-build 2>&1 | tee "$LOG_DIR/container-build-full.log"
 BUILD_EXIT=$?
 
@@ -127,17 +127,17 @@ fi
 log "✓ Apple Container build SUCCEEDED"
 
 # ─── PHASE 4: Apple Container — local mode (single-node) ─────────────────────
-section "PHASE 4: Apple Container local mode (SAIL_MODE=local)"
+section "PHASE 4: Apple Container local mode (ZELOX_MODE=local)"
 
-container stop vajra 2>/dev/null || true
-container rm vajra 2>/dev/null || true
-mkdir -p /tmp/vajra
+container stop zelox 2>/dev/null || true
+container rm zelox 2>/dev/null || true
+mkdir -p /tmp/zelox
 
 log "Starting container in local mode..."
-container run --rm --detach --name vajra \
+container run --rm --detach --name zelox \
     -p 50051:50051 \
-    -v /tmp/vajra:/tmp/vajra \
-    vajra:latest \
+    -v /tmp/zelox:/tmp/zelox \
+    zelox:latest \
     > "$LOG_DIR/container-local.log" 2>&1
 
 for i in $(seq 1 18); do
@@ -155,21 +155,21 @@ else
     FAIL=$((FAIL+1))
 fi
 
-container stop vajra 2>/dev/null || true
+container stop zelox 2>/dev/null || true
 sleep 3
 
 # ─── PHASE 5: Apple Container — local-cluster mode ───────────────────────────
-section "PHASE 5: Apple Container local-cluster mode (SAIL_MODE=local-cluster)"
+section "PHASE 5: Apple Container local-cluster mode (ZELOX_MODE=local-cluster)"
 
-container stop vajra-cluster 2>/dev/null || true
-container rm vajra-cluster 2>/dev/null || true
+container stop zelox-cluster 2>/dev/null || true
+container rm zelox-cluster 2>/dev/null || true
 
 log "Starting container in local-cluster mode..."
-container run --rm --detach --name vajra-cluster \
+container run --rm --detach --name zelox-cluster \
     -p 50051:50051 \
-    -e SAIL_MODE=local-cluster \
-    -v /tmp/vajra:/tmp/vajra \
-    vajra:latest \
+    -e ZELOX_MODE=local-cluster \
+    -v /tmp/zelox:/tmp/zelox \
+    zelox:latest \
     > "$LOG_DIR/container-cluster.log" 2>&1
 
 for i in $(seq 1 18); do
@@ -187,7 +187,7 @@ else
     FAIL=$((FAIL+1))
 fi
 
-container stop vajra-cluster 2>/dev/null || true
+container stop zelox-cluster 2>/dev/null || true
 
 # ─── FINAL REPORT ─────────────────────────────────────────────────────────────
 section "FINAL REPORT"
@@ -208,4 +208,4 @@ if [ $FAIL -gt 0 ]; then
     log "✗ $FAIL mode(s) FAILED"
     exit 1
 fi
-log "✓ All $PASS modes PASSED — Vajra distributed validation complete"
+log "✓ All $PASS modes PASSED — Zelox distributed validation complete"

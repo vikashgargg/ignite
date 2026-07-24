@@ -1,4 +1,4 @@
-# Vajra (वज्र) Benchmark Results
+# Zelox Benchmark Results
 
 > Last updated: 2026-07-02
 > Tag: **v0.6.0-alpha**
@@ -10,9 +10,9 @@
 
 ## Authoritative head-to-heads (measured, honest — 2026-07-02)
 
-**Batch vs Spark 3.5.3 — Vajra wins across the board:**
+**Batch vs Spark 3.5.3 — Zelox wins across the board:**
 
-| Benchmark | Vajra | Spark 3.5.3 | Verdict |
+| Benchmark | Zelox | Spark 3.5.3 | Verdict |
 |---|---|---|---|
 | TPC-H SF-1 (22q, warm) | 1.78 s | 63.46 s | ~36× (small/warm) |
 | TPC-H SF-100 (22q, 100 GB, EKS) | 347 s / 51.7 GiB | 1099 s / 115 GiB | ~3.2× faster, ~2.2× less RAM |
@@ -21,9 +21,9 @@
 
 **Streaming vs Flink 1.19 — competitive, NOT categorically-better** (rigorous tri-engine
 Nexmark-methodology run, 2026-07-01; supersedes an earlier lighter ~1.5M-ev/s run that reported
-Vajra faster — we claim only the measured head-to-head + flag path-dependence):
+Zelox faster — we claim only the measured head-to-head + flag path-dependence):
 
-| Dimension | Flink 1.19 | Vajra | Verdict |
+| Dimension | Flink 1.19 | Zelox | Verdict |
 |---|---|---|---|
 | Throughput | 5.78M ev/s | 5.28M ev/s | ~1.10× slower (competitive, after T1–T7a) |
 | Memory (peak RSS) | 8.55 GiB | ~7.1 GiB | ~1.2× less (path-dependent; batch ~8× less) |
@@ -69,7 +69,7 @@ Full 100M-row run: `CLICKBENCH_FULL=1 SPARK_REMOTE=sc://localhost:50051 python s
 
 ```
 ======================================================================
-  Vajra (वज्र) TPC-H Benchmark  —  Scale Factor 1  (release + LTO)
+  Zelox TPC-H Benchmark  —  Scale Factor 1  (release + LTO)
 ======================================================================
   Q         Time      Rows  Status
   ----  --------  --------  ------
@@ -121,13 +121,13 @@ Full 100M-row run: `CLICKBENCH_FULL=1 SPARK_REMOTE=sc://localhost:50051 python s
 ## Spark Compatibility — 105/105 (100%)
 
 > Tested against the Spark compat scorecard (`scripts/spark_compat_score.py`).
-> Binary: `./target/debug/vajra server`  
+> Binary: `./target/debug/zelox server`  
 > Client: PySpark 4.0.2 on Python 3.9  
 > Platform: macOS 26 ARM64  
 
 ```
 ═══════════════════════════════════════════════════════
-  VAJRA SPARK COMPATIBILITY SCORECARD
+  ZELOX SPARK COMPATIBILITY SCORECARD
 ═══════════════════════════════════════════════════════
   1. Basic SQL                           ✓✓✓✓✓✓✓✓✓✓✓✓✓  13/13
   2. Aggregate Functions                     ✓✓✓✓✓✓  6/6
@@ -157,7 +157,7 @@ Full 100M-row run: `CLICKBENCH_FULL=1 SPARK_REMOTE=sc://localhost:50051 python s
 
 ### Compatibility Summary
 
-| Metric                    | Vajra v0.4.0 | LakeSail v0.6.3 |
+| Metric                    | Zelox v0.4.0 | LakeSail v0.6.3 |
 |---------------------------|--------------|-----------------|
 | Spark compat score        | **100% (105/105)** | ~95% |
 | UDF support               | ✓ (5/5)      | ✓ partial       |
@@ -170,7 +170,7 @@ Full 100M-row run: `CLICKBENCH_FULL=1 SPARK_REMOTE=sc://localhost:50051 python s
 ### Notes
 
 - UDFs require `PYTHONPATH` pointing to a PySpark installation on both the server and client.
-- The binary must be built WITHOUT mimalloc (`default = []` in `sail-cli/Cargo.toml`); mimalloc
+- The binary must be built WITHOUT mimalloc (`default = []` in `zelox-cli/Cargo.toml`); mimalloc
   causes re-entrant allocator recursion when Python UDFs run on Tokio worker threads.
 
 ---
@@ -189,8 +189,8 @@ for tbl in ['customer','lineitem','nation','orders','part','partsupp','region','
 print('Done')
 "
 
-# 2. Start Vajra server
-SAIL_RUNTIME__STACK_SIZE=67108864 ./target/release/vajra server --port 50055 &
+# 2. Start Zelox server
+ZELOX_RUNTIME__STACK_SIZE=67108864 ./target/release/zelox server --port 50055 &
 
 # 3. Run benchmark via PySpark client
 SPARK_REMOTE=sc://localhost:50055 python -c "

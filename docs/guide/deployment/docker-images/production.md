@@ -7,7 +7,7 @@ rank: 2
 
 <!--@include: ../_common/support.md-->
 
-Building the Sail Docker image from source is recommended for production deployments where performance is critical.
+Building the Zelox Docker image from source is recommended for production deployments where performance is critical.
 
 In an empty directory, create a `Dockerfile` with the following content.
 
@@ -20,7 +20,7 @@ In an empty directory, create a `Dockerfile` with the following content.
 In the same directory, run the following command with the desired release tag or branch name to build the Docker image.
 
 ```bash-vue
-docker build -t sail:latest --build-arg RELEASE_TAG="v{{ libVersion }}" .
+docker build -t zelox:latest --build-arg RELEASE_TAG="v{{ libVersion }}" .
 ```
 
 ::: info

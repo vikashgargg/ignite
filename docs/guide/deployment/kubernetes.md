@@ -7,12 +7,12 @@ rank: 2
 
 <!--@include: ./_common/support.md-->
 
-Sail supports distributed data processing on Kubernetes clusters.
-This guide demonstrates how to deploy Sail on a Kubernetes cluster and connect to it via Spark Connect.
+Zelox supports distributed data processing on Kubernetes clusters.
+This guide demonstrates how to deploy Zelox on a Kubernetes cluster and connect to it via Spark Connect.
 
 ## Building the Docker Image
 
-We first need to build the Docker image for Sail. Please refer to
+We first need to build the Docker image for Zelox. Please refer to
 the [Docker Images Guide](/guide/deployment/docker-images/) for more information.
 
 ## Loading the Docker Image
@@ -30,28 +30,28 @@ You can refer to their documentation for more details.
 ::: code-group
 
 ```bash [kind]
-kind load docker-image sail:latest
+kind load docker-image zelox:latest
 ```
 
 ```bash [minikube]
-minikube image load sail:latest
+minikube image load zelox:latest
 ```
 
 ```bash [k3d]
-k3d image import sail:latest
+k3d image import zelox:latest
 ```
 
 ```bash [k3s]
-docker save sail:latest | k3s ctr images import -
+docker save zelox:latest | k3s ctr images import -
 ```
 
 ```bash [MicroK8s]
-docker save sail:latest | microk8s images import
+docker save zelox:latest | microk8s images import
 ```
 
 :::
 
-The following sections use [kind](https://kind.sigs.k8s.io/) as an example, but you can run Sail in other Kubernetes
+The following sections use [kind](https://kind.sigs.k8s.io/) as an example, but you can run Zelox in other Kubernetes
 distributions of your choice.
 Run the following command to create a local Kubernetes cluster.
 
@@ -75,31 +75,31 @@ kind create cluster --config k8s/kind-config.yaml
 Then load the Docker image into the cluster.
 
 ```bash
-kind load docker-image sail:latest
+kind load docker-image zelox:latest
 ```
 
-## Running the Sail Server
+## Running the Zelox Server
 
 ::: info
 
-The way to configure Sail applications is not stable yet.
+The way to configure Zelox applications is not stable yet.
 Please refer to the [Changelog](/reference/changelog/) if the configuration ever changes in future releases.
 
 :::
 
-Create a file `k8s/sail.yaml` with the following content.
+Create a file `k8s/zelox.yaml` with the following content.
 
 ::: code-group
 
-<<< ../../../k8s/sail.yaml [k8s/sail.yaml]
+<<< ../../../k8s/zelox.yaml [k8s/zelox.yaml]
 
 :::
 
 Create the Kubernetes resources using the following command.
-The Sail Spark Connect server runs as a Kubernetes deployment, and the gRPC port is exposed as a Kubernetes service.
+The Zelox Spark Connect server runs as a Kubernetes deployment, and the gRPC port is exposed as a Kubernetes service.
 
 ```bash
-kubectl apply -f k8s/sail.yaml
+kubectl apply -f k8s/zelox.yaml
 ```
 
 ## Overriding the Default Pod Spec
@@ -133,15 +133,15 @@ kubectl apply -k k8s/
 
 ## Running Spark Jobs
 
-To connect to the Sail Spark Connect server, you can forward the service port to your local machine.
+To connect to the Zelox Spark Connect server, you can forward the service port to your local machine.
 
 ```bash
-kubectl -n sail port-forward service/sail-spark-server 50051:50051
+kubectl -n zelox port-forward service/zelox-spark-server 50051:50051
 ```
 
 Now you can run Spark jobs using the standalone Spark client.
-Here is an example of running PySpark shell powered by Sail on Kubernetes.
-Sail worker pods are launched on-demand to execute Spark jobs.
+Here is an example of running PySpark shell powered by Zelox on Kubernetes.
+Zelox worker pods are launched on-demand to execute Spark jobs.
 The worker pods are terminated after a certain period of inactivity.
 
 ```bash
@@ -156,19 +156,19 @@ custom pod template (such as the `k8s/test-volume-patch.yaml` file shown above) 
 Once the pod template is in place, you can run pytest locally against the cluster with the following command.
 
 ```bash
-env SPARK_REMOTE="sc://localhost:50051" PYTEST_DEBUG_TEMPROOT="/tmp/sail" pytest --pyargs pysail
+env SPARK_REMOTE="sc://localhost:50051" PYTEST_DEBUG_TEMPROOT="/tmp/zelox" pytest --pyargs pyzelox
 ```
 
 ## Cleaning Up
 
-Run the following command to clean up the Kubernetes resources for the Sail server.
-All Sail worker pods will be terminated automatically as well.
+Run the following command to clean up the Kubernetes resources for the Zelox server.
+All Zelox worker pods will be terminated automatically as well.
 
 ```bash
-kubectl delete -f k8s/sail.yaml
+kubectl delete -f k8s/zelox.yaml
 ```
 
-If you used Kustomize to deploy the Sail server, you can clean up the resources with the following command.
+If you used Kustomize to deploy the Zelox server, you can clean up the resources with the following command.
 
 ```bash
 kubectl delete -k k8s/

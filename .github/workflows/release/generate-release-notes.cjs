@@ -2,14 +2,14 @@ module.exports = async ({ github, context, core }) => {
   const version = process.env.RELEASE_VERSION;
   const previousVersion = process.env.PREVIOUS_RELEASE_VERSION;
   const text = [];
-  const summaryUrl = `https://docs.lakesail.com/sail/latest/reference/changelog/#_${version.replace(/\./g, "-")}`;
-  const pypiUrl = `https://pypi.org/project/pysail/${version}/`;
+  const summaryUrl = `https://docs.zelox.club/latest/reference/changelog/#_${version.replace(/\./g, "-")}`;
+  const pypiUrl = `https://pypi.org/project/pyzelox/${version}/`;
   text.push("## Overview\n");
   text.push(
     `You can find the release summary in the [documentation](${summaryUrl}).\n\n`,
   );
   text.push(
-    `The PySail Python package is available on [PyPI](${pypiUrl}).\n\n`,
+    `The PyZelox Python package is available on [PyPI](${pypiUrl}).\n\n`,
   );
 
   if (previousVersion) {

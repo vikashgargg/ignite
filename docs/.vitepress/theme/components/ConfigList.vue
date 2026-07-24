@@ -46,7 +46,7 @@ const props = defineProps<{
 }>();
 
 function configEnvVar(key: string): string {
-  return `SAIL_${key.toUpperCase().replace(/\./g, "__")}`;
+  return `ZELOX_${key.toUpperCase().replace(/\./g, "__")}`;
 }
 </script>
 

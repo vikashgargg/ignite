@@ -1,0 +1,39 @@
+use std::sync::Arc;
+
+use datafusion::common::Result;
+use datafusion::execution::SessionStateBuilder;
+use datafusion::prelude::{SessionConfig, SessionContext};
+use zelox_common::config::AppConfig;
+use zelox_common::runtime::RuntimeHandle;
+use zelox_delta_lake::session_extension::DeltaTableCache;
+
+use crate::runtime::RuntimeEnvFactory;
+use crate::session_factory::SessionFactory;
+
+pub struct WorkerSessionFactory {
+    runtime_env: RuntimeEnvFactory,
+}
+
+impl WorkerSessionFactory {
+    pub fn new(config: Arc<AppConfig>, runtime: RuntimeHandle) -> Self {
+        let runtime_env = RuntimeEnvFactory::new(config, runtime.clone());
+        Self { runtime_env }
+    }
+}
+
+impl SessionFactory<()> for WorkerSessionFactory {
+    fn create(&mut self, _info: ()) -> Result<SessionContext> {
+        let runtime = self.runtime_env.create(Ok)?;
+        // We still add default features for the worker session
+        // since we need built-in functions to be available for the codec
+        // when decoding the execution plan.
+        let config = SessionConfig::default().with_extension(Arc::new(DeltaTableCache::default()));
+        let state = SessionStateBuilder::new()
+            .with_config(config)
+            .with_runtime_env(runtime)
+            .with_default_features()
+            .build();
+        let session = SessionContext::new_with_state(state);
+        Ok(session)
+    }
+}

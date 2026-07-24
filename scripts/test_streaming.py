@@ -1,10 +1,10 @@
 """
-Vajra Streaming Integration Test
+Zelox Streaming Integration Test
 =================================
 Validates the end-to-end streaming pipeline:
   rate source → count() aggregate → memory sink → spark.sql("SELECT * FROM counts")
 
-Requires a running Vajra server (SPARK_REMOTE env) or will auto-start one.
+Requires a running Zelox server (SPARK_REMOTE env) or will auto-start one.
 
 Usage:
     SPARK_REMOTE=sc://localhost:50051 \\
@@ -25,9 +25,9 @@ SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "")
 _proc = None
 
 if not SPARK_REMOTE:
-    vajra_bin = os.environ.get("VAJRA_BIN", "./target/release/vajra")
+    zelox_bin = os.environ.get("ZELOX_BIN", "./target/release/zelox")
     _proc = subprocess.Popen(
-        [vajra_bin, "server", "--ip", "0.0.0.0", "--port", "50056"],
+        [zelox_bin, "server", "--ip", "0.0.0.0", "--port", "50056"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
@@ -76,7 +76,7 @@ def check(name: str, fn):
 
 
 print("\n" + "─" * 60)
-print("  Vajra Streaming Integration Tests")
+print("  Zelox Streaming Integration Tests")
 print("─" * 60)
 
 # ── Test 1: rate → count → memory sink ───────────────────────────────────────

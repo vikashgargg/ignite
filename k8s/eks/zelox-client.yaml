@@ -1,0 +1,26 @@
+# Spark-Connect client pod for driving Zelox's BATCH runs (TPC-DS-99 / TPC-H) on the zelox-sf100
+# cluster. Mirrors k8s/stream/zelox-client.yaml but in the `zelox` namespace, with duckdb (TPC-DS/H
+# data is generated in-process by scripts/tpcds_score.py + tpch_distributed.py). No role nodeSelector
+# (the batch cluster is a single big-arm node).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: zelox-client
+  namespace: zelox
+spec:
+  restartPolicy: Never
+  containers:
+    - name: client
+      image: python:3.12-slim
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          pip install --quiet "setuptools<81" pyspark-client==4.2.0 grpcio grpcio-status protobuf googleapis-common-protos pandas pyarrow duckdb
+          echo CLIENT_READY
+          sleep infinity
+      # TPC-DS/H data is generated client-side (DuckDB -> pandas -> createDataFrame), so the client
+      # needs headroom for the largest table's pandas frame + Arrow transfer. 24Gi covers SF-1 safely
+      # (SF-10+ needs a Zelox-side/shared-parquet data path instead — future).
+      resources:
+        requests: { cpu: "1", memory: "6Gi", ephemeral-storage: "20Gi" }
+        limits: { cpu: "2", memory: "16Gi", ephemeral-storage: "40Gi" }

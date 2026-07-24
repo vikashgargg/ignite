@@ -1,15 +1,15 @@
 #!/usr/bin/env sh
-# Vajra installer — curl https://raw.githubusercontent.com/vikashgargg/ignite/main/install.sh | sh
+# Zelox installer — curl https://raw.githubusercontent.com/vikashgargg/zelox/main/install.sh | sh
 set -e
 
-REPO="vikashgargg/ignite"
-INSTALL_DIR="${VAJRA_INSTALL_DIR:-${IGNITE_INSTALL_DIR:-$HOME/.local/bin}}"
-VENV_DIR="${VAJRA_VENV_DIR:-$HOME/.local/lib/vajra/venv}"
-BINARY="vajra"
+REPO="vikashgargg/zelox"
+INSTALL_DIR="${ZELOX_INSTALL_DIR:-${ZELOX_INSTALL_DIR:-$HOME/.local/bin}}"
+VENV_DIR="${ZELOX_VENV_DIR:-$HOME/.local/lib/zelox/venv}"
+BINARY="zelox"
 
-info()  { printf "\033[32m[vajra]\033[0m %s\n" "$*"; }
-warn()  { printf "\033[33m[vajra]\033[0m %s\n" "$*"; }
-error() { printf "\033[31m[vajra]\033[0m %s\n" "$*" >&2; exit 1; }
+info()  { printf "\033[32m[zelox]\033[0m %s\n" "$*"; }
+warn()  { printf "\033[33m[zelox]\033[0m %s\n" "$*"; }
+error() { printf "\033[31m[zelox]\033[0m %s\n" "$*" >&2; exit 1; }
 
 # ── 1. Detect OS / arch ────────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ case "$OS" in
   Darwin*)
     case "$ARCH" in
       arm64)  TARGET="aarch64-apple-darwin" ;;
-      *)      error "Vajra requires Apple Silicon (arm64). Intel Macs are not supported. Build from source: https://github.com/$REPO" ;;
+      *)      error "Zelox requires Apple Silicon (arm64). Intel Macs are not supported. Build from source: https://github.com/$REPO" ;;
     esac
     ;;
   *)
@@ -80,11 +80,11 @@ LATEST=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
 
 [ -z "$LATEST" ] && error "Could not fetch release info. Check https://github.com/$REPO/releases"
 
-info "Installing Vajra $LATEST for $TARGET"
+info "Installing Zelox $LATEST for $TARGET"
 
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST/vajra-$TARGET"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST/zelox-$TARGET"
 TMP_DIR="$(mktemp -d)"
-TMP_BIN="$TMP_DIR/vajra"
+TMP_BIN="$TMP_DIR/zelox"
 
 info "Downloading from $DOWNLOAD_URL"
 curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN" \
@@ -92,7 +92,7 @@ curl -fsSL "$DOWNLOAD_URL" -o "$TMP_BIN" \
 
 chmod +x "$TMP_BIN"
 mkdir -p "$INSTALL_DIR"
-# Real binary is vajra-bin; vajra wrapper sets PYTHONPATH + VAJRA_PYTHON
+# Real binary is zelox-bin; zelox wrapper sets PYTHONPATH + ZELOX_PYTHON
 mv "$TMP_BIN" "$INSTALL_DIR/${BINARY}-bin"
 rm -rf "$TMP_DIR"
 
@@ -124,11 +124,11 @@ PYSPARK_SITE="$("$VENV_DIR/bin/python3" -c 'import sysconfig; print(sysconfig.ge
 VENV_PYTHON="$VENV_DIR/bin/python3"
 
 # ── 5. Create wrapper script ───────────────────────────────────────────────────
-# Sets PYTHONPATH (pyspark importable) and VAJRA_PYTHON (tells vajra-bin to
+# Sets PYTHONPATH (pyspark importable) and ZELOX_PYTHON (tells zelox-bin to
 # spawn pyspark client in venv Python instead of the embedded Python 3.9).
 # Variables expand at install time via %s; ${PYTHONPATH} stays literal.
 
-printf '#!/usr/bin/env sh\nexport PYTHONPATH="%s${PYTHONPATH:+:${PYTHONPATH}}"\nexport VAJRA_PYTHON="%s"\nexec "%s" "$@"\n' \
+printf '#!/usr/bin/env sh\nexport PYTHONPATH="%s${PYTHONPATH:+:${PYTHONPATH}}"\nexport ZELOX_PYTHON="%s"\nexec "%s" "$@"\n' \
   "$PYSPARK_SITE" "$VENV_PYTHON" "$INSTALL_DIR/${BINARY}-bin" > "$INSTALL_DIR/$BINARY"
 chmod +x "$INSTALL_DIR/$BINARY"
 
@@ -138,7 +138,7 @@ info "Installed to $INSTALL_DIR/$BINARY"
 
 if "$INSTALL_DIR/$BINARY" --version >/dev/null 2>&1; then
   VERSION="$("$INSTALL_DIR/$BINARY" --version 2>/dev/null || echo "$LATEST")"
-  info "Vajra $VERSION installed successfully"
+  info "Zelox $VERSION installed successfully"
 fi
 
 # ── 7. PATH hint ──────────────────────────────────────────────────────────────
@@ -154,5 +154,5 @@ case ":$PATH:" in
 esac
 
 info "Done! Quick test:"
-info "  vajra --version"
-info "  vajra sql \"SELECT 1\""
+info "  zelox --version"
+info "  zelox sql \"SELECT 1\""

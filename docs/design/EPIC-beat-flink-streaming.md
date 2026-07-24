@@ -1,6 +1,6 @@
 # EPIC VAJ-BEAT-FLINK — objectively beat Apache Flink on streaming (not match)
 
-> **Charter mandate** ([MEMORY.md](../../MEMORY.md)): Vajra must *objectively beat* Flink on **every**
+> **Charter mandate** ([MEMORY.md](../../MEMORY.md)): Zelox must *objectively beat* Flink on **every**
 > production axis — throughput, latency, memory, EO/recovery, elasticity, K8s-native, cost, DX. This EPIC
 > is the streaming-throughput+latency front. Bar: **≤1.0× Flink is the floor; the goal is a new era of
 > streaming on Rust** — structurally ahead because no-JVM + Arrow zero-copy + fusion do less work per
@@ -10,7 +10,7 @@
 ## 0. Measured reality (the honest baseline — do not re-derive)
 Source of truth: [throughput-tickets.md](throughput-tickets.md) (EKS 100M, c7g.4xlarge, vs Flink 1.19).
 
-| Path | Vajra | Flink | Gap | Notes |
+| Path | Zelox | Flink | Gap | Notes |
 |---|---|---|---|---|
 | Windowed-agg throughput | **5.37M ev/s** | 5.72M | **1.068× behind** | steady, measured; per-stage CPU below |
 | Memory (RSS) | **9.61 GiB** | 8.55 GiB | 1.12× behind | source value-byte copy is the cost |
@@ -24,7 +24,7 @@ proved shuffle cost = hash+route+send, not the copy). The levers are **source_re
 ## 1. The structural moat — why Rust+Arrow can BEAT (not just match) Flink
 Flink's per-record path (KB [REFERENCES.md](../REFERENCES.md) §Flink): `KafkaDeserializationSchema` →
 **Jackson tree parse per record** → object graph → JVM GC → pipelined shuffle. It is fast per-op but
-does **irreducible per-record work on the JVM heap**. Vajra's advantage is that we can do **less total
+does **irreducible per-record work on the JVM heap**. Zelox's advantage is that we can do **less total
 work**: parse the JSON value **directly into typed Arrow columns inside the source**, so the raw value
 bytes are **never materialized as a full Arrow Binary column** (~10 GB @100M) and never re-read. No JVM,
 no GC, no object graph — columnar all the way. **This is the axis Flink cannot follow** (it has no
@@ -43,11 +43,11 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
   pushdown into scan.
 
 #### Concrete architecture (dep-layering + codec RESOLVED 2026-07-06)
-- **Layering (resolved):** `sail-data-source → sail-function` is a **clean acyclic downward edge**
-  (`sail-function` deps = sail-common / sail-common-datafusion / sail-sql-analyzer; none reach
-  sail-data-source). So the reader may call the parse routine directly — no relocation to a shared
+- **Layering (resolved):** `zelox-data-source → zelox-function` is a **clean acyclic downward edge**
+  (`zelox-function` deps = zelox-common / zelox-common-datafusion / zelox-sql-analyzer; none reach
+  zelox-data-source). So the reader may call the parse routine directly — no relocation to a shared
   crate needed.
-- **Step 1 — expose a batch parse API in sail-function** (`scalar/json/from_json.rs`): promote
+- **Step 1 — expose a batch parse API in zelox-function** (`scalar/json/from_json.rs`): promote
   `parse_json_to_struct` to `pub fn parse_json_binary_to_struct(values: &BinaryArray, fields: &Fields,
   options: &SparkFromJsonOptions, tz: &str) -> Result<StructArray>` (Binary variant of the existing
   Utf8 path; UTF-8 lossy per-row like Spark; reuses `ColBuilder` + `simd_parse_value` from T7b). Unit
@@ -58,10 +58,10 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
   `parse_json_binary_to_struct` and emit the struct's fields (flow-event-wrapped) **instead of**
   `value:Binary`. Output schema = `to_flow_event_schema(project(struct_fields))`. When `None`,
   behaviour is byte-identical to today (default; zero risk to non-JSON pipelines).
-- **Step 3 — codec round-trip** (`sail-execution/src/codec.rs`, `KafkaSourceExecNode`): add proto
+- **Step 3 — codec round-trip** (`zelox-execution/src/codec.rs`, `KafkaSourceExecNode`): add proto
   field `parse_value_as` (serialized `Fields` + options); encode in the `downcast_ref::<KafkaSourceExec>`
   arm, decode in `NodeKind::KafkaSource`. Distributed round-trip test (the codec test at ~L4715).
-- **Step 4 — physical-optimizer fusion rule** (`sail-physical-optimizer`, new
+- **Step 4 — physical-optimizer fusion rule** (`zelox-physical-optimizer`, new
   `fuse_streaming_source_parse.rs`): match `ProjectionExec`/unnest whose sole expr over the streaming
   source is `from_json(CAST(value AS Utf8), <schema-literal>)`; when the child is a `KafkaSourceExec`
   with `parse_value_as == None`, rewrite to the source with `parse_value_as = Some(...)` and drop the
@@ -122,8 +122,8 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
   clean 20M/16-part profile — `from_json=135s` (#1, intrinsic JSON tokenize Flink's Jackson also pays,
   already simd-json'd = PARITY, not the differentiator) > **`exchange=89.8s` (#2, the keyed shuffle =
   the BF2 target)** > `finalize=27s` > `source_read=4.4s` (CHEAP — librdkafka bg prefetch; RULED OUT as
-  a lever) > `encode=0.3s`; window `STARVED(upstream)`. ⇒ single-node is parse-bound PARITY (Vajra
-  ~1.05× behind on identical work); the exchange is the #2 cost and the ONLY stage where Vajra's no-JVM
+  a lever) > `encode=0.3s`; window `STARVED(upstream)`. ⇒ single-node is parse-bound PARITY (Zelox
+  ~1.05× behind on identical work); the exchange is the #2 cost and the ONLY stage where Zelox's no-JVM
   Arrow zero-copy NETWORK shuffle can STRUCTURALLY beat Flink's JVM-serialized shuffle — but that only
   shows **multi-node** (here the exchange is in-memory). Measure-first RULED IN exchange, RULED OUT
   source_read + parse.
@@ -158,7 +158,7 @@ zero-copy columnar source). That is the "new era on Rust" thesis, and it is meas
   per-operator throughput/watermark-lag/ckpt metrics (matrix Observability P0 + Backpressure).
 
 ### VAJ-T7 — IMPLEMENTATION STATUS (2026-07-06)
-**All 4 steps landed, opt-in behind `VAJRA_T7_FUSE`, default byte-identical. Compiles + clippy
+**All 4 steps landed, opt-in behind `ZELOX_T7_FUSE`, default byte-identical. Compiles + clippy
 clean + codec round-trip tested. NOT yet behaviourally validated (needs a running plan).**
 - Step 1 `parse_json_binary_to_struct` — DONE 7898f8d3 (20/20 parity, byte-identity test).
 - Steps 2+3+4 — DONE 47b8206d: reader `parse_value_as` fusion (3 read paths via `fuse_event_stream`);
@@ -166,14 +166,14 @@ clean + codec round-trip tested. NOT yet behaviourally validated (needs a runnin
   `rewrite_source_fusion` per-worker rule in `task_runner/core.rs` (matches
   `ProjectionExec[from_json(value)]` over `KafkaSourceExec`, conservative-bail).
 
-**✅ T1 LOCAL GREEN (2026-07-07, a0525f0c):** `inc_ckpt_gate.sh` with `VAJRA_T7_FUSE=1` →
+**✅ T1 LOCAL GREEN (2026-07-07, a0525f0c):** `inc_ckpt_gate.sh` with `ZELOX_T7_FUSE=1` →
 `VAJ-T7 source-fusion: fused from_json -> '#7'` FIRES + `exit=0` (dup=0 EO across kill-9, exact
 per-key window counts). The T1 dump pinned the real plan shape —
 `ProjectionExec[_marker,_retracted,from_json(value@2) as #7,partition@3] -> CooperativeExec ->
 KafkaSourceExec` — and the matcher now targets it exactly (identity-map-except-value, unwrap the
 `CooperativeExec`). Next: T2 kind (rule fires on real k8s + WM_PROF source_read drop) → T3 EKS beat.
 
-**✅ T2 KIND GREEN (2026-07-07):** `TAG=t7fuse VAJRA_T7_FUSE=1 kind_streaming_test.sh` on real k8s
+**✅ T2 KIND GREEN (2026-07-07):** `TAG=t7fuse ZELOX_T7_FUSE=1 kind_streaming_test.sh` on real k8s
 (control-plane + kafka + compute nodes) → `T2_COMPLETENESS n_windows=2 sum_count=2000000 ... PASS`
 + `source-fusion: fused` FIRES in the compute pod logs. Confirms the rule matches on a real k8s
 scheduler/network, not just local process. (Throughput on kind is not representative; the
@@ -184,8 +184,8 @@ beat (HONEST negative result):**
 | Engine | ev/s | RSS |
 |---|---|---|
 | Flink 1.19 | **5.580M** | 8.57 GiB |
-| Vajra unfused (baseline) | 5.255M | — |
-| Vajra **fused (T7)** ×3 | 5.24 / 5.24 / 5.40M | — |
+| Zelox unfused (baseline) | 5.255M | — |
+| Zelox **fused (T7)** ×3 | 5.24 / 5.24 / 5.40M | — |
 Fusion FIRED (verified `T7FUSE=1` + `fused count:1` + plan dump), EO-safe, counts exact — but
 throughput is **unchanged vs unfused**, still ~1.05× behind Flink. **Do NOT flip default-on** (no
 measured perf justification; keep opt-in).
@@ -201,16 +201,16 @@ measured perf justification; keep opt-in).
 - **Methodology bug caught (fixed forward):** the head-to-head's `kk set env` AFTER deploy triggered a
   maxSurge=1 rollout deadlock on the 16-vCPU node → the FIRST run silently used the UNFUSED old pod
   (fused count:0). Caught it, patched `maxSurge=0` + forced the fused pod, re-ran (fused count:1).
-  Fix forward: set VAJRA_T7_FUSE in the deploy YAML env (not post-hoc set-env), or maxSurge=0 default.
+  Fix forward: set ZELOX_T7_FUSE in the deploy YAML env (not post-hoc set-env), or maxSurge=0 default.
 
 **Remaining validation:**
 2. **Validation runbook (T1→T2→T3):**
-   - **T1 local:** `inc_ckpt_gate.sh` with `VAJRA_T7_FUSE=1` → dup=0 + correct counts (EO across
+   - **T1 local:** `inc_ckpt_gate.sh` with `ZELOX_T7_FUSE=1` → dup=0 + correct counts (EO across
      crash on the fused path); and WITHOUT the flag → unchanged (regression guard).
-   - **T2 kind:** `kind_streaming_test.sh` + windowed-agg benchmark with `VAJRA_T7_FUSE=1` →
+   - **T2 kind:** `kind_streaming_test.sh` + windowed-agg benchmark with `ZELOX_T7_FUSE=1` →
      n_windows/sum exact; confirm the rule fired in worker logs; per-stage WM_PROF shows
      `source_read` dropped (raw-value materialize gone).
-   - **T3 EKS:** 100M head-to-head vs Flink with `VAJRA_T7_FUSE=1` → the measured beat
+   - **T3 EKS:** 100M head-to-head vs Flink with `ZELOX_T7_FUSE=1` → the measured beat
      (source_read+from_json combined CPU < Flink; ev/s ≤1.0× Flink; RSS ≤ Flink). Image via
      `eks_build_image.sh`.
 3. **Then flip default-on** once T1+T2+T3 green, and update `throughput-tickets.md` +
@@ -243,7 +243,7 @@ and redirect the sequence:
      they PIPELINE instead of the window starving on a blocking upstream. This directly attacks
      `input_wait`.
   3. **Kafka read/decode profile** — quantify the read path (librdkafka fetch + Arrow decode) with the
-     now-fixed WM_PROF (RUST_LOG must include `sail_physical_plan::streaming::window_accum=info`).
+     now-fixed WM_PROF (RUST_LOG must include `zelox_physical_plan::streaming::window_accum=info`).
 - **PREREQUISITE (measure-first, prod-grade):** before building BF2/BF3, get a CLEAN per-stage EKS
   profile (non-crash, 100M, correct RUST_LOG) to rank source_read vs exchange vs input_wait — pick the
   lever from the ranked number, NOT a guess (the T7 lesson). BF2 vs BF3 priority = whichever the profile

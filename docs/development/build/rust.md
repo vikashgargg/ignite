@@ -13,7 +13,7 @@ Run the following commands to verify the code before committing changes.
 cargo +nightly fmt && \
   cargo clippy --all-targets --all-features && \
   cargo build && \
-  env SAIL_UPDATE_GOLD_DATA=1 cargo test
+  env ZELOX_UPDATE_GOLD_DATA=1 cargo test
 ```
 
 ::: info
@@ -25,7 +25,7 @@ cargo +nightly fmt && \
    The GitHub Actions workflow runs `cargo clippy` with the `-D warnings` option,
    so that the build will fail if there are any warnings from either the compiler or the linter.
 
-3. The `SAIL_UPDATE_GOLD_DATA` environment variable update the test gold data files to match the behavior of the code.
+3. The `ZELOX_UPDATE_GOLD_DATA` environment variable update the test gold data files to match the behavior of the code.
    Running `cargo test` without the environment variable will validate the gold data. The test would fail if the gold data is outdated.
 
 :::

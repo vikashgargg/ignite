@@ -3,7 +3,7 @@
 checkpoint-barrier crash-EO fix (docs/design/distributed-eo-coordinator-wiring.md §4e).
 
 Identical logical query (10s event-time tumbling keyed COUNT, Kafka -> Parquet) but driven by
-`.trigger(continuous="1 second")` so it exercises the REALTIME N-reader multi-partition path (one
+`.trigger(realTime="5 seconds")` so it exercises the REALTIME N-reader multi-partition path (one
 reader per Kafka partition -> keyed StreamExchange -> WindowAccum -> aligned barrier -> sink) — the
 exact path whose exchange dropped 15/16 Checkpoint barriers before the fix. availableNow (the sibling
 script) uses the micro-batch path and does NOT exercise it.
@@ -53,7 +53,7 @@ t0 = time.time()
 q = (agg.writeStream.format("parquet")
      .option("path", OUT).option("checkpointLocation", CK)
      .outputMode("append")
-     .trigger(continuous="1 second").start())
+     .trigger(realTime="5 seconds").start())
 # Run for a bounded window (continuous never self-terminates), then stop cleanly so the committed
 # offsets/state land at an epoch boundary.
 time.sleep(RUN_SECS)
@@ -62,4 +62,4 @@ try:
 except Exception:
     pass
 dt = time.time() - t0
-print(f"VAJRA_WAGG_CONTINUOUS events={N} ran_s={dt:.1f} trigger=continuous", flush=True)
+print(f"ZELOX_WAGG_CONTINUOUS events={N} ran_s={dt:.1f} trigger=realTime", flush=True)

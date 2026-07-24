@@ -12,5 +12,5 @@ Please commit the changes if any.
 ```bash
 env SPARK_LOCAL_IP=127.0.0.1 \
   hatch run scripts/spark-config/generate.py \
-  -o crates/sail-spark-connect/data/spark_config.json
+  -o crates/zelox-spark-connect/data/spark_config.json
 ```

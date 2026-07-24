@@ -8,7 +8,7 @@ import type { NodeLike } from "./tree";
 
 export const SPHINX_BUILD_OUTPUT = path.join(
   __dirname,
-  "../../../../python/pysail/docs/_build",
+  "../../../../python/pyzelox/docs/_build",
 );
 
 export type SphinxLink = {

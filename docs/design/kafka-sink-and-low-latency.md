@@ -1,10 +1,24 @@
 # Design: Kafka sink + record-paced low-latency emission (P0 — close the Flink latency gap)
 
-> Status: **design, implementation-ready**. This is the #1 P0 from `docs/PROD_GRADE_ROADMAP.md`
-> — the measured streaming head-to-head (`docs/benchmarks/STREAMING_VS_FLINK_EKS.md`) showed
-> Vajra wins throughput (1.33×) + memory (6.4×) + holds exactly-once, but **loses latency**
-> (p50 ~30 s) because it has **no record-level low-latency sink** (only a per-epoch file sink).
-> This adds a Kafka sink and record-paced emission so Vajra reaches Flink-class ms latency.
+> Status: **✅ IMPLEMENTED + MEASURED-WON (latency pillar).** `KafkaSinkExec`
+> (`crates/zelox-data-source/src/formats/kafka/sink.rs`) = record-paced per-row produce +
+> transactional EO with per-task `transactional.id` (Flink KafkaSink FLIP-143 parity), wrapped
+> N-way (no funnel) in `ParallelStreamSinkExec`.
+>
+> **T2/kind FAIR head-to-head (2026-07-08, parallelism=2 both, Kafka→passthrough→Kafka):**
+> | | p50 | p99 | max |
+> |---|---|---|---|
+> | **Zelox** | **30 ms** | **125 ms** | **128 ms** |
+> | Flink 1.19 | 42 ms | 580 ms | 767 ms |
+>
+> **Zelox WINS every percentile, and the TAIL by 4.6–6×.** MECHANISM (grounded): Flink's p99/max
+> spikes (580/767 ms) are **JVM stop-the-world GC pauses** — the canonical JVM streaming tail-latency
+> problem (REFERENCES: no-GC / off-heap-state). Zelox is Rust, **no GC** → the tail stays FLAT
+> (125→128 ms, p99≈max). This is the no-JVM advantage made measurable — the axis where "single binary,
+> no JVM" shows up exactly as the charter predicts. The old "p50 ~30 s" below = the pre-sink per-epoch
+> **file** probe (superseded); the old EKS "p50 257 ms" = the pre-parallel-sink 1/16-partition bug
+> (fixed, commit 1d096c8f). REMAINING prod-grade confirm: sustained **100k ev/s** p99<100 ms + EO-chaos
+> (acceptance criteria below) on kind/EKS — the win is proven at 5k ev/s; validate it holds under load.
 
 ## Grounding (how the proven systems do it)
 - **Spark Structured Streaming Kafka sink** (`KafkaStreamWriter`/`KafkaStreamDataWriter`):
@@ -22,9 +36,9 @@
   delivery reports. Transactions: `init_transactions` / `begin_transaction` /
   `commit_transaction` / `abort_transaction`.
 
-## Vajra integration points (mapped against the current code)
+## Zelox integration points (mapped against the current code)
 - **Source of truth for the flow-event sink pattern:** `RealtimeFileSinkExec`
-  (`crates/sail-data-source/src/streaming_decode.rs`) — consumes the **flow-event** input
+  (`crates/zelox-data-source/src/streaming_decode.rs`) — consumes the **flow-event** input
   (not decoded), reads `Checkpoint{epoch}` barriers in-band to delimit epochs, accumulates an
   epoch's data, and commits per epoch. The Kafka sink is the same shape with Kafka produce +
   flush/commit replacing the Parquet+metadata commit.
@@ -32,8 +46,8 @@
   (which already threads `STREAM_REALTIME_INTERVAL_OPTION`, checkpoint location, and N-way
   parallel sinks via `ParallelStreamSinkExec`). Add a `"kafka"` sink branch → `KafkaSinkExec`.
   `writeStream.format("kafka")` resolves through `write_stream.rs` like other formats.
-- **Codec:** add `KafkaSinkExecNode` to `proto/sail/plan/physical.proto` + encode/decode arms
-  in `crates/sail-execution/src/codec.rs` (mirror `RealtimeFileSinkExec`'s arms) so it survives
+- **Codec:** add `KafkaSinkExecNode` to `proto/zelox/plan/physical.proto` + encode/decode arms
+  in `crates/zelox-execution/src/codec.rs` (mirror `RealtimeFileSinkExec`'s arms) so it survives
   the driver→worker boundary in distributed mode.
 
 ## `KafkaSinkExec` — operator design
@@ -67,7 +81,7 @@ cadence (which only governs durability/EO, off the record path — already the r
 intent). Also: honor `Trigger.ProcessingTime` intervals for predictable micro-batch latency.
 
 ## Acceptance criteria (how we prove it)
-- **Functional:** Kafka→Vajra→Kafka passthrough; consumer reads the output topic; values match
+- **Functional:** Kafka→Zelox→Kafka passthrough; consumer reads the output topic; values match
   input 1:1 (no loss/dup at AT_LEAST_ONCE allows dup → assert ⊇; at EXACTLY_ONCE assert ==).
 - **Latency:** sustained 100k ev/s, embed produce-wall-ms in each record, measure
   `consume_ms − produce_ms` on the output topic → **p99 < 100 ms** (vs the current ~30 s

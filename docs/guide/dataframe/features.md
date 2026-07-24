@@ -5,7 +5,7 @@ rank: 1
 
 # Supported Features
 
-Here is a high-level overview of the Spark DataFrame API features supported by Sail.
+Here is a high-level overview of the Spark DataFrame API features supported by Zelox.
 The list covers the most common use cases of the DataFrame API and is not meant to be complete.
 
 | Feature                                                                                                  | Supported          |

@@ -1,6 +1,6 @@
-# Vajra → a true production-grade Spark **and** Flink replacement
+# Zelox → a true production-grade Spark **and** Flink replacement
 
-> The honest, grounded roadmap. What Vajra is, what's **measured** today, where it
+> The honest, grounded roadmap. What Zelox is, what's **measured** today, where it
 > genuinely stands against the systems it intends to replace, and exactly what's left —
 > with each gap tied to how the proven systems (Apache Spark, Apache Flink, Apache
 > Arrow, Apache DataFusion, Arrow Flight) actually solve it.
@@ -22,7 +22,7 @@ This document is deliberately honest: it records measured **wins** and measured
 
 ---
 
-## 1. Where Vajra stands today — measured, not asserted
+## 1. Where Zelox stands today — measured, not asserted
 
 ### Batch / SQL (the Spark replacement) — strong
 | Workload | Result | Source |
@@ -41,10 +41,10 @@ data; at 100 GB both are I/O/compute-bound → still ~3×). The defensible claim
 On one `c7g.4xlarge` (Graviton), official Flink 1.19, identical 100M-event 10 s tumbling
 keyed-COUNT, shared Kafka topic (`docs/benchmarks/STREAMING_VS_FLINK_EKS.md`):
 
-| Dimension | Flink 1.19 | Vajra | Verdict |
+| Dimension | Flink 1.19 | Zelox | Verdict |
 |---|---|---|---|
-| **Throughput** | 1.157M ev/s | **1.543M ev/s** | 🟢 Vajra **1.33× faster** |
-| **Memory** (peak RSS) | 8.24 GiB | **1.29 GiB** | 🟢 Vajra **~6.4× less** |
+| **Throughput** | 1.157M ev/s | **1.543M ev/s** | 🟢 Zelox **1.33× faster** |
+| **Memory** (peak RSS) | 8.24 GiB | **1.29 GiB** | 🟢 Zelox **~6.4× less** |
 | **Exactly-once** | mature | EO across hard kill ✓ (100000/100000) | 🟢 correct / 🟡 less hardened |
 | **Latency** | ms (Kafka) / ~ckpt (file) | p50 ~30 s (realtime probe) | 🔴 **Flink wins clearly** |
 
@@ -59,13 +59,13 @@ clear, honest gap (root cause: no record-level low-latency sink + immature realt
 Spark = batch + SQL + Structured Streaming (micro-batch, now also **Real-Time Mode**).
 Flink = low-latency, stateful, exactly-once event streaming. A single engine that
 replaces both must be **excellent on all of**: throughput, memory, latency, large state,
-exactly-once under failure, elastic rescaling, and operational maturity. Vajra wins the
+exactly-once under failure, elastic rescaling, and operational maturity. Zelox wins the
 first two, holds correctness, and has real gaps on the rest. The sections below are the
 gap analysis, each grounded in how the incumbents do it.
 
 ---
 
-## 3. Gap analysis by subsystem (grounded → Vajra status → what's needed)
+## 3. Gap analysis by subsystem (grounded → Zelox status → what's needed)
 
 ### 3.1 Streaming latency — **P0, the #1 gap**
 - **Flink:** record-at-a-time pipelined operators; Kafka sink emits per record → **ms**
@@ -73,9 +73,9 @@ gap analysis, each grounded in how the incumbents do it.
 - **Spark Real-Time Mode (2025):** abandons the micro-batch latency floor with
   **long-running stages** that process records on arrival → sub-second/ms p99, *keeping*
   exactly-once + the DataFrame API. (https://www.databricks.com/blog/introducing-real-time-mode-apache-sparktm-structured-streaming)
-- **Vajra now:** **Kafka sink landed** (commit `74b167bc`) — `writeStream.format("kafka")`
+- **Zelox now:** **Kafka sink landed** (commit `74b167bc`) — `writeStream.format("kafka")`
   produces records **on arrival** (record-paced) via librdkafka, flushing per epoch. Measured
-  Kafka→Vajra→Kafka: **p50 51 ms / p99 202 ms at a 250 ms epoch** (p99 ≈ epoch interval),
+  Kafka→Zelox→Kafka: **p50 51 ms / p99 202 ms at a 250 ms epoch** (p99 ≈ epoch interval),
   vs the old file-sink ~30 s — **~600× better, Flink-class** (`STREAMING_VS_FLINK_EKS.md`).
   Delivery = at-least-once.
 - **Remaining (build on Spark Real-Time Mode + Flink):**
@@ -95,13 +95,13 @@ gap analysis, each grounded in how the incumbents do it.
   + changelog checkpoints** (only deltas uploaded); state TTL; **rescalable** state
   (key-group reassignment). **Flink 2.0 disaggregated state (ForSt):** state lives on
   DFS/object store, separating compute from state for cloud elasticity.
-- **Vajra now:** windowed-agg keeps partial state **in memory**, snapshotted to the
+- **Zelox now:** windowed-agg keeps partial state **in memory**, snapshotted to the
   object-store checkpoint on EndOfData/epoch. Good for O(open windows); not for very large
   keyed state, and snapshots are full (not incremental).
 - **Needed:**
   1. **Spillable / embedded-KV state backend** (RocksDB-class or an Arrow-native on-disk
      KV) so state exceeds RAM.
-  2. **Incremental checkpoints** (upload deltas, not full state) — Vajra's object-store-first
+  2. **Incremental checkpoints** (upload deltas, not full state) — Zelox's object-store-first
      design is *already aligned* with Flink 2.0 ForSt; lean into it: disaggregated state on
      S3 as the native model, not a bolt-on.
   3. **State TTL** + **rescaling** (redistribute state when parallelism changes).
@@ -111,7 +111,7 @@ gap analysis, each grounded in how the incumbents do it.
 ### 3.3 Checkpointing & exactly-once under failure — **P1**
 - **Flink:** Chandy-Lamport **aligned** barriers + **unaligned** checkpoints (don't block on
   backpressure) + **2PC** sinks (`TwoPhaseCommitSinkFunction`) for EO to Kafka/files.
-- **Vajra now:** `StreamBarrierAlignExec` (aligned Chandy-Lamport), object-store single-blob
+- **Zelox now:** `StreamBarrierAlignExec` (aligned Chandy-Lamport), object-store single-blob
   atomic commit, per-instance offset staging; **EO validated across hard kill** (this work)
   and across container kill. *Not yet:* unaligned checkpoints, 2PC for arbitrary sinks,
   mid-job single-worker failure recovery (vs full restart).
@@ -123,7 +123,7 @@ gap analysis, each grounded in how the incumbents do it.
 ### 3.4 Distributed source/shuffle parallelism — **P1**
 - **Spark/Flink:** source parallelism = #partitions across the *cluster*; shuffle is a
   full N→M exchange with backpressure + spill.
-- **Vajra now:** parallel Kafka source (this work) reports `UnknownPartitioning(N)`,
+- **Zelox now:** parallel Kafka source (this work) reports `UnknownPartitioning(N)`,
   per-instance partition assignment + EO offsets — but composed via an N→1 align before the
   single watermark, so the source parallelism is currently **intra-node**; the Arrow-Flight
   shuffle (`StreamExchangeExec`) is 1→N (broadcast markers + hash-route). ClickBench-100M
@@ -136,7 +136,7 @@ gap analysis, each grounded in how the incumbents do it.
 ### 3.5 Watermarks & event-time correctness at scale — **P1**
 - **Flink:** per-split watermarks merged by MIN; **FLIP-182 watermark alignment** bounds
   skew across sources (a fast partition can't run far ahead).
-- **Vajra now:** avoids the per-partition hazard by merging N→1 *before* a single
+- **Zelox now:** avoids the per-partition hazard by merging N→1 *before* a single
   `WatermarkExec` (correct, but serializes the merge). No idle-source detection / alignment.
 - **Needed:** per-partition watermark generation + MIN-merge in the distributed exchange;
   idle-partition handling; allowed-lateness + side outputs.
@@ -145,13 +145,13 @@ gap analysis, each grounded in how the incumbents do it.
 DF 54.0.0 brings RepartitionExec coalesce-before-distributor (helps our shuffle), Parquet
 predicate short-circuit + stats-based file/row-group reorder (faster scans), ORDER BY
 redundant-sort-key pruning, scalar-subquery physical exec, lateral joins, lambda/`array_transform`,
-an Extension Type Registry (hook for Vajra-native vector/AI types), and arrow-avro. Bump from
+an Extension Type Registry (hook for Zelox-native vector/AI types), and arrow-avro. Bump from
 53.1.0, absorb the arrow-version ripple (codec/flow-event/parquet), re-run all gates, re-bench.
 
 ### 3.6 Adaptive execution & query optimization (batch) — **P1**
 - **Spark AQE:** runtime re-optimization (coalesce shuffle partitions, skew-join handling,
   switch join strategy from runtime stats). **DataFusion:** dynamic filters, bounded batches.
-- **Vajra now:** DataFusion optimizer (strong static plans); no runtime AQE-style
+- **Zelox now:** DataFusion optimizer (strong static plans); no runtime AQE-style
   re-planning or skew handling.
 - **Needed:** runtime statistics → adaptive shuffle-partition coalescing + skew-join split;
   spill everywhere (sort/agg/join) so large queries never OOM.
@@ -160,7 +160,7 @@ an Extension Type Registry (hook for Vajra-native vector/AI types), and arrow-av
 - **Spark/Flink:** task retry + speculative execution; **JobManager/driver HA**; external
   shuffle service (decouple shuffle from executor lifetime); **autoscaling/reactive
   rescaling**.
-- **Vajra now:** EO across full restart proven; **no** mid-job worker-failure recovery,
+- **Zelox now:** EO across full restart proven; **no** mid-job worker-failure recovery,
   driver HA, or autoscaling yet.
 - **Needed:** worker-failure task replay without job restart; driver/scheduler HA;
   reactive rescaling (add/remove workers live) — the cloud-native elasticity story, made
@@ -171,7 +171,7 @@ an Extension Type Registry (hook for Vajra-native vector/AI types), and arrow-av
 - **Missing / partial (blocking real use):** **Kafka sink** (also the latency blocker),
   CDC sources, Iceberg/Delta **streaming** sinks with EO, JDBC, Pulsar/Kinesis. Flink's
   connector breadth + Spark's DataSource v2 ecosystem are the bar.
-  - *Acceptance:* Kafka→Vajra→Kafka and Kafka→Vajra→Iceberg both exactly-once.
+  - *Acceptance:* Kafka→Zelox→Kafka and Kafka→Zelox→Iceberg both exactly-once.
 
 ### 3.9 Memory, spill & robustness — **partly proven**
 - **Win:** measured **6.4× less RAM** than Flink (no JVM, Arrow). The Arrow i32 2 GiB
@@ -218,13 +218,13 @@ coverage to 100%.
 
 ## 5. The honest one-paragraph summary
 
-Vajra is **already a credible Spark batch replacement** (measured ~3× faster, ~2× less
+Zelox is **already a credible Spark batch replacement** (measured ~3× faster, ~2× less
 RAM at 100 GB scale, distributed on EKS) and now **wins streaming throughput (1.33×) and
 memory (6.4×) vs Flink with exactly-once across a hard crash**. It is **not yet** a Flink
 latency replacement (p99 is seconds, not ms — no low-latency sink, immature realtime mode)
 nor as operationally hardened (no mid-job failure recovery / HA / large-state backend /
 unaligned checkpoints). The path is concrete and grounded in exactly how Spark Real-Time
-Mode, Flink 1.19/2.0, DataFusion, and Arrow solve each problem — and Vajra's object-store
+Mode, Flink 1.19/2.0, DataFusion, and Arrow solve each problem — and Zelox's object-store
 -centric, no-JVM, Arrow-columnar architecture is genuinely well-positioned to leapfrog
 (esp. on memory, cost, and disaggregated cloud-native state). Closing the P0 set is what
 turns "wins two of four axes" into "replaces both Spark and Flink."

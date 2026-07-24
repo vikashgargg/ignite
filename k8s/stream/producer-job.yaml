@@ -1,5 +1,5 @@
 # Pre-load the SHARED Kafka topic `events` with N keyed, event-timed records.
-# Both Flink and Vajra consume this identical topic from earliest — a true
+# Both Flink and Zelox consume this identical topic from earliest — a true
 # like-for-like windowed-aggregation workload. Payload (JSON):
 #   key (Kafka msg key, = grouping key k)   value: {"k":int,"ts":epoch_ms,"v":1}
 # event-time `ts` advances so the 10s tumbling windows are well-defined.

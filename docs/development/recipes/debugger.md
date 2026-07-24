@@ -10,7 +10,7 @@ RustRover.
 In **Run** > **Edit Configurations**, add a new **Cargo** configuration with the following settings:
 
 1. Name: **Run Spark Connect server** (You can use any name you like.)
-2. Command: `run -p sail-cli -- spark server`
+2. Command: `run -p zelox-cli -- spark server`
 3. Environment Variables:
    - (required) `PYTHONPATH`: `.venvs/default/lib/python<version>/site-packages` (Please replace `<version>` with the
      actual Python version, e.g. `3.11`.)
@@ -18,7 +18,7 @@ In **Run** > **Edit Configurations**, add a new **Cargo** configuration with the
      project
      path. **This must be an absolute path.**)
    - (optional) `RUST_BACKTRACE`: `full`
-   - (optional) `RUST_LOG`: `sail=debug`
+   - (optional) `RUST_LOG`: `zelox=debug`
 
 When entering environment variables, you can click on the button on the right side of the input box to open the dialog
 and add the environment variables one by one.

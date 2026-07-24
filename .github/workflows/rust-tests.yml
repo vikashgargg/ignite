@@ -18,7 +18,7 @@ jobs:
     env:
       # Coverage environment variables
       RUSTC_WORKSPACE_WRAPPER: ${{ github.workspace }}/.github/scripts/rustc-workspace-wrapper.sh
-      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/llvm-profiles/rust-unit/sail-%p-%m.profraw
+      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/llvm-profiles/rust-unit/zelox-%p-%m.profraw
     steps:
       - uses: actions/checkout@v4
 
@@ -78,7 +78,7 @@ jobs:
       - name: Run Cargo Test (Ignored)
         if: ${{ inputs.run_catalog_tests == 'true' }}
         env:
-          LLVM_PROFILE_FILE: ${{ github.workspace }}/target/llvm-profiles/rust-slow/sail-%p-%m.profraw
+          LLVM_PROFILE_FILE: ${{ github.workspace }}/target/llvm-profiles/rust-slow/zelox-%p-%m.profraw
         run: cargo nextest run --run-ignored ignored-only -j 6 --no-fail-fast
 
       # Generate coverage report after ignored tests (push to main only)

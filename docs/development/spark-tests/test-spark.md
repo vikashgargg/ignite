@@ -6,7 +6,7 @@ rank: 20
 # Running Spark Tests
 
 The Spark tests are unit tests collected from the Spark project
-and are used to measure Spark feature parity for Sail.
+and are used to measure Spark feature parity for Zelox.
 
 The Spark project itself uses the Python [unittest](https://docs.python.org/3/library/unittest.html) module to run the tests.
 We have developed custom scripts to run the tests using [pytest](https://docs.pytest.org/) instead.
@@ -26,7 +26,7 @@ When you run the command, the environment will be created automatically if it do
 
 ## Running the Spark Connect Server
 
-Use the following commands to build and run the Sail Spark Connect server.
+Use the following commands to build and run the Zelox Spark Connect server.
 
 ```bash
 hatch run scripts/spark-tests/run-server.sh

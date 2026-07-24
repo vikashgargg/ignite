@@ -1,14 +1,14 @@
 # Generate TPC-H SF-100 (~100 GB) parquet to the node's local disk (hostPath
-# /data), shared by the Vajra and Spark benchmark pods on the same single node.
+# /data), shared by the Zelox and Spark benchmark pods on the same single node.
 apiVersion: v1
 kind: Namespace
-metadata: { name: vajra }
+metadata: { name: zelox }
 ---
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: tpch-gen
-  namespace: vajra
+  namespace: zelox
 spec:
   backoffLimit: 1
   template:

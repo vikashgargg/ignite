@@ -19,7 +19,7 @@ The easiest way to build the Python API docs is to build them from the current r
 
 ```bash
 hatch env create docs
-hatch run docs:pip install pysail
+hatch run docs:pip install pyzelox
 hatch run docs:build
 ```
 
@@ -28,7 +28,7 @@ If instead you wish to build from a local build, then make sure to
 
 ```bash
 hatch env create docs
-hatch run docs:install-pysail
+hatch run docs:install-pyzelox
 hatch run docs:build
 ```
 

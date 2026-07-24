@@ -5,11 +5,11 @@ rank: 60
 
 # MCP Server Testing
 
-This guide provides tips for testing the MCP (Model Context Protocol) server in Sail.
+This guide provides tips for testing the MCP (Model Context Protocol) server in Zelox.
 
 ## Running the MCP Server
 
-Run the following command to build the Sail CLI and install it in the `default` Hatch environment.
+Run the following command to build the Zelox CLI and install it in the `default` Hatch environment.
 
 ```bash
 hatch run maturin develop
@@ -19,11 +19,11 @@ Run `hatch shell` to enter the `default` Hatch environment.
 Then use the following command to launch the MCP server.
 
 ```bash
-sail spark mcp-server
+zelox spark mcp-server
 ```
 
 The steps above can be inconvenient if you are only making changes to the MCP server Python script.
-In these steps, the Python script is embedded in the Sail binary. Changing the Python script requires rebuilding the binary for the change to take effect, but building the binary is known to be slow.
+In these steps, the Python script is embedded in the Zelox binary. Changing the Python script requires rebuilding the binary for the change to take effect, but building the binary is known to be slow.
 
 To work around this, you can run the Python script directly.
 
@@ -34,7 +34,7 @@ To work around this, you can run the Python script directly.
 2. In another terminal, run `hatch shell` to enter the `default` Hatch environment. Then run the following command to start the MCP server.
    ```bash
    env FASTMCP_LOG_LEVEL=INFO \
-     python crates/sail-cli/src/python/spark_mcp_server.py \
+     python crates/zelox-cli/src/python/spark_mcp_server.py \
      --spark-remote sc://127.0.0.1:50051
    ```
 

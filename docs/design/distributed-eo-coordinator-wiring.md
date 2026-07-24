@@ -6,7 +6,7 @@ crash-EO produces real committed dups at N=16; targeted offset-record patches we
 
 ## 0. STANDING PRINCIPLE — no patches, structural correctness only (charter, user-directed 2026-07-03)
 
-Vajra replaces Flink and Spark **in every way** (see [vajra_charter](../../MEMORY.md)); crash-EO exactly-once
+Zelox replaces Flink and Spark **in every way** (see [zelox_charter](../../MEMORY.md)); crash-EO exactly-once
 is a **structural invariant**, not a metric to tune toward with heuristics. **Rule: do NOT patch the
 symptom.** Three targeted patches on the ad-hoc sink-commit path (W3 offset-completeness gate, W4 GC-guard,
 W4 recovery-truncation) each only *moved* the dup count (7407→7414→6259) without eliminating it — proof the
@@ -24,7 +24,7 @@ The crash-EO dup at scale is a **globally-inconsistent checkpoint**: on crash + 
 committed under a pre-crash AND a post-crash epoch (measured via `_spark_metadata`: real committed dups, not
 a test artifact). Root architectural cause:
 
-- **`EpochCoordinator` (Vajra's Flink checkpoint-coordinator / RisingWave meta-service) EXISTS + is
+- **`EpochCoordinator` (Zelox's Flink checkpoint-coordinator / RisingWave meta-service) EXISTS + is
   unit-tested but is NEVER WIRED** (`grep` = zero non-test usage). It already implements the correct
   protocol: collect an `EpochAck{offsets, state_ptrs}` from EVERY task, declare epoch `e` globally complete
   only when ALL expected tasks ack, emit one atomic `GlobalCheckpoint`; recovery restores `last_committed`.
@@ -106,7 +106,7 @@ correct, minimal change; the per-operator snapshots it needs already exist and a
 
 Chosen realization (objectively-better-in-production vs an RPC coordinator: no new RPC surface, identical in
 local-cluster and EKS, same durable medium as offsets/state = RisingWave decoupled-commit + the F4
-object-store-atomic principle Vajra already uses). The tested [`EpochCoordinator`] state machine is the
+object-store-atomic principle Zelox already uses). The tested [`EpochCoordinator`] state machine is the
 commit decision — fed acks read from object store, it commits epoch `e` **iff every task acked**.
 
 **Expected task set (written once each):** `epochs/expected/{src,win,snk}` = N readers / M window instances /

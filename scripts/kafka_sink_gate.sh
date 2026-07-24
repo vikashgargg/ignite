@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # T1 gate for Gap 2 (realtime Kafka SINK throughput). ISOLATED (no concurrent loadgen): pre-load a topic
-# with N messages, then drain it through a Vajra Kafka->Kafka passthrough (availableNow, which terminates)
+# with N messages, then drain it through a Zelox Kafka->Kafka passthrough (availableNow, which terminates)
 # and measure throughput = N / wall. Compares against the Parquet/S3 sink (~5M ev/s) to prove the Kafka
 # sink is the bottleneck. Self-checking (produced count + sink_out count). Usage: N=2000000 WORKERS=2 ...
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 N="${N:-2000000}"; K="${K:-1000}"; EPMS="${EPMS:-1000}"; NP="${NP:-16}"; WORKERS="${WORKERS:-2}"
 PORT="${PORT:-50098}"; IN=sink_in; OUT=sink_out; CK=/tmp/sink_ck
-BIN="$ROOT/target/debug/vajra"; PY="$ROOT/.venvs/smoke/bin/python"
+BIN="$ROOT/target/debug/zelox"; PY="$ROOT/.venvs/smoke/bin/python"
 KPOD=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1); [ -n "$KPOD" ] || { echo "FATAL: no kafka"; exit 2; }
 rm -rf "$CK"
 for t in "$IN" "$OUT"; do
@@ -21,12 +21,12 @@ echo "=== pre-load $IN with N=$N (isolated: produced BEFORE the drain) ==="
 BOOT=localhost:9092 TOPIC=$IN N=$N K=$K EPMS=$EPMS NP=$NP KPOD="$KPOD" "$PY" "$ROOT/scripts/scale_producer.py" 2>&1 | grep -aE "PRODUCED|TOPIC_CHECK|PRODUCER_OK|FATAL"
 [ "${PIPESTATUS[0]}" = "0" ] || { echo "ABORT: producer self-check failed"; exit 3; }
 
-echo "=== vajra server --workers $WORKERS ==="
-pkill -9 -f 'target/debug/vajra' 2>/dev/null; sleep 1
+echo "=== zelox server --workers $WORKERS ==="
+pkill -9 -f 'target/debug/zelox' 2>/dev/null; sleep 1
 RUST_LOG=warn "$BIN" server --ip 127.0.0.1 --port "$PORT" --mode local-cluster --workers "$WORKERS" >/tmp/sink_server.log 2>&1 &
 SRV=$!; for i in $(seq 1 30); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 1; done
 
-echo "=== drain $IN -> $OUT via Vajra CONTINUOUS passthrough for ${RUN:-30}s; measure DELIVERED throughput ==="
+echo "=== drain $IN -> $OUT via Zelox CONTINUOUS passthrough for ${RUN:-30}s; measure DELIVERED throughput ==="
 RUN="${RUN:-30}"
 SPARK_REMOTE="sc://localhost:$PORT" BOOT=localhost:9092 IN=$IN OUT=$OUT CK=$CK RUN=$RUN "$PY" - <<'PY' &
 import os, time

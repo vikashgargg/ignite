@@ -1,11 +1,11 @@
 """
-Vajra Spark Compatibility Scorecard
+Zelox Spark Compatibility Scorecard
 =====================================
 Tests ~50 key Spark features across SQL, DataFrames, UDFs, DML,
 JSON/Parquet, and complex types.
 
 Usage (starts its own server — single-node local mode):
-    VAJRA_BIN=./target/debug/vajra \\
+    ZELOX_BIN=./target/debug/zelox \\
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
@@ -13,7 +13,7 @@ Usage (starts its own server — single-node local mode):
 Against a running server — single-node (local mode):
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
-      ./target/debug/vajra server --port 50055
+      ./target/debug/zelox server --port 50055
 
     SPARK_REMOTE=sc://localhost:50055 \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
@@ -21,7 +21,7 @@ Against a running server — single-node (local mode):
 Against a running server — multi-worker (local-cluster mode, N workers in-process):
     DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/Library/Frameworks \\
     PYTHONPATH=.venvs/smoke/lib/python3.9/site-packages \\
-      ./target/debug/vajra cluster --role scheduler --port 50055 --workers 4
+      ./target/debug/zelox cluster --role scheduler --port 50055 --workers 4
 
     SPARK_REMOTE=sc://localhost:50055 \\
       .venvs/smoke/bin/python scripts/spark_compat_score.py
@@ -45,9 +45,9 @@ SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "")
 _proc = None
 
 if not SPARK_REMOTE:
-    vajra_bin = os.environ.get("VAJRA_BIN", os.environ.get("VAJRA_BIN", "./target/debug/vajra"))
+    zelox_bin = os.environ.get("ZELOX_BIN", os.environ.get("ZELOX_BIN", "./target/debug/zelox"))
     _proc = subprocess.Popen(
-        [vajra_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
+        [zelox_bin, "server", "--ip", "0.0.0.0", "--port", "50055"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
@@ -57,7 +57,7 @@ if not SPARK_REMOTE:
         line = _proc.stderr.readline().decode(errors="replace")
         if line:
             print(f"  server: {line.strip()}")
-        if "ready" in line.lower() or "Vajra" in line:
+        if "ready" in line.lower() or "Zelox" in line:
             started = True
             break
         time.sleep(0.05)
@@ -176,15 +176,15 @@ def _parquet_schema_evolve(spark, tmp):
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 # When running against a remote server (container/k8s), use a shared path
-# that is mounted into the server (e.g. -v /tmp/vajra:/tmp/vajra).
+# that is mounted into the server (e.g. -v /tmp/zelox:/tmp/zelox).
 # This avoids "file not found" errors when the server tries to read Mac-local
 # /var/folders/... paths that don't exist inside the container.
 _remote_mode = bool(os.environ.get("SPARK_REMOTE", ""))
 if _remote_mode:
-    # Shared path mounted into the server. Apple Container mounts /tmp/vajra;
-    # K8s mounts /tmp/sail (see k8s/kind-config.yaml + worker pod template), so
+    # Shared path mounted into the server. Apple Container mounts /tmp/zelox;
+    # K8s mounts /tmp/zelox (see k8s/kind-config.yaml + worker pod template), so
     # the path is overridable via SCORECARD_REMOTE_TMP.
-    _tmp_root = os.environ.get("SCORECARD_REMOTE_TMP", "/tmp/vajra/scorecard-tmp")
+    _tmp_root = os.environ.get("SCORECARD_REMOTE_TMP", "/tmp/zelox/scorecard-tmp")
     shutil.rmtree(_tmp_root, ignore_errors=True)
     os.makedirs(_tmp_root, exist_ok=True)
     import contextlib
@@ -822,7 +822,7 @@ finally:
 
 total_pass = total_fail = total_skip = 0
 print(f"\n{'═'*55}")
-print("  VAJRA SPARK COMPATIBILITY SCORECARD")
+print("  ZELOX SPARK COMPATIBILITY SCORECARD")
 print(f"{'═'*55}")
 
 for grp, tests in results.items():

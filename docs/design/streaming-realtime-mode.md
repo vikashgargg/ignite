@@ -1,6 +1,6 @@
-# Vajra realtime mode (F1) + the new-age universal engine — prod-grade across every dimension
+# Zelox realtime mode (F1) + the new-age universal engine — prod-grade across every dimension
 
-Vajra's goal: **one native engine, one Spark API, for any processing** — batch, micro-batch streaming,
+Zelox's goal: **one native engine, one Spark API, for any processing** — batch, micro-batch streaming,
 **realtime (continuous) streaming**, and lakehouse — that **out-performs Spark and Flink combined**
 across reliability, security, memory, latency, and throughput. Not by porting their mechanisms, but by
 re-deriving them on a leaner substrate (Rust + Arrow + DataFusion, no JVM) and **earning every claim
@@ -44,7 +44,7 @@ rows/s; Arrow Flight zero-copy shuffle for distributed (F2/F3). *Gap:* multi-nod
 
 ## 2. Realtime mode (F1) — the architecture
 
-**Vajra's flow-event model already *is* Chandy-Lamport barriers.** `FlowEvent::Marker` flows in-band with
+**Zelox's flow-event model already *is* Chandy-Lamport barriers.** `FlowEvent::Marker` flows in-band with
 `FlowEvent::Data`, never overtaking it — exactly Flink's barrier property, but Arrow-batch-framed,
 vectorized, GC-free. We reuse the marker we have; no new barrier subsystem.
 
@@ -101,10 +101,10 @@ exactly-once with 2PC* blog; Spark *continuous-processing* guide. Established in
   sink issues an **idempotent preemptive commit** ("it is our responsibility to implement a commit in an
   idempotent way").
 - **Spark Continuous:** **at-least-once only**, ~1 ms, **map/filter/projection only**, and sinks are
-  **Kafka/Memory/Console — no durable file sink**. So Vajra's EO durable-file realtime sink is *beyond*
+  **Kafka/Memory/Console — no durable file sink**. So Zelox's EO durable-file realtime sink is *beyond*
   Spark Continuous and at Flink's EO level, without alignment (single-input).
 
-**Vajra mechanism (maps 1:1 to the invariants, collapsed to an object-store-atomic commit):**
+**Zelox mechanism (maps 1:1 to the invariants, collapsed to an object-store-atomic commit):**
 1. The continuous source emits `FlowMarker::Checkpoint{epoch}` every commit interval, **in-band, never
    overtaking data** (FlowEvent ordering already guarantees this — our markers *are* Chandy-Lamport
    barriers). Before emitting, it **pre-commits** by staging its reached offset map to
@@ -135,4 +135,4 @@ aligned barriers → F2/F3.
   (crash gate) are acceptance criteria, not afterthoughts.
 
 DataFusion 54 (repartition coalesce, Parquet morsel scans) helps throughput but is batch-engine; realtime
-is Vajra's flow-event layer on top — tracked as the separate DF54 upgrade sprint.
+is Zelox's flow-event layer on top — tracked as the separate DF54 upgrade sprint.

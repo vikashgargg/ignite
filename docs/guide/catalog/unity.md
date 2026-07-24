@@ -5,7 +5,7 @@ rank: 3
 
 # Unity Catalog
 
-The Unity Catalog provider in Sail allows you to connect to an external catalog that exposes
+The Unity Catalog provider in Zelox allows you to connect to an external catalog that exposes
 the [Unity Catalog API](https://docs.unitycatalog.io/).
 
 Unity Catalog can be configured using the following options:
@@ -23,10 +23,10 @@ See [Common Options](./index.md#common-options) for caching configuration.
 ## Environment Variables
 
 ::: warning
-The environment variables only allow configuring one Unity Catalog provider instance per session. We may stop supporting these environment variables in future versions of Sail when we support the options in the catalog provider list.
+The environment variables only allow configuring one Unity Catalog provider instance per session. We may stop supporting these environment variables in future versions of Zelox when we support the options in the catalog provider list.
 :::
 
-Sail automatically loads Unity Catalog configuration from environment variables with the following prefixes:
+Zelox automatically loads Unity Catalog configuration from environment variables with the following prefixes:
 
 - `DATABRICKS_*` - Databricks-specific configuration
 - `UNITY_*` - Unity Catalog configuration
@@ -86,5 +86,5 @@ The following table lists the supported configuration keys and their correspondi
 
 ```bash
 export UNITY_ALLOW_HTTP_URL='false'
-export SAIL_CATALOG__LIST='[{type="unity", name="sail", uri="https://catalog.example.com", default_catalog="meow", token="..."}]'
+export ZELOX_CATALOG__LIST='[{type="unity", name="zelox", uri="https://catalog.example.com", default_catalog="meow", token="..."}]'
 ```

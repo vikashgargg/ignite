@@ -1,0 +1,24 @@
+[package]
+name = "zelox-plan-lakehouse"
+version = { workspace = true }
+edition = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+zelox-common-datafusion = { path = "../zelox-common-datafusion" }
+zelox-data-source = { path = "../zelox-data-source" }
+zelox-delta-lake = { path = "../zelox-delta-lake" }
+zelox-iceberg = { path = "../zelox-iceberg" }
+zelox-logical-plan = { path = "../zelox-logical-plan" }
+zelox-physical-plan = { path = "../zelox-physical-plan" }
+
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+
+async-trait = { workspace = true }
+url = { workspace = true }
+log = { workspace = true }
+

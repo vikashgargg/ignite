@@ -3,7 +3,7 @@
 # (kill -9) on a local-cluster. See scripts/f3c_stateful_crash.py. Exit 0 = PASS.
 set -uo pipefail
 PORT="${PORT:-50091}"; ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/target/debug/vajra"; [ -x "$BIN" ] || BIN="$ROOT/target/release/vajra"
+BIN="$ROOT/target/debug/zelox"; [ -x "$BIN" ] || BIN="$ROOT/target/release/zelox"
 PY="$ROOT/.venvs/smoke/bin/python"
 KPOD=$(docker ps --format '{{.Names}}' | grep -i kafka | head -1)
 docker exec "$KPOD" /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic f3c_eo >/dev/null 2>&1; sleep 2

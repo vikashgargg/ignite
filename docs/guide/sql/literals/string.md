@@ -51,11 +51,11 @@ SELECT 'Hello, World!' AS col;
 -- |Hello, World!|
 -- +-------------+
 
-SELECT "Sail" AS col;
+SELECT "Zelox" AS col;
 -- +----+
 -- | col|
 -- +----+
--- |Sail|
+-- |Zelox|
 -- +----+
 
 SELECT 'It\'s about $25.' AS col;

@@ -4,9 +4,9 @@ title: Development
 
 # Development
 
-Welcome to the Sail development guide!
-Sail welcomes contributions of all kinds from the community.
-If you would like to make code changes to Sail,
+Welcome to the Zelox development guide!
+Zelox welcomes contributions of all kinds from the community.
+If you would like to make code changes to Zelox,
 this guide will help you get started.
 
 <PageList :data="data" :prefix="['development']" />
