@@ -35,7 +35,7 @@ fi
 echo "TOPIC_CHECK events=$CUR"
 
 echo "==== [2] Zelox ($TAG, COMPLETE_ON_END=1) + client ===="
-sed -e "s|__ECR__|$REG|g" -e "s|zelox:eo-multipart|zelox:$TAG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
+sed -E -e "s|__ECR__/zelox:[A-Za-z0-9._-]+|$REG/zelox:$TAG|g" -e "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
 kk patch deploy zelox-stream --type merge -p '{"spec":{"strategy":{"rollingUpdate":{"maxSurge":0,"maxUnavailable":1}}}}' >/dev/null
 kk set env deploy/zelox-stream AWS_REGION="$REGION" ZELOX_COMPLETE_ON_END=1 >/dev/null
 wait_ready zelox-stream

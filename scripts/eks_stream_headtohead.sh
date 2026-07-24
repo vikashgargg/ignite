@@ -46,7 +46,7 @@ kk delete -f k8s/stream/flink-session.yaml --ignore-not-found
 kk delete job flink-runner --ignore-not-found
 
 echo "================ [4/6] Zelox ================"
-sed -e "s|__ECR__|$REG|g" -e "s|zelox:eo-multipart|zelox:${TAG:-realtime-fix}|g" k8s/stream/zelox-stream.yaml | kk apply -f -
+sed -E -e "s|__ECR__/zelox:[A-Za-z0-9._-]+|$REG/zelox:${TAG:-realtime-fix}|g" -e "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
 # VAJ-T7 source-fusion opt-in + per-stage CPU profile (source_read drop is the beat).
 [ "${ZELOX_T7_FUSE:-0}" = "1" ] && kk set env deploy/zelox-stream \
   ZELOX_T7_FUSE=1 ZELOX_WM_PROF=1 RUST_LOG="warn,zelox_physical_plan::streaming::window_accum=info,zelox_execution::task_runner::core=debug" >/dev/null 2>&1

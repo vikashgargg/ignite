@@ -29,7 +29,7 @@ sed "s|N_EVENTS\", value: \"[0-9]*\"|N_EVENTS\", value: \"$N\"|" k8s/stream/prod
 kk wait --for=condition=complete --timeout=1800s job/producer; kk logs job/producer | grep PRODUCED
 
 echo "==== [2] Zelox + client (S3 sink) ===="
-sed "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
+sed -E -e "s|__ECR__/zelox:[A-Za-z0-9._-]+|$REG/zelox:${TAG:-rename42}|g" -e "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
 kk patch deploy zelox-stream --type merge -p '{"spec":{"strategy":{"rollingUpdate":{"maxSurge":0,"maxUnavailable":1}}}}' >/dev/null
 kk set env deploy/zelox-stream AWS_REGION="$REGION" >/dev/null   # object-store from_env uses node instance role
 wait_ready zelox-stream

@@ -32,7 +32,7 @@ echo "FLINK  peakRSS=$(gib "${FLINK_MEM:-0}")GiB  wall_s=$FLINK_WALL  throughput
 kk delete -f k8s/stream/flink-session.yaml --ignore-not-found >/dev/null 2>&1; kk delete job flink-runner --ignore-not-found >/dev/null 2>&1
 
 echo "==== [2] Zelox + client ===="
-sed "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
+sed -E -e "s|__ECR__/zelox:[A-Za-z0-9._-]+|$REG/zelox:${TAG:-rename42}|g" -e "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
 # maxSurge=0: the pod requests ~15 CPU on a 16-vCPU node, so a rolling update that surges a 2nd pod
 # DEADLOCKS (new Pending, old never terminates → env change never applies → sweep measures stale config).
 # Terminate old BEFORE new so each prefetch value actually takes effect.

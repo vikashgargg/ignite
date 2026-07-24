@@ -459,11 +459,11 @@ stream-stream joins, dedup) is deferred to **Spark 4.3**. Zelox's realtime path 
 windowed aggregation, joins, and dedup all run under the continuous engine with per-epoch commits. That
 is the one place Zelox is genuinely ahead of upstream Spark rather than at parity.
 
-> ⚠️ **Use `trigger(continuous=…)`, not `trigger(realTime=…)`.** Spark 4.2 added a *new* trigger type
-> (`Trigger.RealTime`). Zelox's vendored `commands.proto` does not yet carry that field, so a 4.2 client
-> calling `.trigger(realTime="5 seconds")` is **not** routed to the realtime engine — it silently falls
-> through to micro-batch and you lose the latency you asked for, with no error. Wiring the 4.2 trigger is
-> a known open item; until it lands, `continuous=` is the supported entry point.
+> **On the 4.2 trigger:** Spark 4.2's `.trigger(realTime="<interval>")` (`Trigger.RealTime`) is wired end to
+> end — `real_time_batch_duration` decodes to `StreamTrigger::RealTime` and routes to the same
+> `StreamDriver::Realtime` engine as the pre-4.2 `.trigger(continuous=…)`. Either trigger enters Zelox's
+> Flink-parity realtime mode; the duration is the commit/checkpoint interval (min 5 s per 4.2), not a latency
+> target — records flow continuously between commits.
 
 ### Pick your latency — from backfill to millisecond realtime
 

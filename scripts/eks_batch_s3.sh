@@ -18,7 +18,7 @@ trap cleanup EXIT
 
 echo "==== [1] Zelox server + client ===="
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f - >/dev/null  # batch skips kafka.yaml (which made the ns)
-sed "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
+sed -E -e "s|__ECR__/zelox:[A-Za-z0-9._-]+|$REG/zelox:${TAG:-rename42}|g" -e "s|__ECR__|$REG|g" k8s/stream/zelox-stream.yaml | kk apply -f -
 kk patch deploy zelox-stream --type merge -p '{"spec":{"strategy":{"rollingUpdate":{"maxSurge":0,"maxUnavailable":1}}}}' >/dev/null
 kk set env deploy/zelox-stream AWS_REGION="$REGION" >/dev/null
 kk wait --for=condition=available --timeout=300s deployment/zelox-stream
