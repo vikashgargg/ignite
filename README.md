@@ -184,6 +184,22 @@ tables, and the honest Zelox-vs-Spark-vs-LakeSail read are in
 
 ## Proven Results
 
+> **Latest verified — renamed + PySpark 4.2 build (`zelox:rename42`, 2026-07-24).** Fresh EKS tri-engine
+> head-to-head with the **actual S3 output files read back and verified**, both engines on identical hardware,
+> 100M scale ([full run](docs/benchmarks/RENAME42_EKS_TRIENGINE.md)):
+>
+> | | Zelox | Spark 3.5.3 / Flink 1.19 | Zelox |
+> |---|--:|--:|:--|
+> | **Batch → S3** (100M, output byte-identical) | **4.08 s / 1.89 GiB** | Spark 32.5 s / 5.6 GiB | **8.0× faster, ~3× less mem** |
+> | **Realtime latency** (`trigger(realTime)`, p50 / tail) | **88 / 131 ms** | Flink 162 / 302 ms | **~2×, tail 2.3× (no-GC)** |
+> | **Realtime → S3 exactly-once** (kill-9 mid-run) | **dup=0, resume == clean** | (Flink mature) | **parity, S3-verified** |
+> | **Streaming throughput** (100M windowed-agg) | 4.09M ev/s | Flink 3.64M ev/s | ~parity (completeness-caveated) |
+>
+> *Honest scope:* both engines ran on **equal 6-vCPU** nodes (c7g/m7g 4xlarge were capacity-unavailable in
+> ap-south-1) — ratios are valid, absolutes are ~half the 16-vCPU baseline below. Streaming here is
+> **single-node**; **distributed throughput at 16-vCPU is [Phase 2](docs/design/phase2-distributed-parity-plan.md)**
+> (not yet confirmed — Flink still leads the distributed exchange at scale).
+
 ```
 ══════════════════════════════════════════════════════════════════
   ZELOX SPARK COMPATIBILITY SCORECARD  (v0.6.0-alpha)
